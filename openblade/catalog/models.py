@@ -116,3 +116,16 @@ class SafetyTokenRecord(Base):
     operation: Mapped[str] = mapped_column(String, nullable=False)
     target_barcode: Mapped[str] = mapped_column(String(8), nullable=False)
     expires_at: Mapped[float] = mapped_column()
+
+
+class AmlUser(Base):
+    __tablename__ = "aml_users"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    password: Mapped[str] = mapped_column(String(64), nullable=False)
+    role: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    require_password_change: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
