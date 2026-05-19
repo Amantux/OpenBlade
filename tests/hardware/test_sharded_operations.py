@@ -40,7 +40,9 @@ def _require_sharded_context(context):
     required = ["library", "ltfs", "catalog"]
     missing = [name for name in required if not hasattr(context, name)]
     if missing:
-        pytest.skip(f"Real AppContext is missing required sharded dependencies: {', '.join(missing)}")
+        pytest.skip(
+            f"Real AppContext is missing required sharded dependencies: {', '.join(missing)}"
+        )
 
 
 def _checksum(path: Path) -> str:
@@ -62,7 +64,7 @@ def test_stripe_two_drives(
     expected = {}
     for index in range(4):
         path = source_dir / f"stripe-{index}.bin"
-        path.write_bytes((bytes([index]) * (256 * 1024)))
+        path.write_bytes(bytes([index]) * (256 * 1024))
         expected[path] = _checksum(path)
     scheduler = DriveScheduler(num_drives=max(2, len(sharded_barcodes)))
     _prepare_volume_group(real_app_context, sharded_barcodes, "hw-stripe")
@@ -86,7 +88,9 @@ def test_stripe_two_drives(
     for file_path, checksum in expected.items():
         restore_job = real_app_context.catalog.create_job("restore", {})
         restore_result = run_sharded_restore(
-            ShardedRestoreRequest(catalog_path=str(file_path), dest_path=restore_dir / file_path.name),
+            ShardedRestoreRequest(
+                catalog_path=str(file_path), dest_path=restore_dir / file_path.name
+            ),
             real_app_context.library,
             real_app_context.ltfs,
             real_app_context.catalog,

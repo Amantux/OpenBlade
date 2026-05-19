@@ -79,7 +79,9 @@ def test_multiple_files_roundtrip(
     restore_dir = tmp_path / "multi-restore"
     restore_dir.mkdir()
     for name, checksum in expected.items():
-        restore_job = real_app_context.restore_service.enqueue(f"/{volume_group}/{name}", restore_dir)
+        restore_job = real_app_context.restore_service.enqueue(
+            f"/{volume_group}/{name}", restore_dir
+        )
         assert restore_job.state == "completed"
         restored_checksum = hashlib.sha256((restore_dir / name).read_bytes()).hexdigest()
         assert restored_checksum == checksum
@@ -107,7 +109,9 @@ def test_restore_nonexistent_raises(real_hardware_guard, real_app_context, tmp_p
     """Requires: real restore service with catalog-backed lookups."""
     _require_archive_services(real_app_context)
     with pytest.raises(OpenBladeFileNotFoundError):
-        real_app_context.restore_service.enqueue("/does-not-exist/missing.bin", tmp_path / "restore")
+        real_app_context.restore_service.enqueue(
+            "/does-not-exist/missing.bin", tmp_path / "restore"
+        )
 
 
 def test_archive_marks_file_archived_after_success(

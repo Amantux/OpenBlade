@@ -50,8 +50,13 @@ def _user_in_tape_group() -> bool:
 def test_lsscsi_finds_changer(real_hardware_guard, changer_device, runner):
     """Requires: changer connected at OPENBLADE_CHANGER_DEVICE."""
     result, devices = _lsscsi_devices(runner)
-    assert any(device.device_type == "mediumx" for device in devices) or "media changer" in result.stdout.lower()
-    assert changer_device in result.stdout or any(device.sg_device == changer_device for device in devices)
+    assert (
+        any(device.device_type == "mediumx" for device in devices)
+        or "media changer" in result.stdout.lower()
+    )
+    assert changer_device in result.stdout or any(
+        device.sg_device == changer_device for device in devices
+    )
 
 
 def test_lsscsi_finds_drives(real_hardware_guard, runner):
@@ -117,4 +122,6 @@ def test_drive_device_permissions(real_hardware_guard, drive_devices, runner):
     del runner
     if all(os.access(drive, os.R_OK) for drive in drive_devices):
         return
-    assert _user_in_tape_group(), "Current user cannot read drive devices and is not in the tape group"
+    assert _user_in_tape_group(), (
+        "Current user cannot read drive devices and is not in the tape group"
+    )

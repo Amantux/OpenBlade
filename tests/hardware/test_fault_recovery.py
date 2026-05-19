@@ -45,7 +45,9 @@ def test_catalog_rollback_on_failed_archive(
     """Requires: OPENBLADE_FAULT_TESTS=enabled and a real archive service."""
     del fault_tests_enabled
     _require_real_app_context(real_app_context)
-    group = real_app_context.catalog.get_volume_group("hw-fault") or real_app_context.catalog.create_volume_group("hw-fault")
+    group = real_app_context.catalog.get_volume_group(
+        "hw-fault"
+    ) or real_app_context.catalog.create_volume_group("hw-fault")
     for barcode in scratch_barcodes:
         real_app_context.catalog.add_barcode_to_volume_group(group.id, barcode)
     source_dir = tmp_path / "fault-source"

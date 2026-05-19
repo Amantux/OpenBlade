@@ -29,7 +29,9 @@ def _find_scratch_slot(status, scratch_barcodes):
 
 def _load_scratch(changer_device: str, runner, scratch_barcodes):
     before = _status(changer_device, runner)
-    drive = next((drive for drive in before.drives if drive.drive_id == 0 and not drive.loaded), None)
+    drive = next(
+        (drive for drive in before.drives if drive.drive_id == 0 and not drive.loaded), None
+    )
     if drive is None:
         pytest.skip("Drive 0 is not empty")
     slot = _find_scratch_slot(before, scratch_barcodes)

@@ -11,7 +11,9 @@ from openblade.hardware.sg import parse_sg_inq
 pytestmark = pytest.mark.real_hardware
 
 
-TAPE_ALERT_RE = re.compile(r"^\s*(?P<name>.+?)\s+\[(?P<code>0x[0-9a-fA-F]+)\]:\s+(?P<value>\d+)", re.MULTILINE)
+TAPE_ALERT_RE = re.compile(
+    r"^\s*(?P<name>.+?)\s+\[(?P<code>0x[0-9a-fA-F]+)\]:\s+(?P<value>\d+)", re.MULTILINE
+)
 NON_MEDIUM_ERROR_RE = re.compile(r"non-medium error count:\s*(?P<value>\d+)", re.IGNORECASE)
 MEDIUM_ERROR_RE = re.compile(r"medium error count:\s*(?P<value>\d+)", re.IGNORECASE)
 LOAD_COUNT_RE = re.compile(r"load(?:s| count)?[^\d]*(?P<value>\d+)", re.IGNORECASE)
@@ -46,7 +48,10 @@ def _sg_logs(runner, device: str, page: str) -> str:
 
 
 def _parse_tapealert(output: str) -> dict[str, int]:
-    return {match.group("name").strip().lower(): int(match.group("value")) for match in TAPE_ALERT_RE.finditer(output)}
+    return {
+        match.group("name").strip().lower(): int(match.group("value"))
+        for match in TAPE_ALERT_RE.finditer(output)
+    }
 
 
 def _find_metric(output: str, *patterns):

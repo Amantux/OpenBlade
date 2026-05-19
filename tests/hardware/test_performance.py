@@ -23,7 +23,9 @@ PERF_RESULTS_FILE = Path(
 
 def save_perf_result(test_name: str, metric: str, value: float, unit: str):
     results = json.loads(PERF_RESULTS_FILE.read_text()) if PERF_RESULTS_FILE.exists() else []
-    results.append({"test": test_name, "metric": metric, "value": value, "unit": unit, "ts": time.time()})
+    results.append(
+        {"test": test_name, "metric": metric, "value": value, "unit": unit, "ts": time.time()}
+    )
     PERF_RESULTS_FILE.write_text(json.dumps(results, indent=2))
 
 
@@ -105,7 +107,9 @@ def test_single_drive_write_throughput(
         elapsed = time.perf_counter() - start
         throughput = payload.stat().st_size / (1024 * 1024) / elapsed
         print(f"single-drive write throughput: {throughput:.2f} MB/s")
-        save_perf_result("test_single_drive_write_throughput", "write_throughput", throughput, "MB/s")
+        save_perf_result(
+            "test_single_drive_write_throughput", "write_throughput", throughput, "MB/s"
+        )
         assert throughput > 50.0
     finally:
         try:

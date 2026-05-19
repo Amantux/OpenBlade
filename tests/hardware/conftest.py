@@ -15,9 +15,7 @@ from openblade.hardware.safety import require_real_hardware
 
 
 def pytest_configure(config):
-    config.addinivalue_line(
-        "markers", "real_hardware: mark test as requiring real tape hardware"
-    )
+    config.addinivalue_line("markers", "real_hardware: mark test as requiring real tape hardware")
 
 
 def _skip_if_no_real_hardware():
@@ -78,7 +76,7 @@ def real_library_backend(real_hardware_guard):
     changer = os.environ.get("OPENBLADE_CHANGER_DEVICE", "/dev/sg0")
     try:
         module = import_module("openblade.hardware.library")
-        backend_cls = getattr(module, "RealLibraryBackend")
+        backend_cls = module.RealLibraryBackend
         try:
             return backend_cls(changer_device=changer)
         except TypeError:

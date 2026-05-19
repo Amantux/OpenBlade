@@ -16,6 +16,8 @@ class JobResponse(BaseModel):
     job_type: str
     error: str | None
     metadata: dict[str, object]
+    created_at: str
+    updated_at: str
 
 
 @router.get("/", response_model=list[JobResponse])
@@ -27,6 +29,8 @@ async def list_jobs(context: AppContext = Depends(get_context)) -> list[JobRespo
             job_type=job.job_type,
             error=job.error,
             metadata=job.metadata_dict,
+            created_at=job.created_at.isoformat(),
+            updated_at=job.updated_at.isoformat(),
         )
         for job in context.catalog.list_jobs()
     ]
@@ -43,4 +47,6 @@ async def get_job(job_id: str, context: AppContext = Depends(get_context)) -> Jo
         job_type=job.job_type,
         error=job.error,
         metadata=job.metadata_dict,
+        created_at=job.created_at.isoformat(),
+        updated_at=job.updated_at.isoformat(),
     )

@@ -44,7 +44,9 @@ def test_no_duplicate_file_records(
     """Requires: real archive service and SQLite-backed catalog."""
     if not hasattr(real_app_context, "archive_service"):
         pytest.skip("Real AppContext archive support is not implemented")
-    group = real_app_context.catalog.get_volume_group("hw-dedup") or real_app_context.catalog.create_volume_group("hw-dedup")
+    group = real_app_context.catalog.get_volume_group(
+        "hw-dedup"
+    ) or real_app_context.catalog.create_volume_group("hw-dedup")
     for barcode in scratch_barcodes:
         real_app_context.catalog.add_barcode_to_volume_group(group.id, barcode)
     source_dir = tmp_path / "dedup-source"
