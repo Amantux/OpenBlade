@@ -46,3 +46,8 @@ Thumbs.db
 # Secrets
 *.env
 .env*
+
+# Judge scratch databases
+.judge-*/
+.judge_*.db
+*.judge.db
