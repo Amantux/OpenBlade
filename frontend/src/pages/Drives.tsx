@@ -9,12 +9,9 @@ import { useInventory } from '../hooks/useInventory';
 import { normalizeDrive, type NormalizedDrive } from '../lib/lmc';
 
 function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
-  if (['FAULTED', 'FAILED', 'OFFLINE'].includes(state)) {
-    return 'red';
-  }
-  if (['BUSY', 'MOUNTING', 'UNMOUNTING'].includes(state)) {
-    return 'amber';
-  }
+  if (['FAULTED', 'FAILED', 'OFFLINE'].includes(state)) return 'red';
+  if (['BUSY', 'MOUNTING', 'UNMOUNTING', 'LOADING', 'UNLOADING'].includes(state)) return 'amber';
+  if (['IDLE', 'EMPTY', 'READY'].includes(state)) return 'gray';
   return 'green';
 }
 

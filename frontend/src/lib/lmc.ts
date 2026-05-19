@@ -197,8 +197,8 @@ export function buildSubsystemStatuses(
   health?: HealthResponse,
   inventory?: InventoryResponse,
 ): SubsystemSummary[] {
-  const drives = inventory?.drives.map(normalizeDrive) ?? [];
-  const slots = inventory?.slots.map(normalizeSlot) ?? [];
+  const drives = inventory?.drives?.map(normalizeDrive) ?? [];
+  const slots = inventory?.slots?.map(normalizeSlot) ?? [];
   const changerState = getChangerState(inventory);
   const healthState = String(health?.status ?? 'UNKNOWN').toUpperCase();
   const latency = health?.latency_ms ?? 0;
@@ -249,8 +249,8 @@ export function buildRasTickets(
   inventory?: InventoryResponse,
   jobs: JobResponse[] = [],
 ): RasTicket[] {
-  const drives = inventory?.drives.map(normalizeDrive) ?? [];
-  const slots = inventory?.slots.map(normalizeSlot) ?? [];
+  const drives = inventory?.drives?.map(normalizeDrive) ?? [];
+  const slots = inventory?.slots?.map(normalizeSlot) ?? [];
   const changerState = getChangerState(inventory);
   const tickets: RasTicket[] = [];
 
