@@ -92,6 +92,14 @@ class AMLState:
             "disallowUsername": False,
         }
     )
+    library_name: str = "OpenBlade Scalar i3"
+    library_mode: str = "online"
+    # Access groups: dict[name, {name, devices: list[str], hosts: list[str]}]
+    access_groups: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Hosts: dict[WWPN, {WWPN, alias, groups: list[str]}]
+    aml_hosts: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Licenses: dict[serialNumber, {serialNumber, type, description, status, feature, expiry}]
+    aml_licenses: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_licenses())
 
 
 def _utcnow() -> datetime:
@@ -125,6 +133,27 @@ def _default_ldap_config() -> dict[str, Any]:
         "keyDistributionCenter": None,
         "domainMapping": None,
         "keytabFile": {"name": None, "date": None},
+    }
+
+
+def _default_aml_licenses() -> dict[str, dict[str, Any]]:
+    return {
+        "LIC-BASE-001": {
+            "serialNumber": "LIC-BASE-001",
+            "type": "BASE",
+            "description": "Base Library License",
+            "status": "active",
+            "feature": "base",
+            "expiry": None,
+        },
+        "LIC-PART-001": {
+            "serialNumber": "LIC-PART-001",
+            "type": "PARTITION",
+            "description": "Partition License (2 partitions)",
+            "status": "active",
+            "feature": "partitions",
+            "expiry": None,
+        },
     }
 
 
@@ -508,6 +537,227 @@ def get_password_policy() -> dict[str, Any]:
     return dict(_STATE.password_policy)
 
 
+def get_library_name() -> str:
+    return _STATE.library_name
+
+
+def set_library_name(name: str) -> str:
+    _STATE.library_name = name
+    return _STATE.library_name
+
+
+def get_library_mode() -> str:
+    return _STATE.library_mode
+
+
+def set_library_mode(mode: str) -> str:
+    _STATE.library_mode = mode
+    return _STATE.library_mode
+
+
 def set_password_policy(policy: dict[str, Any]) -> dict[str, Any]:
     _STATE.password_policy = dict(policy)
     return get_password_policy()
+
+
+def list_access_groups() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": item["name"],
+            "devices": list(item.get("devices", [])),
+            "hosts": list(item.get("hosts", [])),
+        }
+        for item in sorted(_STATE.access_groups.values(), key=lambda value: value["name"])
+    ]
+
+
+def get_access_group(name: str) -> dict[str, Any] | None:
+    group = _STATE.access_groups.get(name)
+    if group is None:
+        return None
+    return {
+        "name": group["name"],
+        "devices": list(group.get("devices", [])),
+        "hosts": list(group.get("hosts", [])),
+    }
+
+
+def create_access_group(name: str) -> dict[str, Any] | None:
+    if name in _STATE.access_groups:
+        return None
+    _STATE.access_groups[name] = {"name": name, "devices": [], "hosts": []}
+    return get_access_group(name)
+
+
+def delete_access_group(name: str) -> bool:
+    group = _STATE.access_groups.pop(name, None)
+    if group is None:
+        return False
+    for wwpn in group.get("hosts", []):
+        host = _STATE.aml_hosts.get(wwpn)
+        if host is not None:
+            host["groups"] = [group_name for group_name in host.get("groups", []) if group_name != name]
+    return True
+
+
+def set_access_group_devices(name: str, devices: list[str]) -> dict[str, Any] | None:
+    group = _STATE.access_groups.get(name)
+    if group is None:
+        return None
+    group["devices"] = list(dict.fromkeys(devices))
+    return get_access_group(name)
+
+
+def add_access_group_devices(name: str, devices: list[str]) -> dict[str, Any] | None:
+    group = _STATE.access_groups.get(name)
+    if group is None:
+        return None
+    merged = list(group.get("devices", []))
+    for serial_number in devices:
+        if serial_number not in merged:
+            merged.append(serial_number)
+    group["devices"] = merged
+    return get_access_group(name)
+
+
+def remove_access_group_device(name: str, serial_number: str) -> bool:
+    group = _STATE.access_groups.get(name)
+    if group is None:
+        return False
+    devices = group.get("devices", [])
+    if serial_number not in devices:
+        return False
+    group["devices"] = [device for device in devices if device != serial_number]
+    return True
+
+
+def list_aml_hosts() -> list[dict[str, Any]]:
+    return [
+        {
+            "WWPN": item["WWPN"],
+            "alias": item.get("alias"),
+            "groups": list(item.get("groups", [])),
+        }
+        for item in sorted(_STATE.aml_hosts.values(), key=lambda value: value["WWPN"])
+    ]
+
+
+def get_aml_host(wwpn: str) -> dict[str, Any] | None:
+    host = _STATE.aml_hosts.get(wwpn)
+    if host is None:
+        return None
+    return {
+        "WWPN": host["WWPN"],
+        "alias": host.get("alias"),
+        "groups": list(host.get("groups", [])),
+    }
+
+
+def create_aml_host(wwpn: str, alias: str | None = None) -> dict[str, Any] | None:
+    if wwpn in _STATE.aml_hosts:
+        return None
+    _STATE.aml_hosts[wwpn] = {"WWPN": wwpn, "alias": alias, "groups": []}
+    return get_aml_host(wwpn)
+
+
+def update_aml_host(wwpn: str, *, alias: str | None = None) -> dict[str, Any] | None:
+    host = _STATE.aml_hosts.get(wwpn)
+    if host is None:
+        return None
+    host["alias"] = alias
+    return get_aml_host(wwpn)
+
+
+def ensure_aml_host(wwpn: str, alias: str | None = None) -> dict[str, Any]:
+    existing = _STATE.aml_hosts.get(wwpn)
+    if existing is None:
+        _STATE.aml_hosts[wwpn] = {"WWPN": wwpn, "alias": alias, "groups": []}
+    elif alias is not None:
+        existing["alias"] = alias
+    return get_aml_host(wwpn) or {"WWPN": wwpn, "alias": alias, "groups": []}
+
+
+def delete_aml_host(wwpn: str) -> bool:
+    host = _STATE.aml_hosts.pop(wwpn, None)
+    if host is None:
+        return False
+    for group_name in host.get("groups", []):
+        group = _STATE.access_groups.get(group_name)
+        if group is not None:
+            group["hosts"] = [host_wwpn for host_wwpn in group.get("hosts", []) if host_wwpn != wwpn]
+    return True
+
+
+def add_host_to_access_group(name: str, wwpn: str, alias: str | None = None) -> bool:
+    group = _STATE.access_groups.get(name)
+    if group is None:
+        return False
+    host = _STATE.aml_hosts.get(wwpn)
+    if host is None:
+        host = {"WWPN": wwpn, "alias": alias, "groups": []}
+        _STATE.aml_hosts[wwpn] = host
+    elif alias is not None:
+        host["alias"] = alias
+    if wwpn not in group.get("hosts", []):
+        group.setdefault("hosts", []).append(wwpn)
+    if name not in host.get("groups", []):
+        host.setdefault("groups", []).append(name)
+    return True
+
+
+def remove_host_from_access_group(name: str, wwpn: str) -> bool:
+    group = _STATE.access_groups.get(name)
+    if group is None:
+        return False
+    if wwpn not in group.get("hosts", []):
+        return False
+    group["hosts"] = [host_wwpn for host_wwpn in group.get("hosts", []) if host_wwpn != wwpn]
+    host = _STATE.aml_hosts.get(wwpn)
+    if host is not None:
+        host["groups"] = [group_name for group_name in host.get("groups", []) if group_name != name]
+    return True
+
+
+def list_aml_licenses() -> list[dict[str, Any]]:
+    return [
+        dict(item)
+        for item in sorted(_STATE.aml_licenses.values(), key=lambda value: value["serialNumber"])
+    ]
+
+
+def get_aml_license(serial_number: str) -> dict[str, Any] | None:
+    license_item = _STATE.aml_licenses.get(serial_number)
+    return None if license_item is None else dict(license_item)
+
+
+def set_aml_license(license_item: dict[str, Any]) -> dict[str, Any]:
+    serial_number = str(license_item["serialNumber"])
+    stored = {
+        "serialNumber": serial_number,
+        "type": license_item.get("type"),
+        "description": license_item.get("description"),
+        "status": license_item.get("status"),
+        "feature": license_item.get("feature"),
+        "expiry": license_item.get("expiry"),
+    }
+    _STATE.aml_licenses[serial_number] = stored
+    return dict(stored)
+
+
+def set_aml_licenses(licenses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [set_aml_license(license_item) for license_item in licenses]
+
+
+def activate_aml_license(serial_number: str) -> bool:
+    license_item = _STATE.aml_licenses.get(serial_number)
+    if license_item is None:
+        return False
+    license_item["status"] = "active"
+    return True
+
+
+def delete_aml_license(serial_number: str) -> bool:
+    if serial_number not in _STATE.aml_licenses:
+        return False
+    del _STATE.aml_licenses[serial_number]
+    return True

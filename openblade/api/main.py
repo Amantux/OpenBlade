@@ -7,7 +7,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from openblade.api import (
+    routes_aml_access,
     routes_aml_auth,
+    routes_aml_library,
     routes_archive,
     routes_inventory,
     routes_jobs,
@@ -42,6 +44,8 @@ app.include_router(routes_archive.router, prefix="/archive", tags=["archive"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_aml_auth.router, prefix="/aml", tags=["aml-auth"])
+app.include_router(routes_aml_access.router, prefix="/aml", tags=["aml-access"])
+app.include_router(routes_aml_library.router, prefix="/aml", tags=["aml-library"])
 
 
 @app.on_event("startup")
