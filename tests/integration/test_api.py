@@ -135,3 +135,25 @@ def test_format_confirm_requires_token() -> None:
 def test_invalid_archive_request_returns_422() -> None:
     response = client.post("/archive/", json={"volume_group": "photos"})
     assert response.status_code == 422
+
+
+def test_sharded_archive_returns_job_id(tmp_path: Path) -> None:
+    barcode, token = _format_first_tape()
+    client.post("/volume-groups/", json={"name": "photos"})
+    client.post("/volume-groups/photos/assign", json={"barcode": barcode})
+    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token})
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "a.txt").write_text("api sharded archive")
+    response = client.post(
+        "/archive/sharded",
+        json={
+            "source_path": str(source),
+            "volume_group": "photos",
+            "lane_barcodes": [barcode],
+            "mode": "stripe",
+            "block_size_mb": 1,
+        },
+    )
+    assert response.status_code == 202
+    assert response.json()["job_id"]

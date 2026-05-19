@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime
 from pathlib import PurePosixPath
 
@@ -25,6 +26,18 @@ from openblade.domain.policies import SafetyToken
 class CatalogRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
+        self._lock = threading.RLock()
+
+    def __getattribute__(self, name: str):
+        attr = object.__getattribute__(self, name)
+        if name.startswith("_") or name == "session" or not callable(attr):
+            return attr
+
+        def _locked(*args, **kwargs):
+            with object.__getattribute__(self, "_lock"):
+                return attr(*args, **kwargs)
+
+        return _locked
 
     def create_volume_group(self, name: str) -> VolumeGroup:
         existing = self.get_volume_group(name)
