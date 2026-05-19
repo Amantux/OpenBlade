@@ -13,7 +13,7 @@ export default function JobCard({ job }: JobCardProps) {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Selected Job</p>
-          <h2 className="mt-1 text-xl font-semibold text-white">{toTitleCase(job.job_type)}</h2>
+          <h2 className="mt-1 text-xl font-semibold text-white">{toTitleCase(job.job_type ?? job.type ?? 'archive')}</h2>
           <p className="mt-1 font-mono text-xs text-slate-400">{job.id}</p>
         </div>
         <Badge variant={getJobStatusVariant(job.status)}>{job.status}</Badge>

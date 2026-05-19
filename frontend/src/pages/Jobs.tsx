@@ -1,11 +1,35 @@
 import { useEffect, useMemo, useState } from 'react';
-import JobCard from '../components/jobs/JobCard';
-import JobList from '../components/jobs/JobList';
-import JobProgress from '../components/jobs/JobProgress';
+import InformationPanel from '../components/panels/InformationPanel';
+import NorthPanel from '../components/panels/NorthPanel';
+import OperationsPanel from '../components/panels/OperationsPanel';
+import Badge from '../components/ui/Badge';
 import ErrorMessage from '../components/ui/ErrorMessage';
-import Card from '../components/ui/Card';
 import Spinner from '../components/ui/Spinner';
 import { useJob, useJobs } from '../hooks/useJobs';
+import {
+  getJobBarcode,
+  getJobProgress,
+  getJobShardText,
+  getJobSourcePath,
+  getJobState,
+  getJobStrategy,
+  getJobTypeLabel,
+} from '../lib/lmc';
+import { formatDate } from '../lib/utils';
+import type { JobResponse } from '../types/api';
+
+function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
+  if (state === 'FAILED') {
+    return 'red';
+  }
+  if (state === 'RUNNING') {
+    return 'blue';
+  }
+  if (state === 'COMPLETED') {
+    return 'green';
+  }
+  return 'amber';
+}
 
 export default function Jobs() {
   const jobsQuery = useJobs();
@@ -23,7 +47,7 @@ export default function Jobs() {
   );
   const detailQuery = useJob(
     selectedJobId,
-    Boolean(selectedSummary && ['PENDING', 'RUNNING'].includes(selectedSummary.status)),
+    Boolean(selectedSummary && ['PENDING', 'RUNNING'].includes(getJobState(selectedSummary))),
   );
 
   if (jobsQuery.isLoading) {
@@ -34,43 +58,86 @@ export default function Jobs() {
   }
 
   const jobs = jobsQuery.data ?? [];
-  const detailJob = detailQuery.data ?? selectedSummary;
+  const selectedJob = detailQuery.data ?? selectedSummary;
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.1fr,1fr]">
-      <JobList jobs={jobs} selectedId={selectedJobId} onSelect={setSelectedJobId} />
-      <div className="space-y-6">
-        {detailJob ? (
-          <>
-            <JobCard job={detailJob} />
-            <JobProgress job={detailJob} />
-            <Card>
-              <h3 className="text-lg font-semibold text-white">Job metadata</h3>
-              <div className="mt-4 overflow-hidden rounded-xl border border-slate-800">
-                <table className="min-w-full divide-y divide-slate-800 text-sm">
-                  <tbody className="divide-y divide-slate-800">
-                    {Object.entries(detailJob.metadata ?? {}).length > 0 ? (
-                      Object.entries(detailJob.metadata ?? {}).map(([key, value]) => (
-                        <tr key={key}>
-                          <td className="px-4 py-3 font-medium text-slate-300">{key}</td>
-                          <td className="px-4 py-3 text-slate-400">{typeof value === 'object' ? JSON.stringify(value) : String(value)}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td className="px-4 py-6 text-slate-400">No metadata available.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </>
-        ) : (
-          <Card className="text-sm text-slate-400">Select a job to inspect details.</Card>
-        )}
-        {detailQuery.isError ? <ErrorMessage error={detailQuery.error} onRetry={() => detailQuery.refetch()} title="Unable to refresh selected job" /> : null}
-      </div>
+    <div className="space-y-4">
+      <NorthPanel
+        title="Active Jobs"
+        subtitle="Archive and restore activity across all partitions."
+        columns={[
+          { key: 'id', header: 'Job ID', render: (row: JobResponse) => <span className="font-mono text-xs">{row.id}</span> },
+          { key: 'type', header: 'Type', render: (row: JobResponse) => getJobTypeLabel(row) },
+          {
+            key: 'state',
+            header: 'State',
+            render: (row: JobResponse) => {
+              const state = getJobState(row);
+              return <Badge variant={stateVariant(state)}>{state}</Badge>;
+            },
+          },
+          {
+            key: 'progress',
+            header: 'Progress',
+            render: (row: JobResponse) => {
+              const progress = Math.round(getJobProgress(row));
+              return (
+                <div className="min-w-40">
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                    <div className="h-full bg-quantum-red" style={{ width: `${progress}%` }} />
+                  </div>
+                  <div className="mt-1 text-xs text-slate-400">{progress}%</div>
+                </div>
+              );
+            },
+          },
+          { key: 'source', header: 'Source', render: (row: JobResponse) => getJobSourcePath(row) },
+          { key: 'barcode', header: 'Barcode', render: (row: JobResponse) => getJobBarcode(row) },
+          { key: 'started', header: 'Started', render: (row: JobResponse) => formatDate(row.created_at) },
+        ]}
+        rows={jobs}
+        getRowId={(row) => row.id}
+        selectedId={selectedJob?.id}
+        onSelect={(row) => setSelectedJobId(row.id)}
+        emptyMessage="No active jobs reported by the archive engine."
+      />
+
+      <InformationPanel
+        title={selectedJob ? `Job ${selectedJob.id}` : 'Job Details'}
+        subtitle="Expanded detail for the selected archive workflow."
+        items={[
+          { label: 'Type', value: selectedJob ? getJobTypeLabel(selectedJob) : '—' },
+          { label: 'State', value: selectedJob ? getJobState(selectedJob) : '—' },
+          { label: 'Progress', value: selectedJob ? `${Math.round(getJobProgress(selectedJob))}%` : '—' },
+          { label: 'Source Path', value: selectedJob ? getJobSourcePath(selectedJob) : '—' },
+          { label: 'Barcode', value: selectedJob ? getJobBarcode(selectedJob) : '—' },
+          { label: 'Strategy', value: selectedJob ? getJobStrategy(selectedJob) : '—' },
+          { label: 'Shards', value: selectedJob ? getJobShardText(selectedJob) : '—' },
+          { label: 'Updated', value: selectedJob ? formatDate(selectedJob.updated_at) : '—' },
+        ]}
+      />
+
+      <OperationsPanel
+        title="Job Operations"
+        subtitle="Cancel is available for selected jobs that are still queued or running."
+        actions={[
+          {
+            label: 'Cancel',
+            onClick: () => undefined,
+            disabled: !selectedJob || !['PENDING', 'RUNNING'].includes(getJobState(selectedJob)),
+            variant: 'danger',
+          },
+          { label: 'Refresh', onClick: () => void jobsQuery.refetch(), variant: 'secondary' },
+        ]}
+      />
+
+      {detailQuery.isError ? (
+        <ErrorMessage
+          error={detailQuery.error}
+          onRetry={() => detailQuery.refetch()}
+          title="Unable to refresh selected job"
+        />
+      ) : null}
     </div>
   );
 }

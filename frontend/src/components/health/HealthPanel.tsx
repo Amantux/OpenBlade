@@ -26,14 +26,20 @@ function DriveHealthTable({ drives }: { drives: DriveResponse[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800">
-          {drives.map((drive) => (
-            <tr key={drive.drive_id}>
-              <td className="px-4 py-3 text-slate-200">Drive {drive.drive_id}</td>
-              <td className="px-4 py-3 font-mono text-xs text-slate-400">{drive.barcode ?? 'Empty'}</td>
-              <td className="px-4 py-3"><Badge variant={getDriveStateVariant(drive.drive_state)}>{drive.drive_state}</Badge></td>
-              <td className="px-4 py-3"><Badge variant={getMountStateVariant(drive.mount_state)}>{drive.mount_state}</Badge></td>
-            </tr>
-          ))}
+          {drives.map((drive) => {
+            const driveId = drive.drive_id ?? drive.id ?? '—';
+            const driveState = drive.drive_state ?? drive.state ?? 'UNKNOWN';
+            const mountState = drive.mount_state ?? 'EMPTY';
+
+            return (
+              <tr key={String(driveId)}>
+                <td className="px-4 py-3 text-slate-200">Drive {driveId}</td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-400">{drive.barcode ?? 'Empty'}</td>
+                <td className="px-4 py-3"><Badge variant={getDriveStateVariant(driveState)}>{driveState}</Badge></td>
+                <td className="px-4 py-3"><Badge variant={getMountStateVariant(mountState)}>{mountState}</Badge></td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

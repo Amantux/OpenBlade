@@ -1,37 +1,32 @@
-import { Outlet, useLocation } from 'react-router-dom';
-import { deriveSystemHealth } from '../../lib/utils';
+import { Outlet } from 'react-router-dom';
 import { useHealth } from '../../hooks/useHealth';
 import { useInventory } from '../../hooks/useInventory';
+import { deriveSystemHealth } from '../../lib/utils';
 import Sidebar from './Sidebar';
+import StatusBar from './StatusBar';
 import TopBar from './TopBar';
 
-const titles: Record<string, string> = {
-  '/': 'Dashboard',
-  '/library': 'Library Topology',
-  '/jobs': 'Job Orchestration',
-  '/archive': 'Archive Workflows',
-  '/catalog': 'Catalog & Restore',
-  '/health': 'System Health',
-};
-
 export default function Layout() {
-  const location = useLocation();
   const { health } = useHealth();
-  const { data: inventory } = useInventory();
-  const systemHealth = deriveSystemHealth(health, inventory?.drives ?? [], inventory?.changer_state);
+  const inventoryQuery = useInventory();
+  const inventory = inventoryQuery.data;
+  const systemHealth = deriveSystemHealth(health, inventory?.drives ?? [], inventory?.changer?.state ?? inventory?.changer_state);
 
   return (
-    <div className="min-h-screen bg-blade-950 text-slate-100 lg:flex">
-      <Sidebar />
-      <div className="flex min-h-screen flex-1 flex-col">
+    <div className="min-h-screen bg-quantum-panel text-slate-100">
+      <div className="grid min-h-screen grid-cols-[260px,1fr] grid-rows-[auto,1fr,42px]">
+        <div className="row-span-3">
+          <Sidebar />
+        </div>
         <TopBar
-          title={titles[location.pathname] ?? 'OpenBlade'}
+          libraryName={inventory?.library_id ?? 'LIBRARY-01'}
           health={systemHealth}
-          backend={health?.backend ?? 'unknown'}
+          backend={health?.backend ?? 'backend'}
         />
-        <main className="flex-1 px-6 py-6">
+        <main className="overflow-y-auto bg-quantum-panel p-4">
           <Outlet />
         </main>
+        <StatusBar health={health} inventory={inventory} />
       </div>
     </div>
   );

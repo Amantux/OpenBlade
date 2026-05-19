@@ -1,13 +1,43 @@
-import ChangerBadge from '../components/library/ChangerBadge';
-import DrivePanel from '../components/library/DrivePanel';
-import SlotGrid from '../components/library/SlotGrid';
+import { useEffect, useMemo, useState } from 'react';
+import InformationPanel from '../components/panels/InformationPanel';
+import NorthPanel from '../components/panels/NorthPanel';
+import OperationsPanel from '../components/panels/OperationsPanel';
+import Badge from '../components/ui/Badge';
 import ErrorMessage from '../components/ui/ErrorMessage';
-import Card from '../components/ui/Card';
 import Spinner from '../components/ui/Spinner';
 import { useInventory } from '../hooks/useInventory';
+import { getSlotTone, normalizeSlot, type NormalizedSlot } from '../lib/lmc';
+
+function toneToBadge(slot: NormalizedSlot): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
+  switch (getSlotTone(slot)) {
+    case 'green':
+      return 'green';
+    case 'blue':
+      return 'blue';
+    case 'red':
+      return 'red';
+    default:
+      return 'gray';
+  }
+}
 
 export default function Library() {
   const inventoryQuery = useInventory();
+  const [selectedElement, setSelectedElement] = useState<string>();
+
+  const inventory = inventoryQuery.data ?? { library_id: 'LIBRARY-01', slots: [], drives: [], changer_state: 'UNKNOWN' };
+  const slots = useMemo(
+    () => inventory.slots.map(normalizeSlot).sort((left, right) => left.element - right.element),
+    [inventory.slots],
+  );
+
+  useEffect(() => {
+    if (!selectedElement && slots.length > 0) {
+      setSelectedElement(String(slots[0].element));
+    }
+  }, [selectedElement, slots]);
+
+  const selectedSlot = slots.find((slot) => String(slot.element) === selectedElement) ?? slots[0];
 
   if (inventoryQuery.isLoading) {
     return <Spinner />;
@@ -16,34 +46,74 @@ export default function Library() {
     return <ErrorMessage error={inventoryQuery.error} onRetry={() => inventoryQuery.refetch()} />;
   }
 
-  const inventory = inventoryQuery.data ?? { library_id: 'unknown', slots: [], drives: [], changer_state: 'unknown' };
-
   return (
-    <div className="space-y-6">
-      <Card className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Library</p>
-          <h2 className="mt-1 text-xl font-semibold text-white">{inventory.library_id}</h2>
-        </div>
-        <div className="flex items-center gap-3 text-sm text-slate-300">
-          <span>Changer state</span>
-          <ChangerBadge state={inventory.changer_state} />
-        </div>
-      </Card>
-      <Card className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-white">Slot topology</h2>
-          <p className="text-sm text-slate-400">Hover a slot to inspect slot id and barcode.</p>
-        </div>
-        <SlotGrid slots={inventory.slots} />
-      </Card>
-      <div>
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold text-white">Drive bays</h2>
-          <p className="text-sm text-slate-400">Monitor tape occupancy, drive state, and mount state per bay.</p>
-        </div>
-        <DrivePanel drives={inventory.drives} />
-      </div>
+    <div className="space-y-4">
+      <NorthPanel
+        title="Library Inventory"
+        subtitle="Element inventory with IE Area and cleaning media annotations."
+        columns={[
+          {
+            key: 'element',
+            header: 'Element',
+            render: (row: NormalizedSlot) => (
+              <div className="flex items-center gap-2">
+                <span>E{String(row.element).padStart(2, '0')}</span>
+                {row.isCleaning ? <span title="Cleaning Slot">🧹</span> : null}
+                {row.isIeArea ? <Badge variant="amber">IE Area</Badge> : null}
+              </div>
+            ),
+          },
+          { key: 'barcode', header: 'Barcode', render: (row: NormalizedSlot) => row.barcode ?? 'Empty' },
+          {
+            key: 'state',
+            header: 'State',
+            render: (row: NormalizedSlot) => <Badge variant={toneToBadge(row)}>{row.state}</Badge>,
+          },
+          { key: 'drive', header: 'Drive', render: (row: NormalizedSlot) => (row.driveId !== null ? `Drive ${row.driveId}` : '—') },
+          { key: 'magazine', header: 'Magazine', render: (row: NormalizedSlot) => row.magazine },
+        ]}
+        rows={slots}
+        getRowId={(row) => String(row.element)}
+        selectedId={selectedElement}
+        onSelect={(row) => setSelectedElement(String(row.element))}
+      />
+
+      <InformationPanel
+        title={selectedSlot ? `Element ${selectedSlot.element}` : 'Element Details'}
+        subtitle="Detailed view of the selected library element."
+        items={[
+          { label: 'Barcode', value: selectedSlot?.barcode ?? 'Empty' },
+          { label: 'State', value: selectedSlot?.state ?? '—' },
+          { label: 'Assigned Drive', value: selectedSlot?.driveId !== null ? `Drive ${selectedSlot?.driveId}` : 'None' },
+          { label: 'Magazine', value: selectedSlot?.magazine ?? '—' },
+          { label: 'IE Area', value: selectedSlot?.isIeArea ? 'Yes' : 'No' },
+          { label: 'Cleaning Slot', value: selectedSlot?.isCleaning ? 'Yes' : 'No' },
+        ]}
+      />
+
+      <OperationsPanel
+        title="Inventory Operations"
+        subtitle="Import and export actions are enabled when an IE Area element is selected."
+        actions={[
+          {
+            label: 'Import',
+            onClick: () => undefined,
+            disabled: !selectedSlot?.isIeArea,
+            variant: 'primary',
+          },
+          {
+            label: 'Export',
+            onClick: () => undefined,
+            disabled: !selectedSlot?.isIeArea,
+            variant: 'secondary',
+          },
+          {
+            label: 'Inventory',
+            onClick: () => void inventoryQuery.refetch(),
+            variant: 'secondary',
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -54,14 +54,14 @@ export function deriveSystemHealth(
     return 'Critical';
   }
 
-  if (drives.some((drive) => ['FAULTED', 'OFFLINE'].includes(drive.drive_state.toUpperCase()))) {
+  if (drives.some((drive) => ['FAULTED', 'OFFLINE'].includes(String(drive.drive_state ?? drive.state ?? '').toUpperCase()))) {
     return 'Critical';
   }
 
   if (
     (changerState && !['IDLE', 'READY'].includes(changerState.toUpperCase())) ||
-    drives.some((drive) => ['BUSY'].includes(drive.drive_state.toUpperCase())) ||
-    drives.some((drive) => ['MOUNTING', 'UNMOUNTING'].includes(drive.mount_state.toUpperCase()))
+    drives.some((drive) => ['BUSY'].includes(String(drive.drive_state ?? drive.state ?? '').toUpperCase())) ||
+    drives.some((drive) => ['MOUNTING', 'UNMOUNTING'].includes(String(drive.mount_state ?? '').toUpperCase()))
   ) {
     return 'Degraded';
   }

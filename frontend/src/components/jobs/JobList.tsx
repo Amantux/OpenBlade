@@ -64,7 +64,7 @@ export default function JobList({ jobs, selectedId, onSelect }: JobListProps) {
                 className={selectedId === job.id ? 'cursor-pointer bg-slate-800/70' : 'cursor-pointer hover:bg-slate-800/40'}
               >
                 <td className="px-4 py-3 font-mono text-xs text-slate-200">{job.id.slice(0, 8)}</td>
-                <td className="px-4 py-3 text-slate-300">{toTitleCase(job.job_type)}</td>
+                <td className="px-4 py-3 text-slate-300">{toTitleCase(job.job_type ?? job.type ?? 'archive')}</td>
                 <td className="px-4 py-3">
                   <Badge variant={getJobStatusVariant(job.status)}>{job.status}</Badge>
                 </td>
