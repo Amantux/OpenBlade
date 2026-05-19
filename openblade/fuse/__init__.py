@@ -1,0 +1,1 @@
+"""FUSE-inspired namespace helpers."""

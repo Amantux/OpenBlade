@@ -1,0 +1,9 @@
+services:
+  openblade:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ..:/app

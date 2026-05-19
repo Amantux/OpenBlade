@@ -1,0 +1,4 @@
+backend: mock
+real_hardware_enabled: false
+db_url: sqlite+aiosqlite:///./openblade.db
+log_level: INFO

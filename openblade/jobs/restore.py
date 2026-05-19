@@ -1,0 +1,115 @@
+"""Restore job: catalog lookup → tape → local path."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+
+from openblade.catalog.repository import CatalogRepository
+from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError
+from openblade.domain.models import JobType, MountMode
+from openblade.jobs.queue import JobQueue
+from openblade.jobs.verify import sha256sum
+from openblade.simulator.library import MockLibraryBackend
+from openblade.simulator.ltfs_volume import MockLTFSBackend
+
+
+@dataclass
+class RestoreRequest:
+    catalog_path: str
+    dest_path: Path
+    dry_run: bool = False
+
+
+@dataclass
+class RestoreResult:
+    job_id: str
+    source_barcode: str
+    checksum_verified: bool
+    error: str | None = None
+
+
+def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int | None]:
+    drive_id = library.find_drive_by_barcode(barcode)
+    if drive_id is not None:
+        return drive_id, None
+    slot_id = library.find_slot_by_barcode(barcode)
+    if slot_id is None:
+        raise CartridgeOfflineError(f"Cartridge {barcode} is offline")
+    drive_id = 0
+    library.load(slot_id, drive_id)
+    return drive_id, slot_id
+
+
+def run_restore_job(
+    request: RestoreRequest,
+    library: MockLibraryBackend,
+    ltfs: MockLTFSBackend,
+    catalog: CatalogRepository,
+    job_id: str,
+) -> RestoreResult:
+    """Restore a cataloged file from tape to a local path."""
+    catalog.update_job_state(job_id, "running")
+    record, instance = catalog.get_latest_instance_for_path(request.catalog_path)
+    cartridge = catalog.get_cartridge(instance.barcode)
+    if cartridge is not None and cartridge.state == "exported":
+        catalog.update_job_state(job_id, "failed", f"Cartridge {instance.barcode} is offline")
+        raise CartridgeOfflineError(f"Cartridge {instance.barcode} is offline")
+    if request.dry_run:
+        catalog.update_job_state(job_id, "completed")
+        return RestoreResult(
+            job_id=job_id, source_barcode=instance.barcode, checksum_verified=False
+        )
+    drive_id, slot_id = _load_if_needed(library, instance.barcode)
+    final_dest = (
+        request.dest_path / PurePosixPath(request.catalog_path).name
+        if request.dest_path.exists() and request.dest_path.is_dir()
+        else request.dest_path
+    )
+    try:
+        handle = ltfs.mount(instance.barcode, MountMode.READ_ONLY)
+        try:
+            ltfs.read_file(handle, PurePosixPath(instance.tape_path), final_dest)
+        finally:
+            ltfs.unmount(handle)
+    finally:
+        if slot_id is not None:
+            library.unload(drive_id, slot_id)
+    actual_checksum = sha256sum(final_dest)
+    if actual_checksum != record.checksum_sha256:
+        quarantine = final_dest.with_name(f"{final_dest.name}.quarantine")
+        final_dest.rename(quarantine)
+        catalog.update_job_state(job_id, "failed", f"Checksum mismatch for {request.catalog_path}")
+        raise ChecksumMismatchError(f"Checksum mismatch for {request.catalog_path}")
+    catalog.update_job_state(job_id, "completed")
+    return RestoreResult(job_id=job_id, source_barcode=instance.barcode, checksum_verified=True)
+
+
+class RestoreService:
+    def __init__(
+        self,
+        library: MockLibraryBackend,
+        ltfs: MockLTFSBackend,
+        catalog: CatalogRepository,
+        queue: JobQueue,
+    ) -> None:
+        self.library = library
+        self.ltfs = ltfs
+        self.catalog = catalog
+        self.queue = queue
+
+    def enqueue(self, catalog_path: str, destination: Path):
+        job = self.catalog.create_job(
+            JobType.RESTORE.value,
+            {"catalog_path": catalog_path, "dest_path": str(destination)},
+        )
+        run_restore_job(
+            RestoreRequest(catalog_path=catalog_path, dest_path=destination),
+            self.library,
+            self.ltfs,
+            self.catalog,
+            job.id,
+        )
+        refreshed = self.catalog.get_job(job.id)
+        assert refreshed is not None
+        return refreshed
