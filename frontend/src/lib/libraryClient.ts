@@ -1,3 +1,4 @@
+import { apiRequest } from '../api/client';
 import type { LibraryEntry } from './libraryStore';
 
 export interface LibraryStatus {
@@ -7,6 +8,13 @@ export interface LibraryStatus {
   status: 'online' | 'offline' | 'error';
   systemInfo?: { hostname: string; version: string; uptime: number };
   health?: { slotsTotal: number; slotsUsed: number; drivesOnline: number; activeJobs: number };
+  error?: string;
+}
+
+interface ProxyProbeResponse {
+  status: LibraryStatus['status'];
+  systemInfo?: LibraryStatus['systemInfo'];
+  health?: LibraryStatus['health'];
   error?: string;
 }
 
@@ -22,12 +30,6 @@ interface VersionInfoResponse {
   versionInfo: {
     firmware?: string;
     software?: string;
-  };
-}
-
-interface SystemDetailResponse {
-  systemDetail: {
-    os: string;
   };
 }
 
@@ -83,8 +85,8 @@ class LibraryRequestError extends Error {
   }
 }
 
-function buildUrl(entry: LibraryEntry, path: string): string {
-  return entry.isLocal ? `/aml${path}` : `http://${entry.host}:${entry.port}/aml${path}`;
+function buildUrl(path: string): string {
+  return `/aml${path}`;
 }
 
 function safeJsonParse(text: string): unknown {
@@ -137,14 +139,14 @@ function countUsedSlots(slots: SlotResource[]): number {
   }).length;
 }
 
-async function fetchSlotSummary(entry: LibraryEntry): Promise<{ slotsTotal: number; slotsUsed: number }> {
-  const partitions = await fetchJson<PartitionListResponse>(buildUrl(entry, '/partitions'));
+async function fetchSlotSummary(): Promise<{ slotsTotal: number; slotsUsed: number }> {
+  const partitions = await fetchJson<PartitionListResponse>(buildUrl('/partitions'));
   const names = partitions.partitionList.partition.map((partition) => partition.name);
 
   const slotGroups = await Promise.all(
     names.flatMap((name) => [
-      fetchJson<SlotListResponse>(buildUrl(entry, `/partition/${encodeURIComponent(name)}/slots`)),
-      fetchJson<SlotListResponse>(buildUrl(entry, `/partition/${encodeURIComponent(name)}/ieSlots`)),
+      fetchJson<SlotListResponse>(buildUrl(`/partition/${encodeURIComponent(name)}/slots`)),
+      fetchJson<SlotListResponse>(buildUrl(`/partition/${encodeURIComponent(name)}/ieSlots`)),
     ]),
   );
 
@@ -153,14 +155,6 @@ async function fetchSlotSummary(entry: LibraryEntry): Promise<{ slotsTotal: numb
     slotsTotal: slots.length,
     slotsUsed: countUsedSlots(slots),
   };
-}
-
-async function loginRemote(entry: LibraryEntry): Promise<void> {
-  await fetchJson<{ summary: string }>(buildUrl(entry, '/users/login'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: entry.username, password: entry.password }),
-  });
 }
 
 function toFailureStatus(entry: LibraryEntry, error: unknown): LibraryStatus {
@@ -193,53 +187,72 @@ function toFailureStatus(entry: LibraryEntry, error: unknown): LibraryStatus {
   };
 }
 
+async function probeLocalLibrary(entry: LibraryEntry): Promise<LibraryStatus> {
+  const [systemResult, versionResult, drivesResult, jobsResult, slotsResult] = await Promise.allSettled([
+    fetchJson<SystemOverviewResponse>(buildUrl('/system')),
+    fetchJson<VersionInfoResponse>(buildUrl('/system/version')),
+    fetchJson<DriveListResponse>(buildUrl('/drives')),
+    fetchJson<JobListResponse>(buildUrl('/jobs')),
+    fetchSlotSummary(),
+  ]);
+
+  if (systemResult.status === 'rejected') {
+    throw systemResult.reason;
+  }
+
+  const version =
+    versionResult.status === 'fulfilled'
+      ? versionResult.value.versionInfo.software ?? versionResult.value.versionInfo.firmware ?? systemResult.value.systemInfo.firmware
+      : systemResult.value.systemInfo.firmware;
+  const drives = drivesResult.status === 'fulfilled' ? drivesResult.value.driveList.drive : [];
+  const jobs = jobsResult.status === 'fulfilled' ? jobsResult.value.jobList.job : [];
+  const slots = slotsResult.status === 'fulfilled' ? slotsResult.value : { slotsTotal: 0, slotsUsed: 0 };
+
+  return {
+    id: entry.id,
+    name: entry.name,
+    host: entry.host,
+    status: 'online',
+    systemInfo: {
+      hostname: systemResult.value.systemInfo.hostname,
+      version,
+      uptime: systemResult.value.systemInfo.uptime,
+    },
+    health: {
+      slotsTotal: slots.slotsTotal,
+      slotsUsed: slots.slotsUsed,
+      drivesOnline: countOnlineDrives(drives),
+      activeJobs: countActiveJobs(jobs),
+    },
+    error: undefined,
+  };
+}
+
+async function probeRemoteLibrary(entry: LibraryEntry): Promise<LibraryStatus> {
+  const result = await apiRequest<ProxyProbeResponse>(`/proxy/libraries/${encodeURIComponent(entry.id)}/probe`, {
+    method: 'POST',
+    body: {
+      host: entry.host,
+      port: entry.port,
+      username: entry.username,
+      password: entry.password,
+    },
+  });
+
+  return {
+    id: entry.id,
+    name: entry.name,
+    host: entry.host,
+    status: result.status,
+    systemInfo: result.systemInfo,
+    health: result.health,
+    error: result.error,
+  };
+}
+
 export async function probeLibrary(entry: LibraryEntry): Promise<LibraryStatus> {
   try {
-    if (!entry.isLocal) {
-      await loginRemote(entry);
-    }
-
-    const [systemResult, detailResult, versionResult, drivesResult, jobsResult, slotsResult] = await Promise.allSettled([
-      fetchJson<SystemOverviewResponse>(buildUrl(entry, '/system')),
-      fetchJson<SystemDetailResponse>(buildUrl(entry, '/system/info')),
-      fetchJson<VersionInfoResponse>(buildUrl(entry, '/system/version')),
-      fetchJson<DriveListResponse>(buildUrl(entry, '/drives')),
-      fetchJson<JobListResponse>(buildUrl(entry, '/jobs')),
-      fetchSlotSummary(entry),
-    ]);
-
-    if (systemResult.status === 'rejected') {
-      throw systemResult.reason;
-    }
-
-    void detailResult;
-
-    const version =
-      versionResult.status === 'fulfilled'
-        ? versionResult.value.versionInfo.software ?? versionResult.value.versionInfo.firmware ?? systemResult.value.systemInfo.firmware
-        : systemResult.value.systemInfo.firmware;
-    const drives = drivesResult.status === 'fulfilled' ? drivesResult.value.driveList.drive : [];
-    const jobs = jobsResult.status === 'fulfilled' ? jobsResult.value.jobList.job : [];
-    const slots = slotsResult.status === 'fulfilled' ? slotsResult.value : { slotsTotal: 0, slotsUsed: 0 };
-
-    return {
-      id: entry.id,
-      name: entry.name,
-      host: entry.host,
-      status: 'online',
-      systemInfo: {
-        hostname: systemResult.value.systemInfo.hostname,
-        version,
-        uptime: systemResult.value.systemInfo.uptime,
-      },
-      health: {
-        slotsTotal: slots.slotsTotal,
-        slotsUsed: slots.slotsUsed,
-        drivesOnline: countOnlineDrives(drives),
-        activeJobs: countActiveJobs(jobs),
-      },
-      error: undefined,
-    };
+    return entry.isLocal ? await probeLocalLibrary(entry) : await probeRemoteLibrary(entry);
   } catch (error) {
     return toFailureStatus(entry, error);
   }

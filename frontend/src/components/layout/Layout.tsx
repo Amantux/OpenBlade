@@ -1,6 +1,9 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useHealth } from '../../hooks/useHealth';
 import { useInventory } from '../../hooks/useInventory';
+import { getActiveLibraryId, subscribeActiveLibrary } from '../../lib/activeLibrary';
+import { getLibraries } from '../../lib/libraryStore';
 import { deriveSystemHealth } from '../../lib/utils';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
@@ -10,7 +13,15 @@ export default function Layout() {
   const { health } = useHealth();
   const inventoryQuery = useInventory();
   const inventory = inventoryQuery.data;
+  const [activeLibraryId, setActiveLibraryId] = useState(() => getActiveLibraryId());
   const systemHealth = deriveSystemHealth(health, inventory?.drives ?? [], inventory?.changer?.state ?? inventory?.changer_state);
+
+  useEffect(() => subscribeActiveLibrary(setActiveLibraryId), []);
+
+  const activeRemoteLibraryName = useMemo(() => {
+    const activeLibrary = getLibraries().find((entry) => entry.id === activeLibraryId);
+    return activeLibrary && !activeLibrary.isLocal ? activeLibrary.name : undefined;
+  }, [activeLibraryId]);
 
   return (
     <div className="min-h-screen bg-quantum-panel text-slate-100">
@@ -22,6 +33,7 @@ export default function Layout() {
           libraryName={inventory?.library_id ?? 'LIBRARY-01'}
           health={systemHealth}
           backend={health?.backend ?? 'backend'}
+          activeLibraryName={activeRemoteLibraryName}
         />
         <main className="overflow-y-auto bg-quantum-panel p-4">
           <Outlet />

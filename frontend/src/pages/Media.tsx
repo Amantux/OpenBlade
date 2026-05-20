@@ -1,36 +1,123 @@
 import { useQuery } from '@tanstack/react-query';
-import { getCartridges, getMediaPools } from '../api/cartridges';
-import InformationPanel from '../components/panels/InformationPanel';
-import NorthPanel from '../components/panels/NorthPanel';
+import { Search } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { listCartridges, type Cartridge } from '../api/media';
 import Badge from '../components/ui/Badge';
+import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
-import type { CartridgeResponse, MediaPoolResponse } from '../types/api';
+import { MEDIA_POOL_STORE_EVENT, getPools, type MediaPool } from '../lib/mediaPoolStore';
+import { formatDate } from '../lib/utils';
+
+const EMPTY_CARTRIDGES: Cartridge[] = [];
 
 function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
-  if (state.toLowerCase().includes('error')) {
+  const normalized = state.toLowerCase();
+  if (normalized.includes('error') || normalized.includes('fault')) {
     return 'red';
   }
-  if (state.toLowerCase().includes('mounted')) {
+  if (normalized.includes('mounted') || normalized.includes('loaded')) {
     return 'blue';
+  }
+  if (normalized.includes('ready') || normalized.includes('home')) {
+    return 'green';
   }
   return 'gray';
 }
 
-function derivePool(cartridge: CartridgeResponse, pools: MediaPoolResponse[]): string {
-  const byType = pools.find((pool) => pool.type === cartridge.type);
-  return byType?.name ?? cartridge.partition ?? 'unassigned';
+function typeVariant(type: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
+  if (type.startsWith('LTO-9')) {
+    return 'green';
+  }
+  if (type.startsWith('LTO-8')) {
+    return 'blue';
+  }
+  if (type.startsWith('LTO-7')) {
+    return 'amber';
+  }
+  return 'gray';
+}
+
+function formatTb(valueGB: number | null | undefined): string {
+  if (!valueGB || valueGB <= 0) {
+    return '0 TB';
+  }
+
+  const valueTB = valueGB / 1000;
+  return `${valueTB.toFixed(valueTB >= 100 ? 0 : 1)} TB`;
+}
+
+function resolvePool(cartridge: Cartridge, pools: MediaPool[]): MediaPool | null {
+  return pools.find((pool) => pool.assignedBarcodes.includes(cartridge.barcode)) ?? null;
+}
+
+function CapacityBar({ usedGB, totalGB }: { usedGB: number; totalGB: number }) {
+  const percent = totalGB > 0 ? Math.min(100, Math.max(0, (usedGB / totalGB) * 100)) : 0;
+  return (
+    <div className="space-y-1">
+      <div className="h-2 overflow-hidden rounded-full bg-slate-900/80">
+        <div className="h-full rounded-full bg-quantum-red" style={{ width: `${percent}%` }} />
+      </div>
+      <div className="text-xs text-slate-400">{formatTb(usedGB)} / {formatTb(totalGB)}</div>
+    </div>
+  );
 }
 
 export default function Media() {
-  const mediaQuery = useQuery({ queryKey: ['media'], queryFn: getCartridges, refetchInterval: 30_000 });
-  const poolsQuery = useQuery({ queryKey: ['media', 'pools'], queryFn: getMediaPools, refetchInterval: 60_000 });
+  const mediaQuery = useQuery({ queryKey: ['media', 'cartridges'], queryFn: listCartridges, refetchInterval: 30_000 });
+  const [pools, setPools] = useState<MediaPool[]>(() => getPools());
+  const [search, setSearch] = useState('');
+  const [poolFilter, setPoolFilter] = useState('all');
+  const [stateFilter, setStateFilter] = useState('all');
+  const [selectedBarcode, setSelectedBarcode] = useState<string | null>(null);
 
-  const media = mediaQuery.data ?? [];
-  const pools = poolsQuery.data ?? [];
-  const selected = media[0];
+  useEffect(() => {
+    const syncPools = () => setPools(getPools());
+    window.addEventListener(MEDIA_POOL_STORE_EVENT, syncPools);
+    window.addEventListener('storage', syncPools);
+    return () => {
+      window.removeEventListener(MEDIA_POOL_STORE_EVENT, syncPools);
+      window.removeEventListener('storage', syncPools);
+    };
+  }, []);
 
-  if (mediaQuery.isLoading || poolsQuery.isLoading) {
+  const media = mediaQuery.data ?? EMPTY_CARTRIDGES;
+  const states = useMemo(() => Array.from(new Set(media.map((cartridge) => cartridge.state))).sort(), [media]);
+
+  const rows = useMemo(
+    () =>
+      media.map((cartridge) => ({
+        cartridge,
+        pool: resolvePool(cartridge, pools),
+      })),
+    [media, pools],
+  );
+
+  const filteredRows = useMemo(
+    () =>
+      rows.filter(({ cartridge, pool }) => {
+        const matchesSearch = cartridge.barcode.toLowerCase().includes(search.toLowerCase());
+        const matchesPool =
+          poolFilter === 'all'
+            ? true
+            : poolFilter === 'unassigned'
+              ? pool === null
+              : pool?.id === poolFilter;
+        const matchesState = stateFilter === 'all' ? true : cartridge.state === stateFilter;
+        return matchesSearch && matchesPool && matchesState;
+      }),
+    [poolFilter, rows, search, stateFilter],
+  );
+
+  const activeSelectedBarcode = filteredRows.some(({ cartridge }) => cartridge.barcode === selectedBarcode)
+    ? selectedBarcode
+    : filteredRows[0]?.cartridge.barcode ?? null;
+
+  const selected = activeSelectedBarcode
+    ? filteredRows.find(({ cartridge }) => cartridge.barcode === activeSelectedBarcode) ?? null
+    : null;
+
+  if (mediaQuery.isLoading) {
     return <Spinner />;
   }
 
@@ -38,44 +125,179 @@ export default function Media() {
     return <ErrorMessage error={mediaQuery.error} onRetry={() => mediaQuery.refetch()} />;
   }
 
-  if (poolsQuery.isError) {
-    return <ErrorMessage error={poolsQuery.error} onRetry={() => poolsQuery.refetch()} />;
-  }
-
   return (
     <div className="space-y-4">
-      <NorthPanel
-        title="Cartridges"
-        subtitle="AML media inventory with pool and location mapping."
-        columns={[
-          { key: 'barcode', header: 'Barcode', render: (row: CartridgeResponse) => row.barcode },
-          { key: 'type', header: 'Type', render: (row: CartridgeResponse) => row.type },
-          { key: 'pool', header: 'Pool', render: (row: CartridgeResponse) => derivePool(row, pools) },
-          { key: 'location', header: 'Location', render: (row: CartridgeResponse) => row.slotAddress },
-          {
-            key: 'state',
-            header: 'State',
-            render: (row: CartridgeResponse) => <Badge variant={stateVariant(row.state)}>{row.state}</Badge>,
-          },
-        ]}
-        rows={media}
-        getRowId={(row) => row.barcode}
-        emptyMessage="No cartridges were returned by the AML controller."
-      />
+      <div>
+        <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Media</div>
+        <h1 className="mt-2 text-3xl font-semibold text-white">Cartridges</h1>
+        <p className="mt-2 text-sm text-slate-400">Live AML cartridge inventory with local pool assignments, capacity bars, and detail telemetry.</p>
+      </div>
 
-      <InformationPanel
-        title={selected?.barcode ?? 'Media Summary'}
-        subtitle="Live cartridge inventory from /aml/media."
-        items={[
-          { label: 'Type', value: selected?.type ?? '—' },
-          { label: 'Pool', value: selected ? derivePool(selected, pools) : '—' },
-          { label: 'Partition', value: selected?.partition ?? '—' },
-          { label: 'Location', value: selected?.slotAddress ?? '—' },
-          { label: 'State', value: selected?.state ?? '—' },
-          { label: 'Write Protected', value: selected?.writeProtected ? 'Yes' : 'No' },
-          { label: 'WORM', value: selected?.worm ? 'Yes' : 'No' },
-        ]}
-      />
+      <Card className="bg-quantum-panel p-5">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr),220px,220px]">
+          <label className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search barcode"
+              className="w-full rounded-md border border-quantum-border bg-quantum-sidebar py-2 pl-9 pr-3 text-sm text-white"
+            />
+          </label>
+          <select
+            value={poolFilter}
+            onChange={(event) => setPoolFilter(event.target.value)}
+            className="rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-sm text-white"
+          >
+            <option value="all">All Pools</option>
+            <option value="unassigned">Unassigned</option>
+            {pools.map((pool) => (
+              <option key={pool.id} value={pool.id}>{pool.name}</option>
+            ))}
+          </select>
+          <select
+            value={stateFilter}
+            onChange={(event) => setStateFilter(event.target.value)}
+            className="rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-sm text-white"
+          >
+            <option value="all">All States</option>
+            {states.map((state) => (
+              <option key={state} value={state}>{state}</option>
+            ))}
+          </select>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr),minmax(320px,1fr)]">
+        <Card className="overflow-hidden bg-quantum-panel p-0">
+          <div className="flex items-center justify-between border-b border-quantum-border px-5 py-4">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Tape Inventory</h2>
+              <p className="mt-1 text-sm text-slate-400">{filteredRows.length} of {rows.length} cartridges shown</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-quantum-border text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-[0.18em] text-slate-500">
+                  <th className="px-4 py-3">Barcode</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">State</th>
+                  <th className="px-4 py-3">Pool</th>
+                  <th className="px-4 py-3">Location</th>
+                  <th className="px-4 py-3">Capacity</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-quantum-border/80">
+                {filteredRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-slate-400">No cartridges match the current filters.</td>
+                  </tr>
+                ) : (
+                  filteredRows.map(({ cartridge, pool }) => {
+                    const active = selectedBarcode === cartridge.barcode;
+                    return (
+                      <tr
+                        key={cartridge.barcode}
+                        className={active ? 'bg-quantum-info/80' : 'hover:bg-quantum-info/40'}
+                        onClick={() => setSelectedBarcode(cartridge.barcode)}
+                      >
+                        <td className="cursor-pointer px-4 py-3 font-medium text-white">{cartridge.barcode}</td>
+                        <td className="px-4 py-3"><Badge variant={typeVariant(cartridge.type)}>{cartridge.type}</Badge></td>
+                        <td className="px-4 py-3"><Badge variant={stateVariant(cartridge.state)}>{cartridge.state}</Badge></td>
+                        <td className="px-4 py-3">
+                          {pool ? (
+                            <span
+                              className="inline-flex rounded-full border px-2.5 py-1 text-xs font-medium"
+                              style={{ borderColor: pool.color, backgroundColor: `${pool.color}22`, color: pool.color }}
+                            >
+                              {pool.name}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Unassigned</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-300">{cartridge.location}</td>
+                        <td className="min-w-[200px] px-4 py-3">
+                          <CapacityBar usedGB={cartridge.usedGB ?? 0} totalGB={cartridge.capacityGB ?? 0} />
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        <Card className="bg-quantum-panel p-5">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Cartridge Detail</h2>
+            <p className="mt-1 text-sm text-slate-400">Select a row to inspect all mapped AML metadata.</p>
+          </div>
+
+          {selected ? (
+            <div className="mt-5 space-y-5">
+              <div>
+                <div className="text-2xl font-semibold text-white">{selected.cartridge.barcode}</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge variant={typeVariant(selected.cartridge.type)}>{selected.cartridge.type}</Badge>
+                  <Badge variant={stateVariant(selected.cartridge.state)}>{selected.cartridge.state}</Badge>
+                </div>
+              </div>
+
+              <CapacityBar usedGB={selected.cartridge.usedGB ?? 0} totalGB={selected.cartridge.capacityGB ?? 0} />
+
+              <dl className="grid gap-3 text-sm">
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Pool</dt>
+                  <dd className="text-right text-white">{selected.pool?.name ?? 'Unassigned'}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Location</dt>
+                  <dd className="text-right text-white">{selected.cartridge.location}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Partition</dt>
+                  <dd className="text-right text-white">{selected.cartridge.partition ?? '—'}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Slot Address</dt>
+                  <dd className="text-right text-white">{selected.cartridge.slotAddress ?? selected.cartridge.location}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Write Protected</dt>
+                  <dd className="text-right text-white">{selected.cartridge.writeProtected ? 'Yes' : 'No'}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">WORM</dt>
+                  <dd className="text-right text-white">{selected.cartridge.worm ? 'Yes' : 'No'}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Generations</dt>
+                  <dd className="text-right text-white">{selected.cartridge.generations ?? '—'}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Load Count</dt>
+                  <dd className="text-right text-white">{selected.cartridge.loadCount ?? '—'}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Error Count</dt>
+                  <dd className="text-right text-white">{selected.cartridge.errorCount ?? '—'}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
+                  <dt className="text-slate-400">Last Loaded</dt>
+                  <dd className="text-right text-white">{selected.cartridge.lastLoaded ? formatDate(selected.cartridge.lastLoaded) : '—'}</dd>
+                </div>
+              </dl>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-md border border-dashed border-quantum-border px-4 py-10 text-center text-sm text-slate-400">
+              No cartridge selected.
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

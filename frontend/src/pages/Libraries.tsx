@@ -1,14 +1,15 @@
-import { LoaderCircle, Plus, RefreshCw, X } from 'lucide-react';
+import { LoaderCircle, Pencil, Plus, RefreshCw, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getActiveLibraryId, setActiveLibraryId, subscribeActiveLibrary } from '../lib/activeLibrary';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
-import { formatDate, formatDuration } from '../lib/utils';
 import { probeLibrary, type LibraryStatus } from '../lib/libraryClient';
 import { addLibrary, getLibraries, removeLibrary, updateLibrary, type LibraryEntry } from '../lib/libraryStore';
+import { formatDate, formatDuration } from '../lib/utils';
 
-interface AddLibraryFormState {
+interface LibraryFormState {
   name: string;
   host: string;
   port: string;
@@ -16,7 +17,7 @@ interface AddLibraryFormState {
   password: string;
 }
 
-const emptyForm: AddLibraryFormState = {
+const emptyForm: LibraryFormState = {
   name: '',
   host: '',
   port: '8000',
@@ -69,6 +70,20 @@ function updateLibraryState(entries: LibraryEntry[], id: string, patch: Partial<
   return entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry));
 }
 
+function toFormState(entry?: LibraryEntry): LibraryFormState {
+  if (!entry) {
+    return emptyForm;
+  }
+
+  return {
+    name: entry.name,
+    host: entry.host,
+    port: String(entry.port),
+    username: entry.username,
+    password: entry.password,
+  };
+}
+
 function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-6">
@@ -92,9 +107,11 @@ export default function Libraries() {
   const [libraries, setLibraries] = useState<LibraryEntry[]>(() => getLibraries());
   const [statuses, setStatuses] = useState<Record<string, LibraryStatus>>({});
   const [probingIds, setProbingIds] = useState<string[]>([]);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [form, setForm] = useState<AddLibraryFormState>(emptyForm);
+  const [editingLibrary, setEditingLibrary] = useState<LibraryEntry | null>(null);
+  const [showLibraryModal, setShowLibraryModal] = useState(false);
+  const [form, setForm] = useState<LibraryFormState>(emptyForm);
   const [selectedRemoteId, setSelectedRemoteId] = useState<string | null>(null);
+  const [activeLibraryId, setActiveLibraryIdState] = useState(() => getActiveLibraryId());
 
   const mergedLibraries = useMemo(
     () => libraries.map((entry) => ({ entry, status: statuses[entry.id] })),
@@ -106,6 +123,19 @@ export default function Libraries() {
     [mergedLibraries, selectedRemoteId],
   );
   const selectedRemoteStatus = selectedRemoteId ? statuses[selectedRemoteId] : undefined;
+
+  useEffect(() => subscribeActiveLibrary(setActiveLibraryIdState), []);
+
+  useEffect(() => {
+    const localLibrary = libraries.find((entry) => entry.isLocal);
+    if (!localLibrary) {
+      return;
+    }
+
+    if (!activeLibraryId || !libraries.some((entry) => entry.id === activeLibraryId)) {
+      setActiveLibraryId(localLibrary.id);
+    }
+  }, [activeLibraryId, libraries]);
 
   const setProbeActive = (id: string, active: boolean) => {
     setProbingIds((current) => {
@@ -157,26 +187,75 @@ export default function Libraries() {
     }));
   };
 
-  const handleAddLibrary = async (event: FormEvent<HTMLFormElement>) => {
+  const closeLibraryModal = () => {
+    setShowLibraryModal(false);
+    setEditingLibrary(null);
+    setForm(emptyForm);
+  };
+
+  const openAddModal = () => {
+    setEditingLibrary(null);
+    setForm(emptyForm);
+    setShowLibraryModal(true);
+  };
+
+  const openEditModal = (entry: LibraryEntry) => {
+    setSelectedRemoteId(null);
+    setEditingLibrary(entry);
+    setForm(toFormState(entry));
+    setShowLibraryModal(true);
+  };
+
+  const handleSaveLibrary = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const created = addLibrary({
+    const patch = {
       name: form.name,
       host: form.host,
       port: Number(form.port) || 8000,
       username: form.username,
       password: form.password,
       isLocal: false,
-      status: 'unknown',
-    });
+      status: 'unknown' as const,
+    };
 
+    if (editingLibrary) {
+      const updated: LibraryEntry = {
+        ...editingLibrary,
+        ...patch,
+      };
+      updateLibrary(editingLibrary.id, patch);
+      setLibraries(getLibraries());
+      setStatuses((current) => ({
+        ...current,
+        [editingLibrary.id]: {
+          ...(current[editingLibrary.id] ?? {
+            id: editingLibrary.id,
+            name: updated.name,
+            host: updated.host,
+            status: 'offline' as const,
+          }),
+          id: editingLibrary.id,
+          name: updated.name,
+          host: updated.host,
+        },
+      }));
+      if (activeLibraryId === editingLibrary.id) {
+        setActiveLibraryId(editingLibrary.id);
+      }
+      closeLibraryModal();
+      await probeEntry(updated);
+      return;
+    }
+
+    const created = addLibrary(patch);
     setLibraries(getLibraries());
-    setForm(emptyForm);
-    setShowAddModal(false);
+    closeLibraryModal();
     await probeEntry(created);
   };
 
   const handleRemoveLibrary = (entry: LibraryEntry) => {
+    const localLibrary = libraries.find((library) => library.isLocal);
     removeLibrary(entry.id);
     setLibraries(getLibraries());
     setStatuses((current) => {
@@ -187,6 +266,19 @@ export default function Libraries() {
     if (selectedRemoteId === entry.id) {
       setSelectedRemoteId(null);
     }
+    if (activeLibraryId === entry.id && localLibrary) {
+      setActiveLibraryId(localLibrary.id);
+    }
+  };
+
+  const handleConnect = (entry: LibraryEntry) => {
+    setActiveLibraryId(entry.id);
+    if (entry.isLocal) {
+      navigate('/library');
+      return;
+    }
+
+    navigate('/dashboard');
   };
 
   return (
@@ -202,7 +294,7 @@ export default function Libraries() {
             <RefreshCw className="mr-2 h-4 w-4" />
             Refresh All
           </Button>
-          <Button type="button" onClick={() => setShowAddModal(true)}>
+          <Button type="button" onClick={openAddModal}>
             <Plus className="mr-2 h-4 w-4" />
             Add Library
           </Button>
@@ -212,6 +304,7 @@ export default function Libraries() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {mergedLibraries.map(({ entry, status }) => {
           const appearance = statusAppearance(status?.status ?? entry.status);
+          const isActive = activeLibraryId === entry.id;
           const isProbing = probingIds.includes(entry.id);
           const displayHost = entry.isLocal ? `${entry.host} (same host)` : `${entry.host}:${entry.port}`;
 
@@ -223,6 +316,7 @@ export default function Libraries() {
                     <div className="flex items-center gap-2">
                       <h2 className="text-lg font-semibold text-slate-100">{entry.name}</h2>
                       {entry.isLocal ? <Badge variant="blue">Local</Badge> : null}
+                      {isActive ? <Badge variant="green">Active</Badge> : null}
                     </div>
                     <p className="mt-1 text-sm text-slate-400">{displayHost}</p>
                   </div>
@@ -261,23 +355,22 @@ export default function Libraries() {
                 {status?.error ? <p className="text-sm text-amber-300">{status.error}</p> : <div className="min-h-5" />}
 
                 <div className="mt-auto flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      if (entry.isLocal) {
-                        navigate('/library');
-                        return;
-                      }
-                      setSelectedRemoteId(entry.id);
-                    }}
-                  >
+                  <Button type="button" variant="secondary" onClick={() => handleConnect(entry)}>
                     Connect
                   </Button>
                   {!entry.isLocal ? (
-                    <Button type="button" variant="danger" onClick={() => handleRemoveLibrary(entry)}>
-                      Remove
-                    </Button>
+                    <>
+                      <Button type="button" variant="ghost" onClick={() => setSelectedRemoteId(entry.id)}>
+                        Details
+                      </Button>
+                      <Button type="button" variant="ghost" onClick={() => openEditModal(entry)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Edit
+                      </Button>
+                      <Button type="button" variant="danger" onClick={() => handleRemoveLibrary(entry)}>
+                        Remove
+                      </Button>
+                    </>
                   ) : null}
                 </div>
               </div>
@@ -286,15 +379,15 @@ export default function Libraries() {
         })}
       </div>
 
-      {showAddModal ? (
-        <Modal onClose={() => setShowAddModal(false)}>
+      {showLibraryModal ? (
+        <Modal onClose={closeLibraryModal}>
           <div>
             <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Library Credentials</div>
-            <h2 className="mt-1 text-xl font-semibold text-slate-100">Add Library</h2>
+            <h2 className="mt-1 text-xl font-semibold text-slate-100">{editingLibrary ? 'Edit Library' : 'Add Library'}</h2>
             <p className="mt-1 text-sm text-slate-400">Store AML endpoint credentials for a remote physical library.</p>
           </div>
 
-          <form className="mt-6 grid gap-4" onSubmit={(event) => void handleAddLibrary(event)}>
+          <form className="mt-6 grid gap-4" onSubmit={(event) => void handleSaveLibrary(event)}>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2 text-sm text-slate-300">
                 <span>Name</span>
@@ -352,10 +445,10 @@ export default function Libraries() {
             </label>
 
             <div className="flex flex-wrap justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" onClick={() => setShowAddModal(false)}>
+              <Button type="button" variant="ghost" onClick={closeLibraryModal}>
                 Cancel
               </Button>
-              <Button type="submit">Save Library</Button>
+              <Button type="submit">{editingLibrary ? 'Update Library' : 'Save Library'}</Button>
             </div>
           </form>
         </Modal>
@@ -417,6 +510,10 @@ export default function Libraries() {
           <div className="mt-6 flex flex-wrap justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => void probeEntry(selectedRemote)}>
               Probe Again
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => openEditModal(selectedRemote)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
             </Button>
             <Button type="button" onClick={() => setSelectedRemoteId(null)}>
               Close

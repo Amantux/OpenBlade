@@ -22,6 +22,7 @@ from openblade.api import (
     routes_aml_partitions,
     routes_aml_physical,
     routes_archive,
+    routes_proxy,
     routes_inventory,
     routes_jobs,
     routes_restore,
@@ -68,6 +69,7 @@ app.include_router(routes_aml_physical.router, prefix="/aml", tags=["aml-physica
 app.include_router(routes_aml_media.router, prefix="/aml", tags=["aml-media"])
 app.include_router(routes_aml_operations.router, prefix="/aml", tags=["aml-operations"])
 app.include_router(routes_aml_system.router, prefix="/aml", tags=["aml-system"])
+app.include_router(routes_proxy.router)
 
 
 @app.on_event("startup")
