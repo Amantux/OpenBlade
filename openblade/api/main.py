@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from openblade.api import (
     routes_aml_access,
     routes_aml_auth,
+    routes_aml_blades,
     routes_aml_library,
     routes_archive,
     routes_inventory,
@@ -46,6 +47,7 @@ app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_aml_auth.router, prefix="/aml", tags=["aml-auth"])
 app.include_router(routes_aml_access.router, prefix="/aml", tags=["aml-access"])
 app.include_router(routes_aml_library.router, prefix="/aml", tags=["aml-library"])
+app.include_router(routes_aml_blades.router, prefix="/aml", tags=["aml-blades"])
 
 
 @app.on_event("startup")

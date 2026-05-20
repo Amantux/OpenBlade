@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import secrets
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -100,6 +101,12 @@ class AMLState:
     aml_hosts: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Licenses: dict[serialNumber, {serialNumber, type, description, status, feature, expiry}]
     aml_licenses: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_licenses())
+    eth_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_eth_blades())
+    fc_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_fc_blades())
+    mgmt_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_mgmt_blades())
+    drive_sleds: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_drive_sleds())
+    power_supplies: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_power_supplies())
+    aml_fans: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_fans())
 
 
 def _utcnow() -> datetime:
@@ -153,6 +160,132 @@ def _default_aml_licenses() -> dict[str, dict[str, Any]]:
             "status": "active",
             "feature": "partitions",
             "expiry": None,
+        },
+    }
+
+
+def _default_eth_blades() -> dict[str, dict[str, Any]]:
+    return {
+        "ETH-1": {
+            "id": "ETH-1",
+            "serialNumber": "ETHB0001",
+            "model": "Ethernet Blade 4-Port",
+            "status": "online",
+            "firmware": "2.1.0",
+            "portCount": 4,
+            "ports": [
+                {
+                    "id": f"ETH-1-P{i}",
+                    "mac": f"00:1A:2B:3C:4D:{i:02X}",
+                    "ip": f"192.168.1.{10 + i}",
+                    "status": "up",
+                    "speed": "1G",
+                    "duplex": "full",
+                }
+                for i in range(1, 5)
+            ],
+        }
+    }
+
+
+def _default_fc_blades() -> dict[str, dict[str, Any]]:
+    return {
+        "FC-1": {
+            "id": "FC-1",
+            "serialNumber": "FCB0001",
+            "model": "FC Blade 4-Port 16Gb",
+            "status": "online",
+            "firmware": "3.2.1",
+            "portCount": 4,
+            "ports": [
+                {
+                    "id": f"FC-1-P{i}",
+                    "wwpn": f"50:00:00:00:00:00:00:0{i}",
+                    "speed": "16G",
+                    "status": "online",
+                    "mode": "target",
+                    "topology": "point-to-point",
+                }
+                for i in range(1, 5)
+            ],
+        }
+    }
+
+
+def _default_mgmt_blades() -> dict[str, dict[str, Any]]:
+    return {
+        "MGMT-1": {
+            "id": "MGMT-1",
+            "serialNumber": "MGMT0001",
+            "model": "iBlade Controller",
+            "status": "active",
+            "firmware": "5.0.1",
+            "role": "primary",
+        },
+        "MGMT-2": {
+            "id": "MGMT-2",
+            "serialNumber": "MGMT0002",
+            "model": "iBlade Controller",
+            "status": "standby",
+            "firmware": "5.0.1",
+            "role": "secondary",
+        },
+    }
+
+
+def _default_drive_sleds() -> dict[str, dict[str, Any]]:
+    return {
+        "SLED-1": {
+            "id": "SLED-1",
+            "serialNumber": "SLD0001",
+            "model": "Drive Sled 4-Bay",
+            "status": "online",
+            "drives": ["DRV-001", "DRV-002"],
+        }
+    }
+
+
+def _default_power_supplies() -> dict[str, dict[str, Any]]:
+    return {
+        "PSU-1": {
+            "id": "PSU-1",
+            "location": "left",
+            "status": "ok",
+            "voltage": 12.1,
+            "wattage": 450,
+        },
+        "PSU-2": {
+            "id": "PSU-2",
+            "location": "right",
+            "status": "ok",
+            "voltage": 12.0,
+            "wattage": 450,
+        },
+    }
+
+
+def _default_aml_fans() -> dict[str, dict[str, Any]]:
+    return {
+        "FAN-1": {
+            "id": "FAN-1",
+            "location": "front-left",
+            "status": "ok",
+            "rpm": 3200,
+            "speed": "normal",
+        },
+        "FAN-2": {
+            "id": "FAN-2",
+            "location": "front-right",
+            "status": "ok",
+            "rpm": 3150,
+            "speed": "normal",
+        },
+        "FAN-3": {
+            "id": "FAN-3",
+            "location": "rear",
+            "status": "ok",
+            "rpm": 2800,
+            "speed": "normal",
         },
     }
 
@@ -558,6 +691,167 @@ def set_library_mode(mode: str) -> str:
 def set_password_policy(policy: dict[str, Any]) -> dict[str, Any]:
     _STATE.password_policy = dict(policy)
     return get_password_policy()
+
+
+def get_eth_blades() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.eth_blades)
+
+
+def get_eth_blade(blade_id: str) -> dict[str, Any] | None:
+    blade = _STATE.eth_blades.get(blade_id)
+    return None if blade is None else deepcopy(blade)
+
+
+def update_eth_blade(blade_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    blade = _STATE.eth_blades.get(blade_id)
+    if blade is None:
+        return None
+    ports = updates.pop("ports", None)
+    blade.update(deepcopy(updates))
+    if ports is not None:
+        blade["ports"] = [deepcopy(port) for port in ports]
+    blade["portCount"] = len(blade.get("ports", []))
+    return deepcopy(blade)
+
+
+def update_eth_port(blade_id: str, port_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    blade = _STATE.eth_blades.get(blade_id)
+    if blade is None:
+        return None
+    for port in blade.get("ports", []):
+        if port.get("id") == port_id:
+            port.update(deepcopy(updates))
+            return deepcopy(port)
+    return None
+
+
+def reset_eth_blade(blade_id: str) -> dict[str, Any] | None:
+    blade = _STATE.eth_blades.get(blade_id)
+    if blade is None:
+        return None
+    blade["status"] = "online"
+    for port in blade.get("ports", []):
+        port["status"] = "up"
+    return deepcopy(blade)
+
+
+def get_fc_blades() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.fc_blades)
+
+
+def get_fc_blade(blade_id: str) -> dict[str, Any] | None:
+    blade = _STATE.fc_blades.get(blade_id)
+    return None if blade is None else deepcopy(blade)
+
+
+def update_fc_blade(blade_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    blade = _STATE.fc_blades.get(blade_id)
+    if blade is None:
+        return None
+    ports = updates.pop("ports", None)
+    blade.update(deepcopy(updates))
+    if ports is not None:
+        blade["ports"] = [deepcopy(port) for port in ports]
+    blade["portCount"] = len(blade.get("ports", []))
+    return deepcopy(blade)
+
+
+def update_fc_port(blade_id: str, port_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    blade = _STATE.fc_blades.get(blade_id)
+    if blade is None:
+        return None
+    for port in blade.get("ports", []):
+        if port.get("id") == port_id:
+            port.update(deepcopy(updates))
+            return deepcopy(port)
+    return None
+
+
+def reset_fc_blade(blade_id: str) -> dict[str, Any] | None:
+    blade = _STATE.fc_blades.get(blade_id)
+    if blade is None:
+        return None
+    blade["status"] = "online"
+    for port in blade.get("ports", []):
+        port["status"] = "online"
+    return deepcopy(blade)
+
+
+def get_mgmt_blades() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.mgmt_blades)
+
+
+def get_mgmt_blade(blade_id: str) -> dict[str, Any] | None:
+    blade = _STATE.mgmt_blades.get(blade_id)
+    return None if blade is None else deepcopy(blade)
+
+
+def update_mgmt_blade(blade_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    blade = _STATE.mgmt_blades.get(blade_id)
+    if blade is None:
+        return None
+    blade.update(deepcopy(updates))
+    return deepcopy(blade)
+
+
+def failover_mgmt_blade(blade_id: str) -> dict[str, Any] | None:
+    blade = _STATE.mgmt_blades.get(blade_id)
+    if blade is None:
+        return None
+    for current_id, current in _STATE.mgmt_blades.items():
+        if current_id == blade_id:
+            current["status"] = "active"
+            current["role"] = "primary"
+        else:
+            current["status"] = "standby"
+            current["role"] = "secondary"
+    return deepcopy(_STATE.mgmt_blades[blade_id])
+
+
+def get_drive_sleds() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.drive_sleds)
+
+
+def get_drive_sled(sled_id: str) -> dict[str, Any] | None:
+    sled = _STATE.drive_sleds.get(sled_id)
+    return None if sled is None else deepcopy(sled)
+
+
+def update_drive_sled(sled_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    sled = _STATE.drive_sleds.get(sled_id)
+    if sled is None:
+        return None
+    sled.update(deepcopy(updates))
+    return deepcopy(sled)
+
+
+def get_power_supplies() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.power_supplies)
+
+
+def get_power_supply(ps_id: str) -> dict[str, Any] | None:
+    power_supply = _STATE.power_supplies.get(ps_id)
+    return None if power_supply is None else deepcopy(power_supply)
+
+
+def get_aml_fans() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.aml_fans)
+
+
+def get_aml_fan(fan_id: str) -> dict[str, Any] | None:
+    fan = _STATE.aml_fans.get(fan_id)
+    return None if fan is None else deepcopy(fan)
+
+
+def refresh_devices() -> dict[str, int]:
+    return {
+        "ethBlades": len(_STATE.eth_blades),
+        "fcBlades": len(_STATE.fc_blades),
+        "mgmtBlades": len(_STATE.mgmt_blades),
+        "driveSleds": len(_STATE.drive_sleds),
+        "powerSupplies": len(_STATE.power_supplies),
+        "fans": len(_STATE.aml_fans),
+    }
 
 
 def list_access_groups() -> list[dict[str, Any]]:
