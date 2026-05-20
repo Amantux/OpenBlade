@@ -7,6 +7,23 @@ import type {
 
 export type BadgeVariant = 'gray' | 'blue' | 'green' | 'amber' | 'red' | 'redDim';
 
+/**
+ * UUID v4 generator that works in both secure (HTTPS/localhost) and non-secure
+ * (plain HTTP on LAN) contexts. Falls back to Math.random when crypto.randomUUID
+ * is unavailable (non-secure context).
+ */
+export function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // RFC-4122 v4 fallback
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export function cn(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');
 }

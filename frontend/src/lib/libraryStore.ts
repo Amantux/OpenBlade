@@ -1,3 +1,5 @@
+import { generateId } from './utils';
+
 export interface LibraryEntry {
   id: string;
   name: string;
@@ -43,7 +45,7 @@ function getCurrentHost(): string {
 
 function createLocalEntry(existing?: Partial<LibraryEntry>): LibraryEntry {
   return {
-    id: typeof existing?.id === 'string' && existing.id ? existing.id : crypto.randomUUID(),
+    id: typeof existing?.id === 'string' && existing.id ? existing.id : generateId(),
     name: 'Local',
     host: getCurrentHost(),
     port: DEFAULT_PORT,
@@ -60,7 +62,7 @@ function normalizeEntry(value: unknown): LibraryEntry | null {
     return null;
   }
 
-  const id = typeof value.id === 'string' && value.id ? value.id : crypto.randomUUID();
+  const id = typeof value.id === 'string' && value.id ? value.id : generateId();
   const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : '';
   const host = typeof value.host === 'string' && value.host.trim() ? value.host.trim() : '';
   const username = typeof value.username === 'string' ? value.username : '';
@@ -144,7 +146,7 @@ export function getLibraries(): LibraryEntry[] {
 export function addLibrary(entry: Omit<LibraryEntry, 'id'>): LibraryEntry {
   const created: LibraryEntry = {
     ...entry,
-    id: crypto.randomUUID(),
+    id: generateId(),
     name: entry.name.trim(),
     host: entry.host.trim(),
     port: normalizePort(entry.port),

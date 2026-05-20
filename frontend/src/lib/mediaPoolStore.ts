@@ -1,3 +1,5 @@
+import { generateId } from './utils';
+
 import { ApiError, apiRequest } from '../api/client';
 
 export type PoolPolicy = 'critical' | 'standard' | 'archive';
@@ -88,7 +90,7 @@ function defaultPools(): MediaPool[] {
   const createdAt = new Date().toISOString();
   return [
     {
-      id: crypto.randomUUID(),
+      id: generateId(),
       name: 'Critical Backups',
       policy: 'critical',
       maxDrives: 1,
@@ -99,7 +101,7 @@ function defaultPools(): MediaPool[] {
       createdAt,
     },
     {
-      id: crypto.randomUUID(),
+      id: generateId(),
       name: 'General Archive',
       policy: 'standard',
       maxDrives: 4,
@@ -110,7 +112,7 @@ function defaultPools(): MediaPool[] {
       createdAt,
     },
     {
-      id: crypto.randomUUID(),
+      id: generateId(),
       name: 'Cold Storage',
       policy: 'archive',
       maxDrives: 2,
@@ -146,7 +148,7 @@ function normalizePool(value: unknown, index: number): MediaPool | null {
   }
 
   return {
-    id: typeof value.id === 'string' && value.id ? value.id : crypto.randomUUID(),
+    id: typeof value.id === 'string' && value.id ? value.id : generateId(),
     name,
     policy,
     maxDrives: normalizeMaxDrives(value.maxDrives, policy),
@@ -256,7 +258,7 @@ export function getPools(): MediaPool[] {
 export async function createPool(pool: Omit<MediaPool, 'id' | 'createdAt'>): Promise<MediaPool> {
   const policy = normalizePolicy(pool.policy);
   const created: MediaPool = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     name: pool.name.trim(),
     policy,
     maxDrives: normalizeMaxDrives(pool.maxDrives, policy),
