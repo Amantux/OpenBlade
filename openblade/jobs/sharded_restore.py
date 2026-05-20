@@ -38,6 +38,13 @@ class ShardedRestoreResult:
     error: str | None = None
 
 
+def _latest_archived_instance(record: Any) -> Any | None:
+    archived = [instance for instance in record.instances if instance.state == "archived"]
+    if not archived:
+        return None
+    return max(archived, key=lambda instance: instance.archived_at or instance.created_at)
+
+
 def run_sharded_restore(
     request: ShardedRestoreRequest,
     library: MockLibraryBackend,
@@ -60,7 +67,31 @@ def run_sharded_restore(
             error=error,
         )
 
-    instances = [instance for instance in file_record.instances if instance.state == "archived"]
+    shard_records = catalog.list_shard_records(file_record.id)
+    if shard_records:
+        ordered_shards = sorted(shard_records, key=lambda record: record.shard_index or 0)
+        instances = [
+            instance
+            for instance in (_latest_archived_instance(record) for record in ordered_shards)
+            if instance is not None
+        ]
+        if len(instances) != len(ordered_shards):
+            error = "Missing archived shard instances"
+            catalog.update_job_state(job_id, "failed", error=error)
+            return ShardedRestoreResult(
+                job_id=job_id,
+                source_barcodes=[],
+                checksum_verified=False,
+                bytes_restored=0,
+                error=error,
+            )
+        restore_block_size = file_record.block_size or request.block_size
+    else:
+        instances = sorted(
+            [instance for instance in file_record.instances if instance.state == "archived"],
+            key=lambda instance: instance.tape_path,
+        )
+        restore_block_size = request.block_size
     if not instances:
         error = "No archived instances found"
         catalog.update_job_state(job_id, "failed", error=error)
@@ -88,9 +119,10 @@ def run_sharded_restore(
                 job_id,
             )
         return _restore_sharded(
-            sorted(instances, key=lambda instance: instance.tape_path),
+            instances,
             file_record,
             request,
+            restore_block_size,
             library,
             ltfs,
             catalog,
@@ -162,6 +194,7 @@ def _restore_sharded(
     instances: list[Any],
     file_record: Any,
     request: ShardedRestoreRequest,
+    block_size: int,
     library: MockLibraryBackend,
     ltfs: MockLTFSBackend,
     catalog: CatalogRepository,
@@ -205,7 +238,7 @@ def _restore_sharded(
         actual_checksum = reassemble_block_stripe(
             shard_files,
             request.dest_path,
-            request.block_size,
+            block_size,
         )
         if actual_checksum != file_record.checksum_sha256:
             if request.dest_path.exists():

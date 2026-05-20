@@ -63,6 +63,11 @@ class FileRecord(Base):
     volume_group_id: Mapped[str] = mapped_column(
         String, ForeignKey("volume_groups.id"), nullable=False
     )
+    shard_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    shard_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    block_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    shard_profile: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    parent_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     volume_group: Mapped[VolumeGroup] = relationship("VolumeGroup", back_populates="file_records")

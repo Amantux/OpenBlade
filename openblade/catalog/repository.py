@@ -100,7 +100,17 @@ class CatalogRepository:
         return list(self.session.execute(stmt).scalars().all())
 
     def create_file_record(
-        self, path: str, size_bytes: int, checksum: str, vg_id: str
+        self,
+        path: str,
+        size_bytes: int,
+        checksum: str,
+        vg_id: str,
+        *,
+        shard_count: int | None = None,
+        shard_index: int | None = None,
+        block_size: int | None = None,
+        shard_profile: str | None = None,
+        parent_id: str | None = None,
     ) -> FileRecord:
         normalized = str(PurePosixPath(path))
         record = self.get_file_record(normalized)
@@ -110,12 +120,22 @@ class CatalogRepository:
                 size_bytes=size_bytes,
                 checksum_sha256=checksum,
                 volume_group_id=vg_id,
+                shard_count=shard_count,
+                shard_index=shard_index,
+                block_size=block_size,
+                shard_profile=shard_profile,
+                parent_id=parent_id,
             )
             self.session.add(record)
         else:
             record.size_bytes = size_bytes
             record.checksum_sha256 = checksum
             record.volume_group_id = vg_id
+            record.shard_count = shard_count
+            record.shard_index = shard_index
+            record.block_size = block_size
+            record.shard_profile = shard_profile
+            record.parent_id = parent_id
         self.session.commit()
         self.session.refresh(record)
         return record
@@ -134,7 +154,7 @@ class CatalogRepository:
         stmt = (
             select(FileRecord)
             .options(selectinload(FileRecord.instances))
-            .where(FileRecord.path.like(like_prefix))
+            .where(FileRecord.parent_id.is_(None), FileRecord.path.like(like_prefix))
             .order_by(FileRecord.path)
         )
         return list(self.session.execute(stmt).scalars().all())
@@ -142,8 +162,8 @@ class CatalogRepository:
     def list_catalog_files(
         self, limit: int = 50, offset: int = 0, search: str | None = None
     ) -> tuple[list[FileRecord], int]:
-        stmt = select(FileRecord).options(selectinload(FileRecord.instances))
-        count_stmt = select(func.count()).select_from(FileRecord)
+        stmt = select(FileRecord).options(selectinload(FileRecord.instances)).where(FileRecord.parent_id.is_(None))
+        count_stmt = select(func.count()).select_from(FileRecord).where(FileRecord.parent_id.is_(None))
         if search:
             pattern = f"%{search.strip()}%"
             stmt = stmt.where(FileRecord.path.ilike(pattern))
@@ -176,7 +196,7 @@ class CatalogRepository:
                     size=record.size_bytes,
                     tape_barcode=latest_instance.barcode,
                     archived_at=latest_instance.archived_at,
-                    shard_count=len(matching_instances),
+                    shard_count=record.shard_count or len(matching_instances),
                 )
             )
         return entries
@@ -198,10 +218,21 @@ class CatalogRepository:
         )
         return self.session.execute(stmt).scalar_one_or_none()
 
+    def list_shard_records(self, parent_id: str) -> list[FileRecord]:
+        stmt = (
+            select(FileRecord)
+            .options(selectinload(FileRecord.instances))
+            .where(FileRecord.parent_id == parent_id)
+            .order_by(FileRecord.shard_index, FileRecord.created_at)
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
     def delete_file_record(self, file_id: str) -> None:
         record = self.get_file_record_by_id(file_id)
         if record is None:
             raise FileNotFoundError(f"Catalog file {file_id} not found")
+        for shard_record in self.list_shard_records(file_id):
+            self.session.delete(shard_record)
         self.session.delete(record)
         self.session.commit()
 
@@ -276,6 +307,11 @@ class CatalogRepository:
             size_bytes=record.size_bytes,
             checksum=record.checksum_sha256,
             vg_id=record.volume_group_id,
+            shard_count=getattr(record, "shard_count", None),
+            shard_index=getattr(record, "shard_index", None),
+            block_size=getattr(record, "block_size", None),
+            shard_profile=getattr(record, "shard_profile", None),
+            parent_id=getattr(record, "parent_id", None),
         )
         instance = self.create_file_instance(file_record.id, barcode, str(tape_path))
         if state in {FileInstanceState.ARCHIVED, FileInstanceState.VERIFIED}:

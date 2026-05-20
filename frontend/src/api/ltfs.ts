@@ -23,8 +23,6 @@ export interface LtfsFile {
 
 export interface LtfsFileListResult {
   files: LtfsFile[];
-  isSynthetic: boolean;
-  note?: string;
 }
 
 interface LtfsCatalogEntry {
@@ -125,18 +123,6 @@ function parseCapacityGb(capacity: string | undefined, mediaType: string): numbe
   return 12 * 1024;
 }
 
-function estimateUsedGb(barcode: string, mounts: number, capacityGB: number): number {
-  const seed = barcode.split('').reduce((total, char) => total + char.charCodeAt(0), 0);
-  const baseline = 0.22 + (seed % 45) / 100;
-  const usageFromMounts = Math.min(mounts * 0.03, 0.2);
-  return Math.min(Math.round(capacityGB * (baseline + usageFromMounts)), capacityGB);
-}
-
-function estimateFileCount(barcode: string, mounts: number): number {
-  const seed = barcode.split('').reduce((total, char) => total + char.charCodeAt(0), 0);
-  return 240 + (seed % 1400) + mounts * 17;
-}
-
 async function getSections() {
   const response = await apiRequest<LtfsSectionSummaryResponse>('/devices/blades/ltfs');
   return response.sectionList.section;
@@ -215,51 +201,32 @@ async function getAmlVolumeMetadata(): Promise<Map<string, AmlVolumeMetadata>> {
   return volumes;
 }
 
-async function getFallbackVolumes(): Promise<LtfsVolume[]> {
-  const amlVolumes = await getAmlVolumeMetadata();
-  return Array.from(amlVolumes.entries())
-    .map(([barcode, volume]) => ({
-      barcode,
-      label: `${volume.label} (AML inventory fallback)`,
-      mountPoint: volume.mountPoint,
-      mounted: volume.mounted,
-      capacityGB: volume.capacityGB,
-      usedGB: estimateUsedGb(barcode, 0, volume.capacityGB),
-      fileCount: estimateFileCount(barcode, 0),
-    }))
-    .sort((left, right) => left.barcode.localeCompare(right.barcode));
-}
-
 export async function getLtfsVolumes(): Promise<LtfsVolume[]> {
-  try {
-    const barcodes = await getCatalogTapeBarcodes();
-    if (barcodes.length === 0) {
-      return [];
-    }
-
-    const [catalogSummaries, amlVolumes] = await Promise.all([
-      Promise.all(barcodes.map(async (barcode) => [barcode, await getVolumeCatalogSummary(barcode)] as const)),
-      getAmlVolumeMetadata().catch(() => new Map<string, AmlVolumeMetadata>()),
-    ]);
-
-    return catalogSummaries
-      .map(([barcode, summary]) => {
-        const amlVolume = amlVolumes.get(barcode);
-        return {
-          barcode,
-          label: amlVolume?.label ?? 'Catalog metadata',
-          mountPoint: amlVolume?.mountPoint,
-          mounted: amlVolume?.mounted ?? false,
-          capacityGB: amlVolume?.capacityGB ?? 12 * 1024,
-          usedGB: summary.usedGB,
-          fileCount: summary.fileCount,
-          lastModified: summary.lastModified,
-        } satisfies LtfsVolume;
-      })
-      .sort((left, right) => left.barcode.localeCompare(right.barcode));
-  } catch {
-    return getFallbackVolumes();
+  const barcodes = await getCatalogTapeBarcodes();
+  if (barcodes.length === 0) {
+    return [];
   }
+
+  const [catalogSummaries, amlVolumes] = await Promise.all([
+    Promise.all(barcodes.map(async (barcode) => [barcode, await getVolumeCatalogSummary(barcode)] as const)),
+    getAmlVolumeMetadata().catch(() => new Map<string, AmlVolumeMetadata>()),
+  ]);
+
+  return catalogSummaries
+    .map(([barcode, summary]) => {
+      const amlVolume = amlVolumes.get(barcode);
+      return {
+        barcode,
+        label: amlVolume?.label ?? barcode,
+        mountPoint: amlVolume?.mountPoint,
+        mounted: amlVolume?.mounted ?? false,
+        capacityGB: amlVolume?.capacityGB ?? 0,
+        usedGB: summary.usedGB,
+        fileCount: summary.fileCount,
+        lastModified: summary.lastModified,
+      } satisfies LtfsVolume;
+    })
+    .sort((left, right) => left.barcode.localeCompare(right.barcode));
 }
 
 export async function mountVolume(barcode: string): Promise<void> {
@@ -270,27 +237,6 @@ export async function mountVolume(barcode: string): Promise<void> {
 export async function unmountVolume(barcode: string): Promise<void> {
   const section = await getSectionForBarcode(barcode);
   await apiRequest(`/devices/blade/ltfs/${section.sectionNumber}/unmount`, { method: 'POST' });
-}
-
-function simulateTree(barcode: string): BrowseNode[] {
-  const prefix = barcode.toLowerCase();
-
-  return [
-    { path: '/backups', type: 'directory', modified: '2024-01-15T03:18:00Z' },
-    { path: '/backups/2024', type: 'directory', modified: '2024-01-15T03:18:00Z' },
-    { path: '/backups/2024/january', type: 'directory', modified: '2024-01-14T22:10:00Z' },
-    { path: `/backups/2024/january/${prefix}-cluster-full-2024-01-14.tar`, type: 'file', size: 2_947_483_648, modified: '2024-01-14T22:10:00Z', tapeBarcode: barcode, shardCount: 1 },
-    { path: `/backups/2024/january/${prefix}-catalog-delta-2024-01-15.tar.gz`, type: 'file', size: 438_845_440, modified: '2024-01-15T03:18:00Z', tapeBarcode: barcode, shardCount: 1 },
-    { path: '/backups/2023', type: 'directory', modified: '2023-12-28T10:40:00Z' },
-    { path: `/backups/2023/${prefix}-year-end-validation-report.pdf`, type: 'file', size: 16_488_920, modified: '2023-12-28T10:40:00Z', tapeBarcode: barcode, shardCount: 1 },
-    { path: '/exports', type: 'directory', modified: '2024-01-12T12:00:00Z' },
-    { path: `/exports/${prefix}-restore-index.csv`, type: 'file', size: 1_248_400, modified: '2024-01-12T12:00:00Z', tapeBarcode: barcode, shardCount: 1 },
-    { path: '/logs', type: 'directory', modified: '2024-01-15T06:05:00Z' },
-    { path: `/logs/${prefix}-ltfs-mount.log`, type: 'file', size: 284_112, modified: '2024-01-15T06:05:00Z', tapeBarcode: barcode, shardCount: 1 },
-    { path: `/logs/${prefix}-integrity-scan.log`, type: 'file', size: 832_516, modified: '2024-01-11T19:44:00Z', tapeBarcode: barcode, shardCount: 1 },
-    { path: '/manifests', type: 'directory', modified: '2024-01-10T08:30:00Z' },
-    { path: `/manifests/${prefix}-tape-manifest.json`, type: 'file', size: 94_320, modified: '2024-01-10T08:30:00Z', tapeBarcode: barcode, shardCount: 1 },
-  ];
 }
 
 function buildDirectoryListing(nodes: BrowseNode[], path = '/'): LtfsFile[] {
@@ -355,34 +301,9 @@ function toCatalogNodes(entries: LtfsCatalogEntry[]): BrowseNode[] {
   }));
 }
 
-function syntheticFallback(barcode: string, path: string, note: string): LtfsFileListResult {
-  return {
-    files: buildDirectoryListing(simulateTree(barcode), path),
-    isSynthetic: true,
-    note,
-  };
-}
-
 export async function listFiles(barcode: string, path = '/'): Promise<LtfsFileListResult> {
-  try {
-    const entries = await getCatalogEntries(barcode, path);
-    if (entries.length === 0) {
-      return syntheticFallback(
-        barcode,
-        path,
-        'Synthetic fallback: backend catalog returned no browse entries for this selection.',
-      );
-    }
-
-    return {
-      files: buildDirectoryListing(toCatalogNodes(entries), path),
-      isSynthetic: false,
-    };
-  } catch {
-    return syntheticFallback(
-      barcode,
-      path,
-      'Synthetic fallback: backend catalog browse is unavailable right now.',
-    );
-  }
+  const entries = await getCatalogEntries(barcode, path);
+  return {
+    files: buildDirectoryListing(toCatalogNodes(entries), path),
+  };
 }

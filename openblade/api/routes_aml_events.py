@@ -303,6 +303,47 @@ class HealthSummaryResponse(BaseModel):
     healthSummary: HealthSummary
 
 
+class DriveSummary(BaseModel):
+    total: int
+    online: int
+    attention: int
+
+
+class SlotSummary(BaseModel):
+    total: int
+    used: int
+    utilizationPercent: int
+
+
+class JobSummary(BaseModel):
+    total: int
+    active: int
+    pending: int
+    completed: int
+    failed: int
+
+
+class EventCounts(BaseModel):
+    total: int
+    critical: int
+    warning: int
+    info: int
+
+
+class DashboardSummary(BaseModel):
+    overall: str
+    drives: DriveSummary
+    slots: SlotSummary
+    jobs: JobSummary
+    events: EventCounts
+    activeAlerts: int
+    openTickets: int
+
+
+class DashboardSummaryResponse(BaseModel):
+    summary: DashboardSummary
+
+
 def _ws_result(summary: str = "Operation completed") -> WSResultCode:
     return WSResultCode(summary=summary)
 
@@ -533,6 +574,58 @@ def _health_summary() -> HealthSummary:
         ),
         activeAlerts=len(alerts),
         openTickets=open_tickets,
+    )
+
+
+def _dashboard_summary() -> DashboardSummary:
+    health = _health_summary()
+    drives = aml_state.list_aml_drives()
+    partitions = aml_state.list_aml_partitions()
+    active_jobs = aml_state.list_aml_jobs()
+    history_jobs = aml_state.list_aml_job_history()
+    all_jobs = [*active_jobs, *history_jobs]
+    events = aml_state.list_aml_events()
+
+    drive_total = len(drives)
+    drive_online = sum(1 for drive in drives if str(drive.get("status", "")).lower() == "online")
+    drive_attention = sum(
+        1
+        for drive in drives
+        if str(drive.get("status", "")).lower() not in {"online", "ready"}
+        or str(drive.get("state", "")).lower() in {"faulted", "failed", "offline", "error"}
+    )
+
+    slot_total = sum(int(partition.get("slotCount", 0)) + int(partition.get("ieSlotCount", 0)) for partition in partitions)
+    slot_used = len(aml_state.list_aml_media())
+    slot_utilization_percent = round((slot_used / slot_total) * 100) if slot_total else 0
+
+    job_statuses = [str(job.get("status", "unknown")).lower() for job in all_jobs]
+    active_statuses = {"active", "running", "in_progress"}
+    pending_statuses = {"pending", "queued", "paused"}
+    completed_statuses = {"completed", "complete", "succeeded", "success"}
+    failed_statuses = {"failed", "cancelled", "canceled", "error"}
+
+    event_severities = [str(event.get("severity", "info")).lower() for event in events]
+
+    return DashboardSummary(
+        overall=health.overall,
+        drives=DriveSummary(total=drive_total, online=drive_online, attention=drive_attention),
+        slots=SlotSummary(total=slot_total, used=slot_used, utilizationPercent=slot_utilization_percent),
+        jobs=JobSummary(
+            total=len(all_jobs),
+            active=sum(1 for status in job_statuses if status in active_statuses),
+            pending=sum(1 for status in job_statuses if status in pending_statuses),
+            completed=sum(1 for status in job_statuses if status in completed_statuses),
+            failed=sum(1 for status in job_statuses if status in failed_statuses),
+        ),
+        events=EventCounts(
+            total=len(events),
+            critical=sum(1 for severity in event_severities if severity == "critical"),
+            warning=sum(1 for severity in event_severities if severity == "warning"),
+            info=sum(1 for severity in event_severities if severity == "info"),
+        ),
+        activeAlerts=health.activeAlerts,
+        openTickets=health.openTickets,
     )
 
 
@@ -1084,3 +1177,12 @@ async def get_health_summary(
 ) -> HealthSummaryResponse:
     _ensure_state(context)
     return HealthSummaryResponse(healthSummary=_health_summary())
+
+
+@router.get("/summary", response_model=DashboardSummaryResponse)
+async def get_dashboard_summary(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> DashboardSummaryResponse:
+    _ensure_state(context)
+    return DashboardSummaryResponse(summary=_dashboard_summary())

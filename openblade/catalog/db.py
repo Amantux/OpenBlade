@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -36,6 +36,32 @@ def _ensure_parent_dir(db_url: str) -> None:
             return
 
 
+def _migrate_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if "file_records" not in inspector.get_table_names():
+        return
+    existing_columns = {column["name"] for column in inspector.get_columns("file_records")}
+    required_columns = {
+        "shard_count": "INTEGER",
+        "shard_index": "INTEGER",
+        "block_size": "INTEGER",
+        "shard_profile": "VARCHAR(32)",
+        "parent_id": "VARCHAR",
+    }
+    missing_columns = {
+        name: column_type
+        for name, column_type in required_columns.items()
+        if name not in existing_columns
+    }
+    if not missing_columns:
+        return
+    with engine.begin() as connection:
+        for name, column_type in missing_columns.items():
+            connection.execute(text(f"ALTER TABLE file_records ADD COLUMN {name} {column_type}"))
+        if "parent_id" in missing_columns:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_file_records_parent_id ON file_records (parent_id)"))
+
+
 def init_db(db_url: str = "sqlite:///./openblade.db") -> None:
     global _engine, _SessionLocal, _db_url
     normalized_db_url = _normalize_db_url(db_url)
@@ -44,6 +70,7 @@ def init_db(db_url: str = "sqlite:///./openblade.db") -> None:
         and _db_url == normalized_db_url
         and not normalized_db_url.endswith(":memory:")
     ):
+        _migrate_schema(_engine)
         return
     if _engine is not None:
         _engine.dispose()
@@ -57,6 +84,7 @@ def init_db(db_url: str = "sqlite:///./openblade.db") -> None:
         engine_kwargs["poolclass"] = StaticPool
     _engine = create_engine(normalized_db_url, **engine_kwargs)
     Base.metadata.create_all(_engine)
+    _migrate_schema(_engine)
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, class_=Session)
     _db_url = normalized_db_url
 

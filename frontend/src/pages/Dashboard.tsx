@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { getAmlSummary, getDashboardStats } from '../api/dashboard';
+import { getEvents, getRasTickets } from '../api/health';
 import InformationPanel from '../components/panels/InformationPanel';
 import NorthPanel from '../components/panels/NorthPanel';
 import OperationsPanel from '../components/panels/OperationsPanel';
@@ -7,11 +10,10 @@ import Badge from '../components/ui/Badge';
 import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
-import { useHealth } from '../hooks/useHealth';
 import { useInventory } from '../hooks/useInventory';
 import { useJobs } from '../hooks/useJobs';
-import { buildRasTickets, getJobState, getSlotTone, normalizeDrive, normalizeSlot, type NormalizedSlot } from '../lib/lmc';
-import { formatDate } from '../lib/utils';
+import { getJobState, getJobTypeLabel, getSlotTone, normalizeDrive, normalizeSlot, type NormalizedSlot } from '../lib/lmc';
+import { formatBytes, formatDate, getDriveStateVariant } from '../lib/utils';
 
 interface PartitionRow {
   id: string;
@@ -22,19 +24,46 @@ interface PartitionRow {
   state: string;
 }
 
+const EMPTY_INVENTORY = { slots: [], drives: [], changer_state: 'UNKNOWN' };
+
+function ticketVariant(severity: string): 'green' | 'amber' | 'red' {
+  switch (severity.toLowerCase()) {
+    case 'critical':
+      return 'red';
+    case 'warning':
+      return 'amber';
+    default:
+      return 'green';
+  }
+}
+
+function eventVariant(severity: string): 'blue' | 'amber' | 'red' {
+  switch (severity.toLowerCase()) {
+    case 'critical':
+      return 'red';
+    case 'warning':
+      return 'amber';
+    default:
+      return 'blue';
+  }
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const healthQuery = useHealth();
   const inventoryQuery = useInventory();
   const jobsQuery = useJobs();
+  const summaryQuery = useQuery({ queryKey: ['dashboard', 'summary'], queryFn: getAmlSummary, refetchInterval: 10_000 });
+  const statsQuery = useQuery({ queryKey: ['dashboard', 'stats'], queryFn: getDashboardStats, refetchInterval: 30_000 });
+  const ticketsQuery = useQuery({ queryKey: ['dashboard', 'tickets'], queryFn: getRasTickets, refetchInterval: 10_000 });
+  const eventsQuery = useQuery({ queryKey: ['dashboard', 'events'], queryFn: () => getEvents(6), refetchInterval: 10_000 });
   const [selectedPartitionId, setSelectedPartitionId] = useState<string>();
 
-  const inventory = inventoryQuery.data ?? { library_id: 'LIBRARY-01', slots: [], drives: [], changer_state: 'UNKNOWN' };
-  const health = healthQuery.health;
+  const inventory = inventoryQuery.data ?? EMPTY_INVENTORY;
   const jobs = jobsQuery.data ?? [];
+  const summary = summaryQuery.data;
+  const storage = statsQuery.data?.storage;
   const slots = inventory.slots.map(normalizeSlot).sort((left, right) => left.element - right.element);
   const drives = inventory.drives.map(normalizeDrive);
-  const rasTickets = buildRasTickets(health, inventory, jobs);
   const activeJobs = jobs.filter((job) => ['PENDING', 'RUNNING'].includes(getJobState(job)));
 
   const partitionRows = useMemo<PartitionRow[]>(() => {
@@ -65,25 +94,40 @@ export default function Dashboard() {
   }, [partitionRows, selectedPartitionId]);
 
   const selectedPartition = partitionRows.find((row) => row.id === selectedPartitionId) ?? partitionRows[0];
-
   const summaryCards = [
-    { label: 'Total Elements', value: health?.slots_total ?? slots.length },
-    { label: 'Elements Used', value: health?.slots_used ?? slots.filter((slot) => slot.occupied).length },
-    { label: 'Drives Online', value: drives.filter((drive) => !['FAULTED', 'OFFLINE', 'FAILED'].includes(drive.state)).length },
-    { label: 'Active Jobs', value: activeJobs.length },
+    { label: 'Drives Online', value: `${summary?.drives.online ?? 0}/${summary?.drives.total ?? drives.length}` },
+    { label: 'Slot Utilization', value: `${summary?.slots.utilizationPercent ?? 0}%` },
+    { label: 'Active Jobs', value: summary?.jobs.active ?? activeJobs.length },
+    { label: 'Events Logged', value: summary?.events.total ?? (eventsQuery.data?.length ?? 0) },
   ];
 
-  if (healthQuery.isLoading || inventoryQuery.isLoading || jobsQuery.isLoading) {
+  if (
+    inventoryQuery.isLoading ||
+    jobsQuery.isLoading ||
+    summaryQuery.isLoading ||
+    statsQuery.isLoading ||
+    ticketsQuery.isLoading ||
+    eventsQuery.isLoading
+  ) {
     return <Spinner />;
-  }
-  if (healthQuery.isError) {
-    return <ErrorMessage error={healthQuery.error} onRetry={() => healthQuery.refetch()} />;
   }
   if (inventoryQuery.isError) {
     return <ErrorMessage error={inventoryQuery.error} onRetry={() => inventoryQuery.refetch()} />;
   }
   if (jobsQuery.isError) {
     return <ErrorMessage error={jobsQuery.error} onRetry={() => jobsQuery.refetch()} />;
+  }
+  if (summaryQuery.isError) {
+    return <ErrorMessage error={summaryQuery.error} onRetry={() => summaryQuery.refetch()} />;
+  }
+  if (statsQuery.isError) {
+    return <ErrorMessage error={statsQuery.error} onRetry={() => statsQuery.refetch()} />;
+  }
+  if (ticketsQuery.isError) {
+    return <ErrorMessage error={ticketsQuery.error} onRetry={() => ticketsQuery.refetch()} />;
+  }
+  if (eventsQuery.isError) {
+    return <ErrorMessage error={eventsQuery.error} onRetry={() => eventsQuery.refetch()} />;
   }
 
   return (
@@ -112,13 +156,11 @@ export default function Dashboard() {
               </div>
               <div className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Loaded Media</div>
-                <div className="mt-2 text-lg font-semibold text-slate-100">{slots.filter((slot) => slot.occupied).length}</div>
+                <div className="mt-2 text-lg font-semibold text-slate-100">{summary?.slots.used ?? slots.filter((slot) => slot.occupied).length}</div>
               </div>
               <div className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Drive Attention</div>
-                <div className="mt-2 text-lg font-semibold text-slate-100">
-                  {drives.filter((drive) => ['FAULTED', 'OFFLINE', 'FAILED'].includes(drive.state)).length}
-                </div>
+                <div className="mt-2 text-lg font-semibold text-slate-100">{summary?.drives.attention ?? 0}</div>
               </div>
             </div>
           </Card>
@@ -128,16 +170,137 @@ export default function Dashboard() {
           <div className="text-xs uppercase tracking-[0.26em] text-slate-500">RAS Summary</div>
           <h2 className="mt-1 text-lg font-semibold text-slate-100">Recent RAS Tickets</h2>
           <div className="mt-4 space-y-3">
-            {rasTickets.map((ticket) => (
+            {(ticketsQuery.data ?? []).slice(0, 6).map((ticket) => (
               <div key={ticket.id} className="rounded-md border border-quantum-border bg-quantum-panel px-3 py-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-slate-100">Severity {ticket.severity}</span>
+                  <Badge variant={ticketVariant(ticket.severity)}>{ticket.severity}</Badge>
                   <span className="text-xs uppercase tracking-[0.14em] text-slate-500">{ticket.component}</span>
                 </div>
                 <p className="mt-2 text-sm text-slate-300">{ticket.message}</p>
-                <p className="mt-2 text-xs text-slate-500">{formatDate(ticket.time)}</p>
+                <p className="mt-2 text-xs text-slate-500">{formatDate(ticket.opened)}</p>
               </div>
             ))}
+            {(ticketsQuery.data ?? []).length === 0 ? (
+              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">
+                No open RAS tickets.
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <Card>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Drive Status</div>
+          <div className="mt-4 space-y-3">
+            {drives.slice(0, 6).map((drive) => (
+              <div key={drive.serialNumber} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-100">{drive.serialNumber}</div>
+                    <div className="mt-1 text-sm text-slate-400">{drive.type} · {drive.tapeLoaded ? (drive.barcode ?? 'Loaded') : 'Empty'}</div>
+                  </div>
+                  <Badge variant={getDriveStateVariant(drive.state)}>{drive.state}</Badge>
+                </div>
+              </div>
+            ))}
+            {drives.length === 0 ? <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No drive data available.</div> : null}
+          </div>
+        </Card>
+
+        <Card>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Slot Utilization</div>
+          <div className="mt-4 rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <div className="text-3xl font-semibold text-slate-100">{summary?.slots.used ?? 0}/{summary?.slots.total ?? 0}</div>
+                <div className="mt-1 text-sm text-slate-400">Occupied elements across partitions and IE slots.</div>
+              </div>
+              <Badge variant={(summary?.slots.utilizationPercent ?? 0) > 90 ? 'amber' : 'blue'}>{summary?.slots.utilizationPercent ?? 0}% used</Badge>
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-900">
+              <div className="h-full bg-quantum-red" style={{ width: `${summary?.slots.utilizationPercent ?? 0}%` }} />
+            </div>
+            <div className="mt-4 grid gap-3 text-sm text-slate-300 md:grid-cols-3">
+              <div>Standard: {partitionRows[0]?.elements ?? 0}</div>
+              <div>IE: {partitionRows[1]?.elements ?? 0}</div>
+              <div>Cleaning: {partitionRows[2]?.elements ?? 0}</div>
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Storage Capacity</div>
+          <div className="mt-4 rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
+            <div className="text-3xl font-semibold text-slate-100">{formatBytes(storage?.totalBytes ?? 0)}</div>
+            <div className="mt-1 text-sm text-slate-400">Cataloged archive footprint across {storage?.volumeGroupCount ?? 0} volume groups.</div>
+            <div className="mt-4 grid gap-3 text-sm text-slate-300">
+              <div className="flex items-center justify-between gap-3"><span>Catalog files</span><span>{storage?.totalFiles ?? 0}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Assigned tapes</span><span>{storage?.totalAssignedTapes ?? 0}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Catalog tapes</span><span>{storage?.totalCatalogTapes ?? 0}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Tape utilization</span><span>{storage?.utilizationPercent ?? 0}%</span></div>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            {(statsQuery.data?.volumeGroups ?? []).slice(0, 3).map((group) => (
+              <div key={group.id} className="flex items-center justify-between gap-3 rounded-md border border-quantum-border bg-quantum-panel px-3 py-2 text-sm text-slate-300">
+                <span>{group.name}</span>
+                <span>{formatBytes(group.storedBytes)}</span>
+              </div>
+            ))}
+            {(statsQuery.data?.volumeGroups ?? []).length === 0 ? <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No cataloged storage data yet.</div> : null}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Jobs</div>
+              <h2 className="mt-1 text-lg font-semibold text-slate-100">Recent Jobs</h2>
+            </div>
+            <Badge variant="blue">{jobs.length}</Badge>
+          </div>
+          <div className="mt-4 space-y-3">
+            {jobs.slice(0, 5).map((job) => (
+              <div key={job.id} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-100">{getJobTypeLabel(job)}</div>
+                    <div className="mt-1 text-sm text-slate-400">{job.id}</div>
+                  </div>
+                  <Badge variant={getJobState(job) === 'FAILED' ? 'red' : getJobState(job) === 'RUNNING' ? 'blue' : 'gray'}>{getJobState(job)}</Badge>
+                </div>
+                <div className="mt-2 text-sm text-slate-300">Updated {formatDate(job.updated_at)}</div>
+              </div>
+            ))}
+            {jobs.length === 0 ? <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No jobs reported by the backend.</div> : null}
+          </div>
+        </Card>
+
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Events</div>
+              <h2 className="mt-1 text-lg font-semibold text-slate-100">Recent Events</h2>
+            </div>
+            <Badge variant="blue">{summary?.events.total ?? 0}</Badge>
+          </div>
+          <div className="mt-4 space-y-3">
+            {(eventsQuery.data ?? []).map((event) => (
+              <div key={event.id} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-slate-100">{event.component}</div>
+                    <div className="mt-1 text-sm text-slate-300">{event.message}</div>
+                  </div>
+                  <Badge variant={eventVariant(event.severity)}>{event.severity}</Badge>
+                </div>
+                <div className="mt-2 text-sm text-slate-400">{formatDate(event.timestamp)}</div>
+              </div>
+            ))}
+            {(eventsQuery.data ?? []).length === 0 ? <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No recent events.</div> : null}
           </div>
         </Card>
       </div>
@@ -177,7 +340,18 @@ export default function Dashboard() {
         title="Library Operations"
         subtitle="Quick actions commonly used from the overview screen."
         actions={[
-          { label: 'Refresh', onClick: () => void Promise.all([healthQuery.refetch(), inventoryQuery.refetch(), jobsQuery.refetch()]), variant: 'primary' },
+          {
+            label: 'Refresh',
+            onClick: () => void Promise.all([
+              inventoryQuery.refetch(),
+              jobsQuery.refetch(),
+              summaryQuery.refetch(),
+              statsQuery.refetch(),
+              ticketsQuery.refetch(),
+              eventsQuery.refetch(),
+            ]),
+            variant: 'primary',
+          },
           { label: 'Physical Map', onClick: () => void navigate('/library'), variant: 'secondary' },
           { label: 'Open Archive', onClick: () => void navigate('/archive'), variant: 'secondary' },
           { label: 'Open Catalog', onClick: () => void navigate('/catalog'), variant: 'secondary' },

@@ -68,11 +68,6 @@ function breadcrumbSegments(path: string) {
     }));
 }
 
-function estimateTapePosition(file: LtfsFile): string {
-  const seed = `${file.path}${file.size}`.split('').reduce((total, char) => total + char.charCodeAt(0), 0);
-  return `${15 + (seed % 78)}% into cartridge`;
-}
-
 export default function LtfsBrowse() {
   const queryClient = useQueryClient();
   const [selectedBarcode, setSelectedBarcode] = useState<string>();
@@ -173,7 +168,7 @@ export default function LtfsBrowse() {
   const chartData = volumes.map((volume) => ({
     name: volume.barcode,
     used: Number((volume.usedGB / 1024).toFixed(2)),
-    free: Number(((volume.capacityGB - volume.usedGB) / 1024).toFixed(2)),
+    free: Number((Math.max(volume.capacityGB - volume.usedGB, 0) / 1024).toFixed(2)),
   }));
 
   return (
@@ -346,11 +341,6 @@ export default function LtfsBrowse() {
                         {selectedVolume.barcode} is not mounted. Catalog metadata is still browseable; mount the tape only when you need physical hydration or reads.
                       </div>
                     ) : null}
-                    {filesQuery.data?.isSynthetic ? (
-                      <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                        {filesQuery.data.note}
-                      </div>
-                    ) : null}
                     <div className="overflow-hidden rounded-md border border-quantum-border">
                       <table className="min-w-full divide-y divide-quantum-border text-sm">
                       <thead className="bg-quantum-sidebar text-left text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -428,13 +418,9 @@ export default function LtfsBrowse() {
                           <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Shard Count</div>
                           <div className="mt-1">{selectedFile.shardCount ?? 1}</div>
                         </div>
-                        <div>
-                          <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Tape Position Estimate</div>
-                          <div className="mt-1">{estimateTapePosition(selectedFile)}</div>
-                        </div>
                       </div>
                     ) : (
-                      <div className="mt-4 text-sm text-slate-400">Select a file to inspect catalog metadata and tape position estimates.</div>
+                      <div className="mt-4 text-sm text-slate-400">Select a file to inspect catalog metadata.</div>
                     )}
                   </div>
                 </div>

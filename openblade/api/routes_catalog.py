@@ -24,6 +24,10 @@ class CatalogFileSummaryResponse(BaseModel):
     created_at: datetime
     instance_count: int
     shard_count: int
+    shard_index: int | None
+    block_size: int | None
+    shard_profile: str | None
+    parent_id: str | None
 
 
 class FileInstanceResponse(BaseModel):
@@ -69,7 +73,11 @@ def _serialize_record(record: FileRecord) -> CatalogFileSummaryResponse:
         checksum=record.checksum_sha256,
         created_at=record.created_at,
         instance_count=len(unique_barcodes),
-        shard_count=len(record.instances),
+        shard_count=record.shard_count or len(record.instances) or 1,
+        shard_index=record.shard_index,
+        block_size=record.block_size,
+        shard_profile=record.shard_profile,
+        parent_id=record.parent_id,
     )
 
 
@@ -108,6 +116,25 @@ async def list_catalog_file_instances(
 ) -> list[FileInstanceResponse]:
     record = _get_record_or_404(context, file_id)
     return [_serialize_instance(instance) for instance in record.instances]
+
+
+@router.get("/{file_id}/shards", response_model=list[CatalogFileDetailResponse])
+async def list_catalog_file_shards(
+    file_id: str,
+    context: AppContext = Depends(get_context),
+) -> list[CatalogFileDetailResponse]:
+    _get_record_or_404(context, file_id)
+    shard_records = context.catalog.list_shard_records(file_id)
+    responses: list[CatalogFileDetailResponse] = []
+    for record in shard_records:
+        summary = _serialize_record(record)
+        responses.append(
+            CatalogFileDetailResponse(
+                **summary.model_dump(),
+                instances=[_serialize_instance(instance) for instance in record.instances],
+            )
+        )
+    return responses
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)

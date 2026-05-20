@@ -177,7 +177,11 @@ export default function Health() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTickets.map((ticket, index) => (
+                {filteredTickets.length === 0 ? (
+                  <tr className="bg-quantum-panel">
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-400">No RAS tickets.</td>
+                  </tr>
+                ) : filteredTickets.map((ticket, index) => (
                   <tr key={ticket.id} className={index % 2 === 0 ? 'bg-quantum-north' : 'bg-quantum-panel'}>
                     <td className="px-4 py-3 font-mono text-xs text-slate-200">{ticket.id}</td>
                     <td className="px-4 py-3"><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${severityStyle(ticket.severity)}`}>{ticket.severity}</span></td>
@@ -246,6 +250,7 @@ export default function Health() {
               </div>
             </div>
           ))}
+          {(eventsQuery.data ?? []).length === 0 ? <div className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-6 text-sm text-slate-400">No recent events.</div> : null}
         </div>
       </Card>
 

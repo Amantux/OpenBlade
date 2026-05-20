@@ -47,6 +47,14 @@ class ShardedArchiveResult:
     errors: list[str]
 
 
+def _shard_record_path(source_file: Path, shard_index: int) -> str:
+    return f"{source_file}#shard{shard_index:04d}"
+
+
+def _archive_profile(mode: ShardMode) -> str:
+    return mode.value
+
+
 def run_sharded_archive(
     request: ShardedArchiveRequest,
     library: MockLibraryBackend,
@@ -207,6 +215,11 @@ def _archive_stripe(
                         size_bytes=size_bytes,
                         checksum=checksum,
                         vg_id=vg_id,
+                        shard_count=1,
+                        shard_index=None,
+                        block_size=None,
+                        shard_profile=_archive_profile(request.mode),
+                        parent_id=None,
                     )
                     instance = catalog.create_file_instance(
                         file_record_id=file_record.id,
@@ -214,6 +227,23 @@ def _archive_stripe(
                         tape_path=tape_path,
                     )
                     catalog.mark_instance_archived(instance.id)
+                    shard_record = catalog.create_file_record(
+                        path=_shard_record_path(source_file, 0),
+                        size_bytes=size_bytes,
+                        checksum=checksum,
+                        vg_id=vg_id,
+                        shard_count=1,
+                        shard_index=0,
+                        block_size=None,
+                        shard_profile=_archive_profile(request.mode),
+                        parent_id=file_record.id,
+                    )
+                    shard_instance = catalog.create_file_instance(
+                        file_record_id=shard_record.id,
+                        barcode=barcode,
+                        tape_path=tape_path,
+                    )
+                    catalog.mark_instance_archived(shard_instance.id)
                     shard_group_ids.append(str(uuid.uuid4()))
                     files_archived += 1
                     bytes_archived += size_bytes
@@ -280,27 +310,37 @@ def _archive_block_stripe(
                 shard_index = future_map[future]
                 shard_tmp_files[shard_index] = future.result()
 
-        def _write_shard(spec: ShardSpec, shard_tmp: Path) -> None:
+        def _write_shard(spec: ShardSpec, shard_tmp: Path) -> tuple[int, str, int]:
             checksum = compute_checksum(shard_tmp)
             mount = mounts[spec.barcode]
             ltfs.write_file(mount, shard_tmp, PurePosixPath(spec.tape_path))
             stat = ltfs.stat(mount, PurePosixPath(spec.tape_path))
             if stat.checksum_sha256 != checksum:
                 raise ValueError(f"Shard {spec.shard_index} checksum mismatch")
+            return spec.shard_index, checksum, shard_tmp.stat().st_size
 
+        shard_checksums: list[str] = [""] * len(plan.shards)
+        shard_sizes: list[int] = [0] * len(plan.shards)
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(plan.shards)) as pool:
             futures = [
                 pool.submit(_write_shard, spec, shard_tmp_files[spec.shard_index])
                 for spec in plan.shards
             ]
             for future in concurrent.futures.as_completed(futures):
-                future.result()
+                shard_index, checksum, shard_size = future.result()
+                shard_checksums[shard_index] = checksum
+                shard_sizes[shard_index] = shard_size
 
         file_record = catalog.create_file_record(
             path=str(source_file),
             size_bytes=plan.file_size,
             checksum=plan.checksum_sha256,
             vg_id=vg_id,
+            shard_count=len(plan.shards),
+            shard_index=None,
+            block_size=request.block_size,
+            shard_profile=_archive_profile(request.mode),
+            parent_id=None,
         )
         for spec in plan.shards:
             instance = catalog.create_file_instance(
@@ -309,6 +349,23 @@ def _archive_block_stripe(
                 tape_path=spec.tape_path,
             )
             catalog.mark_instance_archived(instance.id)
+            shard_record = catalog.create_file_record(
+                path=_shard_record_path(source_file, spec.shard_index),
+                size_bytes=shard_sizes[spec.shard_index],
+                checksum=shard_checksums[spec.shard_index],
+                vg_id=vg_id,
+                shard_count=len(plan.shards),
+                shard_index=spec.shard_index,
+                block_size=request.block_size,
+                shard_profile=_archive_profile(request.mode),
+                parent_id=file_record.id,
+            )
+            shard_instance = catalog.create_file_instance(
+                file_record_id=shard_record.id,
+                barcode=spec.barcode,
+                tape_path=spec.tape_path,
+            )
+            catalog.mark_instance_archived(shard_instance.id)
     finally:
         for mount in mounts.values():
             with suppress(Exception):

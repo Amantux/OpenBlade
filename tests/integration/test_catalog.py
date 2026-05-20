@@ -15,13 +15,26 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
-def _first_data_barcode() -> str:
+def _data_barcodes(limit: int = 1) -> list[str]:
     context = get_context()
-    return next(
+    return [
         str(slot.barcode)
         for slot in context.library.inventory().slots
         if slot.barcode is not None and not str(slot.barcode).startswith("CLN")
-    )
+    ][:limit]
+
+
+def _first_data_barcode() -> str:
+    return _data_barcodes(1)[0]
+
+
+def _format_tape(client: TestClient, barcode: str) -> str:
+    response = client.post(f"/cartridges/{barcode}/format/dry-run")
+    assert response.status_code == 200
+    token = response.json()["token"]
+    confirm = client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token})
+    assert confirm.status_code == 200
+    return token
 
 
 def _format_first_tape(client: TestClient) -> tuple[str, str]:
@@ -97,3 +110,89 @@ def test_catalog_list_after_archive(client: TestClient, tmp_path: Path) -> None:
         }
     ]
     assert browse_payload[0]["archived_at"] is not None
+
+
+def test_dashboard_stats_after_archive(client: TestClient, tmp_path: Path) -> None:
+    barcode, token = _format_first_tape(client)
+    assert client.post("/volume-groups/", json={"name": "photos"}).status_code == 201
+    assert client.post("/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
+    assert client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}).status_code == 200
+
+    source = tmp_path / "source"
+    source.mkdir()
+    archived_file = source / "a.txt"
+    archived_file.write_text("dashboard stats route test")
+
+    archive_response = client.post(
+        "/archive/",
+        json={"source_path": str(source), "volume_group": "photos"},
+    )
+    assert archive_response.status_code == 202
+
+    response = client.get("/dashboard/stats")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["storage"]["totalFiles"] == 1
+    assert payload["storage"]["totalBytes"] == archived_file.stat().st_size
+    assert payload["storage"]["volumeGroupCount"] == 1
+    assert payload["storage"]["totalAssignedTapes"] == 1
+    assert payload["storage"]["totalCatalogTapes"] == 1
+    assert payload["storage"]["totalTapeCapacityBytes"] > 0
+    assert payload["volumeGroups"] == [
+        {
+            "id": payload["volumeGroups"][0]["id"],
+            "name": "photos",
+            "assignedTapes": 1,
+            "fileCount": 1,
+            "storedBytes": archived_file.stat().st_size,
+        }
+    ]
+
+
+def test_catalog_shards_endpoint_returns_shard_metadata(client: TestClient, tmp_path: Path) -> None:
+    barcodes = _data_barcodes(limit=2)
+    assert len(barcodes) == 2
+    assert client.post("/volume-groups/", json={"name": "photos"}).status_code == 201
+    for barcode in barcodes:
+        assert client.post(f"/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
+        _format_tape(client, barcode)
+
+    source = tmp_path / "source"
+    source.mkdir()
+    archived_file = source / "big.bin"
+    archived_file.write_bytes(bytes(index % 256 for index in range(1_600_000)))
+
+    archive_response = client.post(
+        "/archive/sharded",
+        json={
+            "source_path": str(source),
+            "volume_group": "photos",
+            "lane_barcodes": barcodes,
+            "mode": "block_stripe",
+            "block_size_mb": 1,
+        },
+    )
+    assert archive_response.status_code == 202
+
+    catalog_response = client.get("/catalog/")
+    assert catalog_response.status_code == 200
+    payload = catalog_response.json()
+    assert payload["total"] == 1
+    parent = payload["files"][0]
+    assert parent["source_path"] == str(archived_file)
+    assert parent["shard_count"] == 2
+    assert parent["shard_index"] is None
+    assert parent["shard_profile"] == "block_stripe"
+    assert parent["block_size"] == 1024 * 1024
+    assert parent["parent_id"] is None
+
+    shards_response = client.get(f"/catalog/{parent['id']}/shards")
+    assert shards_response.status_code == 200
+    shards = shards_response.json()
+    assert [shard["shard_index"] for shard in shards] == [0, 1]
+    assert all(shard["shard_count"] == 2 for shard in shards)
+    assert all(shard["shard_profile"] == "block_stripe" for shard in shards)
+    assert all(shard["block_size"] == 1024 * 1024 for shard in shards)
+    assert all(shard["parent_id"] == parent["id"] for shard in shards)
+    assert {shard["instances"][0]["barcode"] for shard in shards} == set(barcodes)

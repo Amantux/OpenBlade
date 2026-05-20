@@ -19,11 +19,24 @@ def test_create_and_get_volume_group() -> None:
 def test_create_file_record() -> None:
     catalog = make_catalog()
     group = catalog.create_volume_group("photos")
-    record = catalog.create_file_record("/photos/a.jpg", 3, "abc", group.id)
+    record = catalog.create_file_record(
+        "/photos/a.jpg",
+        3,
+        "abc",
+        group.id,
+        shard_count=1,
+        shard_index=None,
+        block_size=None,
+        shard_profile="standard",
+        parent_id=None,
+    )
     fetched = catalog.get_file_record("/photos/a.jpg")
     assert fetched is not None
     assert fetched.id == record.id
     assert fetched.checksum_sha256 == "abc"
+    assert fetched.shard_count == 1
+    assert fetched.shard_index is None
+    assert fetched.shard_profile == "standard"
 
 
 def test_mark_instance_archived() -> None:
@@ -77,6 +90,50 @@ def test_list_catalog_tape_barcodes_returns_unique_sorted_values() -> None:
     catalog.mark_instance_archived(duplicate_instance.id)
 
     assert catalog.list_catalog_tape_barcodes() == ["PHO001L8", "PHO002L8"]
+
+
+def test_list_shard_records_returns_children_only() -> None:
+    catalog = make_catalog()
+    group = catalog.create_volume_group("photos")
+    parent = catalog.create_file_record(
+        "/photos/a.jpg",
+        3,
+        "abc",
+        group.id,
+        shard_count=2,
+        shard_index=None,
+        block_size=1024,
+        shard_profile="block_stripe",
+        parent_id=None,
+    )
+    first_shard = catalog.create_file_record(
+        "/photos/a.jpg#shard0000",
+        2,
+        "def",
+        group.id,
+        shard_count=2,
+        shard_index=0,
+        block_size=1024,
+        shard_profile="block_stripe",
+        parent_id=parent.id,
+    )
+    second_shard = catalog.create_file_record(
+        "/photos/a.jpg#shard0001",
+        1,
+        "ghi",
+        group.id,
+        shard_count=2,
+        shard_index=1,
+        block_size=1024,
+        shard_profile="block_stripe",
+        parent_id=parent.id,
+    )
+
+    listed = catalog.list_shard_records(parent.id)
+    parents = catalog.list_file_records("/photos")
+
+    assert [record.id for record in listed] == [first_shard.id, second_shard.id]
+    assert [record.id for record in parents] == [parent.id]
 
 
 def test_create_and_update_job() -> None:

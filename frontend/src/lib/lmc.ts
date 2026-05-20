@@ -1,5 +1,4 @@
 import type {
-  CatalogFile,
   DriveResponse,
   HealthResponse,
   InventoryResponse,
@@ -30,14 +29,6 @@ export interface NormalizedDrive {
   tapeLoaded: boolean;
   mountState: string;
   type: string;
-}
-
-export interface RasTicket {
-  id: string;
-  severity: 1 | 2 | 3;
-  component: string;
-  message: string;
-  time: string;
 }
 
 export interface SubsystemSummary {
@@ -112,7 +103,7 @@ export function normalizeDrive(drive: DriveResponse): NormalizedDrive {
     barcode: drive.barcode ?? null,
     tapeLoaded: isDriveLoaded(drive),
     mountState: String(drive.mount_state ?? (isDriveLoaded(drive) ? 'MOUNTED' : 'EMPTY')).toUpperCase(),
-    type: drive.type ?? 'LTO-9',
+    type: drive.type ?? 'UNKNOWN',
   };
 }
 
@@ -257,90 +248,3 @@ export function buildSubsystemStatuses(
   ];
 }
 
-export function buildRasTickets(
-  health?: HealthResponse,
-  inventory?: InventoryResponse,
-  jobs: JobResponse[] = [],
-): RasTicket[] {
-  const drives = inventory?.drives?.map(normalizeDrive) ?? [];
-  const slots = inventory?.slots?.map(normalizeSlot) ?? [];
-  const changerState = getChangerState(inventory);
-  const tickets: RasTicket[] = [];
-
-  if (!health || !HEALTHY_STATES.includes(String(health.status).toUpperCase())) {
-    tickets.push({
-      id: 'health-status',
-      severity: 1,
-      component: 'Connectivity',
-      message: `Management path reports ${health?.status ?? 'offline'} state.`,
-      time: new Date().toISOString(),
-    });
-  }
-
-  for (const drive of drives.filter((item) => FAILED_DRIVE_STATES.includes(item.state))) {
-    tickets.push({
-      id: `drive-${drive.serialNumber}`,
-      severity: 1,
-      component: drive.serialNumber,
-      message: `${drive.type} reports ${toTitleCase(drive.state)} and requires service attention.`,
-      time: new Date().toISOString(),
-    });
-  }
-
-  if (WARNING_CHANGER_STATES.includes(changerState) || FAILED_CHANGER_STATES.includes(changerState)) {
-    tickets.push({
-      id: 'changer-state',
-      severity: FAILED_CHANGER_STATES.includes(changerState) ? 1 : 2,
-      component: 'Robot',
-      message: `Medium changer is ${toTitleCase(changerState)}. Operator observation recommended.`,
-      time: new Date().toISOString(),
-    });
-  }
-
-  for (const job of jobs.filter((item) => getJobState(item) === 'FAILED').slice(0, 2)) {
-    tickets.push({
-      id: `job-${job.id}`,
-      severity: 2,
-      component: 'Archive Engine',
-      message: job.error ?? `Job ${job.id} failed during ${getJobTypeLabel(job)} processing.`,
-      time: job.updated_at || job.created_at,
-    });
-  }
-
-  if (slots.every((slot) => !slot.occupied)) {
-    tickets.push({
-      id: 'media-warning',
-      severity: 3,
-      component: 'Media',
-      message: 'No populated elements detected in the active partition set.',
-      time: new Date().toISOString(),
-    });
-  }
-
-  if (tickets.length === 0) {
-    tickets.push({
-      id: 'nominal',
-      severity: 3,
-      component: 'System',
-      message: 'No open RAS Tickets. Subsystems report nominal operation.',
-      time: new Date().toISOString(),
-    });
-  }
-
-  return tickets.slice(0, 6);
-}
-
-export function buildCatalogFallback(jobs: JobResponse[]): CatalogFile[] {
-  return jobs
-    .filter((job) => getJobTypeLabel(job).toLowerCase().includes('archive'))
-    .map((job) => ({
-      id: job.id,
-      source_path: getJobSourcePath(job),
-      size_bytes: getMetadataNumber(job, 'size_bytes') ?? job.bytes_written ?? 0,
-      checksum: getMetadataString(job, 'checksum') ?? 'Unavailable',
-      created_at: job.created_at,
-      instance_count: getJobBarcode(job) === '—' ? 0 : 1,
-      shard_count: Number(getJobShardText(job)) || 1,
-    }))
-    .slice(0, 50);
-}

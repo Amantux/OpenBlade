@@ -230,7 +230,17 @@ def run_archive_job(
                 tapes_used.append(selected_barcode)
             assert current_handle is not None
             ltfs.write_file(current_handle, file_path, tape_path)
-            record = catalog.create_file_record(catalog_path, size_bytes, checksum, volume_group.id)
+            record = catalog.create_file_record(
+                catalog_path,
+                size_bytes,
+                checksum,
+                volume_group.id,
+                shard_count=1,
+                shard_index=None,
+                block_size=None,
+                shard_profile="standard",
+                parent_id=None,
+            )
             instance = catalog.create_file_instance(record.id, current_barcode, str(tape_path))
             stat = ltfs.stat(current_handle, tape_path)
             if stat.checksum_sha256 != checksum or stat.size_bytes != size_bytes:

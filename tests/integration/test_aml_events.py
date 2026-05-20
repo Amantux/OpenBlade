@@ -115,6 +115,22 @@ def test_ticket_summary_returns_200(authed: TestClient) -> None:
     assert resp.status_code == 200
 
 
+def test_dashboard_summary_returns_live_counts(authed: TestClient) -> None:
+    authed.post(
+        "/aml/ras/ticket",
+        json={"ticket": {"severity": "warning", "component": "drive", "description": "Dashboard summary test"}},
+    )
+    summary_resp = authed.get("/aml/summary")
+    assert summary_resp.status_code == 200
+
+    payload = summary_resp.json()["summary"]
+    assert payload["drives"]["total"] >= payload["drives"]["online"]
+    assert payload["slots"]["total"] >= payload["slots"]["used"]
+    assert payload["jobs"]["total"] >= payload["jobs"]["active"]
+    assert payload["events"]["total"] >= payload["events"]["critical"] + payload["events"]["warning"] + payload["events"]["info"]
+    assert payload["openTickets"] >= 1
+
+
 # ---------------------------------------------------------------------------
 # Logs
 # ---------------------------------------------------------------------------
