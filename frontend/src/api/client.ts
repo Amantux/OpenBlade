@@ -79,7 +79,7 @@ export async function apiRequest<T>(
       ? rawBody
       : JSON.stringify(rawBody);
 
-  if (body && !isBodyInitLike(body) && !headers.has('Content-Type')) {
+  if (rawBody !== undefined && rawBody !== null && !isBodyInitLike(rawBody) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
