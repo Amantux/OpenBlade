@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ValidationError
 
 from openblade.catalog.db import get_catalog_repository
 from openblade.nas.service import NasService
+from openblade.nas.sidecar import SidecarResolver
 from openblade.nas.types import (
+    SidecarValidationError,
     CacheDriveConfig,
+    EffectivePolicy,
     NasShareDefinition,
     SourceStreamConfig,
     StoragePolicy,
@@ -21,8 +25,13 @@ def get_nas_service(repo=Depends(get_catalog_repository)) -> NasService:
     return NasService(repo)
 
 
-def _bad_request(exc: ValueError) -> HTTPException:
+def _bad_request(exc: ValueError | ValidationError | SidecarValidationError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+class ResolvePolicyRequest(BaseModel):
+    directory: str
+    share_id: str | None = None
 
 
 @router.get("/policies", response_model=list[StoragePolicy])
@@ -180,3 +189,34 @@ async def delete_share(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Share {normalized_share_id} not found")
     return {"deleted": True}
+
+
+@router.post("/resolve-policy", response_model=EffectivePolicy)
+async def resolve_policy(
+    request: ResolvePolicyRequest,
+    service: NasService = Depends(get_nas_service),
+) -> EffectivePolicy:
+    normalized_share_id = None if request.share_id is None else "/" + request.share_id.lstrip("/")
+    share_default_policy = None
+
+    if normalized_share_id is not None:
+        share = service.get_share(normalized_share_id)
+        if share is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Share {normalized_share_id} not found",
+            )
+        if share.default_policy_id is not None:
+            share_default_policy = service.get_policy(share.default_policy_id)
+
+    resolver = SidecarResolver(nas_service=service)
+    system_default_policy = service.get_policy("balanced")
+
+    try:
+        return resolver.resolve_effective_policy(
+            directory=request.directory,
+            share_default_policy=share_default_policy,
+            system_default_policy=system_default_policy,
+        )
+    except (ValidationError, SidecarValidationError, ValueError) as exc:
+        raise _bad_request(exc) from exc

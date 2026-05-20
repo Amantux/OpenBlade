@@ -6,7 +6,14 @@ from enum import Enum
 from typing import Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+
+
+class EffectivePolicySource(str, Enum):
+    SYSTEM_DEFAULT = "system_default"
+    SHARE_DEFAULT = "share_default"
+    SIDECAR = "sidecar"
+
 
 
 def _strip_required_string(value: object, *, field_name: str, max_length: int | None = None) -> str:
@@ -90,6 +97,51 @@ class StoragePolicy(BaseModel):
     @classmethod
     def validate_name(cls, value: object) -> str:
         return _strip_required_string(value, field_name="name", max_length=64)
+
+
+class SidecarValidationError(Exception):
+    def __init__(self, message: str, field: str = None, raw_value=None):
+        super().__init__(message)
+        self.field = field
+        self.raw_value = raw_value
+
+
+class SidecarPolicy(BaseModel):
+    """Parsed contents of a .openblade-policy.yaml file."""
+
+    model_config = ConfigDict(extra="ignore")
+    _warnings: list[str] = PrivateAttr(default_factory=list)
+
+    volume_group: str | None = None
+    pool: str | None = None
+    policy: str | None = None
+    ingest_mode: IngestMode | None = None
+    cache_drive: str | None = None
+    retention: str | None = None
+    copies: int | None = Field(default=None, ge=1, le=4)
+    preserve_tree: bool | None = None
+    verify_before_archive: bool | None = None
+    verify_after_write: bool | None = None
+    evict_cache_after_verified: bool | None = None
+
+
+class EffectivePolicy(BaseModel):
+    """Resolved effective policy for an ingest operation."""
+
+    policy_name: str | None = None
+    policy_id: str | None = None
+    ingest_mode: IngestMode = IngestMode.CACHE_DRIVE
+    pool: str | None = None
+    volume_group: str | None = None
+    cache_drive: str | None = None
+    copies: int = 1
+    verify_before_archive: bool = True
+    verify_after_write: bool = True
+    evict_cache_after_verified: bool = False
+    preserve_tree: bool = True
+    source: EffectivePolicySource = EffectivePolicySource.SYSTEM_DEFAULT
+    sidecar_path: str | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CacheDriveConfig(BaseModel):
