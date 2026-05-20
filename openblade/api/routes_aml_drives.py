@@ -625,39 +625,6 @@ async def clear_drive_errors(
     return _ws_result(f"Cleared drive errors for {serial_number}")
 
 
-@router.get("/drive/{serialNumber}/firmware", response_model=FirmwareResponse)
-async def get_drive_firmware(
-    serialNumber: str,
-    _: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
-) -> FirmwareResponse:
-    _ensure_state(context)
-    serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return FirmwareResponse(firmware=_firmware_info(_get_drive_or_404(serial_number)))
-
-
-@router.post("/drive/{serialNumber}/firmware/update", response_model=WSResultCode)
-async def update_drive_firmware(
-    serialNumber: str,
-    current_user: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
-) -> WSResultCode:
-    _ensure_state(context)
-    _require_admin(current_user)
-    serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
-    firmware = _firmware_info(drive)
-    _update_drive(
-        serial_number,
-        {
-            "firmware": firmware.available,
-            "firmwareInfo": {"available": firmware.available},
-            "history": _append_history(drive, event_type="firmwareUpdate"),
-        },
-    )
-    return _ws_result(f"Drive {serial_number} firmware updated")
-
-
 @router.post("/drive/{serialNumber}/diagnostic", response_model=WSResultCode)
 async def run_drive_diagnostic(
     serialNumber: str,
