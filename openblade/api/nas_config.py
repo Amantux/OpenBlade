@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
@@ -21,6 +21,7 @@ from openblade.nas.ingest import (
     start_ingest_job,
 )
 from openblade.nas.planner import ArchivePlanner
+from openblade.nas.restore_planner import RestorePlan, RestorePlanner
 from openblade.nas.service import NasService
 from openblade.nas.sidecar import SidecarResolver
 from openblade.nas.types import (
@@ -34,6 +35,7 @@ from openblade.nas.types import (
     NasRestoreJob,
     NasShareDefinition,
     RestoreJobStatus,
+    RestorePlanRequest,
     SidecarValidationError,
     SourceStreamConfig,
     StoragePolicy,
@@ -64,14 +66,6 @@ class StartIngestRequest(BaseModel):
 
 class CancelIngestResponse(BaseModel):
     cancelled: bool
-
-
-class RestorePlanRequest(BaseModel):
-    paths: list[str] = Field(default_factory=list)
-    destination: str = "/openblade/restore"
-    priority: int = 5
-    allow_parallel: bool = True
-    max_drives: int = 2
 
 
 @router.get("/policies", response_model=list[StoragePolicy])
@@ -305,6 +299,18 @@ async def get_pool_file_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from exc
 
 
+@router.post("/restore-plan", response_model=RestorePlan)
+async def restore_plan(
+    request: RestorePlanRequest,
+    service: NasService = Depends(get_nas_service),
+) -> RestorePlan:
+    if request.pool_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pool_id is required")
+    if service.get_pool(request.pool_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {request.pool_id} not found")
+    return RestorePlanner(service).plan(request)
+
+
 @router.post("/pools/{pool_id}/request-restore", response_model=NasRestoreJob)
 async def request_restore(
     pool_id: str,
@@ -313,6 +319,8 @@ async def request_restore(
 ) -> JSONResponse:
     if service.get_pool(pool_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+
+    plan = RestorePlanner(service).plan(request.model_copy(update={"pool_id": pool_id}))
     job = NasRestoreJob(
         id=str(uuid4()),
         pool_id=pool_id,
@@ -322,6 +330,16 @@ async def request_restore(
         allow_parallel=request.allow_parallel,
         max_drives=request.max_drives,
         status=RestoreJobStatus.QUEUED,
+        required_tapes=plan.required_tapes,
+        missing_tapes=plan.missing_tapes,
+        exported_tapes=plan.exported_tapes,
+        tape_load_order=plan.tape_load_order,
+        parallel_restore_groups={
+            f"group-{index + 1}": group for index, group in enumerate(plan.parallel_restore_groups)
+        },
+        estimated_bytes=plan.estimated_bytes,
+        unavailable_files=plan.unavailable_files,
+        warnings=plan.warnings,
     )
     saved = service.upsert_restore_job(job)
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=saved.model_dump(mode="json"))

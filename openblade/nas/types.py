@@ -351,6 +351,15 @@ class NasFileRecord(BaseModel):
     updated_at: str | None = None
 
 
+class RestorePlanRequest(BaseModel):
+    pool_id: str | None = None
+    paths: list[str] = Field(default_factory=list)
+    destination: str = "/openblade/restore"
+    priority: int = 5
+    allow_parallel: bool = True
+    max_drives: int = 2
+
+
 class RestoreJobStatus(str, Enum):
     QUEUED = "queued"
     PLANNING = "planning"

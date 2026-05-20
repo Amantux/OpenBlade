@@ -149,6 +149,9 @@ class NasService:
             records.extend(self.list_file_records(dataset.id))
         return sorted(records, key=lambda record: (record.relative_path, record.id))
 
+    def list_pool_file_records(self, pool_id: str) -> list[NasFileRecord]:
+        return self._list_pool_file_records(pool_id)
+
     def derive_file_state(
         self,
         record: NasFileRecord,
