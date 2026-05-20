@@ -115,6 +115,27 @@ class AMLState:
     aml_partitions_global: dict[str, Any] = field(default_factory=lambda: _default_aml_partitions_global())
     aml_media: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_media())
     aml_media_pools: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_media_pools())
+    aml_drives: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_drives())
+    aml_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aml_job_history: list[dict[str, Any]] = field(default_factory=list)
+    aml_moves: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aml_mounts: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aml_inventory_status: dict[str, Any] = field(
+        default_factory=lambda: {
+            "state": "idle",
+            "startTime": None,
+            "completedTime": "2024-01-15T06:00:00Z",
+            "progress": 100,
+            "elementsScanned": 72,
+            "elementsTotal": 72,
+        }
+    )
+    aml_import_status: dict[str, Any] = field(
+        default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None}
+    )
+    aml_export_status: dict[str, Any] = field(
+        default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None}
+    )
 
 
 def _utcnow() -> datetime:
@@ -280,6 +301,48 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
     return {
         "default": {"name": "default", "type": "LTO-9", "mediaCount": 2, "policy": "scratch"},
         "cleaning": {"name": "cleaning", "type": "LTO-9-CLN", "mediaCount": 1, "policy": "cleaning"},
+    }
+
+
+
+def _default_aml_drives() -> dict[str, dict[str, Any]]:
+    return {
+        "DRV-001": {
+            "serialNumber": "DRV-001",
+            "model": "IBM LTO-9 HH",
+            "type": "LTO-9",
+            "status": "online",
+            "state": "idle",
+            "partition": "partition1",
+            "location": "1,1,1",
+            "firmware": "H3J4",
+            "loadCount": 142,
+            "errorCount": 0,
+            "cleaningCount": 3,
+            "lastCleaned": "2024-01-10T08:00:00Z",
+            "loadedMedia": None,
+            "config": {"compression": True, "encryption": False, "speed": "400MB/s", "bufferSize": "256MB"},
+            "errors": [],
+            "diagnosticResult": None,
+        },
+        "DRV-002": {
+            "serialNumber": "DRV-002",
+            "model": "IBM LTO-9 HH",
+            "type": "LTO-9",
+            "status": "online",
+            "state": "idle",
+            "partition": "partition1",
+            "location": "1,1,2",
+            "firmware": "H3J4",
+            "loadCount": 87,
+            "errorCount": 0,
+            "cleaningCount": 2,
+            "lastCleaned": "2024-01-08T14:00:00Z",
+            "loadedMedia": None,
+            "config": {"compression": True, "encryption": False, "speed": "400MB/s", "bufferSize": "256MB"},
+            "errors": [],
+            "diagnosticResult": None,
+        },
     }
 
 
@@ -1646,7 +1709,7 @@ def delete_aml_media(barcode: str) -> bool:
 def _next_media_slot_address(partition: str) -> str:
     slot_numbers: list[int] = []
     for media in _STATE.aml_media.values():
-        if str(media.get("partition", "partition1")) != partition:
+        if media.get("partition") != partition:
             continue
         parts = str(media.get("slotAddress", "")).split(",")
         if len(parts) != 3:
@@ -1670,7 +1733,7 @@ def import_aml_media(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             existing["type"] = media_type
             imported.append(deepcopy(existing))
             continue
-        partition = str(item.get("partition", "partition1"))
+        partition = item.get("partition") or None
         stored = {
             "barcode": barcode,
             "type": media_type,
@@ -1794,3 +1857,187 @@ def delete_aml_media_pool(name: str) -> bool:
         return False
     del _STATE.aml_media_pools[name]
     return True
+
+
+
+def list_aml_drives() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_drives.items())]
+
+
+
+def get_aml_drive(serial_number: str) -> dict[str, Any] | None:
+    drive = _STATE.aml_drives.get(serial_number)
+    return deepcopy(drive) if drive is not None else None
+
+
+
+def update_aml_drive(serial_number: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    drive = _STATE.aml_drives.get(serial_number)
+    if drive is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "serialNumber":
+            continue
+        drive[key] = value
+    return get_aml_drive(serial_number)
+
+
+
+def list_aml_jobs() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_jobs.items())]
+
+
+
+def get_aml_job(job_id: str) -> dict[str, Any] | None:
+    job = _STATE.aml_jobs.get(job_id)
+    return deepcopy(job) if job is not None else None
+
+
+
+def set_aml_job(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(job)
+    stored["id"] = job_id
+    _STATE.aml_jobs[job_id] = stored
+    return deepcopy(stored)
+
+
+
+def update_aml_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    job = _STATE.aml_jobs.get(job_id)
+    if job is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "id":
+            continue
+        job[key] = value
+    return deepcopy(job)
+
+
+
+def pop_aml_job(job_id: str) -> dict[str, Any] | None:
+    job = _STATE.aml_jobs.pop(job_id, None)
+    return deepcopy(job) if job is not None else None
+
+
+
+def list_aml_job_history() -> list[dict[str, Any]]:
+    return [deepcopy(item) for item in _STATE.aml_job_history]
+
+
+
+def append_aml_job_history(job: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(job)
+    _STATE.aml_job_history.append(stored)
+    return deepcopy(stored)
+
+
+
+def clear_aml_job_history() -> None:
+    _STATE.aml_job_history.clear()
+
+
+
+def list_aml_moves() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_moves.items())]
+
+
+
+def get_aml_move(move_id: str) -> dict[str, Any] | None:
+    move = _STATE.aml_moves.get(move_id)
+    return deepcopy(move) if move is not None else None
+
+
+
+def set_aml_move(move_id: str, move: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(move)
+    stored["id"] = move_id
+    _STATE.aml_moves[move_id] = stored
+    return deepcopy(stored)
+
+
+
+def update_aml_move(move_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    move = _STATE.aml_moves.get(move_id)
+    if move is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "id":
+            continue
+        move[key] = value
+    return deepcopy(move)
+
+
+
+def pop_aml_move(move_id: str) -> dict[str, Any] | None:
+    move = _STATE.aml_moves.pop(move_id, None)
+    return deepcopy(move) if move is not None else None
+
+
+
+def list_aml_mounts() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_mounts.items())]
+
+
+
+def get_aml_mount(mount_id: str) -> dict[str, Any] | None:
+    mount = _STATE.aml_mounts.get(mount_id)
+    return deepcopy(mount) if mount is not None else None
+
+
+
+def set_aml_mount(mount_id: str, mount: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(mount)
+    stored["id"] = mount_id
+    _STATE.aml_mounts[mount_id] = stored
+    return deepcopy(stored)
+
+
+
+def update_aml_mount(mount_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    mount = _STATE.aml_mounts.get(mount_id)
+    if mount is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "id":
+            continue
+        mount[key] = value
+    return deepcopy(mount)
+
+
+
+def pop_aml_mount(mount_id: str) -> dict[str, Any] | None:
+    mount = _STATE.aml_mounts.pop(mount_id, None)
+    return deepcopy(mount) if mount is not None else None
+
+
+
+def get_aml_inventory_status() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_inventory_status)
+
+
+
+def set_aml_inventory_status(status: dict[str, Any]) -> dict[str, Any]:
+    _STATE.aml_inventory_status = deepcopy(status)
+    return get_aml_inventory_status()
+
+
+
+def get_aml_import_status() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_import_status)
+
+
+
+def set_aml_import_status(status: dict[str, Any]) -> dict[str, Any]:
+    _STATE.aml_import_status = deepcopy(status)
+    return get_aml_import_status()
+
+
+
+def get_aml_export_status() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_export_status)
+
+
+
+def set_aml_export_status(status: dict[str, Any]) -> dict[str, Any]:
+    _STATE.aml_export_status = deepcopy(status)
+    return get_aml_export_status()
