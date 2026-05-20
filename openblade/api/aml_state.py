@@ -82,6 +82,139 @@ class AMLState:
     )
     service_access_code: str = field(default_factory=lambda: _generate_numeric_code(8))
     service_access_generated_at: datetime = field(default_factory=lambda: _utcnow())
+    aml_system_config: dict[str, Any] = field(default_factory=lambda: {
+        "hostname": "openblade-1",
+        "timezone": "UTC",
+        "locale": "en_US",
+        "dateFormat": "YYYY-MM-DD",
+        "temperatureUnit": "celsius",
+    })
+    aml_network_config: dict[str, Any] = field(default_factory=lambda: {
+        "interfaces": {
+            "eth0": {
+                "name": "eth0",
+                "type": "ethernet",
+                "ip": "192.168.1.100",
+                "mask": "255.255.255.0",
+                "gateway": "192.168.1.1",
+                "mac": "00:1A:2B:3C:4D:5E",
+                "status": "up",
+                "speed": "1G",
+                "duplex": "full",
+                "enabled": True,
+            },
+            "eth1": {
+                "name": "eth1",
+                "type": "ethernet",
+                "ip": "10.0.0.100",
+                "mask": "255.255.255.0",
+                "gateway": "10.0.0.1",
+                "mac": "00:1A:2B:3C:4D:5F",
+                "status": "up",
+                "speed": "1G",
+                "duplex": "full",
+                "enabled": True,
+            },
+        },
+        "dns": {"primary": "8.8.8.8", "secondary": "8.8.4.4", "search": ["local"], "domain": "local"},
+        "ntp": {
+            "enabled": True,
+            "servers": ["pool.ntp.org", "time.cloudflare.com"],
+            "status": "synced",
+            "lastSync": "2024-01-15T06:00:00Z",
+        },
+        "routes": [],
+    })
+    aml_snmp_config: dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "version": "v2c",
+        "community": "public",
+        "trapHosts": [],
+        "contact": "admin@example.com",
+        "location": "Data Center",
+    })
+    aml_email_config: dict[str, Any] = field(default_factory=lambda: {
+        "enabled": False,
+        "smtpHost": "",
+        "smtpPort": 587,
+        "smtpUser": "",
+        "from": "openblade@example.com",
+        "tls": True,
+        "recipients": [],
+    })
+    aml_syslog_config: dict[str, Any] = field(default_factory=lambda: {
+        "enabled": False,
+        "host": "",
+        "port": 514,
+        "protocol": "UDP",
+        "facility": "local0",
+        "severity": "warning",
+    })
+    aml_services: dict[str, dict[str, Any]] = field(default_factory=lambda: {
+        "api": {
+            "name": "api",
+            "status": "running",
+            "pid": 1234,
+            "uptime": 86400,
+            "description": "OpenBlade API",
+        },
+        "web": {
+            "name": "web",
+            "status": "running",
+            "pid": 1235,
+            "uptime": 86400,
+            "description": "Web UI",
+        },
+        "archiver": {
+            "name": "archiver",
+            "status": "running",
+            "pid": 1236,
+            "uptime": 86400,
+            "description": "Archive Service",
+        },
+    })
+    aml_audit_log: list[dict[str, Any]] = field(default_factory=list)
+    aml_ha_config: dict[str, Any] = field(default_factory=lambda: {
+        "enabled": False,
+        "role": "standalone",
+        "partner": None,
+        "state": "active",
+        "lastFailover": None,
+    })
+    aml_callhome_config: dict[str, Any] = field(default_factory=lambda: {
+        "enabled": False,
+        "endpoint": "https://callhome.quantum.com",
+        "interval": 3600,
+        "lastContact": None,
+    })
+    aml_system_security: dict[str, Any] = field(default_factory=lambda: {
+        "tlsEnabled": True,
+        "tlsVersion": "TLS1.3",
+        "cipherSuites": ["TLS_AES_256_GCM_SHA384"],
+        "certExpiry": "2025-12-31",
+        "sshEnabled": True,
+        "loginBanner": "",
+    })
+    aml_debug_config: dict[str, Any] = field(default_factory=lambda: {"logLevel": "INFO", "debugMode": False, "traceEnabled": False})
+    aml_system_preferences: dict[str, Any] = field(default_factory=lambda: {
+        "sessionTimeout": 1800,
+        "idleTimeout": 900,
+        "passwordPolicy": {"minLength": 8, "requireSpecial": True},
+        "auditLog": True,
+    })
+    aml_remote_config: dict[str, Any] = field(default_factory=lambda: {
+        "ssh": {"enabled": True, "port": 22},
+        "vnc": {"enabled": False, "port": 5900},
+        "rdp": {"enabled": False},
+    })
+    aml_proxy_config: dict[str, Any] = field(default_factory=lambda: {
+        "enabled": False,
+        "host": "",
+        "port": 8080,
+        "user": "",
+        "noProxy": ["localhost", "127.0.0.1"],
+    })
+    aml_system_started_at: float = field(default_factory=lambda: time.time() - 86400.0)
     session_timeout_minutes: int = 30
     password_policy: dict[str, Any] = field(
         default_factory=lambda: {
@@ -1294,6 +1427,126 @@ def ensure_initialized(db_url: str, *, force_reset: bool = False) -> None:
     purge_expired_sessions()
 
 
+def get_aml_system_config() -> dict[str, Any]:
+    return _STATE.aml_system_config
+
+
+def set_aml_system_config(v: dict[str, Any]) -> None:
+    _STATE.aml_system_config = v
+
+
+def get_aml_network_config() -> dict[str, Any]:
+    return _STATE.aml_network_config
+
+
+def set_aml_network_config(v: dict[str, Any]) -> None:
+    _STATE.aml_network_config = v
+
+
+def get_aml_snmp_config() -> dict[str, Any]:
+    return _STATE.aml_snmp_config
+
+
+def set_aml_snmp_config(v: dict[str, Any]) -> None:
+    _STATE.aml_snmp_config = v
+
+
+def get_aml_email_config() -> dict[str, Any]:
+    return _STATE.aml_email_config
+
+
+def set_aml_email_config(v: dict[str, Any]) -> None:
+    _STATE.aml_email_config = v
+
+
+def get_aml_syslog_config() -> dict[str, Any]:
+    return _STATE.aml_syslog_config
+
+
+def set_aml_syslog_config(v: dict[str, Any]) -> None:
+    _STATE.aml_syslog_config = v
+
+
+def get_aml_services() -> dict[str, dict[str, Any]]:
+    return _STATE.aml_services
+
+
+def set_aml_services(v: dict[str, dict[str, Any]]) -> None:
+    _STATE.aml_services = v
+
+
+def get_aml_audit_log() -> list[dict[str, Any]]:
+    return _STATE.aml_audit_log
+
+
+def set_aml_audit_log(v: list[dict[str, Any]]) -> None:
+    _STATE.aml_audit_log = v
+
+
+def get_aml_ha_config() -> dict[str, Any]:
+    return _STATE.aml_ha_config
+
+
+def set_aml_ha_config(v: dict[str, Any]) -> None:
+    _STATE.aml_ha_config = v
+
+
+def get_aml_callhome_config() -> dict[str, Any]:
+    return _STATE.aml_callhome_config
+
+
+def set_aml_callhome_config(v: dict[str, Any]) -> None:
+    _STATE.aml_callhome_config = v
+
+
+def get_aml_system_security() -> dict[str, Any]:
+    return _STATE.aml_system_security
+
+
+def set_aml_system_security(v: dict[str, Any]) -> None:
+    _STATE.aml_system_security = v
+
+
+def get_aml_debug_config() -> dict[str, Any]:
+    return _STATE.aml_debug_config
+
+
+def set_aml_debug_config(v: dict[str, Any]) -> None:
+    _STATE.aml_debug_config = v
+
+
+def get_aml_system_preferences() -> dict[str, Any]:
+    return _STATE.aml_system_preferences
+
+
+def set_aml_system_preferences(v: dict[str, Any]) -> None:
+    _STATE.aml_system_preferences = v
+
+
+def get_aml_remote_config() -> dict[str, Any]:
+    return _STATE.aml_remote_config
+
+
+def set_aml_remote_config(v: dict[str, Any]) -> None:
+    _STATE.aml_remote_config = v
+
+
+def get_aml_proxy_config() -> dict[str, Any]:
+    return _STATE.aml_proxy_config
+
+
+def set_aml_proxy_config(v: dict[str, Any]) -> None:
+    _STATE.aml_proxy_config = v
+
+
+def get_aml_system_started_at() -> float:
+    return _STATE.aml_system_started_at
+
+
+def set_aml_system_started_at(v: float) -> None:
+    _STATE.aml_system_started_at = v
+
+
 def _seed_default_users() -> None:
     with get_session() as session:
         admin = session.get(AmlUser, "admin")
@@ -1333,141 +1586,6 @@ def _migrate_plaintext_passwords() -> None:
 def list_users() -> list[AmlUser]:
     with get_session() as session:
         return list(session.execute(select(AmlUser).order_by(AmlUser.name)).scalars())
-
-
-aml_system_config: dict[str, Any] = {
-    "hostname": "openblade-1",
-    "timezone": "UTC",
-    "locale": "en_US",
-    "dateFormat": "YYYY-MM-DD",
-    "temperatureUnit": "celsius",
-}
-aml_network_config: dict[str, Any] = {
-    "interfaces": {
-        "eth0": {
-            "name": "eth0",
-            "type": "ethernet",
-            "ip": "192.168.1.100",
-            "mask": "255.255.255.0",
-            "gateway": "192.168.1.1",
-            "mac": "00:1A:2B:3C:4D:5E",
-            "status": "up",
-            "speed": "1G",
-            "duplex": "full",
-            "enabled": True,
-        },
-        "eth1": {
-            "name": "eth1",
-            "type": "ethernet",
-            "ip": "10.0.0.100",
-            "mask": "255.255.255.0",
-            "gateway": "10.0.0.1",
-            "mac": "00:1A:2B:3C:4D:5F",
-            "status": "up",
-            "speed": "1G",
-            "duplex": "full",
-            "enabled": True,
-        },
-    },
-    "dns": {"primary": "8.8.8.8", "secondary": "8.8.4.4", "search": ["local"], "domain": "local"},
-    "ntp": {
-        "enabled": True,
-        "servers": ["pool.ntp.org", "time.cloudflare.com"],
-        "status": "synced",
-        "lastSync": "2024-01-15T06:00:00Z",
-    },
-    "routes": [],
-}
-aml_snmp_config: dict[str, Any] = {
-    "enabled": True,
-    "version": "v2c",
-    "community": "public",
-    "trapHosts": [],
-    "contact": "admin@example.com",
-    "location": "Data Center",
-}
-aml_email_config: dict[str, Any] = {
-    "enabled": False,
-    "smtpHost": "",
-    "smtpPort": 587,
-    "smtpUser": "",
-    "from": "openblade@example.com",
-    "tls": True,
-    "recipients": [],
-}
-aml_syslog_config: dict[str, Any] = {
-    "enabled": False,
-    "host": "",
-    "port": 514,
-    "protocol": "UDP",
-    "facility": "local0",
-    "severity": "warning",
-}
-aml_services: dict[str, dict[str, Any]] = {
-    "api": {
-        "name": "api",
-        "status": "running",
-        "pid": 1234,
-        "uptime": 86400,
-        "description": "OpenBlade API",
-    },
-    "web": {
-        "name": "web",
-        "status": "running",
-        "pid": 1235,
-        "uptime": 86400,
-        "description": "Web UI",
-    },
-    "archiver": {
-        "name": "archiver",
-        "status": "running",
-        "pid": 1236,
-        "uptime": 86400,
-        "description": "Archive Service",
-    },
-}
-aml_audit_log: list[dict[str, Any]] = []
-aml_ha_config: dict[str, Any] = {
-    "enabled": False,
-    "role": "standalone",
-    "partner": None,
-    "state": "active",
-    "lastFailover": None,
-}
-aml_callhome_config: dict[str, Any] = {
-    "enabled": False,
-    "endpoint": "https://callhome.quantum.com",
-    "interval": 3600,
-    "lastContact": None,
-}
-aml_system_security: dict[str, Any] = {
-    "tlsEnabled": True,
-    "tlsVersion": "TLS1.3",
-    "cipherSuites": ["TLS_AES_256_GCM_SHA384"],
-    "certExpiry": "2025-12-31",
-    "sshEnabled": True,
-    "loginBanner": "",
-}
-aml_debug_config: dict[str, Any] = {"logLevel": "INFO", "debugMode": False, "traceEnabled": False}
-aml_system_preferences: dict[str, Any] = {
-    "sessionTimeout": 1800,
-    "idleTimeout": 900,
-    "passwordPolicy": {"minLength": 8, "requireSpecial": True},
-    "auditLog": True,
-}
-aml_remote_config: dict[str, Any] = {
-    "ssh": {"enabled": True, "port": 22},
-    "vnc": {"enabled": False, "port": 5900},
-    "rdp": {"enabled": False},
-}
-aml_proxy_config: dict[str, Any] = {
-    "enabled": False,
-    "host": "",
-    "port": 8080,
-    "user": "",
-    "noProxy": ["localhost", "127.0.0.1"],
-}
-aml_system_started_at: float = time.time() - 86400.0
 
 
 def get_user(name: str) -> AmlUser | None:

@@ -124,3 +124,17 @@ def test_backup_status_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/system/backup")
     assert resp.status_code == 200
     assert "backupStatus" in resp.json()
+
+
+def test_reset_clears_system_config(tmp_path: Path) -> None:
+    from openblade.api.aml_state import get_aml_system_config, set_aml_system_config
+    from openblade.bootstrap import create_context, reset_context
+    from openblade.config import OpenBladeConfig
+
+    ctx = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    reset_context(ctx)
+    cfg = get_aml_system_config()
+    cfg["hostname"] = "mutated-host"
+    set_aml_system_config(cfg)
+    reset_context(ctx)
+    assert get_aml_system_config()["hostname"] == "openblade-1", "reset_context must clear system config"
