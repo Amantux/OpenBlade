@@ -107,4 +107,8 @@ def reset_context(context: AppContext | None = None) -> AppContext:
     _library = _CONTEXT.library
     _ltfs = _CONTEXT.ltfs
     _catalog = _CONTEXT.catalog
+
+    from openblade.api import aml_state
+
+    aml_state.ensure_initialized(_CONTEXT.config.db_url, force_reset=True)
     return _CONTEXT

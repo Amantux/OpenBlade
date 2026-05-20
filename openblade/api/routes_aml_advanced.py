@@ -1229,25 +1229,6 @@ async def get_ha_status(
     return HaStatusResponse(status=HaStatus.model_validate(_ha_status_payload()))
 
 
-@router.post("/system/ha/failover", response_model=WSResultCode)
-async def post_ha_failover(
-    current_user: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
-) -> WSResultCode:
-    _ensure_state(context)
-    _require_admin(current_user)
-    config = aml_state.set_aml_advanced_ha_config({"enabled": True, "mode": "activeStandby", "lastFailover": _timestamp()})
-    nodes = aml_state.list_aml_advanced_ha_nodes()
-    for node in nodes:
-        if node["role"] == "active":
-            aml_state.update_aml_advanced_ha_node(str(node["id"]), {"role": "standby", "state": "standby", "lastHeartbeat": _timestamp()})
-        else:
-            aml_state.update_aml_advanced_ha_node(str(node["id"]), {"role": "active", "state": "active", "lastHeartbeat": _timestamp()})
-    if not config.get("enabled"):
-        aml_state.set_aml_advanced_ha_config({"enabled": True})
-    return _ws_result("Triggered manual HA failover")
-
-
 @router.get("/system/ha/nodes", response_model=HaNodeListResponse)
 async def list_ha_nodes(
     _: AmlUser = Depends(require_auth),
@@ -1372,44 +1353,6 @@ async def put_drive_encryption(
     updates = payload.encryption.model_dump(exclude_none=True)
     aml_state.update_aml_drive(serial, {"encryptionState": {**dict(drive.get("encryptionState", {})), **updates}})
     return _ws_result(f"Updated encryption settings for drive {serial}")
-
-
-@router.get("/partition/{name}/encryption", response_model=PartitionEncryptionResponse)
-async def get_partition_encryption(
-    name: str,
-    _: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
-) -> PartitionEncryptionResponse:
-    _ensure_state(context)
-    partition_name = _validate_identifier(name, field_name="name")
-    partition = _get_partition_or_404(partition_name)
-    return PartitionEncryptionResponse(encryption=_serialize_partition_encryption(partition_name, partition))
-
-
-@router.put("/partition/{name}/encryption", response_model=WSResultCode)
-async def put_partition_encryption(
-    name: str,
-    payload: PartitionEncryptionUpdateRequest,
-    current_user: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
-) -> WSResultCode:
-    _ensure_state(context)
-    _require_admin(current_user)
-    partition_name = _validate_identifier(name, field_name="name")
-    partition = _get_partition_or_404(partition_name)
-    current = dict(partition.get("encryption", {}))
-    updates = payload.encryption.model_dump(exclude_none=True)
-    normalized = {
-        **current,
-        "enabled": updates.get("enabled", current.get("enabled", False)),
-        "type": updates.get("mode", current.get("type", current.get("mode", "none"))),
-        "mode": updates.get("mode", current.get("mode", current.get("type", "none"))),
-        "keyManager": updates.get("keyManager", current.get("keyManager")),
-        "keyAlias": updates.get("keyAlias", current.get("keyAlias")),
-        "status": updates.get("status", current.get("status", "enabled" if updates.get("enabled") else "disabled")),
-    }
-    aml_state.set_aml_partition_section(partition_name, "encryption", normalized)
-    return _ws_result(f"Updated encryption settings for partition {partition_name}")
 
 
 @router.get("/devices/blade/fibreChannel/{serialNumber}/dataPath", response_model=DataPathStatusResponse)
@@ -1558,29 +1501,6 @@ async def get_capacity_summary(
 ) -> CapacitySummaryResponse:
     _ensure_state(context)
     return CapacitySummaryResponse(capacity=CapacitySummary.model_validate(_capacity_payload()))
-
-
-@router.get("/system/performance", response_model=PerformanceMetricsResponse)
-async def get_system_performance(
-    _: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
-) -> PerformanceMetricsResponse:
-    _ensure_state(context)
-    return PerformanceMetricsResponse(performance=PerformanceMetrics.model_validate(_performance_payload()))
-
-
-@router.get("/media/{barcode}/history", response_model=MediaHistoryListResponse)
-async def get_media_history(
-    barcode: str,
-    _: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
-) -> MediaHistoryListResponse:
-    _ensure_state(context)
-    media_barcode = _validate_identifier(barcode, field_name="barcode")
-    media = aml_state.get_aml_media(media_barcode)
-    if media is None:
-        raise HTTPException(status_code=404, detail="Media not found")
-    return MediaHistoryListResponse(historyList=MediaHistoryListResource(event=_media_history_events(media)))
 
 
 @router.get("/system/supportedMedia", response_model=SupportedMediaListResponse)

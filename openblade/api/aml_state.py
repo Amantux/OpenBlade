@@ -1283,11 +1283,11 @@ def verify_password(password_hash: str, password: str) -> bool:
 _STATE = AMLState()
 
 
-def ensure_initialized(db_url: str) -> None:
+def ensure_initialized(db_url: str, *, force_reset: bool = False) -> None:
     global _STATE
     normalized_db_url = _normalize_db_url(db_url)
     init_db(normalized_db_url)
-    if _STATE.db_url != normalized_db_url:
+    if force_reset or _STATE.db_url != normalized_db_url:
         _STATE = AMLState(db_url=normalized_db_url)
     _seed_default_users()
     _migrate_plaintext_passwords()

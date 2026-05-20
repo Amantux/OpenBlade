@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from openblade.api import aml_state
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
@@ -682,6 +682,431 @@ class ProxyConfigResponse(BaseModel):
     proxyConfig: ProxyConfig
 
 
+class InterfaceUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ip: str | None = None
+    mask: str | None = None
+    gateway: str | None = None
+    duplex: str | None = None
+
+
+class InterfaceUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    interface: InterfaceUpdate
+
+
+class DNSConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    primary: str | None = None
+    secondary: str | None = None
+    search: list[str] | None = None
+    domain: str | None = None
+
+
+class DNSConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dnsConfig: DNSConfigUpdate
+
+
+class RouteUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    destination: str
+    mask: str | None = None
+    gateway: str | None = None
+    interface: str | None = None
+    metric: int | None = None
+
+
+class RouteUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    route: RouteUpdate
+
+
+class NTPConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    servers: list[str] | None = None
+    status: str | None = None
+    lastSync: str | None = None
+
+
+class NTPConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ntpConfig: NTPConfigUpdate
+
+
+class SystemConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hostname: str | None = None
+    timezone: str | None = None
+    locale: str | None = None
+    dateFormat: str | None = None
+    temperatureUnit: str | None = None
+
+
+class SystemConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    systemConfig: SystemConfigUpdate
+
+
+class HostnameUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str
+
+
+class HostnameUpdateEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hostname: HostnameUpdatePayload
+
+
+class TimezoneUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str
+
+
+class TimezoneUpdateEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: TimezoneUpdatePayload
+
+
+class TimeUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    utc: str
+
+    @field_validator("utc")
+    @classmethod
+    def _validate_utc(cls, value: str) -> str:
+        try:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"utc must be a valid ISO-8601 timestamp, got {value!r}") from exc
+        return value
+
+
+class TimeUpdateEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    systemTime: TimeUpdatePayload
+
+
+class LocaleConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: str | None = None
+    dateFormat: str | None = None
+    timeFormat: str | None = None
+    temperatureUnit: str | None = None
+
+
+class LocaleConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    locale: LocaleConfigUpdate
+
+
+class SecurityConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tlsEnabled: bool | None = None
+    tlsVersion: str | None = None
+    cipherSuites: list[str] | None = None
+    certExpiry: str | None = None
+    sshEnabled: bool | None = None
+    loginBanner: str | None = None
+
+
+class SecurityConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    securityConfig: SecurityConfigUpdate
+
+
+class CertInfoUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str | None = None
+    issuer: str | None = None
+    notBefore: str | None = None
+    notAfter: str | None = None
+    fingerprint: str | None = None
+    status: str | None = None
+
+
+class CertInfoUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    certInfo: CertInfoUpdate
+
+
+class SNMPConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    version: str | None = None
+    community: str | None = None
+    trapHosts: list[str] | None = None
+    contact: str | None = None
+    location: str | None = None
+
+
+class SNMPConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snmpConfig: SNMPConfigUpdate
+
+
+class EmailConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    enabled: bool | None = None
+    smtpHost: str | None = None
+    smtpPort: int | None = None
+    smtpUser: str | None = None
+    from_: str | None = Field(default=None, alias="from")
+    tls: bool | None = None
+    recipients: list[str] | None = None
+
+
+class EmailConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    emailConfig: EmailConfigUpdate
+
+
+class SyslogConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    host: str | None = None
+    port: int | None = None
+    protocol: str | None = None
+    facility: str | None = None
+    severity: str | None = None
+
+
+class SyslogConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    syslogConfig: SyslogConfigUpdate
+
+
+class StorageFormatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    volume: str | None = None
+    name: str | None = None
+
+
+class StorageFormatPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format: StorageFormatRequest
+
+
+class RestoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    location: str
+
+
+class RestorePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    restore: RestoreRequest
+
+
+class CertificateImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    subject: str | None = None
+    expiry: str | None = None
+    issuer: str | None = None
+    notBefore: str | None = None
+    notAfter: str | None = None
+    fingerprint: str | None = None
+    status: str | None = None
+    type: str | None = None
+
+
+class CertificateImportPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cert: CertificateImportRequest
+
+
+class RebootRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    delay: int | None = None
+    force: bool | None = None
+
+
+class RebootPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reboot: RebootRequest
+
+
+class DebugInfoUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    logLevel: str | None = None
+    debugMode: bool | None = None
+    traceEnabled: bool | None = None
+
+
+class DebugInfoUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    debugInfo: DebugInfoUpdate
+
+
+class PreferencesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sessionTimeout: int | None = None
+    idleTimeout: int | None = None
+    passwordPolicy: dict[str, Any] | None = None
+    auditLog: bool | None = None
+
+
+class PreferencesUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preferences: PreferencesUpdate
+
+
+class HAStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    role: str | None = None
+    partner: str | None = None
+    state: str | None = None
+    lastFailover: str | None = None
+
+
+class HAStatusUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    haStatus: HAStatusUpdate
+
+
+class CallHomeConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    endpoint: str | None = None
+    interval: int | None = None
+    lastContact: str | None = None
+
+
+class CallHomeConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    callHomeConfig: CallHomeConfigUpdate
+
+
+class RemoteServiceConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    port: int | None = None
+
+
+class RemoteConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ssh: RemoteServiceConfigUpdate | None = None
+    vnc: RemoteServiceConfigUpdate | None = None
+    rdp: RemoteServiceConfigUpdate | None = None
+
+
+class RemoteConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    remoteConfig: RemoteConfigUpdate
+
+
+class ProxyConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    host: str | None = None
+    port: int | None = None
+    user: str | None = None
+    noProxy: list[str] | None = None
+
+
+class ProxyConfigUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proxyConfig: ProxyConfigUpdate
+
+
+class NetworkInterfaceImport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: str
+    ip: str
+    mask: str
+    gateway: str
+    mac: str
+    status: str
+    speed: str
+    duplex: str
+    enabled: bool
+
+
+class NetworkConfigImport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    interfaces: dict[str, NetworkInterfaceImport] | None = None
+    dns: DNSConfigUpdate | None = None
+    ntp: NTPConfigUpdate | None = None
+    routes: list[RouteUpdate] | None = None
+
+
+class SystemConfigImportData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    systemConfig: SystemConfigUpdate | None = None
+    networkConfig: NetworkConfigImport | None = None
+    snmpConfig: SNMPConfigUpdate | None = None
+    emailConfig: EmailConfigUpdate | None = None
+    syslogConfig: SyslogConfigUpdate | None = None
+    securityConfig: SecurityConfigUpdate | None = None
+    debugInfo: DebugInfoUpdate | None = None
+    preferences: PreferencesUpdate | None = None
+    haStatus: HAStatusUpdate | None = None
+    callHomeConfig: CallHomeConfigUpdate | None = None
+    remoteConfig: RemoteConfigUpdate | None = None
+    proxyConfig: ProxyConfigUpdate | None = None
+
+
+class SystemConfigImportPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config: SystemConfigImportData
+
+
 def _ws_result(summary: str) -> WSResultCode:
     return WSResultCode(summary=summary)
 
@@ -736,6 +1161,15 @@ def _extract_payload(payload: dict[str, Any] | None, key: str) -> dict[str, Any]
     if isinstance(nested, dict):
         return nested
     return payload
+
+
+
+def _model_updates(payload: BaseModel, key: str) -> dict[str, Any]:
+    data = payload.model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
+    nested = data.get(key)
+    if isinstance(nested, dict):
+        return nested
+    return data
 
 
 
@@ -946,14 +1380,14 @@ async def get_network_interface(
 @router.put("/network/interface/{name}", response_model=InterfaceResponse)
 async def update_network_interface(
     name: str,
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: InterfaceUpdate | InterfaceUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> InterfaceResponse:
     _ensure_state(context)
     _require_admin(current_user)
     interface = _get_interface_or_404(name)
-    updates = _extract_payload(payload, "interface")
+    updates = _model_updates(payload, "interface")
     for field in ("ip", "mask", "gateway", "duplex"):
         if field in updates and updates[field] is not None:
             interface[field] = updates[field]
@@ -1002,13 +1436,13 @@ async def get_dns_config(
 
 @router.put("/network/dns", response_model=DNSConfigResponse)
 async def update_dns_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: DNSConfigUpdate | DNSConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> DNSConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "dnsConfig")
+    updates = _model_updates(payload, "dnsConfig")
     aml_state.aml_network_config["dns"].update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "network/dns")
     return DNSConfigResponse(dnsConfig=DNSConfig.model_validate(aml_state.aml_network_config["dns"]))
@@ -1025,13 +1459,13 @@ async def get_routing_table(
 
 @router.post("/network/routing", response_model=WSResultCode)
 async def add_route(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: RouteUpdate | RouteUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    route = _extract_payload(payload, "route")
+    route = _model_updates(payload, "route")
     destination = str(route.get("destination", "")).strip()
     if not destination:
         raise HTTPException(status_code=400, detail="Destination is required")
@@ -1077,13 +1511,13 @@ async def get_ntp_config(
 
 @router.put("/network/ntp", response_model=NTPConfigResponse)
 async def update_ntp_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: NTPConfigUpdate | NTPConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> NTPConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "ntpConfig")
+    updates = _model_updates(payload, "ntpConfig")
     if "servers" in updates and updates["servers"] is not None:
         aml_state.aml_network_config["ntp"]["servers"] = list(updates["servers"])
     if "enabled" in updates and updates["enabled"] is not None:
@@ -1196,13 +1630,13 @@ async def export_system_config(
 
 @router.post("/system/config/import", response_model=WSResultCode)
 async def import_system_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: SystemConfigImportData | SystemConfigImportPayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    config = _extract_payload(payload, "config") or payload
+    config = _model_updates(payload, "config")
     if "systemConfig" in config:
         aml_state.aml_system_config.update(config["systemConfig"])
     if "networkConfig" in config:
@@ -1259,13 +1693,13 @@ async def get_system_config(
 
 @router.put("/system/config", response_model=SystemConfigResponse)
 async def update_system_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: SystemConfigUpdate | SystemConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> SystemConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "systemConfig")
+    updates = _model_updates(payload, "systemConfig")
     aml_state.aml_system_config.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/config")
     return SystemConfigResponse(systemConfig=SystemConfig.model_validate(aml_state.aml_system_config))
@@ -1282,16 +1716,14 @@ async def get_hostname(
 
 @router.put("/system/hostname", response_model=HostnameResponse)
 async def update_hostname(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: HostnameUpdatePayload | HostnameUpdateEnvelope = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> HostnameResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "hostname")
-    value = updates.get("value") if isinstance(updates, dict) else None
-    if value is None:
-        value = payload.get("value")
+    updates = _model_updates(payload, "hostname")
+    value = updates.get("value")
     if not isinstance(value, str) or not value.strip():
         raise HTTPException(status_code=400, detail="Hostname is required")
     aml_state.aml_system_config["hostname"] = value.strip()
@@ -1311,14 +1743,14 @@ async def get_timezone(
 
 @router.put("/system/timezone", response_model=TimezoneResponse)
 async def update_timezone(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: TimezoneUpdatePayload | TimezoneUpdateEnvelope = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> TimezoneResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "timezone")
-    value = updates.get("value") if isinstance(updates, dict) else payload.get("value")
+    updates = _model_updates(payload, "timezone")
+    value = updates.get("value")
     if not isinstance(value, str) or not value.strip():
         raise HTTPException(status_code=400, detail="Timezone is required")
     aml_state.aml_system_config["timezone"] = value.strip()
@@ -1338,14 +1770,14 @@ async def get_system_time(
 
 @router.put("/system/time", response_model=WSResultCode)
 async def set_system_time(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: TimeUpdatePayload | TimeUpdateEnvelope = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "systemTime")
-    utc_value = updates.get("utc") if isinstance(updates, dict) else payload.get("utc")
+    updates = _model_updates(payload, "systemTime")
+    utc_value = updates.get("utc")
     if not isinstance(utc_value, str) or not utc_value.strip():
         raise HTTPException(status_code=400, detail="UTC time is required")
     aml_state.set_aml_system_manual_time_utc(utc_value.strip())
@@ -1366,13 +1798,13 @@ async def get_locale(
 
 @router.put("/system/locale", response_model=LocaleResponse)
 async def update_locale(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: LocaleConfigUpdate | LocaleConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> LocaleResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "locale")
+    updates = _model_updates(payload, "locale")
     if "language" in updates:
         aml_state.aml_system_config["locale"] = updates["language"]
     if "dateFormat" in updates:
@@ -1396,13 +1828,13 @@ async def get_security_config(
 
 @router.put("/system/security", response_model=SecurityConfigResponse)
 async def update_security_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: SecurityConfigUpdate | SecurityConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> SecurityConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "securityConfig")
+    updates = _model_updates(payload, "securityConfig")
     aml_state.aml_system_security.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/security")
     return SecurityConfigResponse(securityConfig=SecurityConfig.model_validate(aml_state.aml_system_security))
@@ -1419,13 +1851,13 @@ async def get_security_certificate(
 
 @router.post("/system/security/certificate", response_model=WSResultCode)
 async def upload_security_certificate(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: CertInfoUpdate | CertInfoUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    data = _extract_payload(payload, "certInfo")
+    data = _model_updates(payload, "certInfo")
     cert_info = aml_state.get_aml_system_cert_info()
     if data:
         cert_info.update({key: value for key, value in data.items() if value is not None})
@@ -1472,13 +1904,13 @@ async def get_snmp_config(
 
 @router.put("/system/snmp", response_model=SNMPConfigResponse)
 async def update_snmp_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: SNMPConfigUpdate | SNMPConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> SNMPConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "snmpConfig")
+    updates = _model_updates(payload, "snmpConfig")
     aml_state.aml_snmp_config.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/snmp")
     return SNMPConfigResponse(snmpConfig=SNMPConfig.model_validate(aml_state.aml_snmp_config))
@@ -1522,13 +1954,13 @@ async def get_email_config(
 
 @router.put("/system/email", response_model=EmailConfigResponse)
 async def update_email_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: EmailConfigUpdate | EmailConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> EmailConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "emailConfig")
+    updates = _model_updates(payload, "emailConfig")
     aml_state.aml_email_config.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/email")
     return EmailConfigResponse(emailConfig=EmailConfig.model_validate(aml_state.aml_email_config))
@@ -1557,13 +1989,13 @@ async def get_syslog_config(
 
 @router.put("/system/syslog", response_model=SyslogConfigResponse)
 async def update_syslog_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: SyslogConfigUpdate | SyslogConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> SyslogConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "syslogConfig")
+    updates = _model_updates(payload, "syslogConfig")
     aml_state.aml_syslog_config.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/syslog")
     return SyslogConfigResponse(syslogConfig=SyslogConfig.model_validate(aml_state.aml_syslog_config))
@@ -1599,13 +2031,13 @@ async def get_storage_overview(
 
 @router.post("/system/storage/format", response_model=WSResultCode)
 async def format_storage_volume(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: StorageFormatRequest | StorageFormatPayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    request = _extract_payload(payload, "format")
+    request = _model_updates(payload, "format")
     volume_name = str(request.get("volume", request.get("name", ""))).strip()
     if not volume_name:
         raise HTTPException(status_code=400, detail="Volume is required")
@@ -1737,13 +2169,13 @@ async def trigger_backup(
 
 @router.post("/system/restore", response_model=WSResultCode)
 async def restore_backup(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: RestoreRequest | RestorePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    request = _extract_payload(payload, "restore")
+    request = _model_updates(payload, "restore")
     location = str(request.get("location", "")).strip()
     if not location:
         raise HTTPException(status_code=400, detail="Restore location is required")
@@ -1837,13 +2269,13 @@ async def list_certificates(
 
 @router.post("/system/certificate/import", response_model=WSResultCode)
 async def import_certificate(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: CertificateImportRequest | CertificateImportPayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    request = _extract_payload(payload, "cert")
+    request = _model_updates(payload, "cert")
     certificates = aml_state.get_aml_system_certificates()
     name = str(request.get("name", f"imported-{len(certificates) + 1}")).strip()
     subject = str(request.get("subject", f"CN={name},O=OpenBlade")).strip()
@@ -1886,13 +2318,13 @@ async def delete_certificate(
 # Reboot/Shutdown
 @router.post("/system/reboot", response_model=WSResultCode)
 async def reboot_system(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: RebootRequest | RebootPayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    request = _extract_payload(payload, "reboot")
+    request = _model_updates(payload, "reboot")
     delay = int(request.get("delay", 0))
     force = bool(request.get("force", False))
     _record_audit(current_user, "reboot", "system/reboot")
@@ -2022,13 +2454,13 @@ async def get_debug_info(
 
 @router.put("/system/debug", response_model=DebugInfoResponse)
 async def update_debug_info(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: DebugInfoUpdate | DebugInfoUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> DebugInfoResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "debugInfo")
+    updates = _model_updates(payload, "debugInfo")
     aml_state.aml_debug_config.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/debug")
     return DebugInfoResponse(debugInfo=DebugInfo.model_validate(aml_state.aml_debug_config))
@@ -2046,13 +2478,13 @@ async def get_preferences(
 
 @router.put("/system/preferences", response_model=PreferencesResponse)
 async def update_preferences(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: PreferencesUpdate | PreferencesUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> PreferencesResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "preferences")
+    updates = _model_updates(payload, "preferences")
     aml_state.aml_system_preferences = _merge_validated_model(Preferences, aml_state.aml_system_preferences, updates)
     _record_audit(current_user, "update", "system/preferences")
     return PreferencesResponse(preferences=Preferences.model_validate(aml_state.aml_system_preferences))
@@ -2125,13 +2557,13 @@ async def get_ha_status(
 
 @router.put("/system/ha", response_model=HAStatusResponse)
 async def update_ha_status(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: HAStatusUpdate | HAStatusUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> HAStatusResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "haStatus")
+    updates = _model_updates(payload, "haStatus")
     aml_state.aml_ha_config.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/ha")
     return HAStatusResponse(haStatus=HAStatus.model_validate(aml_state.aml_ha_config))
@@ -2175,13 +2607,13 @@ async def get_callhome_config(
 
 @router.put("/system/callhome", response_model=CallHomeConfigResponse)
 async def update_callhome_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: CallHomeConfigUpdate | CallHomeConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> CallHomeConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "callHomeConfig")
+    updates = _model_updates(payload, "callHomeConfig")
     aml_state.aml_callhome_config.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/callhome")
     return CallHomeConfigResponse(callHomeConfig=CallHomeConfig.model_validate(aml_state.aml_callhome_config))
@@ -2211,13 +2643,13 @@ async def get_remote_config(
 
 @router.put("/system/remote", response_model=RemoteConfigResponse)
 async def update_remote_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: RemoteConfigUpdate | RemoteConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> RemoteConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "remoteConfig")
+    updates = _model_updates(payload, "remoteConfig")
     for key in ("ssh", "vnc", "rdp"):
         if key in updates and isinstance(updates[key], dict):
             aml_state.aml_remote_config.setdefault(key, {}).update({inner_key: inner_value for inner_key, inner_value in updates[key].items() if inner_value is not None})
@@ -2237,13 +2669,13 @@ async def get_proxy_config(
 
 @router.put("/system/proxy", response_model=ProxyConfigResponse)
 async def update_proxy_config(
-    payload: dict[str, Any] = Body(default_factory=dict),
+    payload: ProxyConfigUpdate | ProxyConfigUpdatePayload = Body(default_factory=dict),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> ProxyConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updates = _extract_payload(payload, "proxyConfig")
+    updates = _model_updates(payload, "proxyConfig")
     aml_state.aml_proxy_config.update({key: value for key, value in updates.items() if value is not None})
     _record_audit(current_user, "update", "system/proxy")
     return ProxyConfigResponse(proxyConfig=ProxyConfig.model_validate(aml_state.aml_proxy_config))
