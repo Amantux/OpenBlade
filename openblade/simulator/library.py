@@ -137,6 +137,14 @@ class MockLibraryBackend:
                 changer_state=self._changer.state,
             )
 
+    def list_tapes(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                {"slotId": slot.slot_id, "barcode": slot.barcode.value}
+                for slot in self._slots.values()
+                if slot.barcode is not None
+            ]
+
     def to_json(self) -> dict[str, Any]:
         with self._lock:
             return {
