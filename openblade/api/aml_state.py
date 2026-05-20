@@ -111,6 +111,10 @@ class AMLState:
     aml_towers: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_towers())
     aml_ie_stations: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_ie_stations())
     aml_magazines: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_magazines())
+    aml_partitions: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_partitions())
+    aml_partitions_global: dict[str, Any] = field(default_factory=lambda: _default_aml_partitions_global())
+    aml_media: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_media())
+    aml_media_pools: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_media_pools())
 
 
 def _utcnow() -> datetime:
@@ -166,6 +170,118 @@ def _default_aml_licenses() -> dict[str, dict[str, Any]]:
             "expiry": None,
         },
     }
+
+
+def _default_aml_partitions() -> dict[str, dict[str, Any]]:
+    return {
+        "partition1": {
+            "name": "partition1",
+            "id": "PART-001",
+            "status": "online",
+            "type": "data",
+            "driveCount": 2,
+            "slotCount": 20,
+            "ieSlotCount": 6,
+            "cleaningSlots": 2,
+            "mediaCount": 10,
+            "drives": ["DRV-001", "DRV-002"],
+            "policy": {
+                "autoClean": True,
+                "cleaningThreshold": 100,
+                "mediaAutoAssign": True,
+                "mountTimeout": 300,
+                "unmountTimeout": 60,
+                "ejectTimeout": 30,
+                "roboticsTimeout": 120,
+            },
+            "access": {"mode": "readWrite", "groups": [], "hosts": []},
+            "cleaning": {
+                "autoClean": True,
+                "threshold": 100,
+                "cleaningTapeBarcode": None,
+                "lastCleaned": None,
+            },
+            "worm": {"enabled": False, "mode": "none"},
+            "encryption": {"enabled": False, "type": "none", "keyManager": None},
+            "qos": {"maxMountsPerHour": 60, "priority": "normal", "preemption": False},
+            "lme": {"enabled": False, "exportPath": None},
+            "alerts": [],
+            "moveQueue": [],
+            "quota": {"totalSlots": 20, "usedSlots": 10, "totalDrives": 2, "usedDrives": 2},
+            "statistics": {
+                "mountCount": 0,
+                "unmountCount": 0,
+                "errorCount": 0,
+                "lastMount": None,
+                "lastUnmount": None,
+                "mediaUsage": [],
+            },
+        }
+    }
+
+
+
+def _default_aml_partitions_global() -> dict[str, Any]:
+    return {
+        "defaultMountTimeout": 300,
+        "defaultCleaningThreshold": 100,
+        "maxPartitions": 8,
+        "currentPartitions": 1,
+    }
+
+
+
+def _default_aml_media() -> dict[str, dict[str, Any]]:
+    return {
+        "VOL001L9": {
+            "barcode": "VOL001L9",
+            "type": "LTO-9",
+            "partition": "partition1",
+            "slotAddress": "1,1,1",
+            "state": "home",
+            "writeProtected": False,
+            "worm": False,
+            "generations": 1,
+            "loadCount": 5,
+            "errorCount": 0,
+            "lastLoaded": "2024-01-15T10:00:00Z",
+        },
+        "VOL002L9": {
+            "barcode": "VOL002L9",
+            "type": "LTO-9",
+            "partition": "partition1",
+            "slotAddress": "1,1,2",
+            "state": "home",
+            "writeProtected": False,
+            "worm": False,
+            "generations": 1,
+            "loadCount": 3,
+            "errorCount": 0,
+            "lastLoaded": "2024-01-14T08:00:00Z",
+        },
+        "CLN001L9": {
+            "barcode": "CLN001L9",
+            "type": "LTO-9-CLN",
+            "partition": "partition1",
+            "slotAddress": "1,0,1",
+            "state": "home",
+            "writeProtected": True,
+            "worm": False,
+            "generations": 0,
+            "loadCount": 2,
+            "errorCount": 0,
+            "lastLoaded": "2024-01-10T12:00:00Z",
+        },
+    }
+
+
+
+def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
+    return {
+        "default": {"name": "default", "type": "LTO-9", "mediaCount": 2, "policy": "scratch"},
+        "cleaning": {"name": "cleaning", "type": "LTO-9-CLN", "mediaCount": 1, "policy": "cleaning"},
+    }
+
 
 
 def _default_eth_blades() -> dict[str, dict[str, Any]]:
@@ -1269,4 +1385,412 @@ def delete_aml_license(serial_number: str) -> bool:
     if serial_number not in _STATE.aml_licenses:
         return False
     del _STATE.aml_licenses[serial_number]
+    return True
+
+
+
+def _unique_partition_values(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
+
+def _sync_aml_partition_counts() -> None:
+    _STATE.aml_partitions_global["currentPartitions"] = len(_STATE.aml_partitions)
+
+
+
+def list_aml_partitions() -> list[dict[str, Any]]:
+    _sync_aml_partition_counts()
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_partitions.items())]
+
+
+
+def get_aml_partition(name: str) -> dict[str, Any] | None:
+    partition = _STATE.aml_partitions.get(name)
+    return deepcopy(partition) if partition is not None else None
+
+
+
+def create_aml_partition(name: str, partition: dict[str, Any]) -> dict[str, Any] | None:
+    if name in _STATE.aml_partitions:
+        return None
+    next_id = f"PART-{len(_STATE.aml_partitions) + 1:03d}"
+    drive_count = int(partition.get("driveCount", 0))
+    slot_count = int(partition.get("slotCount", 0))
+    stored = {
+        "name": name,
+        "id": partition.get("id", next_id),
+        "status": partition.get("status", "online"),
+        "type": partition.get("type", "data"),
+        "driveCount": drive_count,
+        "slotCount": slot_count,
+        "ieSlotCount": int(partition.get("ieSlotCount", 0)),
+        "cleaningSlots": int(partition.get("cleaningSlots", 0)),
+        "mediaCount": int(partition.get("mediaCount", 0)),
+        "drives": list(partition.get("drives", [])),
+        "policy": deepcopy(
+            partition.get("policy")
+            or {
+                "autoClean": True,
+                "cleaningThreshold": _STATE.aml_partitions_global.get("defaultCleaningThreshold", 100),
+                "mediaAutoAssign": True,
+                "mountTimeout": _STATE.aml_partitions_global.get("defaultMountTimeout", 300),
+                "unmountTimeout": 60,
+                "ejectTimeout": 30,
+                "roboticsTimeout": 120,
+            }
+        ),
+        "access": deepcopy(partition.get("access") or {"mode": "readWrite", "groups": [], "hosts": []}),
+        "cleaning": deepcopy(
+            partition.get("cleaning")
+            or {
+                "autoClean": True,
+                "threshold": _STATE.aml_partitions_global.get("defaultCleaningThreshold", 100),
+                "cleaningTapeBarcode": None,
+                "lastCleaned": None,
+            }
+        ),
+        "worm": deepcopy(partition.get("worm") or {"enabled": False, "mode": "none"}),
+        "encryption": deepcopy(
+            partition.get("encryption") or {"enabled": False, "type": "none", "keyManager": None}
+        ),
+        "qos": deepcopy(
+            partition.get("qos") or {"maxMountsPerHour": 60, "priority": "normal", "preemption": False}
+        ),
+        "lme": deepcopy(partition.get("lme") or {"enabled": False, "exportPath": None}),
+        "alerts": deepcopy(partition.get("alerts") or []),
+        "moveQueue": deepcopy(partition.get("moveQueue") or []),
+        "quota": deepcopy(
+            partition.get("quota")
+            or {
+                "totalSlots": slot_count,
+                "usedSlots": int(partition.get("mediaCount", 0)),
+                "totalDrives": drive_count,
+                "usedDrives": len(partition.get("drives", [])),
+            }
+        ),
+        "statistics": deepcopy(
+            partition.get("statistics")
+            or {
+                "mountCount": 0,
+                "unmountCount": 0,
+                "errorCount": 0,
+                "lastMount": None,
+                "lastUnmount": None,
+                "mediaUsage": [],
+            }
+        ),
+    }
+    _STATE.aml_partitions[name] = stored
+    _sync_aml_partition_counts()
+    return get_aml_partition(name)
+
+
+
+def update_aml_partition(name: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    partition = _STATE.aml_partitions.get(name)
+    if partition is None:
+        return None
+    for key, value in updates.items():
+        if value is not None:
+            partition[key] = deepcopy(value)
+    quota = partition.setdefault("quota", {})
+    quota.setdefault("totalSlots", int(partition.get("slotCount", 0)))
+    quota.setdefault("totalDrives", int(partition.get("driveCount", 0)))
+    if "slotCount" in updates and updates["slotCount"] is not None:
+        quota["totalSlots"] = int(updates["slotCount"])
+    if "driveCount" in updates and updates["driveCount"] is not None:
+        quota["totalDrives"] = int(updates["driveCount"])
+    return get_aml_partition(name)
+
+
+
+def delete_aml_partition(name: str) -> bool:
+    if name not in _STATE.aml_partitions:
+        return False
+    del _STATE.aml_partitions[name]
+    _sync_aml_partition_counts()
+    return True
+
+
+
+def get_aml_partitions_global() -> dict[str, Any]:
+    _sync_aml_partition_counts()
+    return deepcopy(_STATE.aml_partitions_global)
+
+
+
+def set_aml_partitions_global(values: dict[str, Any]) -> dict[str, Any]:
+    for key, value in values.items():
+        if key == "currentPartitions":
+            continue
+        if value is not None:
+            _STATE.aml_partitions_global[key] = value
+    _sync_aml_partition_counts()
+    return get_aml_partitions_global()
+
+
+
+def set_aml_partition_section(name: str, section: str, value: Any) -> Any | None:
+    partition = _STATE.aml_partitions.get(name)
+    if partition is None:
+        return None
+    partition[section] = deepcopy(value)
+    return deepcopy(partition[section])
+
+
+
+def add_aml_partition_list_item(name: str, field: str, value: str) -> list[str] | None:
+    partition = _STATE.aml_partitions.get(name)
+    if partition is None:
+        return None
+    items = list(partition.get(field, []))
+    if value not in items:
+        items.append(value)
+    partition[field] = _unique_partition_values(items)
+    return list(partition[field])
+
+
+
+def remove_aml_partition_list_item(name: str, field: str, value: str) -> bool:
+    partition = _STATE.aml_partitions.get(name)
+    if partition is None:
+        return False
+    items = list(partition.get(field, []))
+    if value not in items:
+        return False
+    partition[field] = [item for item in items if item != value]
+    return True
+
+
+
+def add_aml_partition_access_value(name: str, field: str, value: str) -> list[str] | None:
+    partition = _STATE.aml_partitions.get(name)
+    if partition is None:
+        return None
+    access = partition.setdefault("access", {"mode": "readWrite", "groups": [], "hosts": []})
+    values = list(access.get(field, []))
+    if value not in values:
+        values.append(value)
+    access[field] = _unique_partition_values(values)
+    return list(access[field])
+
+
+
+def remove_aml_partition_access_value(name: str, field: str, value: str) -> bool:
+    partition = _STATE.aml_partitions.get(name)
+    if partition is None:
+        return False
+    access = partition.setdefault("access", {"mode": "readWrite", "groups": [], "hosts": []})
+    values = list(access.get(field, []))
+    if value not in values:
+        return False
+    access[field] = [item for item in values if item != value]
+    return True
+
+
+
+def _sync_aml_media_counts() -> None:
+    partition_counts: dict[str, int] = {}
+    for media in _STATE.aml_media.values():
+        partition = str(media.get("partition", "partition1"))
+        partition_counts[partition] = partition_counts.get(partition, 0) + 1
+    for name, partition in _STATE.aml_partitions.items():
+        media_count = partition_counts.get(name, 0)
+        partition["mediaCount"] = media_count
+        quota = partition.setdefault("quota", {})
+        quota["usedSlots"] = media_count
+        quota.setdefault("totalSlots", int(partition.get("slotCount", 0)))
+        quota.setdefault("totalDrives", int(partition.get("driveCount", 0)))
+        quota.setdefault("usedDrives", len(partition.get("drives", [])))
+    for pool in _STATE.aml_media_pools.values():
+        pool["mediaCount"] = sum(1 for media in _STATE.aml_media.values() if media.get("type") == pool.get("type"))
+
+
+
+def list_aml_media() -> list[dict[str, Any]]:
+    _sync_aml_media_counts()
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_media.items())]
+
+
+
+def get_aml_media(barcode: str) -> dict[str, Any] | None:
+    media = _STATE.aml_media.get(barcode)
+    return deepcopy(media) if media is not None else None
+
+
+
+def update_aml_media(barcode: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    media = _STATE.aml_media.get(barcode)
+    if media is None:
+        return None
+    updates = deepcopy(updates)
+    updates.pop("barcode", None)
+    for key, value in updates.items():
+        if value is not None:
+            media[key] = value
+    _sync_aml_media_counts()
+    return get_aml_media(barcode)
+
+
+
+def delete_aml_media(barcode: str) -> bool:
+    if barcode not in _STATE.aml_media:
+        return False
+    del _STATE.aml_media[barcode]
+    _sync_aml_media_counts()
+    return True
+
+
+
+def _next_media_slot_address(partition: str) -> str:
+    slot_numbers: list[int] = []
+    for media in _STATE.aml_media.values():
+        if str(media.get("partition", "partition1")) != partition:
+            continue
+        parts = str(media.get("slotAddress", "")).split(",")
+        if len(parts) != 3:
+            continue
+        try:
+            slot_numbers.append(int(parts[-1]))
+        except ValueError:
+            continue
+    next_slot = max(slot_numbers, default=0) + 1
+    return f"1,1,{next_slot}"
+
+
+
+def import_aml_media(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    imported: list[dict[str, Any]] = []
+    for item in items:
+        barcode = str(item["barcode"])
+        media_type = str(item.get("type", "LTO-9"))
+        existing = _STATE.aml_media.get(barcode)
+        if existing is not None:
+            existing["type"] = media_type
+            imported.append(deepcopy(existing))
+            continue
+        partition = str(item.get("partition", "partition1"))
+        stored = {
+            "barcode": barcode,
+            "type": media_type,
+            "partition": partition,
+            "slotAddress": str(item.get("slotAddress") or _next_media_slot_address(partition)),
+            "state": str(item.get("state", "home")),
+            "writeProtected": bool(item.get("writeProtected", False)),
+            "worm": bool(item.get("worm", False)),
+            "generations": int(item.get("generations", 1 if media_type.startswith("LTO") and "CLN" not in media_type else 0)),
+            "loadCount": int(item.get("loadCount", 0)),
+            "errorCount": int(item.get("errorCount", 0)),
+            "lastLoaded": item.get("lastLoaded"),
+        }
+        _STATE.aml_media[barcode] = stored
+        imported.append(deepcopy(stored))
+    _sync_aml_media_counts()
+    return imported
+
+
+
+def export_aml_media(barcodes: list[str]) -> list[str]:
+    removed: list[str] = []
+    for barcode in barcodes:
+        if barcode in _STATE.aml_media:
+            del _STATE.aml_media[barcode]
+            removed.append(barcode)
+    _sync_aml_media_counts()
+    return removed
+
+
+
+def move_aml_media(barcode: str, destination: str) -> dict[str, Any] | None:
+    media = _STATE.aml_media.get(barcode)
+    if media is None:
+        return None
+    media["slotAddress"] = destination
+    if destination.upper().startswith("DRV"):
+        media["state"] = "loaded"
+        media["lastLoaded"] = _isoformat(_utcnow())
+        media["loadCount"] = int(media.get("loadCount", 0)) + 1
+    elif destination.upper().startswith("IE"):
+        media["state"] = "exported"
+    else:
+        media["state"] = "home"
+    return get_aml_media(barcode)
+
+
+
+def search_aml_media(
+    *, partition: str | None = None, media_type: str | None = None, state: str | None = None, barcode: str | None = None
+) -> list[dict[str, Any]]:
+    items = list_aml_media()
+    if partition is not None:
+        items = [item for item in items if str(item.get("partition", "")).lower() == partition.lower()]
+    if media_type is not None:
+        items = [item for item in items if str(item.get("type", "")).lower() == media_type.lower()]
+    if state is not None:
+        items = [item for item in items if str(item.get("state", "")).lower() == state.lower()]
+    if barcode is not None:
+        items = [item for item in items if barcode.lower() in str(item.get("barcode", "")).lower()]
+    return items
+
+
+
+def list_aml_scratch_media(partition: str | None = None, media_type: str | None = None) -> list[dict[str, Any]]:
+    items = search_aml_media(partition=partition, media_type=media_type)
+    return [
+        item
+        for item in items
+        if not bool(item.get("writeProtected", False))
+        and not bool(item.get("worm", False))
+        and "CLN" not in str(item.get("type", "")).upper()
+        and str(item.get("state", "")).lower() in {"home", "scratch", "available"}
+    ]
+
+
+
+def list_aml_media_pools() -> list[dict[str, Any]]:
+    _sync_aml_media_counts()
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_media_pools.items())]
+
+
+
+def get_aml_media_pool(name: str) -> dict[str, Any] | None:
+    _sync_aml_media_counts()
+    pool = _STATE.aml_media_pools.get(name)
+    return deepcopy(pool) if pool is not None else None
+
+
+
+def create_aml_media_pool(name: str, pool: dict[str, Any]) -> dict[str, Any] | None:
+    if name in _STATE.aml_media_pools:
+        return None
+    stored = {
+        "name": name,
+        "type": pool.get("type", "LTO-9"),
+        "mediaCount": 0,
+        "policy": pool.get("policy", "scratch"),
+    }
+    _STATE.aml_media_pools[name] = stored
+    _sync_aml_media_counts()
+    return get_aml_media_pool(name)
+
+
+
+def update_aml_media_pool(name: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    pool = _STATE.aml_media_pools.get(name)
+    if pool is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "name" or value is None:
+            continue
+        pool[key] = value
+    _sync_aml_media_counts()
+    return get_aml_media_pool(name)
+
+
+
+def delete_aml_media_pool(name: str) -> bool:
+    if name not in _STATE.aml_media_pools:
+        return False
+    del _STATE.aml_media_pools[name]
     return True

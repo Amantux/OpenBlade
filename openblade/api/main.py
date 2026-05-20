@@ -11,6 +11,8 @@ from openblade.api import (
     routes_aml_auth,
     routes_aml_blades,
     routes_aml_library,
+    routes_aml_media,
+    routes_aml_partitions,
     routes_aml_physical,
     routes_archive,
     routes_inventory,
@@ -49,7 +51,9 @@ app.include_router(routes_aml_auth.router, prefix="/aml", tags=["aml-auth"])
 app.include_router(routes_aml_access.router, prefix="/aml", tags=["aml-access"])
 app.include_router(routes_aml_library.router, prefix="/aml", tags=["aml-library"])
 app.include_router(routes_aml_blades.router, prefix="/aml", tags=["aml-blades"])
+app.include_router(routes_aml_partitions.router, prefix="/aml", tags=["aml-partitions"])
 app.include_router(routes_aml_physical.router, prefix="/aml", tags=["aml-physical"])
+app.include_router(routes_aml_media.router, prefix="/aml", tags=["aml-media"])
 
 
 @app.on_event("startup")
