@@ -15,6 +15,8 @@ from openblade.jobs.inventory import InventoryService, run_inventory_job
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.restore import RestoreService
 from openblade.jobs.worker import Worker
+from openblade.nas.service import NasService
+from openblade.nas.types import StoragePolicy
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 from openblade.simulator.scenarios import scalar_i3_default
@@ -24,6 +26,46 @@ structlog.configure()
 _library: MockLibraryBackend | None = None
 _ltfs: MockLTFSBackend | None = None
 _catalog: CatalogRepository | None = None
+
+
+def _default_policies() -> list[StoragePolicy]:
+    return [
+        StoragePolicy(
+            id="critical_sequential",
+            name="Critical Sequential",
+            policy_type="critical_sequential",
+            allow_spillover=False,
+            max_parallelism=1,
+        ),
+        StoragePolicy(
+            id="noncritical_sharded",
+            name="Noncritical Sharded",
+            policy_type="noncritical_sharded",
+            allow_sharding=True,
+            max_parallelism=4,
+            shard_strategy="round_robin",
+        ),
+        StoragePolicy(
+            id="balanced",
+            name="Balanced",
+            policy_type="balanced",
+            allow_spillover=True,
+            max_parallelism=2,
+        ),
+    ]
+
+
+def _seed_nas_defaults(catalog: CatalogRepository) -> None:
+    service = NasService(catalog)
+    existing_policy_ids = {policy.id for policy in service.get_policies()}
+    for policy in _default_policies():
+        if policy.id not in existing_policy_ids:
+            service.upsert_policy(policy)
+
+    existing_share_paths = {share.path for share in service.get_nas_shares()}
+    for share in service.get_default_shares():
+        if share.path not in existing_share_paths:
+            service.upsert_share(share)
 
 
 @dataclass
@@ -64,6 +106,7 @@ def get_catalog() -> CatalogRepository:
     init_db(cfg.db_url)
     if _catalog is None:
         _catalog = CatalogRepository(get_session())
+        _seed_nas_defaults(_catalog)
     return _catalog
 
 
@@ -74,6 +117,7 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     init_db(active_config.db_url)
     library, ltfs = scalar_i3_default()
     catalog = CatalogRepository(get_session())
+    _seed_nas_defaults(catalog)
     run_inventory_job(library, catalog)
     queue = JobQueue()
     worker = Worker(queue)

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from openblade.catalog.models import Base
+from openblade.catalog.repository import CatalogRepository
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
@@ -38,9 +39,9 @@ def _ensure_parent_dir(db_url: str) -> None:
 
 def _migrate_schema(engine: Engine) -> None:
     inspector = inspect(engine)
-    if "file_records" not in inspector.get_table_names():
-        return
-    existing_columns = {column["name"] for column in inspector.get_columns("file_records")}
+    existing_columns: set[str] = set()
+    if "file_records" in inspector.get_table_names():
+        existing_columns = {column["name"] for column in inspector.get_columns("file_records")}
     required_columns = {
         "shard_count": "INTEGER",
         "shard_index": "INTEGER",
@@ -51,15 +52,170 @@ def _migrate_schema(engine: Engine) -> None:
     missing_columns = {
         name: column_type
         for name, column_type in required_columns.items()
-        if name not in existing_columns
+        if existing_columns and name not in existing_columns
     }
-    if not missing_columns:
-        return
     with engine.begin() as connection:
-        for name, column_type in missing_columns.items():
-            connection.execute(text(f"ALTER TABLE file_records ADD COLUMN {name} {column_type}"))
-        if "parent_id" in missing_columns:
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_file_records_parent_id ON file_records (parent_id)"))
+        if missing_columns:
+            for name, column_type in missing_columns.items():
+                connection.execute(text(f"ALTER TABLE file_records ADD COLUMN {name} {column_type}"))
+        if existing_columns:
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_file_records_parent_id ON file_records (parent_id)")
+            )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS nas_storage_policies (
+                    id VARCHAR PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    policy_type VARCHAR(64) NOT NULL,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS nas_cache_drives (
+                    id VARCHAR PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    root_path VARCHAR NOT NULL,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS nas_configs (
+                    key VARCHAR PRIMARY KEY,
+                    value_json TEXT NOT NULL DEFAULT '{}'
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS nas_shares (
+                    path VARCHAR PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    share_type VARCHAR(32) NOT NULL,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    created_at DATETIME
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS nas_pools (
+                    id VARCHAR PRIMARY KEY,
+                    name VARCHAR NOT NULL UNIQUE,
+                    description TEXT,
+                    volume_group_ids TEXT NOT NULL DEFAULT '[]',
+                    default_policy_id VARCHAR,
+                    default_ingest_mode VARCHAR NOT NULL DEFAULT 'cache_drive',
+                    mount_path TEXT,
+                    virtual_mount_enabled INTEGER NOT NULL DEFAULT 1,
+                    hydration_behavior VARCHAR NOT NULL DEFAULT 'queue',
+                    cache_target_id VARCHAR,
+                    restore_target_path TEXT NOT NULL DEFAULT '/openblade/restore',
+                    access_mode VARCHAR NOT NULL DEFAULT 'read_only',
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS nas_datasets (
+                    id VARCHAR PRIMARY KEY,
+                    pool_id VARCHAR,
+                    name VARCHAR NOT NULL,
+                    source_path TEXT,
+                    source_host TEXT,
+                    policy_id VARCHAR,
+                    ingest_mode VARCHAR,
+                    volume_group_id VARCHAR,
+                    tape_set TEXT NOT NULL DEFAULT '[]',
+                    shard_map TEXT NOT NULL DEFAULT '{}',
+                    file_count INTEGER NOT NULL DEFAULT 0,
+                    total_bytes INTEGER NOT NULL DEFAULT 0,
+                    status VARCHAR NOT NULL DEFAULT 'pending',
+                    copies_completed INTEGER NOT NULL DEFAULT 0,
+                    manifest_path TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS nas_file_records (
+                    id VARCHAR PRIMARY KEY,
+                    dataset_id VARCHAR NOT NULL,
+                    pool_id VARCHAR,
+                    relative_path TEXT NOT NULL,
+                    source_path TEXT,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    mtime TEXT,
+                    checksum_sha256 TEXT,
+                    tape_barcode TEXT,
+                    tape_offset INTEGER,
+                    status VARCHAR NOT NULL DEFAULT 'offline_on_tape',
+                    cache_path TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS nas_restore_jobs (
+                    id VARCHAR PRIMARY KEY,
+                    status VARCHAR NOT NULL DEFAULT 'queued',
+                    priority INTEGER NOT NULL DEFAULT 5,
+                    paths TEXT NOT NULL DEFAULT '[]',
+                    pool_id VARCHAR,
+                    dataset_id VARCHAR,
+                    destination TEXT NOT NULL DEFAULT '/openblade/restore',
+                    allow_parallel INTEGER NOT NULL DEFAULT 1,
+                    max_drives INTEGER NOT NULL DEFAULT 2,
+                    cache_policy VARCHAR NOT NULL DEFAULT 'restore_to_destination',
+                    overwrite_policy VARCHAR NOT NULL DEFAULT 'skip_existing',
+                    required_tapes TEXT NOT NULL DEFAULT '[]',
+                    missing_tapes TEXT NOT NULL DEFAULT '[]',
+                    exported_tapes TEXT NOT NULL DEFAULT '[]',
+                    tape_load_order TEXT NOT NULL DEFAULT '[]',
+                    parallel_restore_groups TEXT NOT NULL DEFAULT '{}',
+                    estimated_bytes INTEGER NOT NULL DEFAULT 0,
+                    bytes_restored INTEGER NOT NULL DEFAULT 0,
+                    files_restored INTEGER NOT NULL DEFAULT 0,
+                    files_failed INTEGER NOT NULL DEFAULT 0,
+                    unavailable_files TEXT NOT NULL DEFAULT '[]',
+                    warnings TEXT NOT NULL DEFAULT '[]',
+                    error_message TEXT,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    completed_at TEXT
+                )
+                """
+            )
+        )
 
 
 def init_db(db_url: str = "sqlite:///./openblade.db") -> None:
@@ -94,3 +250,9 @@ def get_session() -> Session:
         init_db()
     assert _SessionLocal is not None
     return _SessionLocal()
+
+
+def get_catalog_repository() -> CatalogRepository:
+    from openblade.bootstrap import get_context
+
+    return get_context().catalog

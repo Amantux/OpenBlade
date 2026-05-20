@@ -134,3 +134,135 @@ class AmlUser(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class NasStoragePolicy(Base):
+    __tablename__ = "nas_storage_policies"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    policy_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class NasCacheDrive(Base):
+    __tablename__ = "nas_cache_drives"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    root_path: Mapped[str] = mapped_column(String, nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class NasConfig(Base):
+    __tablename__ = "nas_configs"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class NasShare(Base):
+    __tablename__ = "nas_shares"
+
+    path: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    share_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class NasPool(Base):
+    __tablename__ = "nas_pools"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    volume_group_ids: Mapped[str] = mapped_column(Text, default="[]")
+    default_policy_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    default_ingest_mode: Mapped[str] = mapped_column(String, default="cache_drive")
+    mount_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    virtual_mount_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    hydration_behavior: Mapped[str] = mapped_column(String, default="queue")
+    cache_target_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    restore_target_path: Mapped[str] = mapped_column(String, default="/openblade/restore")
+    access_mode: Mapped[str] = mapped_column(String, default="read_only")
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class NasDataset(Base):
+    __tablename__ = "nas_datasets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    pool_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_host: Mapped[str | None] = mapped_column(String, nullable=True)
+    policy_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    ingest_mode: Mapped[str | None] = mapped_column(String, nullable=True)
+    volume_group_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    tape_set: Mapped[str] = mapped_column(Text, default="[]")
+    shard_map: Mapped[str] = mapped_column(Text, default="{}")
+    file_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    copies_completed: Mapped[int] = mapped_column(Integer, default=0)
+    manifest_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class NasFileRecord(Base):
+    __tablename__ = "nas_file_records"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    dataset_id: Mapped[str] = mapped_column(String, nullable=False)
+    pool_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    relative_path: Mapped[str] = mapped_column(Text, nullable=False)
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    mtime: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tape_barcode: Mapped[str | None] = mapped_column(String, nullable=True)
+    tape_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="offline_on_tape")
+    cache_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class NasRestoreJob(Base):
+    __tablename__ = "nas_restore_jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    status: Mapped[str] = mapped_column(String, default="queued")
+    priority: Mapped[int] = mapped_column(Integer, default=5)
+    paths: Mapped[str] = mapped_column(Text, default="[]")
+    pool_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    dataset_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    destination: Mapped[str] = mapped_column(Text, default="/openblade/restore")
+    allow_parallel: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_drives: Mapped[int] = mapped_column(Integer, default=2)
+    cache_policy: Mapped[str] = mapped_column(String, default="restore_to_destination")
+    overwrite_policy: Mapped[str] = mapped_column(String, default="skip_existing")
+    required_tapes: Mapped[str] = mapped_column(Text, default="[]")
+    missing_tapes: Mapped[str] = mapped_column(Text, default="[]")
+    exported_tapes: Mapped[str] = mapped_column(Text, default="[]")
+    tape_load_order: Mapped[str] = mapped_column(Text, default="[]")
+    parallel_restore_groups: Mapped[str] = mapped_column(Text, default="{}")
+    estimated_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    bytes_restored: Mapped[int] = mapped_column(Integer, default=0)
+    files_restored: Mapped[int] = mapped_column(Integer, default=0)
+    files_failed: Mapped[int] = mapped_column(Integer, default=0)
+    unavailable_files: Mapped[str] = mapped_column(Text, default="[]")
+    warnings: Mapped[str] = mapped_column(Text, default="[]")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)

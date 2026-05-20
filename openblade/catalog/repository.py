@@ -16,17 +16,62 @@ from openblade.catalog.models import (
     FileInstance,
     FileRecord,
     Job,
+    NasCacheDrive,
+    NasConfig,
+    NasDataset,
+    NasFileRecord,
+    NasPool,
+    NasRestoreJob,
+    NasShare,
+    NasStoragePolicy,
     SafetyTokenRecord,
     VolumeGroup,
 )
 from openblade.domain.errors import FileNotFoundError
 from openblade.domain.models import FileInstanceState
 from openblade.domain.policies import SafetyToken
+from openblade.nas.types import (
+    CacheDriveConfig,
+    NasShareDefinition,
+    RestoreJobStatus,
+    StoragePolicy,
+)
+from openblade.nas.types import (
+    NasDataset as NasDatasetModel,
+)
+from openblade.nas.types import (
+    NasFileRecord as NasFileRecordModel,
+)
+from openblade.nas.types import (
+    NasPool as NasPoolModel,
+)
+from openblade.nas.types import (
+    NasRestoreJob as NasRestoreJobModel,
+)
 
 _ARCHIVED_INSTANCE_STATES = {
     FileInstanceState.ARCHIVED.value,
     FileInstanceState.VERIFIED.value,
 }
+
+
+def _model_to_json_dict(model: object) -> dict[str, object]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(mode="json")
+    return model.dict()
+
+
+def _load_json_value(value: str | None, default: object) -> object:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
+
+
+def _utcnow_iso() -> str:
+    return datetime.utcnow().isoformat()
 
 
 @dataclass(frozen=True)
@@ -42,6 +87,102 @@ class CatalogRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
         self._lock = threading.RLock()
+
+    def _validate_nas_config_data(self, data: object, *, entity_name: str) -> dict[str, object]:
+        try:
+            value = json.loads(json.dumps(data))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{entity_name} config_json must be a valid JSON object") from exc
+        if not isinstance(value, dict) or not value:
+            raise ValueError(f"{entity_name} config_json must be a non-empty JSON object")
+        return value
+
+    def _nas_pool_to_dict(self, row: NasPool) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "name": row.name,
+            "description": row.description,
+            "volume_group_ids": _load_json_value(row.volume_group_ids, []),
+            "default_policy_id": row.default_policy_id,
+            "default_ingest_mode": row.default_ingest_mode,
+            "mount_path": row.mount_path,
+            "virtual_mount_enabled": row.virtual_mount_enabled,
+            "hydration_behavior": row.hydration_behavior,
+            "cache_target_id": row.cache_target_id,
+            "restore_target_path": row.restore_target_path,
+            "access_mode": row.access_mode,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+    def _nas_dataset_to_dict(self, row: NasDataset) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "pool_id": row.pool_id,
+            "name": row.name,
+            "source_path": row.source_path,
+            "source_host": row.source_host,
+            "policy_id": row.policy_id,
+            "ingest_mode": row.ingest_mode,
+            "volume_group_id": row.volume_group_id,
+            "tape_set": _load_json_value(row.tape_set, []),
+            "shard_map": _load_json_value(row.shard_map, {}),
+            "file_count": row.file_count,
+            "total_bytes": row.total_bytes,
+            "status": row.status,
+            "copies_completed": row.copies_completed,
+            "manifest_path": row.manifest_path,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+    def _nas_file_record_to_dict(self, row: NasFileRecord) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "dataset_id": row.dataset_id,
+            "pool_id": row.pool_id,
+            "relative_path": row.relative_path,
+            "source_path": row.source_path,
+            "size_bytes": row.size_bytes,
+            "mtime": row.mtime,
+            "checksum_sha256": row.checksum_sha256,
+            "tape_barcode": row.tape_barcode,
+            "tape_offset": row.tape_offset,
+            "status": row.status,
+            "cache_path": row.cache_path,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+    def _nas_restore_job_to_dict(self, row: NasRestoreJob) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "status": row.status,
+            "priority": row.priority,
+            "paths": _load_json_value(row.paths, []),
+            "pool_id": row.pool_id,
+            "dataset_id": row.dataset_id,
+            "destination": row.destination,
+            "allow_parallel": row.allow_parallel,
+            "max_drives": row.max_drives,
+            "cache_policy": row.cache_policy,
+            "overwrite_policy": row.overwrite_policy,
+            "required_tapes": _load_json_value(row.required_tapes, []),
+            "missing_tapes": _load_json_value(row.missing_tapes, []),
+            "exported_tapes": _load_json_value(row.exported_tapes, []),
+            "tape_load_order": _load_json_value(row.tape_load_order, []),
+            "parallel_restore_groups": _load_json_value(row.parallel_restore_groups, {}),
+            "estimated_bytes": row.estimated_bytes,
+            "bytes_restored": row.bytes_restored,
+            "files_restored": row.files_restored,
+            "files_failed": row.files_failed,
+            "unavailable_files": _load_json_value(row.unavailable_files, []),
+            "warnings": _load_json_value(row.warnings, []),
+            "error_message": row.error_message,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "completed_at": row.completed_at,
+        }
 
     def __getattribute__(self, name: str):
         attr = object.__getattribute__(self, name)
@@ -366,6 +507,348 @@ class CatalogRepository:
             return
         self.session.delete(record)
         self.session.commit()
+
+    def list_nas_policies(self) -> list[NasStoragePolicy]:
+        stmt = select(NasStoragePolicy).order_by(NasStoragePolicy.id)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def get_nas_policy(self, policy_id: str) -> NasStoragePolicy | None:
+        return self.session.get(NasStoragePolicy, policy_id)
+
+    def upsert_nas_policy(self, policy_id: str, data: dict[str, object]) -> NasStoragePolicy:
+        data = self._validate_nas_config_data(data, entity_name="NAS policy")
+        parsed = StoragePolicy.model_validate({**data, "id": policy_id})
+        payload = _model_to_json_dict(parsed)
+        policy = self.session.get(NasStoragePolicy, policy_id)
+        if policy is None:
+            policy = NasStoragePolicy(id=policy_id)
+            self.session.add(policy)
+        policy.name = parsed.name
+        policy.policy_type = parsed.policy_type
+        policy.config_json = json.dumps(payload)
+        policy.updated_at = datetime.utcnow()
+        self.session.commit()
+        self.session.refresh(policy)
+        return policy
+
+    def delete_nas_policy(self, policy_id: str) -> bool:
+        policy = self.session.get(NasStoragePolicy, policy_id)
+        if policy is None:
+            return False
+        self.session.delete(policy)
+        self.session.commit()
+        return True
+
+    def list_nas_cache_drives(self) -> list[NasCacheDrive]:
+        stmt = select(NasCacheDrive).order_by(NasCacheDrive.id)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def get_nas_cache_drive(self, drive_id: str) -> NasCacheDrive | None:
+        return self.session.get(NasCacheDrive, drive_id)
+
+    def upsert_nas_cache_drive(self, drive_id: str, data: dict[str, object]) -> NasCacheDrive:
+        data = self._validate_nas_config_data(data, entity_name="NAS cache drive")
+        parsed = CacheDriveConfig.model_validate({**data, "id": drive_id})
+        payload = _model_to_json_dict(parsed)
+        drive = self.session.get(NasCacheDrive, drive_id)
+        if drive is None:
+            drive = NasCacheDrive(id=drive_id)
+            self.session.add(drive)
+        drive.name = parsed.name
+        drive.root_path = parsed.root_path
+        drive.config_json = json.dumps(payload)
+        drive.enabled = parsed.enabled
+        self.session.commit()
+        self.session.refresh(drive)
+        return drive
+
+    def delete_nas_cache_drive(self, drive_id: str) -> bool:
+        drive = self.session.get(NasCacheDrive, drive_id)
+        if drive is None:
+            return False
+        self.session.delete(drive)
+        self.session.commit()
+        return True
+
+    def get_nas_config(self, key: str) -> dict[str, object] | None:
+        config = self.session.get(NasConfig, key)
+        if config is None:
+            return None
+        value = json.loads(config.value_json or "{}")
+        if isinstance(value, dict):
+            return value
+        return {"value": value}
+
+    def set_nas_config(self, key: str, value: dict[str, object]) -> dict[str, object]:
+        config = self.session.get(NasConfig, key)
+        if config is None:
+            config = NasConfig(key=key)
+            self.session.add(config)
+        config.value_json = json.dumps(value)
+        self.session.commit()
+        return value
+
+    def delete_nas_config(self, key: str) -> bool:
+        config = self.session.get(NasConfig, key)
+        if config is None:
+            return False
+        self.session.delete(config)
+        self.session.commit()
+        return True
+
+    def list_nas_shares(self) -> list[NasShare]:
+        stmt = select(NasShare).order_by(NasShare.path)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def get_nas_share(self, path: str) -> NasShare | None:
+        return self.session.get(NasShare, path)
+
+    def upsert_nas_share(self, path: str, data: dict[str, object]) -> NasShare:
+        data = self._validate_nas_config_data(data, entity_name="NAS share")
+        parsed = NasShareDefinition.model_validate({**data, "path": path})
+        payload = _model_to_json_dict(parsed)
+        share = self.session.get(NasShare, path)
+        if share is None:
+            share = NasShare(path=path)
+            self.session.add(share)
+        share.name = parsed.name
+        share.share_type = parsed.share_type
+        share.config_json = json.dumps(payload)
+        self.session.commit()
+        self.session.refresh(share)
+        return share
+
+    def delete_nas_share(self, path: str) -> bool:
+        share = self.session.get(NasShare, path)
+        if share is None:
+            return False
+        self.session.delete(share)
+        self.session.commit()
+        return True
+
+    def list_nas_pools(self) -> list[dict[str, object]]:
+        stmt = select(NasPool).order_by(NasPool.name)
+        return [self._nas_pool_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def get_nas_pool(self, pool_id: str) -> dict[str, object] | None:
+        row = self.session.get(NasPool, pool_id)
+        if row is None:
+            return None
+        return self._nas_pool_to_dict(row)
+
+    def upsert_nas_pool(self, config: dict[str, object]) -> dict[str, object]:
+        parsed = NasPoolModel.model_validate(config)
+        row = self.session.get(NasPool, parsed.id)
+        if row is None:
+            row = NasPool(id=parsed.id, created_at=parsed.created_at or _utcnow_iso())
+            self.session.add(row)
+        row.name = parsed.name
+        row.description = parsed.description
+        row.volume_group_ids = json.dumps(parsed.volume_group_ids)
+        row.default_policy_id = parsed.default_policy_id
+        row.default_ingest_mode = parsed.default_ingest_mode
+        row.mount_path = parsed.mount_path
+        row.virtual_mount_enabled = parsed.virtual_mount_enabled
+        row.hydration_behavior = parsed.hydration_behavior
+        row.cache_target_id = parsed.cache_target_id
+        row.restore_target_path = parsed.restore_target_path
+        row.access_mode = parsed.access_mode
+        row.created_at = row.created_at or parsed.created_at or _utcnow_iso()
+        row.updated_at = parsed.updated_at or _utcnow_iso()
+        self.session.commit()
+        self.session.refresh(row)
+        return self._nas_pool_to_dict(row)
+
+    def delete_nas_pool(self, pool_id: str) -> bool:
+        row = self.session.get(NasPool, pool_id)
+        if row is None:
+            return False
+        self.session.delete(row)
+        self.session.commit()
+        return True
+
+    def list_nas_datasets(self, pool_id: str | None = None) -> list[dict[str, object]]:
+        stmt = select(NasDataset).order_by(NasDataset.created_at, NasDataset.name)
+        if pool_id is not None:
+            stmt = stmt.where(NasDataset.pool_id == pool_id)
+        return [self._nas_dataset_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def get_nas_dataset(self, dataset_id: str) -> dict[str, object] | None:
+        row = self.session.get(NasDataset, dataset_id)
+        if row is None:
+            return None
+        return self._nas_dataset_to_dict(row)
+
+    def upsert_nas_dataset(self, config: dict[str, object]) -> dict[str, object]:
+        parsed = NasDatasetModel.model_validate(config)
+        row = self.session.get(NasDataset, parsed.id)
+        if row is None:
+            row = NasDataset(id=parsed.id, created_at=parsed.created_at or _utcnow_iso())
+            self.session.add(row)
+        row.pool_id = parsed.pool_id
+        row.name = parsed.name
+        row.source_path = parsed.source_path
+        row.source_host = parsed.source_host
+        row.policy_id = parsed.policy_id
+        row.ingest_mode = parsed.ingest_mode
+        row.volume_group_id = parsed.volume_group_id
+        row.tape_set = json.dumps(parsed.tape_set)
+        row.shard_map = json.dumps(parsed.shard_map)
+        row.file_count = parsed.file_count
+        row.total_bytes = parsed.total_bytes
+        row.status = parsed.status
+        row.copies_completed = parsed.copies_completed
+        row.manifest_path = parsed.manifest_path
+        row.created_at = row.created_at or parsed.created_at or _utcnow_iso()
+        row.updated_at = parsed.updated_at or _utcnow_iso()
+        self.session.commit()
+        self.session.refresh(row)
+        return self._nas_dataset_to_dict(row)
+
+    def delete_nas_dataset(self, dataset_id: str) -> bool:
+        row = self.session.get(NasDataset, dataset_id)
+        if row is None:
+            return False
+        self.session.delete(row)
+        self.session.commit()
+        return True
+
+    def list_nas_file_records(self, dataset_id: str) -> list[dict[str, object]]:
+        stmt = (
+            select(NasFileRecord)
+            .where(NasFileRecord.dataset_id == dataset_id)
+            .order_by(NasFileRecord.relative_path)
+        )
+        return [self._nas_file_record_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def get_nas_file_record(self, file_id: str) -> dict[str, object] | None:
+        row = self.session.get(NasFileRecord, file_id)
+        if row is None:
+            return None
+        return self._nas_file_record_to_dict(row)
+
+    def upsert_nas_file_record(self, config: dict[str, object]) -> dict[str, object]:
+        parsed = NasFileRecordModel.model_validate(config)
+        row = self.session.get(NasFileRecord, parsed.id)
+        if row is None:
+            row = NasFileRecord(id=parsed.id, created_at=parsed.created_at or _utcnow_iso())
+            self.session.add(row)
+        row.dataset_id = parsed.dataset_id
+        row.pool_id = parsed.pool_id
+        row.relative_path = parsed.relative_path
+        row.source_path = parsed.source_path
+        row.size_bytes = parsed.size_bytes
+        row.mtime = parsed.mtime
+        row.checksum_sha256 = parsed.checksum_sha256
+        row.tape_barcode = parsed.tape_barcode
+        row.tape_offset = parsed.tape_offset
+        row.status = parsed.status.value
+        row.cache_path = parsed.cache_path
+        row.created_at = row.created_at or parsed.created_at or _utcnow_iso()
+        row.updated_at = parsed.updated_at or _utcnow_iso()
+        self.session.commit()
+        self.session.refresh(row)
+        return self._nas_file_record_to_dict(row)
+
+    def update_nas_file_status(self, file_id: str, status: str) -> bool:
+        row = self.session.get(NasFileRecord, file_id)
+        if row is None:
+            return False
+        parsed = NasFileRecordModel.model_validate({**self._nas_file_record_to_dict(row), "status": status})
+        row.status = parsed.status.value
+        row.updated_at = _utcnow_iso()
+        self.session.commit()
+        return True
+
+    def list_nas_restore_jobs(self, status: str | None = None) -> list[dict[str, object]]:
+        stmt = select(NasRestoreJob).order_by(NasRestoreJob.created_at.desc())
+        if status is not None:
+            stmt = stmt.where(NasRestoreJob.status == status)
+        return [self._nas_restore_job_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def get_nas_restore_job(self, job_id: str) -> dict[str, object] | None:
+        row = self.session.get(NasRestoreJob, job_id)
+        if row is None:
+            return None
+        return self._nas_restore_job_to_dict(row)
+
+    def upsert_nas_restore_job(self, config: dict[str, object]) -> dict[str, object]:
+        parsed = NasRestoreJobModel.model_validate(config)
+        row = self.session.get(NasRestoreJob, parsed.id)
+        if row is None:
+            row = NasRestoreJob(id=parsed.id, created_at=parsed.created_at or _utcnow_iso())
+            self.session.add(row)
+        row.status = parsed.status.value
+        row.priority = parsed.priority
+        row.paths = json.dumps(parsed.paths)
+        row.pool_id = parsed.pool_id
+        row.dataset_id = parsed.dataset_id
+        row.destination = parsed.destination
+        row.allow_parallel = parsed.allow_parallel
+        row.max_drives = parsed.max_drives
+        row.cache_policy = parsed.cache_policy
+        row.overwrite_policy = parsed.overwrite_policy
+        row.required_tapes = json.dumps(parsed.required_tapes)
+        row.missing_tapes = json.dumps(parsed.missing_tapes)
+        row.exported_tapes = json.dumps(parsed.exported_tapes)
+        row.tape_load_order = json.dumps(parsed.tape_load_order)
+        row.parallel_restore_groups = json.dumps(parsed.parallel_restore_groups)
+        row.estimated_bytes = parsed.estimated_bytes
+        row.bytes_restored = parsed.bytes_restored
+        row.files_restored = parsed.files_restored
+        row.files_failed = parsed.files_failed
+        row.unavailable_files = json.dumps(parsed.unavailable_files)
+        row.warnings = json.dumps(parsed.warnings)
+        row.error_message = parsed.error_message
+        row.created_at = row.created_at or parsed.created_at or _utcnow_iso()
+        row.updated_at = parsed.updated_at or _utcnow_iso()
+        row.completed_at = parsed.completed_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._nas_restore_job_to_dict(row)
+
+    def update_nas_restore_job_status(
+        self,
+        job_id: str,
+        status: str,
+        *,
+        bytes_restored: int | None = None,
+        files_restored: int | None = None,
+        files_failed: int | None = None,
+        error_message: str | None = None,
+    ) -> bool:
+        row = self.session.get(NasRestoreJob, job_id)
+        if row is None:
+            return False
+
+        row.status = RestoreJobStatus(status).value
+        row.updated_at = _utcnow_iso()
+
+        if bytes_restored is not None:
+            row.bytes_restored = bytes_restored
+        if files_restored is not None:
+            row.files_restored = files_restored
+        if files_failed is not None:
+            row.files_failed = files_failed
+        if error_message is not None:
+            row.error_message = error_message
+        if row.status in {
+            RestoreJobStatus.COMPLETED.value,
+            RestoreJobStatus.FAILED.value,
+            RestoreJobStatus.CANCELLED.value,
+        }:
+            row.completed_at = _utcnow_iso()
+
+        self.session.commit()
+        return True
+
+    def delete_nas_restore_job(self, job_id: str) -> bool:
+        row = self.session.get(NasRestoreJob, job_id)
+        if row is None:
+            return False
+        self.session.delete(row)
+        self.session.commit()
+        return True
 
     def save_safety_token(self, token: SafetyToken) -> None:
         row = SafetyTokenRecord(
