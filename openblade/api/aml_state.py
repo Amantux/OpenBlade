@@ -187,6 +187,18 @@ class AMLState:
         "state": "idle", "filename": None, "createdAt": None, "size": 0
     })
     aml_system_manual_time_utc: str | None = None
+    aml_ltfs_sections: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_ltfs_sections())
+    aml_iscsi_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_iscsi_blades())
+    aml_advanced_ha_config: dict[str, Any] = field(default_factory=lambda: _default_aml_advanced_ha_config())
+    aml_advanced_ha_nodes: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_advanced_ha_nodes())
+    aml_ekm_config: dict[str, Any] = field(default_factory=lambda: _default_aml_ekm_config())
+    aml_ekm_status: dict[str, Any] = field(default_factory=lambda: _default_aml_ekm_status())
+    aml_ekm_keys: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_ekm_keys())
+    aml_sharing_config: dict[str, Any] = field(default_factory=lambda: _default_aml_sharing_config())
+    aml_sharing_status: dict[str, Any] = field(default_factory=lambda: _default_aml_sharing_status())
+    aml_sharing_clients: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_sharing_clients())
+    aml_remote_libraries: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_remote_libraries())
+    aml_supported_media: list[dict[str, Any]] = field(default_factory=lambda: _default_aml_supported_media())
 
 
 def _utcnow() -> datetime:
@@ -377,6 +389,26 @@ def _default_aml_media() -> dict[str, dict[str, Any]]:
             "loadCount": 5,
             "errorCount": 0,
             "lastLoaded": "2024-01-15T10:00:00Z",
+            "history": [
+                {
+                    "timestamp": "2024-01-15T10:00:00Z",
+                    "type": "mount",
+                    "action": "mount",
+                    "source": "1,1,1",
+                    "destination": "DRV-001",
+                    "drive": "DRV-001",
+                    "result": "success",
+                },
+                {
+                    "timestamp": "2024-01-15T10:30:00Z",
+                    "type": "unmount",
+                    "action": "unmount",
+                    "source": "DRV-001",
+                    "destination": "1,1,1",
+                    "drive": "DRV-001",
+                    "result": "success",
+                },
+            ],
         },
         "VOL002L9": {
             "barcode": "VOL002L9",
@@ -390,6 +422,17 @@ def _default_aml_media() -> dict[str, dict[str, Any]]:
             "loadCount": 3,
             "errorCount": 0,
             "lastLoaded": "2024-01-14T08:00:00Z",
+            "history": [
+                {
+                    "timestamp": "2024-01-14T08:00:00Z",
+                    "type": "inventory",
+                    "action": "inventory",
+                    "source": "1,1,2",
+                    "destination": None,
+                    "drive": None,
+                    "result": "success",
+                }
+            ],
         },
         "CLN001L9": {
             "barcode": "CLN001L9",
@@ -433,6 +476,13 @@ def _default_aml_drives() -> dict[str, dict[str, Any]]:
             "lastCleaned": "2024-01-10T08:00:00Z",
             "loadedMedia": None,
             "config": {"compression": True, "encryption": False, "speed": "400MB/s", "bufferSize": "256MB"},
+            "encryptionState": {
+                "enabled": False,
+                "mode": "applicationManaged",
+                "keyManager": None,
+                "keyAlias": None,
+                "status": "disabled",
+            },
             "errors": [],
             "diagnosticResult": None,
         },
@@ -451,6 +501,13 @@ def _default_aml_drives() -> dict[str, dict[str, Any]]:
             "lastCleaned": "2024-01-08T14:00:00Z",
             "loadedMedia": None,
             "config": {"compression": True, "encryption": False, "speed": "400MB/s", "bufferSize": "256MB"},
+            "encryptionState": {
+                "enabled": False,
+                "mode": "applicationManaged",
+                "keyManager": None,
+                "keyAlias": None,
+                "status": "disabled",
+            },
             "errors": [],
             "diagnosticResult": None,
         },
@@ -581,15 +638,118 @@ def _default_fc_blades() -> dict[str, dict[str, Any]]:
             "ports": [
                 {
                     "id": f"FC-1-P{i}",
+                    "portNumber": i,
                     "wwpn": f"50:00:00:00:00:00:00:0{i}",
                     "speed": "16G",
                     "status": "online",
                     "mode": "target",
                     "topology": "point-to-point",
+                    "fabricLoginState": "logged-in",
+                    "alias": f"FCB0001-Port{i}",
+                    "statistics": {
+                        "framesTx": 100000 * i,
+                        "framesRx": 98000 * i,
+                        "linkResets": 0,
+                        "lossOfSignal": 0,
+                        "crcErrors": 0,
+                        "secondsSinceReset": 86400 + (i * 120),
+                    },
                 }
                 for i in range(1, 5)
             ],
-        }
+            "hpf": {
+                "enabled": True,
+                "mode": "auto",
+                "preferredPort": 1,
+                "partnerBladeSerial": "FCB0002",
+                "interventionRequired": False,
+                "autoRestore": True,
+                "state": "protected",
+            },
+            "zoning": {
+                "enabled": True,
+                "mode": "singleInitiatorSingleTarget",
+                "defaultZoneSet": "OpenBlade-ZoneSet-A",
+                "activeZoneCount": 4,
+                "pendingChanges": False,
+            },
+            "wwn": {
+                "serialNumber": "FCB0001",
+                "nodeWwn": "50:00:00:00:00:00:10:01",
+                "virtualWwnEnabled": False,
+                "virtualNodeWwn": None,
+                "portWwns": [f"50:00:00:00:00:00:00:0{i}" for i in range(1, 5)],
+            },
+            "dataPath": {
+                "serialNumber": "FCB0001",
+                "status": "healthy",
+                "activePaths": 4,
+                "preferredPath": "fabric-a",
+                "lastTest": "2024-01-15T09:30:00Z",
+                "lastResult": "pass",
+            },
+        },
+        "FC-2": {
+            "id": "FC-2",
+            "serialNumber": "FCB0002",
+            "model": "FC Blade 4-Port 16Gb",
+            "status": "online",
+            "firmware": "3.2.1",
+            "portCount": 4,
+            "ports": [
+                {
+                    "id": f"FC-2-P{i}",
+                    "portNumber": i,
+                    "wwpn": f"50:00:00:00:00:00:00:1{i}",
+                    "speed": "16G",
+                    "status": "online",
+                    "mode": "target",
+                    "topology": "point-to-point",
+                    "fabricLoginState": "logged-in",
+                    "alias": f"FCB0002-Port{i}",
+                    "statistics": {
+                        "framesTx": 92000 * i,
+                        "framesRx": 91000 * i,
+                        "linkResets": 0,
+                        "lossOfSignal": 0,
+                        "crcErrors": 0,
+                        "secondsSinceReset": 84000 + (i * 90),
+                    },
+                }
+                for i in range(1, 5)
+            ],
+            "hpf": {
+                "enabled": True,
+                "mode": "auto",
+                "preferredPort": 1,
+                "partnerBladeSerial": "FCB0001",
+                "interventionRequired": False,
+                "autoRestore": True,
+                "state": "protected",
+            },
+            "zoning": {
+                "enabled": True,
+                "mode": "singleInitiatorSingleTarget",
+                "defaultZoneSet": "OpenBlade-ZoneSet-B",
+                "activeZoneCount": 4,
+                "pendingChanges": False,
+            },
+            "wwn": {
+                "serialNumber": "FCB0002",
+                "nodeWwn": "50:00:00:00:00:00:10:02",
+                "virtualWwnEnabled": False,
+                "virtualNodeWwn": None,
+                "portWwns": [f"50:00:00:00:00:00:00:1{i}" for i in range(1, 5)],
+            },
+            "dataPath": {
+                "serialNumber": "FCB0002",
+                "status": "healthy",
+                "activePaths": 4,
+                "preferredPath": "fabric-b",
+                "lastTest": "2024-01-15T09:45:00Z",
+                "lastResult": "pass",
+            },
+        },
     }
 
 
@@ -732,6 +892,206 @@ def _default_aml_magazines() -> dict[str, dict[str, Any]]:
             "tapes": ["VOL001L9", "VOL002L9", "VOL003L9"],
         }
     }
+
+
+
+def _default_aml_ltfs_sections() -> dict[str, dict[str, Any]]:
+    return {
+        "1": {
+            "sectionNumber": 1,
+            "name": "LTFS Section 1",
+            "status": "ready",
+            "mounted": False,
+            "mountPoint": "/ltfs/partition1",
+            "fileSystem": "LTFS 2.4",
+            "partitionName": "partition1",
+            "readOnly": False,
+            "lastMounted": None,
+            "drives": [
+                {"serialNumber": "DRV-001", "state": "available", "role": "primary"},
+                {"serialNumber": "DRV-002", "state": "available", "role": "secondary"},
+            ],
+            "media": [
+                {"barcode": "VOL001L9", "state": "cataloged", "type": "LTO-9"},
+                {"barcode": "VOL002L9", "state": "cataloged", "type": "LTO-9"},
+            ],
+        }
+    }
+
+
+
+def _default_aml_iscsi_blades() -> dict[str, dict[str, Any]]:
+    return {
+        "FCB0001": {
+            "serialNumber": "FCB0001",
+            "enabled": False,
+            "iqn": "iqn.2024-01.com.openblade:fcb0001",
+            "ipAddress": "192.168.150.11",
+            "subnetMask": "255.255.255.0",
+            "gateway": "192.168.150.1",
+            "authMode": "none",
+            "mtu": 1500,
+            "sessions": [],
+            "targets": [
+                {
+                    "name": "iqn.2024-01.com.openblade:fcb0001.target0",
+                    "status": "ready",
+                    "luns": ["partition1"],
+                }
+            ],
+            "initiators": [],
+        },
+        "FCB0002": {
+            "serialNumber": "FCB0002",
+            "enabled": False,
+            "iqn": "iqn.2024-01.com.openblade:fcb0002",
+            "ipAddress": "192.168.150.12",
+            "subnetMask": "255.255.255.0",
+            "gateway": "192.168.150.1",
+            "authMode": "none",
+            "mtu": 1500,
+            "sessions": [],
+            "targets": [
+                {
+                    "name": "iqn.2024-01.com.openblade:fcb0002.target0",
+                    "status": "ready",
+                    "luns": ["partition1"],
+                }
+            ],
+            "initiators": [],
+        },
+    }
+
+
+
+def _default_aml_advanced_ha_config() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "mode": "standalone",
+        "clusterName": "OpenBlade-HA",
+        "heartbeatInterval": 5,
+        "autoFailback": False,
+    }
+
+
+
+def _default_aml_advanced_ha_nodes() -> dict[str, dict[str, Any]]:
+    return {
+        "node-1": {
+            "id": "node-1",
+            "name": "openblade-a",
+            "role": "active",
+            "state": "standalone",
+            "ipAddress": "192.168.100.10",
+            "lastHeartbeat": "2024-01-15T10:00:00Z",
+            "healthy": True,
+        },
+        "node-2": {
+            "id": "node-2",
+            "name": "openblade-b",
+            "role": "standby",
+            "state": "idle",
+            "ipAddress": "192.168.100.11",
+            "lastHeartbeat": None,
+            "healthy": True,
+        },
+    }
+
+
+
+def _default_aml_ekm_config() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "primaryServer": "ekm.example.com",
+        "secondaryServer": None,
+        "port": 5696,
+        "protocol": "kmip",
+        "timeoutSeconds": 10,
+        "clientCertificate": None,
+    }
+
+
+
+def _default_aml_ekm_status() -> dict[str, Any]:
+    return {
+        "connected": False,
+        "lastTest": None,
+        "error": None,
+        "cacheAgeSeconds": 0,
+    }
+
+
+
+def _default_aml_ekm_keys() -> dict[str, dict[str, Any]]:
+    return {
+        "key-001": {
+            "keyId": "key-001",
+            "alias": "OpenBlade-Partition1",
+            "state": "cached",
+            "algorithm": "AES-256",
+            "updatedAt": "2024-01-15T08:00:00Z",
+        }
+    }
+
+
+
+def _default_aml_sharing_config() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "mode": "disabled",
+        "serverId": "openblade-share-1",
+        "exportedPartitions": [],
+    }
+
+
+
+def _default_aml_sharing_status() -> dict[str, Any]:
+    return {
+        "state": "disabled",
+        "connectedClients": 0,
+        "lastSync": None,
+        "health": "ok",
+    }
+
+
+
+def _default_aml_sharing_clients() -> dict[str, dict[str, Any]]:
+    return {}
+
+
+
+def _default_aml_remote_libraries() -> dict[str, dict[str, Any]]:
+    return {}
+
+
+
+def _default_aml_supported_media() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "LTO-8",
+            "description": "LTO Ultrium 8 data cartridge",
+            "nativeCapacity": "12 TB",
+            "compressedCapacity": "30 TB",
+            "generations": ["LTO-7", "LTO-8"],
+            "cleaning": False,
+        },
+        {
+            "name": "LTO-9",
+            "description": "LTO Ultrium 9 data cartridge",
+            "nativeCapacity": "18 TB",
+            "compressedCapacity": "45 TB",
+            "generations": ["LTO-8", "LTO-9"],
+            "cleaning": False,
+        },
+        {
+            "name": "LTO-9-CLN",
+            "description": "LTO Ultrium 9 cleaning cartridge",
+            "nativeCapacity": "N/A",
+            "compressedCapacity": "N/A",
+            "generations": ["LTO-9"],
+            "cleaning": True,
+        },
+    ]
 
 
 
@@ -2986,3 +3346,232 @@ def get_aml_system_manual_time_utc() -> str | None:
 
 def set_aml_system_manual_time_utc(ts: str | None) -> None:
     _STATE.aml_system_manual_time_utc = ts
+
+
+
+def get_fc_blade_by_serial(serial_number: str) -> dict[str, Any] | None:
+    for blade in _STATE.fc_blades.values():
+        if str(blade.get("serialNumber")) == serial_number:
+            return deepcopy(blade)
+    return None
+
+
+
+def update_fc_blade_by_serial(serial_number: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    for blade_id, blade in _STATE.fc_blades.items():
+        if str(blade.get("serialNumber")) == serial_number:
+            return update_fc_blade(blade_id, updates)
+    return None
+
+
+
+def get_fc_port_by_number(serial_number: str, port_number: int) -> dict[str, Any] | None:
+    blade = get_fc_blade_by_serial(serial_number)
+    if blade is None:
+        return None
+    for port in blade.get("ports", []):
+        if int(port.get("portNumber", 0)) == port_number:
+            return port
+    return None
+
+
+
+def update_fc_port_by_number(serial_number: str, port_number: int, updates: dict[str, Any]) -> dict[str, Any] | None:
+    for blade in _STATE.fc_blades.values():
+        if str(blade.get("serialNumber")) != serial_number:
+            continue
+        for port in blade.get("ports", []):
+            if int(port.get("portNumber", 0)) == port_number:
+                port.update(deepcopy(updates))
+                return deepcopy(port)
+        return None
+    return None
+
+
+
+def list_aml_ltfs_sections() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_ltfs_sections.items(), key=lambda entry: int(entry[0]))]
+
+
+
+def get_aml_ltfs_section(section_number: int | str) -> dict[str, Any] | None:
+    section = _STATE.aml_ltfs_sections.get(str(section_number))
+    return deepcopy(section) if section is not None else None
+
+
+
+def update_aml_ltfs_section(section_number: int | str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    section = _STATE.aml_ltfs_sections.get(str(section_number))
+    if section is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            section[key] = value
+    return get_aml_ltfs_section(section_number)
+
+
+
+def get_aml_iscsi_blade(serial_number: str) -> dict[str, Any] | None:
+    blade = _STATE.aml_iscsi_blades.get(serial_number)
+    return deepcopy(blade) if blade is not None else None
+
+
+
+def update_aml_iscsi_blade(serial_number: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    blade = _STATE.aml_iscsi_blades.get(serial_number)
+    if blade is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            blade[key] = value
+    return get_aml_iscsi_blade(serial_number)
+
+
+
+def get_aml_advanced_ha_config() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_advanced_ha_config)
+
+
+
+def set_aml_advanced_ha_config(updates: dict[str, Any]) -> dict[str, Any]:
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            _STATE.aml_advanced_ha_config[key] = value
+    return get_aml_advanced_ha_config()
+
+
+
+def list_aml_advanced_ha_nodes() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_advanced_ha_nodes.items())]
+
+
+
+def get_aml_advanced_ha_node(node_id: str) -> dict[str, Any] | None:
+    node = _STATE.aml_advanced_ha_nodes.get(node_id)
+    return deepcopy(node) if node is not None else None
+
+
+
+def update_aml_advanced_ha_node(node_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    node = _STATE.aml_advanced_ha_nodes.get(node_id)
+    if node is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            node[key] = value
+    return get_aml_advanced_ha_node(node_id)
+
+
+
+def get_aml_ekm_config() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_ekm_config)
+
+
+
+def set_aml_ekm_config(updates: dict[str, Any]) -> dict[str, Any]:
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            _STATE.aml_ekm_config[key] = value
+    return get_aml_ekm_config()
+
+
+
+def get_aml_ekm_status() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_ekm_status)
+
+
+
+def set_aml_ekm_status(status: dict[str, Any]) -> dict[str, Any]:
+    _STATE.aml_ekm_status = deepcopy(status)
+    return get_aml_ekm_status()
+
+
+
+def list_aml_ekm_keys() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_ekm_keys.items())]
+
+
+
+def set_aml_ekm_keys(keys: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    _STATE.aml_ekm_keys = {str(item.get("keyId")): deepcopy(item) for item in keys}
+    return list_aml_ekm_keys()
+
+
+
+def get_aml_sharing_config() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_sharing_config)
+
+
+
+def set_aml_sharing_config(updates: dict[str, Any]) -> dict[str, Any]:
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            _STATE.aml_sharing_config[key] = value
+    return get_aml_sharing_config()
+
+
+
+def get_aml_sharing_status() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_sharing_status)
+
+
+
+def set_aml_sharing_status(status: dict[str, Any]) -> dict[str, Any]:
+    _STATE.aml_sharing_status = deepcopy(status)
+    return get_aml_sharing_status()
+
+
+
+def list_aml_sharing_clients() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_sharing_clients.items())]
+
+
+
+def set_aml_sharing_clients(clients: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    _STATE.aml_sharing_clients = {str(item.get("id")): deepcopy(item) for item in clients}
+    return list_aml_sharing_clients()
+
+
+
+def list_aml_remote_libraries() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_remote_libraries.items())]
+
+
+
+def get_aml_remote_library(library_id: str) -> dict[str, Any] | None:
+    library = _STATE.aml_remote_libraries.get(library_id)
+    return deepcopy(library) if library is not None else None
+
+
+
+def create_aml_remote_library(payload: dict[str, Any]) -> dict[str, Any]:
+    next_id = f"rlib-{len(_STATE.aml_remote_libraries) + 1}"
+    library = {"id": next_id, **deepcopy(payload)}
+    _STATE.aml_remote_libraries[next_id] = library
+    return deepcopy(library)
+
+
+
+def update_aml_remote_library(library_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    library = _STATE.aml_remote_libraries.get(library_id)
+    if library is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "id":
+            continue
+        if value is not None:
+            library[key] = value
+    return get_aml_remote_library(library_id)
+
+
+
+def delete_aml_remote_library(library_id: str) -> bool:
+    if library_id not in _STATE.aml_remote_libraries:
+        return False
+    del _STATE.aml_remote_libraries[library_id]
+    return True
+
+
+
+def list_aml_supported_media() -> list[dict[str, Any]]:
+    return deepcopy(_STATE.aml_supported_media)
