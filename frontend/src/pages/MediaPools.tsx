@@ -458,7 +458,7 @@ export default function MediaPools() {
                 <th className="px-3 py-3">Barcode</th>
                 <th className="px-3 py-3">Type</th>
                 <th className="px-3 py-3">State</th>
-                <th className="px-3 py-3">Location</th>
+                <th className="px-3 py-3">Slot Address</th>
                 <th className="px-3 py-3">Capacity</th>
               </tr>
             </thead>
@@ -484,7 +484,7 @@ export default function MediaPools() {
                       <td className="px-3 py-3 font-medium text-white">{cartridge.barcode}</td>
                       <td className="px-3 py-3">{cartridge.type}</td>
                       <td className="px-3 py-3">{cartridge.state}</td>
-                      <td className="px-3 py-3">{cartridge.location}</td>
+                      <td className="px-3 py-3">{cartridge.slotAddress ?? cartridge.location ?? '—'}</td>
                       <td className="px-3 py-3 text-slate-300">{assignable ? formatTb(cartridge.capacityGB) : 'N/A'}</td>
                     </tr>
                   );
@@ -687,7 +687,7 @@ export default function MediaPools() {
                         <td className="px-3 py-3 font-medium text-white">{cartridge.barcode}</td>
                         <td className="px-3 py-3">{cartridge.type}</td>
                         <td className="px-3 py-3">{cartridge.state}</td>
-                        <td className="px-3 py-3">{cartridge.slotAddress ?? '—'}</td>
+                        <td className="px-3 py-3">{cartridge.slotAddress ?? cartridge.location ?? '—'}</td>
                         <td className="px-3 py-3">{formatTb(cartridge.capacityGB)}</td>
                       </tr>
                     ))

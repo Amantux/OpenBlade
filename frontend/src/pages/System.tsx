@@ -9,6 +9,7 @@ import {
   getSnmpConfig,
   getSnmpTraps,
   getSystemCertificates,
+  getSystemConfig,
   getSystemDetail,
   getSystemOverview,
   getSystemSecurity,
@@ -25,6 +26,7 @@ import {
   updateNetworkInterface,
   updateNtpConfig,
   updateSnmpConfig,
+  updateSystemConfig,
   updateSystemSecurity,
   type CertificateSummaryResponse,
   type DnsConfigResponse,
@@ -34,6 +36,7 @@ import {
   type SecurityConfigResponse,
   type SnmpConfigResponse,
   type SnmpTrapResponse,
+  type SystemConfigResponse,
 } from '../api/system';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -113,6 +116,7 @@ function ToggleField({
 }
 
 function OverviewTab() {
+  const queryClient = useQueryClient();
   const overviewQuery = useQuery({ queryKey: ['system', 'overview'], queryFn: getSystemOverview, refetchInterval: 30_000 });
   const detailQuery = useQuery({ queryKey: ['system', 'detail'], queryFn: getSystemDetail, refetchInterval: 60_000 });
   const statusQuery = useQuery({ queryKey: ['system', 'status'], queryFn: getSystemStatus, refetchInterval: 15_000 });
@@ -120,12 +124,46 @@ function OverviewTab() {
   const uptimeQuery = useQuery({ queryKey: ['system', 'uptime'], queryFn: getSystemUptime, refetchInterval: 15_000 });
   const timeQuery = useQuery({ queryKey: ['system', 'time'], queryFn: getSystemTime, refetchInterval: 15_000 });
   const backupQuery = useQuery({ queryKey: ['system', 'backup'], queryFn: getBackupStatus, refetchInterval: 60_000 });
+  const configQuery = useQuery({ queryKey: ['system', 'config'], queryFn: getSystemConfig, refetchInterval: 60_000 });
+  const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState<SystemConfigResponse>({
+    hostname: '',
+    timezone: 'UTC',
+    locale: 'en_US',
+    dateFormat: 'YYYY-MM-DD',
+    temperatureUnit: 'celsius',
+  });
 
-  if ([overviewQuery, detailQuery, statusQuery, versionQuery, uptimeQuery, timeQuery, backupQuery].some((query) => query.isLoading)) {
+  useEffect(() => {
+    if (configQuery.data && !editMode) {
+      setForm(configQuery.data);
+    }
+  }, [configQuery.data, editMode]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => updateSystemConfig(form),
+    onSuccess: async () => {
+      setEditMode(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['system', 'config'] }),
+        queryClient.invalidateQueries({ queryKey: ['system', 'overview'] }),
+        queryClient.invalidateQueries({ queryKey: ['system', 'time'] }),
+      ]);
+    },
+  });
+
+  const resetForm = () => {
+    if (configQuery.data) {
+      setForm(configQuery.data);
+    }
+    setEditMode(false);
+  };
+
+  if ([overviewQuery, detailQuery, statusQuery, versionQuery, uptimeQuery, timeQuery, backupQuery, configQuery].some((query) => query.isLoading)) {
     return <Spinner />;
   }
 
-  const errorQuery = [overviewQuery, detailQuery, statusQuery, versionQuery, uptimeQuery, timeQuery, backupQuery].find((query) => query.isError);
+  const errorQuery = [overviewQuery, detailQuery, statusQuery, versionQuery, uptimeQuery, timeQuery, backupQuery, configQuery].find((query) => query.isError);
   if (errorQuery) {
     return <ErrorMessage error={errorQuery.error} onRetry={() => void errorQuery.refetch()} />;
   }
@@ -147,7 +185,17 @@ function OverviewTab() {
             <h2 className="mt-1 text-2xl font-semibold text-slate-100">System identity</h2>
             <p className="mt-2 text-sm text-slate-400">Live system inventory, runtime status, backup posture, and clock state from AML system routes.</p>
           </div>
-          <Badge variant={statusVariant(status.overall)}>{status.overall}</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={statusVariant(status.overall)}>{status.overall}</Badge>
+            {editMode ? (
+              <>
+                <Button type="button" variant="ghost" disabled={saveMutation.isPending} onClick={resetForm}>Cancel</Button>
+                <Button type="button" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? 'Saving…' : 'Save Overview'}</Button>
+              </>
+            ) : (
+              <Button type="button" variant="secondary" onClick={() => setEditMode(true)}>Edit Overview</Button>
+            )}
+          </div>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
           {[
@@ -163,6 +211,36 @@ function OverviewTab() {
               <div className="mt-2 text-sm font-medium text-slate-100">{value}</div>
             </div>
           ))}
+        </div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Configuration</div>
+            <h3 className="mt-1 text-lg font-semibold text-slate-100">Editable system settings</h3>
+          </div>
+          <Badge variant="blue">/aml/system/config</Badge>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <Field label="Hostname">
+            <input className={fieldClassName} disabled={!editMode} value={form.hostname} onChange={(event) => setForm((current) => ({ ...current, hostname: event.target.value }))} />
+          </Field>
+          <Field label="Timezone">
+            <input className={fieldClassName} disabled={!editMode} value={form.timezone} onChange={(event) => setForm((current) => ({ ...current, timezone: event.target.value }))} />
+          </Field>
+          <Field label="Locale">
+            <input className={fieldClassName} disabled={!editMode} value={form.locale} onChange={(event) => setForm((current) => ({ ...current, locale: event.target.value }))} />
+          </Field>
+          <Field label="Date Format">
+            <input className={fieldClassName} disabled={!editMode} value={form.dateFormat} onChange={(event) => setForm((current) => ({ ...current, dateFormat: event.target.value }))} />
+          </Field>
+          <Field label="Temperature Unit">
+            <select className={fieldClassName} disabled={!editMode} value={form.temperatureUnit} onChange={(event) => setForm((current) => ({ ...current, temperatureUnit: event.target.value }))}>
+              <option value="celsius">celsius</option>
+              <option value="fahrenheit">fahrenheit</option>
+            </select>
+          </Field>
         </div>
       </Card>
 
@@ -231,6 +309,8 @@ function OverviewTab() {
           </div>
         </Card>
       </div>
+
+      {saveMutation.isError ? <ErrorMessage error={saveMutation.error} /> : null}
     </div>
   );
 }
@@ -491,6 +571,7 @@ function CertificatesTab() {
             <input
               ref={fileInputRef}
               type="file"
+              accept=".crt,.cer,.pem,.der,.p12,.pfx"
               className="hidden"
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -500,7 +581,7 @@ function CertificatesTab() {
                 event.target.value = '';
               }}
             />
-            <Button onClick={() => fileInputRef.current?.click()}>{uploadMutation.isPending ? 'Uploading…' : 'Upload Certificate'}</Button>
+            <Button disabled={uploadMutation.isPending} onClick={() => fileInputRef.current?.click()}>{uploadMutation.isPending ? 'Uploading…' : 'Upload Certificate'}</Button>
           </>
         </div>
         <div className="mt-4 overflow-x-auto">

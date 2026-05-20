@@ -1,4 +1,4 @@
-import type { DriveResponse, HealthResponse, InventoryResponse, SystemHealth } from '../../types/api';
+import type { DriveResponse, HealthResponse, InventoryResponse, SystemHealthLevel } from '../../types/api';
 import { getDriveStateVariant, getMountStateVariant } from '../../lib/utils';
 import Badge from '../ui/Badge';
 import Card from '../ui/Card';
@@ -8,7 +8,7 @@ import ApiLatencyChart from './ApiLatencyChart';
 interface HealthPanelProps {
   health?: HealthResponse;
   inventory?: InventoryResponse;
-  status: SystemHealth;
+  status: SystemHealthLevel;
   avgLatency: number;
   latencies: Array<{ index: number; latency: number }>;
 }

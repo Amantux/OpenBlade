@@ -293,6 +293,14 @@ export async function getSystemConfig(): Promise<SystemConfigResponse> {
   return response.systemConfig;
 }
 
+export async function updateSystemConfig(payload: Partial<SystemConfigResponse>): Promise<SystemConfigResponse> {
+  const response = await apiRequest<{ systemConfig: SystemConfigResponse }>('/system/config', {
+    method: 'PUT',
+    body: { systemConfig: payload },
+  });
+  return response.systemConfig;
+}
+
 export async function getSystemSecurity(): Promise<SecurityConfigResponse> {
   const response = await apiRequest<{ securityConfig: SecurityConfigResponse }>('/system/security');
   return response.securityConfig;
@@ -315,7 +323,7 @@ export async function importCertificate(file: File): Promise<void> {
   const baseName = file.name.replace(/\.[^.]+$/, '') || 'uploaded-certificate';
   const expiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  await apiRequest('/system/certificate/import', {
+  await apiRequest('/aml/system/certificate/import', {
     method: 'POST',
     body: {
       cert: {
@@ -388,7 +396,7 @@ export async function getSystemFirmware(): Promise<SystemFirmwareResponse> {
       lastActivated?: string | null;
       package: FirmwarePackageResponse[];
     };
-  }>('/system/firmware');
+  }>('/aml/system/firmware');
 
   return {
     currentVersion: response.systemFirmware.currentVersion,
@@ -401,18 +409,18 @@ export async function getSystemFirmware(): Promise<SystemFirmwareResponse> {
 }
 
 export async function getSystemFirmwareStatus(): Promise<SystemFirmwareStatusResponse> {
-  const response = await apiRequest<{ firmwareStatus: SystemFirmwareStatusResponse }>('/system/firmware/status');
+  const response = await apiRequest<{ firmwareStatus: SystemFirmwareStatusResponse }>('/aml/system/firmware/status');
   return response.firmwareStatus;
 }
 
 export async function uploadSystemFirmware(file: File): Promise<void> {
   const formData = new FormData();
   formData.append('file', file);
-  await apiRequest('/system/firmware', { method: 'POST', body: formData });
+  await apiRequest('/aml/system/firmware', { method: 'POST', body: formData });
 }
 
 export async function activateSystemFirmware(): Promise<void> {
-  await apiRequest('/system/firmware/activate', { method: 'PUT', body: { firmware: { commit: true } } });
+  await apiRequest('/aml/system/firmware/activate', { method: 'PUT', body: { firmware: { commit: true } } });
 }
 
 export async function getEthBlades(): Promise<EthBladeResponse[]> {

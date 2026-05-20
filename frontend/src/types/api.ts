@@ -272,4 +272,127 @@ export interface RasTicketResponse {
   component?: string;
 }
 
-export type SystemHealth = 'Healthy' | 'Degraded' | 'Critical';
+export interface Job {
+  id: string;
+  type: string;
+  state: string;
+  priority: string;
+  source: string | null;
+  destination: string | null;
+  barcode: string | null;
+  progress: number;
+  startedAt: string;
+  completedAt: string | null;
+  durationSeconds: number;
+  result: string | null;
+}
+
+export interface Move {
+  id: string;
+  source: string;
+  destination: string;
+  barcode: string;
+  state: string;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface InventoryStatus {
+  state: string;
+  startTime: string | null;
+  completedTime: string | null;
+  progress: number;
+  elementsScanned: number;
+  elementsTotal: number;
+  lastCompleted: string | null;
+}
+
+export interface InventoryResult {
+  timestamp: string | null;
+  elementsScanned: number;
+  mediaFound: number;
+  emptySlots: number;
+  errors: string[];
+}
+
+export interface PhysicalSlot {
+  address: string;
+  elementType: string;
+  state: string;
+  barcode: string | null;
+  full: boolean;
+}
+
+export interface IeStationSlot {
+  id: string;
+  address: string;
+  state: string;
+  barcode: string | null;
+  type: string;
+}
+
+export interface IeStation {
+  id: string;
+  serialNumber: string;
+  status: string;
+  state: string;
+  slotCount: number;
+  slots: IeStationSlot[];
+}
+
+export interface RasTicket {
+  id: string;
+  severity: string;
+  component: string;
+  message: string;
+  opened: string;
+  state: string;
+  resolution?: string | null;
+  assignee?: string | null;
+}
+
+export interface Event {
+  id: string;
+  timestamp: string;
+  severity: string;
+  component: string;
+  message: string;
+  details: Record<string, unknown>;
+}
+
+export interface Alert {
+  id: string;
+  timestamp: string;
+  severity: string;
+  component: string;
+  message: string;
+  acknowledged: boolean;
+}
+
+export interface SystemHealth {
+  overall: string;
+  drivesOnline: number;
+  drivesTotal: number;
+  slotsUsed: number;
+  slotsTotal: number;
+  activeJobs: number;
+  openTickets: number;
+  uptime: number;
+  uptimeFormatted: string;
+  lastBackupTime: string | null;
+  lastBackupStatus: string | null;
+  backend: string;
+  activeAlerts: number;
+  componentStates: Record<string, string>;
+}
+
+export interface AuditEntry {
+  timestamp: string;
+  user: string;
+  action: string;
+  resource: string;
+  result: string;
+  ip?: string | null;
+}
+
+export type SystemHealthLevel = 'Healthy' | 'Degraded' | 'Critical';

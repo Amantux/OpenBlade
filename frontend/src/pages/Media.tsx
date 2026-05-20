@@ -48,7 +48,11 @@ function formatTb(valueGB: number | null | undefined): string {
 }
 
 function resolvePool(cartridge: Cartridge, pools: MediaPool[]): MediaPool | null {
-  return pools.find((pool) => pool.assignedBarcodes.includes(cartridge.barcode)) ?? null;
+  if (!cartridge.poolName) {
+    return null;
+  }
+
+  return pools.find((pool) => pool.name === cartridge.poolName) ?? null;
 }
 
 function CapacityBar({ usedGB, totalGB }: { usedGB: number; totalGB: number }) {
@@ -83,6 +87,10 @@ export default function Media() {
 
   const media = mediaQuery.data ?? EMPTY_CARTRIDGES;
   const states = useMemo(() => Array.from(new Set(media.map((cartridge) => cartridge.state))).sort(), [media]);
+  const poolNames = useMemo(
+    () => Array.from(new Set(media.map((cartridge) => cartridge.poolName).filter((value): value is string => Boolean(value)).concat(pools.map((pool) => pool.name)))).sort(),
+    [media, pools],
+  );
 
   const rows = useMemo(
     () =>
@@ -95,14 +103,14 @@ export default function Media() {
 
   const filteredRows = useMemo(
     () =>
-      rows.filter(({ cartridge, pool }) => {
+      rows.filter(({ cartridge }) => {
         const matchesSearch = cartridge.barcode.toLowerCase().includes(search.toLowerCase());
         const matchesPool =
           poolFilter === 'all'
             ? true
             : poolFilter === 'unassigned'
-              ? pool === null
-              : pool?.id === poolFilter;
+              ? !cartridge.poolName
+              : cartridge.poolName === poolFilter;
         const matchesState = stateFilter === 'all' ? true : cartridge.state === stateFilter;
         return matchesSearch && matchesPool && matchesState;
       }),
@@ -130,7 +138,7 @@ export default function Media() {
       <div>
         <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Media</div>
         <h1 className="mt-2 text-3xl font-semibold text-white">Cartridges</h1>
-        <p className="mt-2 text-sm text-slate-400">Live AML cartridge inventory with local pool assignments, capacity bars, and detail telemetry.</p>
+        <p className="mt-2 text-sm text-slate-400">Live AML cartridge inventory with backend pool assignments, slot telemetry, and operational counters.</p>
       </div>
 
       <Card className="bg-quantum-panel p-5">
@@ -151,8 +159,8 @@ export default function Media() {
           >
             <option value="all">All Pools</option>
             <option value="unassigned">Unassigned</option>
-            {pools.map((pool) => (
-              <option key={pool.id} value={pool.id}>{pool.name}</option>
+            {poolNames.map((poolName) => (
+              <option key={poolName} value={poolName}>{poolName}</option>
             ))}
           </select>
           <select
@@ -184,14 +192,16 @@ export default function Media() {
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">State</th>
                   <th className="px-4 py-3">Pool</th>
-                  <th className="px-4 py-3">Location</th>
+                  <th className="px-4 py-3">Slot Address</th>
+                  <th className="px-4 py-3">Loads</th>
+                  <th className="px-4 py-3">Errors</th>
                   <th className="px-4 py-3">Capacity</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-quantum-border/80">
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-slate-400">No cartridges match the current filters.</td>
+                    <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No cartridges match the current filters.</td>
                   </tr>
                 ) : (
                   filteredRows.map(({ cartridge, pool }) => {
@@ -206,18 +216,26 @@ export default function Media() {
                         <td className="px-4 py-3"><Badge variant={typeVariant(cartridge.type)}>{cartridge.type}</Badge></td>
                         <td className="px-4 py-3"><Badge variant={stateVariant(cartridge.state)}>{cartridge.state}</Badge></td>
                         <td className="px-4 py-3">
-                          {pool ? (
-                            <span
-                              className="inline-flex rounded-full border px-2.5 py-1 text-xs font-medium"
-                              style={{ borderColor: pool.color, backgroundColor: `${pool.color}22`, color: pool.color }}
-                            >
-                              {pool.name}
-                            </span>
+                          {cartridge.poolName ? (
+                            pool ? (
+                              <span
+                                className="inline-flex rounded-full border px-2.5 py-1 text-xs font-medium"
+                                style={{ borderColor: pool.color, backgroundColor: `${pool.color}22`, color: pool.color }}
+                              >
+                                {pool.name}
+                              </span>
+                            ) : (
+                              <span className="inline-flex rounded-full border border-slate-600 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200">
+                                {cartridge.poolName}
+                              </span>
+                            )
                           ) : (
                             <span className="text-slate-400">Unassigned</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-slate-300">{cartridge.location}</td>
+                        <td className="px-4 py-3 text-slate-300">{cartridge.slotAddress ?? cartridge.location ?? '—'}</td>
+                        <td className="px-4 py-3 text-slate-300">{cartridge.loadCount ?? '—'}</td>
+                        <td className="px-4 py-3 text-slate-300">{cartridge.errorCount ?? '—'}</td>
                         <td className="min-w-[200px] px-4 py-3">
                           <CapacityBar usedGB={cartridge.usedGB ?? 0} totalGB={cartridge.capacityGB ?? 0} />
                         </td>
@@ -251,19 +269,19 @@ export default function Media() {
               <dl className="grid gap-3 text-sm">
                 <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
                   <dt className="text-slate-400">Pool</dt>
-                  <dd className="text-right text-white">{selected.pool?.name ?? 'Unassigned'}</dd>
+                  <dd className="text-right text-white">{selected.cartridge.poolName ?? 'Unassigned'}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
-                  <dt className="text-slate-400">Location</dt>
-                  <dd className="text-right text-white">{selected.cartridge.location}</dd>
+                  <dt className="text-slate-400">Slot Address</dt>
+                  <dd className="text-right text-white">{selected.cartridge.slotAddress ?? selected.cartridge.location ?? '—'}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
                   <dt className="text-slate-400">Partition</dt>
                   <dd className="text-right text-white">{selected.cartridge.partition ?? '—'}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
-                  <dt className="text-slate-400">Slot Address</dt>
-                  <dd className="text-right text-white">{selected.cartridge.slotAddress ?? selected.cartridge.location}</dd>
+                  <dt className="text-slate-400">Usage</dt>
+                  <dd className="text-right text-white">{selected.cartridge.percentUsed ?? 0}%</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 rounded-md border border-quantum-border bg-quantum-info/60 px-3 py-2">
                   <dt className="text-slate-400">Write Protected</dt>

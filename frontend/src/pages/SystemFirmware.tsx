@@ -8,7 +8,6 @@ import {
   getMgmtBlades,
   getSystemFirmware,
   getSystemFirmwareStatus,
-  getSystemUpdates,
   uploadSystemFirmware,
 } from '../api/system';
 import Badge from '../components/ui/Badge';
@@ -29,7 +28,6 @@ export default function SystemFirmware() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const firmwareQuery = useQuery({ queryKey: ['system', 'firmware'], queryFn: getSystemFirmware, refetchInterval: 30_000 });
   const statusQuery = useQuery({ queryKey: ['system', 'firmware', 'status'], queryFn: getSystemFirmwareStatus, refetchInterval: 5_000 });
-  const updatesQuery = useQuery({ queryKey: ['system', 'updates'], queryFn: getSystemUpdates, refetchInterval: 60_000 });
   const drivesQuery = useQuery({ queryKey: ['system', 'firmware', 'drives'], queryFn: getDrives, refetchInterval: 60_000 });
   const ethBladesQuery = useQuery({ queryKey: ['system', 'firmware', 'eth-blades'], queryFn: getEthBlades, refetchInterval: 60_000 });
   const fcBladesQuery = useQuery({ queryKey: ['system', 'firmware', 'fc-blades'], queryFn: getFcBlades, refetchInterval: 60_000 });
@@ -55,24 +53,24 @@ export default function SystemFirmware() {
     },
   });
 
-  if ([firmwareQuery, statusQuery, updatesQuery, drivesQuery, ethBladesQuery, fcBladesQuery, mgmtBladesQuery].some((query) => query.isLoading)) {
+  if ([firmwareQuery, statusQuery, drivesQuery, ethBladesQuery, fcBladesQuery, mgmtBladesQuery].some((query) => query.isLoading)) {
     return <Spinner />;
   }
 
-  const errorQuery = [firmwareQuery, statusQuery, updatesQuery, drivesQuery, ethBladesQuery, fcBladesQuery, mgmtBladesQuery].find((query) => query.isError);
+  const errorQuery = [firmwareQuery, statusQuery, drivesQuery, ethBladesQuery, fcBladesQuery, mgmtBladesQuery].find((query) => query.isError);
   if (errorQuery) {
     return <ErrorMessage error={errorQuery.error} onRetry={() => void errorQuery.refetch()} />;
   }
 
   const firmware = firmwareQuery.data!;
   const status = statusQuery.data!;
-  const updates = updatesQuery.data ?? [];
   const driveVersions = summarizeVersions((drivesQuery.data ?? []).map((item) => item.firmware));
   const bladeVersions = summarizeVersions([
     ...(ethBladesQuery.data ?? []).map((item) => item.firmware),
     ...(fcBladesQuery.data ?? []).map((item) => item.firmware),
     ...(mgmtBladesQuery.data ?? []).map((item) => item.firmware),
   ]);
+  const stagedPackage = firmware.uploadedPackages.find((item) => item.name === firmware.stagedPackage);
   const progress = Math.max(0, Math.min(100, status.progress));
 
   const cards = useMemo(
@@ -110,7 +108,7 @@ export default function SystemFirmware() {
                 event.target.value = '';
               }}
             />
-            <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>{uploadMutation.isPending ? 'Uploading…' : 'Upload Firmware'}</Button>
+            <Button variant="secondary" disabled={uploadMutation.isPending} onClick={() => fileInputRef.current?.click()}>{uploadMutation.isPending ? 'Uploading…' : 'Upload Firmware'}</Button>
             <Button disabled={!firmware.stagedVersion || activateMutation.isPending} onClick={() => activateMutation.mutate()}>{activateMutation.isPending ? 'Activating…' : 'Activate Staged Update'}</Button>
           </div>
         </div>
@@ -147,24 +145,25 @@ export default function SystemFirmware() {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Available Updates</div>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Staged Update</div>
           <div className="mt-4 space-y-3">
-            {updates.length === 0 ? (
-              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No package updates are currently advertised.</div>
-            ) : (
-              updates.map((item) => (
-                <div key={item.name} className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-4 text-sm text-slate-300">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-slate-100">{item.name}</div>
-                      <div className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">{item.type}</div>
-                    </div>
-                    <Badge variant="blue">{item.version}</Badge>
+            {stagedPackage ? (
+              <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-4 text-sm text-slate-300">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-100">{stagedPackage.name}</div>
+                    <div className="mt-1 text-xs text-slate-500">Uploaded {formatDate(stagedPackage.uploadedAt)}</div>
                   </div>
-                  <div className="mt-3">{item.description}</div>
-                  <div className="mt-2 text-xs text-slate-500">{formatBytes(item.size)}</div>
+                  <Badge variant="amber">{stagedPackage.version}</Badge>
                 </div>
-              ))
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                  <span>{formatBytes(stagedPackage.size)}</span>
+                  <span>{stagedPackage.checksum ?? 'No checksum'}</span>
+                  <span>Status: {firmware.status}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No staged system firmware is ready for activation.</div>
             )}
           </div>
         </Card>
@@ -172,22 +171,26 @@ export default function SystemFirmware() {
         <Card>
           <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Uploaded Firmware Packages</div>
           <div className="mt-4 space-y-3">
-            {(firmware.uploadedPackages ?? []).map((item) => (
-              <div key={item.name} className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-4 text-sm text-slate-300">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="font-semibold text-slate-100">{item.name}</div>
-                    <div className="mt-1 text-xs text-slate-500">Uploaded {formatDate(item.uploadedAt)}</div>
+            {(firmware.uploadedPackages ?? []).length === 0 ? (
+              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No system firmware packages have been uploaded.</div>
+            ) : (
+              (firmware.uploadedPackages ?? []).map((item) => (
+                <div key={item.name} className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-4 text-sm text-slate-300">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-slate-100">{item.name}</div>
+                      <div className="mt-1 text-xs text-slate-500">Uploaded {formatDate(item.uploadedAt)}</div>
+                    </div>
+                    <Badge variant={item.active ? 'green' : firmware.stagedPackage === item.name ? 'amber' : 'gray'}>{item.active ? 'Active' : firmware.stagedPackage === item.name ? 'Staged' : 'Available'}</Badge>
                   </div>
-                  <Badge variant={item.active ? 'green' : firmware.stagedPackage === item.name ? 'amber' : 'gray'}>{item.active ? 'Active' : firmware.stagedPackage === item.name ? 'Staged' : 'Available'}</Badge>
+                  <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                    <span>Version {item.version}</span>
+                    <span>{formatBytes(item.size)}</span>
+                    <span>{item.checksum ?? 'No checksum'}</span>
+                  </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                  <span>Version {item.version}</span>
-                  <span>{formatBytes(item.size)}</span>
-                  <span>{item.checksum ?? 'No checksum'}</span>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </Card>
       </div>

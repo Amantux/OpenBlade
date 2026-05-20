@@ -2,7 +2,7 @@ import type {
   DriveResponse,
   HealthResponse,
   JobResponse,
-  SystemHealth,
+  SystemHealthLevel,
 } from '../types/api';
 
 export type BadgeVariant = 'gray' | 'blue' | 'green' | 'amber' | 'red' | 'redDim';
@@ -67,7 +67,7 @@ export function deriveSystemHealth(
   health?: HealthResponse,
   drives: DriveResponse[] = [],
   changerState?: string,
-): SystemHealth {
+): SystemHealthLevel {
   const status = health?.status?.toLowerCase() ?? 'unknown';
 
   if (!health || !['ok', 'healthy', 'good', 'ready'].includes(status)) {
@@ -183,4 +183,22 @@ export function getThroughput(job: JobResponse): string | null {
   }
 
   return null;
+}
+
+export function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number | null | undefined>>): void {
+  const escapeCell = (value: string | number | null | undefined) => {
+    const normalized = value == null ? '' : String(value);
+    return `"${normalized.replace(/"/g, '""')}"`;
+  };
+
+  const csv = [headers.map(escapeCell).join(','), ...rows.map((row) => row.map(escapeCell).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }

@@ -1,157 +1,205 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import InformationPanel from '../components/panels/InformationPanel';
-import NorthPanel from '../components/panels/NorthPanel';
-import OperationsPanel from '../components/panels/OperationsPanel';
-import Badge from '../components/ui/Badge';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { cancelJob, listActiveJobs, listJobHistory } from '../api/operations';
+import Button from '../components/ui/Button';
+import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
-import { cancelJob, useJob, useJobs } from '../hooks/useJobs';
-import {
-  getJobBarcode,
-  getJobProgress,
-  getJobShardText,
-  getJobSourcePath,
-  getJobState,
-  getJobStrategy,
-  getJobTypeLabel,
-} from '../lib/lmc';
-import { formatDate } from '../lib/utils';
-import type { JobResponse } from '../types/api';
+import type { Job } from '../types/api';
+import { formatDate, formatDuration } from '../lib/utils';
 
 function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
-  if (state === 'FAILED') {
-    return 'red';
+  switch (state) {
+    case 'RUNNING':
+      return 'blue';
+    case 'COMPLETED':
+    case 'SUCCESS':
+      return 'green';
+    case 'FAILED':
+      return 'red';
+    case 'PENDING':
+      return 'amber';
+    default:
+      return 'gray';
   }
-  if (state === 'RUNNING') {
-    return 'blue';
-  }
-  if (state === 'COMPLETED') {
-    return 'green';
-  }
-  return 'amber';
+}
+
+function StateBadge({ value }: { value: string }) {
+  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${stateVariant(value) === 'blue' ? 'border-blue-500/30 bg-blue-500/15 text-blue-300' : stateVariant(value) === 'green' ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300' : stateVariant(value) === 'red' ? 'border-red-500/30 bg-red-500/15 text-red-300' : stateVariant(value) === 'amber' ? 'border-amber-500/30 bg-amber-500/15 text-amber-300' : 'border-slate-700 bg-slate-800 text-slate-200'}`}>{value}</span>;
+}
+
+function ProgressBar({ value }: { value: number }) {
+  const progress = Math.max(0, Math.min(100, value));
+  return (
+    <div className="min-w-36">
+      <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+        <div className="h-full bg-quantum-red" style={{ width: `${progress}%` }} />
+      </div>
+      <div className="mt-1 text-xs text-slate-400">{progress}%</div>
+    </div>
+  );
+}
+
+function JobsTable({ jobs, history, onCancel, cancellingId }: { jobs: Job[]; history?: boolean; onCancel?: (jobId: string) => void; cancellingId?: string; }) {
+  return (
+    <div className="overflow-x-auto rounded-md border border-quantum-border">
+      <table className="min-w-full text-sm">
+        <thead className="bg-quantum-sidebar text-left text-xs uppercase tracking-[0.18em] text-slate-400">
+          <tr>
+            <th className="px-4 py-3 font-medium">Job ID</th>
+            <th className="px-4 py-3 font-medium">Type</th>
+            <th className="px-4 py-3 font-medium">State</th>
+            <th className="px-4 py-3 font-medium">Source</th>
+            <th className="px-4 py-3 font-medium">Dest</th>
+            <th className="px-4 py-3 font-medium">Progress</th>
+            <th className="px-4 py-3 font-medium">Started</th>
+            <th className="px-4 py-3 font-medium">Duration</th>
+            {history ? <th className="px-4 py-3 font-medium">Completed</th> : null}
+            {history ? <th className="px-4 py-3 font-medium">Result</th> : null}
+            {!history ? <th className="px-4 py-3 font-medium">Actions</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {jobs.length === 0 ? (
+            <tr>
+              <td colSpan={history ? 10 : 9} className="px-4 py-6 text-center text-slate-400">
+                No {history ? 'historical' : 'active'} jobs available.
+              </td>
+            </tr>
+          ) : (
+            jobs.map((job, index) => {
+              const cancelable = ['PENDING', 'RUNNING'].includes(job.state);
+              return (
+                <tr key={job.id} className={index % 2 === 0 ? 'bg-quantum-north' : 'bg-quantum-panel'}>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-200">{job.id}</td>
+                  <td className="px-4 py-3 text-slate-300">{job.type}</td>
+                  <td className="px-4 py-3"><StateBadge value={job.state} /></td>
+                  <td className="px-4 py-3 text-slate-300">{job.source ?? '—'}</td>
+                  <td className="px-4 py-3 text-slate-300">{job.destination ?? '—'}</td>
+                  <td className="px-4 py-3"><ProgressBar value={job.progress} /></td>
+                  <td className="px-4 py-3 text-slate-300">{formatDate(job.startedAt)}</td>
+                  <td className="px-4 py-3 text-slate-300">{formatDuration(job.durationSeconds)}</td>
+                  {history ? <td className="px-4 py-3 text-slate-300">{formatDate(job.completedAt ?? '')}</td> : null}
+                  {history ? <td className="px-4 py-3"><StateBadge value={job.result ?? '—'} /></td> : null}
+                  {!history ? (
+                    <td className="px-4 py-3">
+                      <Button
+                        variant="danger"
+                        className="px-3 py-1.5"
+                        disabled={!cancelable || cancellingId === job.id}
+                        onClick={() => onCancel?.(job.id)}
+                      >
+                        {cancellingId === job.id ? 'Cancelling…' : 'Cancel'}
+                      </Button>
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export default function Jobs() {
   const queryClient = useQueryClient();
-  const jobsQuery = useJobs();
-  const [selectedJobId, setSelectedJobId] = useState<string>();
+  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
-  useEffect(() => {
-    if (!selectedJobId && jobsQuery.data && jobsQuery.data.length > 0) {
-      setSelectedJobId(jobsQuery.data[0].id);
-    }
-  }, [jobsQuery.data, selectedJobId]);
-
-  const selectedSummary = useMemo(
-    () => jobsQuery.data?.find((job) => job.id === selectedJobId),
-    [jobsQuery.data, selectedJobId],
-  );
-  const detailQuery = useJob(
-    selectedJobId,
-    Boolean(selectedSummary && ['PENDING', 'RUNNING'].includes(getJobState(selectedSummary))),
-  );
+  const activeJobsQuery = useQuery({
+    queryKey: ['operations', 'jobs', 'active'],
+    queryFn: listActiveJobs,
+    refetchInterval: activeTab === 'active' && autoRefresh ? 5_000 : false,
+  });
+  const historyQuery = useQuery({
+    queryKey: ['operations', 'jobs', 'history'],
+    queryFn: listJobHistory,
+    refetchInterval: activeTab === 'history' && autoRefresh ? 5_000 : false,
+  });
 
   const cancelMutation = useMutation({
-    mutationFn: (jobId: string) => cancelJob(jobId),
+    mutationFn: cancelJob,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['jobs'] }),
-        queryClient.invalidateQueries({ queryKey: ['jobs', 'history'] }),
+        queryClient.invalidateQueries({ queryKey: ['operations', 'jobs', 'active'] }),
+        queryClient.invalidateQueries({ queryKey: ['operations', 'jobs', 'history'] }),
       ]);
     },
   });
 
-  if (jobsQuery.isLoading) {
+  const activeSummary = useMemo(() => {
+    const jobs = activeJobsQuery.data ?? [];
+    return {
+      running: jobs.filter((job) => job.state === 'RUNNING').length,
+      pending: jobs.filter((job) => job.state === 'PENDING').length,
+    };
+  }, [activeJobsQuery.data]);
+
+  if (activeJobsQuery.isLoading || historyQuery.isLoading) {
     return <Spinner />;
   }
-  if (jobsQuery.isError) {
-    return <ErrorMessage error={jobsQuery.error} onRetry={() => jobsQuery.refetch()} />;
+  if (activeJobsQuery.isError) {
+    return <ErrorMessage error={activeJobsQuery.error} onRetry={() => activeJobsQuery.refetch()} />;
   }
-
-  const jobs = jobsQuery.data ?? [];
-  const selectedJob = detailQuery.data ?? selectedSummary;
+  if (historyQuery.isError) {
+    return <ErrorMessage error={historyQuery.error} onRetry={() => historyQuery.refetch()} />;
+  }
 
   return (
     <div className="space-y-4">
-      <NorthPanel
-        title="Active Jobs"
-        subtitle="AML job queue across partitions and operator workflows."
-        columns={[
-          { key: 'id', header: 'Job ID', render: (row: JobResponse) => <span className="font-mono text-xs">{row.id}</span> },
-          { key: 'type', header: 'Type', render: (row: JobResponse) => getJobTypeLabel(row) },
-          {
-            key: 'state',
-            header: 'State',
-            render: (row: JobResponse) => {
-              const state = getJobState(row);
-              return <Badge variant={stateVariant(state)}>{state}</Badge>;
-            },
-          },
-          {
-            key: 'progress',
-            header: 'Progress',
-            render: (row: JobResponse) => {
-              const progress = Math.round(getJobProgress(row));
-              return (
-                <div className="min-w-40">
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-                    <div className="h-full bg-quantum-red" style={{ width: `${progress}%` }} />
-                  </div>
-                  <div className="mt-1 text-xs text-slate-400">{progress}%</div>
-                </div>
-              );
-            },
-          },
-          { key: 'source', header: 'Source', render: (row: JobResponse) => getJobSourcePath(row) },
-          { key: 'barcode', header: 'Barcode', render: (row: JobResponse) => getJobBarcode(row) },
-          { key: 'started', header: 'Started', render: (row: JobResponse) => formatDate(row.created_at) },
-        ]}
-        rows={jobs}
-        getRowId={(row) => row.id}
-        selectedId={selectedJob?.id}
-        onSelect={(row) => setSelectedJobId(row.id)}
-        emptyMessage="No active jobs reported by the AML queue."
-      />
+      <Card>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Operations Center</p>
+            <h1 className="mt-2 text-2xl font-semibold text-white">Jobs</h1>
+            <p className="mt-2 text-sm text-slate-400">Track live AML queue activity and completed job history.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[360px]">
+            <div className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3">
+              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Running</div>
+              <div className="mt-2 text-2xl font-semibold text-white">{activeSummary.running}</div>
+            </div>
+            <div className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3">
+              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Queued</div>
+              <div className="mt-2 text-2xl font-semibold text-white">{activeSummary.pending}</div>
+            </div>
+          </div>
+        </div>
+      </Card>
 
-      <InformationPanel
-        title={selectedJob ? `Job ${selectedJob.id}` : 'Job Details'}
-        subtitle="Expanded detail for the selected workflow."
-        items={[
-          { label: 'Type', value: selectedJob ? getJobTypeLabel(selectedJob) : '—' },
-          { label: 'State', value: selectedJob ? getJobState(selectedJob) : '—' },
-          { label: 'Progress', value: selectedJob ? `${Math.round(getJobProgress(selectedJob))}%` : '—' },
-          { label: 'Source Path', value: selectedJob ? getJobSourcePath(selectedJob) : '—' },
-          { label: 'Barcode', value: selectedJob ? getJobBarcode(selectedJob) : '—' },
-          { label: 'Strategy', value: selectedJob ? getJobStrategy(selectedJob) : '—' },
-          { label: 'Shards', value: selectedJob ? getJobShardText(selectedJob) : '—' },
-          { label: 'Updated', value: selectedJob ? formatDate(selectedJob.updated_at) : '—' },
-        ]}
-      />
+      <Card>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="inline-flex rounded-md border border-quantum-border bg-quantum-sidebar p-1">
+            <button type="button" className={`rounded px-4 py-2 text-sm font-semibold ${activeTab === 'active' ? 'bg-quantum-red text-white' : 'text-slate-300'}`} onClick={() => setActiveTab('active')}>
+              Active Jobs
+            </button>
+            <button type="button" className={`rounded px-4 py-2 text-sm font-semibold ${activeTab === 'history' ? 'bg-quantum-red text-white' : 'text-slate-300'}`} onClick={() => setActiveTab('history')}>
+              Job History
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} />
+              Auto-refresh every 5s
+            </label>
+            <Button variant="secondary" onClick={() => void Promise.all([activeJobsQuery.refetch(), historyQuery.refetch()])}>
+              Refresh now
+            </Button>
+          </div>
+        </div>
 
-      {cancelMutation.isError ? <ErrorMessage error={cancelMutation.error} /> : null}
+        {cancelMutation.isError ? <div className="mt-4"><ErrorMessage error={cancelMutation.error} /></div> : null}
 
-      <OperationsPanel
-        title="Job Operations"
-        subtitle="Cancel is available for jobs that are still queued or running."
-        actions={[
-          {
-            label: cancelMutation.isPending ? 'Cancelling…' : 'Cancel',
-            onClick: () => selectedJob && cancelMutation.mutate(selectedJob.id),
-            disabled: !selectedJob || !['PENDING', 'RUNNING'].includes(getJobState(selectedJob)) || cancelMutation.isPending,
-            variant: 'danger',
-          },
-          { label: 'Refresh', onClick: () => void jobsQuery.refetch(), variant: 'secondary' },
-        ]}
-      />
-
-      {detailQuery.isError ? (
-        <ErrorMessage
-          error={detailQuery.error}
-          onRetry={() => detailQuery.refetch()}
-          title="Unable to refresh selected job"
-        />
-      ) : null}
+        <div className="mt-4">
+          {activeTab === 'active' ? (
+            <JobsTable jobs={activeJobsQuery.data ?? []} onCancel={(jobId) => cancelMutation.mutate(jobId)} cancellingId={cancelMutation.variables} />
+          ) : (
+            <JobsTable jobs={historyQuery.data ?? []} history />
+          )}
+        </div>
+      </Card>
     </div>
   );
 }

@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { SystemHealth } from '../../types/api';
+import type { SystemHealthLevel } from '../../types/api';
 import { useAuth } from '../../lib/auth-context';
 import StatusPill from '../ui/StatusPill';
 
 interface TopBarProps {
   libraryName: string;
-  health: SystemHealth;
+  health: SystemHealthLevel;
   backend: string;
   activeLibraryName?: string;
 }
 
-const statusCopy: Record<SystemHealth, string> = {
+const statusCopy: Record<SystemHealthLevel, string> = {
   Healthy: 'Library Ready',
   Degraded: 'Service Attention',
   Critical: 'Operator Required',

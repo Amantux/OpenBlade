@@ -5,6 +5,7 @@ export interface Cartridge {
   type: string;
   partition?: string;
   slotAddress?: string;
+  location?: string;
   state: string;
   writeProtected?: boolean;
   worm?: boolean;
@@ -23,6 +24,7 @@ interface AmlMediaRecord {
   type: string;
   partition?: string | null;
   slotAddress?: string;
+  location?: string | null;
   state: string;
   writeProtected?: boolean;
   worm?: boolean;
@@ -79,7 +81,8 @@ function mapCartridge(media: AmlMediaRecord): Cartridge {
     barcode: media.barcode,
     type: media.type,
     partition: media.partition ?? undefined,
-    slotAddress: media.slotAddress,
+    slotAddress: media.slotAddress ?? media.location ?? undefined,
+    location: media.location ?? undefined,
     state: media.state,
     writeProtected: media.writeProtected,
     worm: media.worm,

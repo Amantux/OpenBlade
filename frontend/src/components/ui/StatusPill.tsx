@@ -1,17 +1,17 @@
-import type { SystemHealth } from '../../types/api';
+import type { SystemHealthLevel } from '../../types/api';
 import { cn } from '../../lib/utils';
 
 interface StatusPillProps {
-  status: SystemHealth;
+  status: SystemHealthLevel;
 }
 
-const pillClasses: Record<SystemHealth, string> = {
+const pillClasses: Record<SystemHealthLevel, string> = {
   Healthy: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300',
   Degraded: 'border-amber-500/30 bg-amber-500/15 text-amber-300',
   Critical: 'border-red-500/30 bg-red-500/15 text-red-300',
 };
 
-const dotClasses: Record<SystemHealth, string> = {
+const dotClasses: Record<SystemHealthLevel, string> = {
   Healthy: 'bg-emerald-400',
   Degraded: 'bg-amber-400',
   Critical: 'bg-red-400',
