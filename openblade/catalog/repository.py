@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
 
@@ -21,6 +22,20 @@ from openblade.catalog.models import (
 from openblade.domain.errors import FileNotFoundError
 from openblade.domain.models import FileInstanceState
 from openblade.domain.policies import SafetyToken
+
+_ARCHIVED_INSTANCE_STATES = {
+    FileInstanceState.ARCHIVED.value,
+    FileInstanceState.VERIFIED.value,
+}
+
+
+@dataclass(frozen=True)
+class CatalogBrowseEntry:
+    path: str
+    size: int
+    tape_barcode: str
+    archived_at: datetime | None
+    shard_count: int
 
 
 class CatalogRepository:
@@ -137,6 +152,43 @@ class CatalogRepository:
         records = list(self.session.execute(stmt).scalars().all())
         total = int(self.session.execute(count_stmt).scalar_one())
         return records, total
+
+    def list_ltfs_entries(
+        self, tape_barcode: str | None = None, path_prefix: str = "/"
+    ) -> list[CatalogBrowseEntry]:
+        entries: list[CatalogBrowseEntry] = []
+        for record in self.list_file_records(path_prefix):
+            matching_instances = [
+                instance
+                for instance in record.instances
+                if instance.state in _ARCHIVED_INSTANCE_STATES
+                and (tape_barcode is None or instance.barcode == tape_barcode)
+            ]
+            if not matching_instances:
+                continue
+            latest_instance = max(
+                matching_instances,
+                key=lambda instance: instance.archived_at or instance.created_at,
+            )
+            entries.append(
+                CatalogBrowseEntry(
+                    path=record.path,
+                    size=record.size_bytes,
+                    tape_barcode=latest_instance.barcode,
+                    archived_at=latest_instance.archived_at,
+                    shard_count=len(matching_instances),
+                )
+            )
+        return entries
+
+    def list_catalog_tape_barcodes(self) -> list[str]:
+        stmt = (
+            select(FileInstance.barcode)
+            .where(FileInstance.state.in_(_ARCHIVED_INSTANCE_STATES))
+            .distinct()
+            .order_by(FileInstance.barcode)
+        )
+        return list(self.session.execute(stmt).scalars().all())
 
     def get_file_record_by_id(self, file_id: str) -> FileRecord | None:
         stmt = (

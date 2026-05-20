@@ -76,3 +76,24 @@ def test_catalog_list_after_archive(client: TestClient, tmp_path: Path) -> None:
     assert detail["source_path"] == "/photos/a.txt"
     assert len(detail["instances"]) == 1
     assert detail["instances"][0]["barcode"] == barcode
+
+    ltfs_tapes_response = client.get("/ltfs/tapes")
+    assert ltfs_tapes_response.status_code == 200
+    assert ltfs_tapes_response.json() == [barcode]
+
+    ltfs_browse_response = client.get(
+        "/ltfs/browse",
+        params={"tape_barcode": barcode, "path_prefix": "/photos"},
+    )
+    assert ltfs_browse_response.status_code == 200
+    browse_payload = ltfs_browse_response.json()
+    assert browse_payload == [
+        {
+            "path": "/photos/a.txt",
+            "size": archived_file.stat().st_size,
+            "tape_barcode": barcode,
+            "archived_at": browse_payload[0]["archived_at"],
+            "shard_count": 1,
+        }
+    ]
+    assert browse_payload[0]["archived_at"] is not None

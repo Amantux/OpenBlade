@@ -90,3 +90,21 @@ def test_assign_and_unassign_pool_updates_media_pool_name(authed: TestClient) ->
     media_response = authed.get("/aml/media/VOL001L9")
     assert media_response.status_code == 200
     assert media_response.json()["media"]["poolName"] is None
+
+
+def test_update_media_pool_allows_clearing_nullable_fields(authed: TestClient) -> None:
+    response = authed.put(
+        "/aml/media/pools/pool-critical",
+        json={"quotaGB": None, "targetLtoGeneration": None},
+    )
+    assert response.status_code == 200
+
+    pool = response.json()["pool"]
+    assert pool["quotaGB"] is None
+    assert pool["targetLtoGeneration"] is None
+
+    get_response = authed.get("/aml/media/pools/pool-critical")
+    assert get_response.status_code == 200
+    pool = get_response.json()["pool"]
+    assert pool["quotaGB"] is None
+    assert pool["targetLtoGeneration"] is None

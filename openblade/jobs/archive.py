@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from openblade.api import aml_state
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError
 from openblade.domain.models import JobType, MountMode
@@ -84,6 +86,56 @@ def _choose_tape(
     raise NoScratchMediaError("No scratch media with sufficient capacity is available")
 
 
+def _aml_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _aml_drive_name(drive_id: int) -> str:
+    return f"DRV-{drive_id + 1:03d}"
+
+
+def _aml_slot_address(slot_id: int) -> str:
+    return f"1,1,{slot_id}"
+
+
+def _mark_aml_drive_busy(barcode: str, drive_id: int) -> None:
+    drive_name = _aml_drive_name(drive_id)
+    drive = aml_state.get_aml_drive(drive_name)
+    if drive is not None:
+        media = aml_state.get_aml_media(barcode)
+        aml_state.update_aml_drive(
+            drive_name,
+            {
+                "state": "busy",
+                "loadedMedia": {
+                    "barcode": barcode,
+                    "type": (media or {}).get("type", "LTO-9"),
+                    "state": "loaded",
+                },
+            },
+        )
+    media = aml_state.get_aml_media(barcode)
+    if media is not None:
+        aml_state.update_aml_media(
+            barcode,
+            {
+                "slotAddress": drive_name,
+                "state": "loaded",
+                "lastLoaded": _aml_timestamp(),
+                "loadCount": int(media.get("loadCount", 0)) + 1,
+            },
+        )
+
+
+def _mark_aml_drive_idle(barcode: str, drive_id: int, slot_id: int | None) -> None:
+    drive_name = _aml_drive_name(drive_id)
+    if aml_state.get_aml_drive(drive_name) is not None:
+        aml_state.update_aml_drive(drive_name, {"state": "idle", "loadedMedia": None})
+    media = aml_state.get_aml_media(barcode)
+    if media is not None and slot_id is not None:
+        aml_state.update_aml_media(barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"})
+
+
 def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int | None]:
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
@@ -144,6 +196,7 @@ def run_archive_job(
         pending_instance_ids = []
         if current_slot_id is not None:
             library.unload(current_drive_id, current_slot_id)
+        _mark_aml_drive_idle(current_barcode, current_drive_id, current_slot_id)
         cartridge = catalog.add_cartridge(current_barcode, volume_group.id)
         tape = ltfs.ensure_tape(current_barcode)
         cartridge.used_bytes = tape.used_bytes
@@ -171,6 +224,7 @@ def run_archive_job(
             if selected_barcode != current_barcode:
                 finalize_current_mount()
                 current_drive_id, current_slot_id = _load_if_needed(library, selected_barcode)
+                _mark_aml_drive_busy(selected_barcode, current_drive_id)
                 current_handle = ltfs.mount(selected_barcode, MountMode.READ_WRITE)
                 current_barcode = selected_barcode
                 tapes_used.append(selected_barcode)
@@ -186,6 +240,16 @@ def run_archive_job(
             files_archived += 1
         finalize_current_mount()
     except Exception as exc:
+        if current_handle is not None:
+            try:
+                ltfs.unmount(current_handle)
+            except Exception:
+                logger.exception("failed to unmount archive handle for job %s", job_id)
+        if current_barcode is not None and current_drive_id is not None:
+            try:
+                _mark_aml_drive_idle(current_barcode, current_drive_id, None)
+            except Exception:
+                logger.exception("failed to reset archive AML drive state for job %s", job_id)
         catalog.update_job_state(job_id, "failed", str(exc))
         raise
 

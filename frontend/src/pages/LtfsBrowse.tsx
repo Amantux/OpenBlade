@@ -103,7 +103,7 @@ export default function LtfsBrowse() {
   const filesQuery = useQuery({
     queryKey: ['ltfs', 'files', selectedVolume?.barcode, currentPath],
     queryFn: () => listFiles(selectedVolume!.barcode, currentPath),
-    enabled: Boolean(selectedVolume?.barcode && selectedVolume.mounted),
+    enabled: Boolean(selectedVolume?.barcode),
   });
 
   useEffect(() => {
@@ -152,7 +152,7 @@ export default function LtfsBrowse() {
   });
 
   const visibleFiles = useMemo(() => {
-    const files = filesQuery.data ?? [];
+    const files = filesQuery.data?.files ?? [];
     const normalizedSearch = search.trim().toLowerCase();
     if (!normalizedSearch) {
       return files;
@@ -184,7 +184,7 @@ export default function LtfsBrowse() {
             <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Media</div>
             <h1 className="mt-1 text-2xl font-semibold text-slate-100">LTFS File Browser</h1>
             <p className="mt-2 text-sm text-slate-400">
-              Browse LTFS cartridges mounted through AML section endpoints and explore a simulated tape file tree at /media/ltfs.
+              Browse catalog-backed LTFS metadata by tape and path. Mount state only affects physical access, not catalog visibility.
             </p>
           </div>
           <Badge variant="blue">{volumes.length} volume{volumes.length === 1 ? '' : 's'}</Badge>
@@ -334,18 +334,25 @@ export default function LtfsBrowse() {
                 </div>
               </div>
 
-              {!selectedVolume.mounted ? (
-                <div className="rounded-md border border-dashed border-quantum-border px-4 py-10 text-center text-sm text-slate-400">
-                  Mount {selectedVolume.barcode} to browse its LTFS directory tree.
-                </div>
-              ) : filesQuery.isLoading ? (
+              {filesQuery.isLoading ? (
                 <Spinner />
               ) : filesQuery.isError ? (
                 <ErrorMessage error={filesQuery.error} onRetry={() => void filesQuery.refetch()} />
               ) : (
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-                  <div className="overflow-hidden rounded-md border border-quantum-border">
-                    <table className="min-w-full divide-y divide-quantum-border text-sm">
+                  <div className="space-y-3">
+                    {!selectedVolume.mounted ? (
+                      <div className="rounded-md border border-dashed border-quantum-border px-4 py-3 text-sm text-slate-400">
+                        {selectedVolume.barcode} is not mounted. Catalog metadata is still browseable; mount the tape only when you need physical hydration or reads.
+                      </div>
+                    ) : null}
+                    {filesQuery.data?.isSynthetic ? (
+                      <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                        {filesQuery.data.note}
+                      </div>
+                    ) : null}
+                    <div className="overflow-hidden rounded-md border border-quantum-border">
+                      <table className="min-w-full divide-y divide-quantum-border text-sm">
                       <thead className="bg-quantum-sidebar text-left text-xs uppercase tracking-[0.18em] text-slate-500">
                         <tr>
                           <th className="px-4 py-3">Name</th>
@@ -390,6 +397,7 @@ export default function LtfsBrowse() {
                         )}
                       </tbody>
                     </table>
+                    </div>
                   </div>
 
                   <div className="rounded-md border border-quantum-border bg-quantum-sidebar p-4">
@@ -409,8 +417,16 @@ export default function LtfsBrowse() {
                           <div className="mt-1">{formatBytes(selectedFile.size)}</div>
                         </div>
                         <div>
-                          <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Modified</div>
+                          <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Archived</div>
                           <div className="mt-1">{formatDate(selectedFile.modified)}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Tape Barcode</div>
+                          <div className="mt-1">{selectedFile.tapeBarcode ?? selectedVolume.barcode}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Shard Count</div>
+                          <div className="mt-1">{selectedFile.shardCount ?? 1}</div>
                         </div>
                         <div>
                           <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Tape Position Estimate</div>
@@ -418,7 +434,7 @@ export default function LtfsBrowse() {
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-4 text-sm text-slate-400">Select a file to inspect LTFS metadata and tape position estimates.</div>
+                      <div className="mt-4 text-sm text-slate-400">Select a file to inspect catalog metadata and tape position estimates.</div>
                     )}
                   </div>
                 </div>

@@ -2910,7 +2910,7 @@ def update_aml_media_pool(pool_id: str, updates: dict[str, Any]) -> dict[str, An
             return None
 
     for key, value in deepcopy(updates).items():
-        if key == "id" or value is None:
+        if key == "id":
             continue
         pool[key] = value
     pool["name"] = next_name

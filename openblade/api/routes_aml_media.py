@@ -269,18 +269,20 @@ def _validate_media_patch(payload: MediaPatch) -> dict[str, Any]:
 def _validate_pool_payload(payload: MediaPoolConfig | MediaPoolPatch | PoolCreateRequest | PoolUpdateRequest) -> dict[str, Any]:
     if isinstance(payload, (PoolCreateRequest, PoolUpdateRequest)):
         nested = payload.pool
-        updates = nested.model_dump(exclude_none=True) if nested is not None else payload.model_dump(exclude_none=True, exclude={"pool"})
+        updates = nested.model_dump(exclude_unset=True) if nested is not None else payload.model_dump(exclude_unset=True, exclude={"pool"})
     else:
-        updates = payload.model_dump(exclude_none=True)
+        updates = payload.model_dump(exclude_unset=True)
 
     if "type" in updates and "targetLtoGeneration" not in updates:
         updates["targetLtoGeneration"] = updates.pop("type")
     else:
         updates.pop("type", None)
 
-    for field_name in ("name", "policy", "targetLtoGeneration", "color"):
+    for field_name in ("name", "policy", "color"):
         if field_name in updates:
             updates[field_name] = _validate_identifier(str(updates[field_name]), field_name=field_name)
+    if "targetLtoGeneration" in updates and updates["targetLtoGeneration"] is not None:
+        updates["targetLtoGeneration"] = _validate_identifier(str(updates["targetLtoGeneration"]), field_name="targetLtoGeneration")
 
     if "maxDrives" in updates:
         try:

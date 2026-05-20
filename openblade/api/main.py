@@ -26,6 +26,7 @@ from openblade.api import (
     routes_proxy,
     routes_inventory,
     routes_jobs,
+    routes_ltfs,
     routes_restore,
     routes_tapes,
     routes_volume_groups,
@@ -55,6 +56,7 @@ app.include_router(routes_tapes.router, prefix="/cartridges", tags=["cartridges"
 app.include_router(routes_volume_groups.router, prefix="/volume-groups", tags=["volume-groups"])
 app.include_router(routes_archive.router, prefix="/archive", tags=["archive"])
 app.include_router(routes_catalog.router, prefix="/catalog", tags=["catalog"])
+app.include_router(routes_ltfs.router, prefix="/ltfs", tags=["ltfs"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_aml_auth.router, prefix="/aml", tags=["aml-auth"])

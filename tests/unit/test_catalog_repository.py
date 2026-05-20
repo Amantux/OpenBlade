@@ -48,6 +48,37 @@ def test_list_file_records_by_prefix() -> None:
     assert [record.path for record in records] == ["/photos/2024/b.jpg", "/photos/a.jpg"]
 
 
+def test_list_ltfs_entries_filters_to_archived_instances() -> None:
+    catalog = make_catalog()
+    group = catalog.create_volume_group("photos")
+    first = catalog.create_file_record("/photos/a.jpg", 3, "abc", group.id)
+    archived = catalog.create_file_instance(first.id, "PHO001L8", "/photos/a.jpg")
+    catalog.mark_instance_archived(archived.id)
+    second = catalog.create_file_record("/photos/b.jpg", 4, "def", group.id)
+    catalog.create_file_instance(second.id, "PHO002L8", "/photos/b.jpg")
+
+    entries = catalog.list_ltfs_entries()
+
+    assert [(entry.path, entry.tape_barcode, entry.shard_count) for entry in entries] == [
+        ("/photos/a.jpg", "PHO001L8", 1)
+    ]
+
+
+def test_list_catalog_tape_barcodes_returns_unique_sorted_values() -> None:
+    catalog = make_catalog()
+    group = catalog.create_volume_group("photos")
+    first = catalog.create_file_record("/photos/a.jpg", 3, "abc", group.id)
+    second = catalog.create_file_record("/photos/b.jpg", 4, "def", group.id)
+    first_instance = catalog.create_file_instance(first.id, "PHO002L8", "/photos/a.jpg")
+    second_instance = catalog.create_file_instance(second.id, "PHO001L8", "/photos/b.jpg")
+    duplicate_instance = catalog.create_file_instance(second.id, "PHO001L8", "/photos/b-copy.jpg")
+    catalog.mark_instance_archived(first_instance.id)
+    catalog.mark_instance_archived(second_instance.id)
+    catalog.mark_instance_archived(duplicate_instance.id)
+
+    assert catalog.list_catalog_tape_barcodes() == ["PHO001L8", "PHO002L8"]
+
+
 def test_create_and_update_job() -> None:
     catalog = make_catalog()
     job = catalog.create_job("archive", {"path": "/data"})
