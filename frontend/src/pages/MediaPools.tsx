@@ -9,15 +9,13 @@ import Spinner from '../components/ui/Spinner';
 import {
   MEDIA_POOL_COLOR_PRESETS,
   MEDIA_POOL_GENERATIONS,
-  MEDIA_POOL_STORE_EVENT,
-  assignCartridge,
-  createPool,
+  assignBarcode as assignCartridge,
   deletePool,
-  getPools,
+  listPools,
+  savePool,
   type MediaPool,
   type PoolPolicy,
-  unassignCartridge,
-  updatePool,
+  unassignBarcode as unassignCartridge,
 } from '../lib/mediaPoolStore';
 import { cn, formatDate } from '../lib/utils';
 
@@ -62,20 +60,32 @@ function isDataCartridge(cartridge: Cartridge): boolean {
 
 function getPolicyBadge(pool: MediaPool): string {
   if (pool.policy === 'critical') {
-    return 'Sequential';
+    return `Critical (${pool.maxDrives})`;
   }
   if (pool.policy === 'archive') {
     return 'WORM Archive';
+  }
+  if (pool.policy === 'cleaning') {
+    return 'Cleaning';
+  }
+  if (pool.policy === 'scratch') {
+    return 'Scratch';
   }
   return `Parallel (${pool.maxDrives})`;
 }
 
 function getPolicyCopy(pool: MediaPool): string {
   if (pool.policy === 'critical') {
-    return 'Sequential';
+    return `Critical lane • ${pool.maxDrives} drives`;
   }
   if (pool.policy === 'archive') {
     return `WORM archive • ${pool.maxDrives} drives`;
+  }
+  if (pool.policy === 'cleaning') {
+    return 'Cleaning media reserved for drive maintenance';
+  }
+  if (pool.policy === 'scratch') {
+    return `Scratch pool • ${pool.maxDrives} drives`;
   }
   return `Parallel • ${pool.maxDrives} drives`;
 }
@@ -160,7 +170,8 @@ function ProgressBar({ color, percent }: { color: string; percent: number }) {
 
 export default function MediaPools() {
   const mediaQuery = useQuery({ queryKey: ['media', 'cartridges'], queryFn: listCartridges, refetchInterval: 30_000 });
-  const [pools, setPools] = useState<MediaPool[]>(() => getPools());
+  const poolsQuery = useQuery({ queryKey: ['media', 'pools'], queryFn: listPools, refetchInterval: 30_000 });
+  const pools = poolsQuery.data ?? [];
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingPool, setEditingPool] = useState<MediaPool | null>(null);
   const [assignPool, setAssignPool] = useState<MediaPool | null>(null);
@@ -169,16 +180,6 @@ export default function MediaPools() {
   const [bulkAssignPoolId, setBulkAssignPoolId] = useState('');
   const [selectedUnassigned, setSelectedUnassigned] = useState<string[]>([]);
   const [selectedAssignBarcodes, setSelectedAssignBarcodes] = useState<string[]>([]);
-
-  useEffect(() => {
-    const syncPools = () => setPools(getPools());
-    window.addEventListener(MEDIA_POOL_STORE_EVENT, syncPools);
-    window.addEventListener('storage', syncPools);
-    return () => {
-      window.removeEventListener(MEDIA_POOL_STORE_EVENT, syncPools);
-      window.removeEventListener('storage', syncPools);
-    };
-  }, []);
 
   const cartridges = mediaQuery.data ?? EMPTY_CARTRIDGES;
 
@@ -207,10 +208,20 @@ export default function MediaPools() {
     [assignPool, unassignedAssignable],
   );
 
-  const refreshPools = () => setPools(getPools());
+  useEffect(() => {
+    if (editingPool) {
+      setEditingPool(pools.find((pool) => pool.id === editingPool.id) ?? null);
+    }
+    if (assignPool) {
+      setAssignPool(pools.find((pool) => pool.id === assignPool.id) ?? null);
+    }
+    if (detailPool) {
+      setDetailPool(pools.find((pool) => pool.id === detailPool.id) ?? null);
+    }
+  }, [assignPool?.id, detailPool?.id, editingPool?.id, pools]);
+
   const refreshAll = async () => {
-    refreshPools();
-    await mediaQuery.refetch();
+    await Promise.all([poolsQuery.refetch(), mediaQuery.refetch()]);
   };
   const detailPoolStats = detailPool ? getPoolStats(detailPool, cartridges) : null;
 
@@ -232,10 +243,9 @@ export default function MediaPools() {
     const payload = {
       name: form.name.trim(),
       policy: form.policy,
-      maxDrives: form.policy === 'critical' ? 1 : form.maxDrives,
+      maxDrives: form.maxDrives,
       targetLtoGeneration: form.targetLtoGeneration || null,
       quotaGB: form.quotaGB ? Number(form.quotaGB) : null,
-      assignedBarcodes: editingPool ? getPoolStats(editingPool, cartridges).cartridges.map((cartridge) => cartridge.barcode) : [],
       color: form.color,
     };
 
@@ -245,9 +255,9 @@ export default function MediaPools() {
 
     try {
       if (editingPool) {
-        await updatePool(editingPool.id, payload);
+        await savePool({ ...editingPool, ...payload, id: editingPool.id });
       } else {
-        await createPool(payload);
+        await savePool(payload);
       }
 
       await refreshAll();
@@ -319,12 +329,16 @@ export default function MediaPools() {
     }
   };
 
-  if (mediaQuery.isLoading) {
+  if (mediaQuery.isLoading || poolsQuery.isLoading) {
     return <Spinner />;
   }
 
   if (mediaQuery.isError) {
     return <ErrorMessage error={mediaQuery.error} onRetry={() => mediaQuery.refetch()} />;
+  }
+
+  if (poolsQuery.isError) {
+    return <ErrorMessage error={poolsQuery.error} onRetry={() => poolsQuery.refetch()} />;
   }
 
   return (
@@ -559,22 +573,20 @@ export default function MediaPools() {
               </div>
             </div>
 
-            {form.policy !== 'critical' ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-sm text-slate-300">
-                  <span>Max Drives</span>
-                  <span className="font-semibold text-white">{form.maxDrives}</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={8}
-                  value={form.maxDrives}
-                  onChange={(event) => setForm((current) => ({ ...current, maxDrives: Number(event.target.value) }))}
-                  className="w-full accent-quantum-red"
-                />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm text-slate-300">
+                <span>Max Drives</span>
+                <span className="font-semibold text-white">{form.maxDrives}</span>
               </div>
-            ) : null}
+              <input
+                type="range"
+                min={1}
+                max={8}
+                value={form.maxDrives}
+                onChange={(event) => setForm((current) => ({ ...current, maxDrives: Number(event.target.value) }))}
+                className="w-full accent-quantum-red"
+              />
+            </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-2 text-sm text-slate-300">

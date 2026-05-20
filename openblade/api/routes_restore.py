@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from openblade.bootstrap import AppContext, get_context
@@ -13,7 +13,8 @@ router = APIRouter()
 
 
 class RestoreRequest(BaseModel):
-    catalog_path: str
+    catalog_path: str | None = None
+    source_path: str | None = None
     dest_path: str
 
 
@@ -27,5 +28,8 @@ async def enqueue_restore(
     request: RestoreRequest,
     context: AppContext = Depends(get_context),
 ) -> EnqueuedJobResponse:
-    job = context.restore_service.enqueue(request.catalog_path, Path(request.dest_path))
+    catalog_path = request.catalog_path or request.source_path
+    if catalog_path is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="catalog_path or source_path is required")
+    job = context.restore_service.enqueue(catalog_path, Path(request.dest_path))
     return EnqueuedJobResponse(job_id=job.id, status="pending")

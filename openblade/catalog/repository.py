@@ -7,7 +7,7 @@ import threading
 from datetime import datetime
 from pathlib import PurePosixPath
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from openblade.catalog.models import (
@@ -123,6 +123,35 @@ class CatalogRepository:
             .order_by(FileRecord.path)
         )
         return list(self.session.execute(stmt).scalars().all())
+
+    def list_catalog_files(
+        self, limit: int = 50, offset: int = 0, search: str | None = None
+    ) -> tuple[list[FileRecord], int]:
+        stmt = select(FileRecord).options(selectinload(FileRecord.instances))
+        count_stmt = select(func.count()).select_from(FileRecord)
+        if search:
+            pattern = f"%{search.strip()}%"
+            stmt = stmt.where(FileRecord.path.ilike(pattern))
+            count_stmt = count_stmt.where(FileRecord.path.ilike(pattern))
+        stmt = stmt.order_by(FileRecord.created_at.desc(), FileRecord.path).offset(offset).limit(limit)
+        records = list(self.session.execute(stmt).scalars().all())
+        total = int(self.session.execute(count_stmt).scalar_one())
+        return records, total
+
+    def get_file_record_by_id(self, file_id: str) -> FileRecord | None:
+        stmt = (
+            select(FileRecord)
+            .options(selectinload(FileRecord.instances))
+            .where(FileRecord.id == file_id)
+        )
+        return self.session.execute(stmt).scalar_one_or_none()
+
+    def delete_file_record(self, file_id: str) -> None:
+        record = self.get_file_record_by_id(file_id)
+        if record is None:
+            raise FileNotFoundError(f"Catalog file {file_id} not found")
+        self.session.delete(record)
+        self.session.commit()
 
     def create_file_instance(
         self, file_record_id: str, barcode: str, tape_path: str

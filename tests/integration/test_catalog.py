@@ -1,58 +1,78 @@
-from openblade.catalog.db import get_session, init_db
-from openblade.catalog.repository import CatalogRepository
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from openblade.api.main import app
+from openblade.bootstrap import create_context, get_context, reset_context
+from openblade.config import OpenBladeConfig
 
 
-def make_catalog() -> CatalogRepository:
-    init_db("sqlite:///:memory:")
-    return CatalogRepository(get_session())
+@pytest.fixture()
+def client(tmp_path: Path) -> TestClient:
+    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'catalog-test.db'}"))
+    reset_context(context)
+    return TestClient(app)
 
 
-def test_create_and_get_volume_group() -> None:
-    catalog = make_catalog()
-    created = catalog.create_volume_group("photos")
-    fetched = catalog.get_volume_group("photos")
-    assert fetched is not None
-    assert fetched.id == created.id
-    assert fetched.name == "photos"
+def _first_data_barcode() -> str:
+    context = get_context()
+    return next(
+        str(slot.barcode)
+        for slot in context.library.inventory().slots
+        if slot.barcode is not None and not str(slot.barcode).startswith("CLN")
+    )
 
 
-def test_create_file_record() -> None:
-    catalog = make_catalog()
-    group = catalog.create_volume_group("photos")
-    record = catalog.create_file_record("/photos/a.jpg", 3, "abc", group.id)
-    fetched = catalog.get_file_record("/photos/a.jpg")
-    assert fetched is not None
-    assert fetched.id == record.id
-    assert fetched.checksum_sha256 == "abc"
+def _format_first_tape(client: TestClient) -> tuple[str, str]:
+    barcode = _first_data_barcode()
+    response = client.post(f"/cartridges/{barcode}/format/dry-run")
+    assert response.status_code == 200
+    return barcode, response.json()["token"]
 
 
-def test_mark_instance_archived() -> None:
-    catalog = make_catalog()
-    group = catalog.create_volume_group("photos")
-    record = catalog.create_file_record("/photos/a.jpg", 3, "abc", group.id)
-    instance = catalog.create_file_instance(record.id, "PHO001L8", "/photos/a.jpg")
-    catalog.mark_instance_archived(instance.id)
-    refreshed = catalog.session.get(type(instance), instance.id)
-    assert refreshed is not None
-    assert refreshed.state == "archived"
-    assert refreshed.checksum_verified is True
+def test_catalog_list_empty_returns_200(client: TestClient) -> None:
+    response = client.get("/catalog/")
+
+    assert response.status_code == 200
+    assert response.json() == {"files": [], "total": 0}
 
 
-def test_list_file_records_by_prefix() -> None:
-    catalog = make_catalog()
-    group = catalog.create_volume_group("photos")
-    catalog.create_file_record("/photos/a.jpg", 1, "a", group.id)
-    catalog.create_file_record("/photos/2024/b.jpg", 1, "b", group.id)
-    catalog.create_file_record("/docs/readme.txt", 1, "c", group.id)
-    records = catalog.list_file_records("/photos")
-    assert [record.path for record in records] == ["/photos/2024/b.jpg", "/photos/a.jpg"]
+def test_catalog_list_after_archive(client: TestClient, tmp_path: Path) -> None:
+    barcode, token = _format_first_tape(client)
+    assert client.post("/volume-groups/", json={"name": "photos"}).status_code == 201
+    assert client.post("/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
+    assert (
+        client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}).status_code
+        == 200
+    )
 
+    source = tmp_path / "source"
+    source.mkdir()
+    archived_file = source / "a.txt"
+    archived_file.write_text("catalog route test")
 
-def test_create_and_update_job() -> None:
-    catalog = make_catalog()
-    job = catalog.create_job("archive", {"path": "/data"})
-    catalog.update_job_state(job.id, "completed")
-    refreshed = catalog.get_job(job.id)
-    assert refreshed is not None
-    assert refreshed.state == "completed"
-    assert refreshed.metadata_dict == {"path": "/data"}
+    archive_response = client.post(
+        "/archive/",
+        json={"source_path": str(source), "volume_group": "photos"},
+    )
+    assert archive_response.status_code == 202
+
+    catalog_response = client.get("/catalog/")
+    assert catalog_response.status_code == 200
+
+    payload = catalog_response.json()
+    assert payload["total"] == 1
+    assert len(payload["files"]) == 1
+    file_record = payload["files"][0]
+    assert file_record["source_path"] == "/photos/a.txt"
+    assert file_record["size_bytes"] == archived_file.stat().st_size
+    assert file_record["instance_count"] == 1
+    assert file_record["shard_count"] == 1
+
+    detail_response = client.get(f"/catalog/{file_record['id']}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["source_path"] == "/photos/a.txt"
+    assert len(detail["instances"]) == 1
+    assert detail["instances"][0]["barcode"] == barcode

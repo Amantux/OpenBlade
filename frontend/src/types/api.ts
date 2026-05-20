@@ -99,10 +99,17 @@ export interface CartridgeResponse {
 }
 
 export interface MediaPoolResponse {
+  id: string;
   name: string;
-  type: string;
-  mediaCount: number;
   policy: string;
+  maxDrives: number;
+  targetLtoGeneration?: string | null;
+  quotaGB?: number | null;
+  color: string;
+  assignedBarcodes: string[];
+  createdAt: string;
+  mediaCount: number;
+  type?: string | null;
 }
 
 export interface PartitionResponse {
@@ -138,16 +145,34 @@ export interface RestoreRequestPayload {
   destination_path: string;
 }
 
-export interface CatalogEntryResponse {
+export interface CatalogFile {
   id: string;
   source_path: string;
-  barcode: string;
   size_bytes: number;
   checksum: string;
-  strategy: string;
-  shards: number;
+  created_at: string;
+  instance_count: number;
+  shard_count: number;
+}
+
+export interface CatalogListResponse {
+  files: CatalogFile[];
+  total: number;
+}
+
+export interface CatalogFileInstance {
+  id: string;
+  barcode: string;
+  tape_path: string;
+  shard_index: number;
   created_at: string;
 }
+
+export interface CatalogFileDetail extends CatalogFile {
+  instances: CatalogFileInstance[];
+}
+
+export type CatalogEntryResponse = CatalogFile;
 
 export interface CatalogResponse {
   entries: CatalogEntryResponse[];

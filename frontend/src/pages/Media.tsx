@@ -1,12 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { listCartridges, type Cartridge } from '../api/media';
-import Badge from '../components/ui/Badge';
 import Card from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
-import { MEDIA_POOL_STORE_EVENT, getPools, type MediaPool } from '../lib/mediaPoolStore';
+import { listPools, type MediaPool } from '../lib/mediaPoolStore';
 import { formatDate } from '../lib/utils';
 
 const EMPTY_CARTRIDGES: Cartridge[] = [];
@@ -69,23 +69,14 @@ function CapacityBar({ usedGB, totalGB }: { usedGB: number; totalGB: number }) {
 
 export default function Media() {
   const mediaQuery = useQuery({ queryKey: ['media', 'cartridges'], queryFn: listCartridges, refetchInterval: 30_000 });
-  const [pools, setPools] = useState<MediaPool[]>(() => getPools());
+  const poolsQuery = useQuery({ queryKey: ['media', 'pools'], queryFn: listPools, refetchInterval: 30_000 });
   const [search, setSearch] = useState('');
   const [poolFilter, setPoolFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
   const [selectedBarcode, setSelectedBarcode] = useState<string | null>(null);
 
-  useEffect(() => {
-    const syncPools = () => setPools(getPools());
-    window.addEventListener(MEDIA_POOL_STORE_EVENT, syncPools);
-    window.addEventListener('storage', syncPools);
-    return () => {
-      window.removeEventListener(MEDIA_POOL_STORE_EVENT, syncPools);
-      window.removeEventListener('storage', syncPools);
-    };
-  }, []);
-
   const media = mediaQuery.data ?? EMPTY_CARTRIDGES;
+  const pools = poolsQuery.data ?? [];
   const states = useMemo(() => Array.from(new Set(media.map((cartridge) => cartridge.state))).sort(), [media]);
   const poolNames = useMemo(
     () => Array.from(new Set(media.map((cartridge) => cartridge.poolName).filter((value): value is string => Boolean(value)).concat(pools.map((pool) => pool.name)))).sort(),
@@ -125,12 +116,16 @@ export default function Media() {
     ? filteredRows.find(({ cartridge }) => cartridge.barcode === activeSelectedBarcode) ?? null
     : null;
 
-  if (mediaQuery.isLoading) {
+  if (mediaQuery.isLoading || poolsQuery.isLoading) {
     return <Spinner />;
   }
 
   if (mediaQuery.isError) {
     return <ErrorMessage error={mediaQuery.error} onRetry={() => mediaQuery.refetch()} />;
+  }
+
+  if (poolsQuery.isError) {
+    return <ErrorMessage error={poolsQuery.error} onRetry={() => poolsQuery.refetch()} />;
   }
 
   return (

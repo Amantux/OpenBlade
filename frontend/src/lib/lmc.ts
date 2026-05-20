@@ -1,5 +1,5 @@
 import type {
-  CatalogEntryResponse,
+  CatalogFile,
   DriveResponse,
   HealthResponse,
   InventoryResponse,
@@ -330,18 +330,17 @@ export function buildRasTickets(
   return tickets.slice(0, 6);
 }
 
-export function buildCatalogFallback(jobs: JobResponse[]): CatalogEntryResponse[] {
+export function buildCatalogFallback(jobs: JobResponse[]): CatalogFile[] {
   return jobs
     .filter((job) => getJobTypeLabel(job).toLowerCase().includes('archive'))
     .map((job) => ({
       id: job.id,
       source_path: getJobSourcePath(job),
-      barcode: getJobBarcode(job),
       size_bytes: getMetadataNumber(job, 'size_bytes') ?? job.bytes_written ?? 0,
       checksum: getMetadataString(job, 'checksum') ?? 'Unavailable',
-      strategy: getJobStrategy(job),
-      shards: Number(getJobShardText(job)) || 1,
       created_at: job.created_at,
+      instance_count: getJobBarcode(job) === '—' ? 0 : 1,
+      shard_count: Number(getJobShardText(job)) || 1,
     }))
     .slice(0, 50);
 }

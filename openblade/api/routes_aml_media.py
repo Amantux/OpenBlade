@@ -138,10 +138,17 @@ class TypeListResponse(BaseModel):
 class MediaPool(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    id: str
     name: str
-    type: str
-    mediaCount: int
     policy: str
+    maxDrives: int
+    targetLtoGeneration: str | None = None
+    quotaGB: int | None = None
+    color: str
+    assignedBarcodes: list[str] = Field(default_factory=list)
+    createdAt: str
+    mediaCount: int = 0
+    type: str | None = None
 
 
 class PoolListResource(BaseModel):
@@ -159,23 +166,51 @@ class PoolResponse(BaseModel):
 class MediaPoolConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    type: str
-    policy: str
+    name: str | None = None
+    policy: str | None = None
+    maxDrives: int | None = None
+    targetLtoGeneration: str | None = None
+    quotaGB: int | None = None
+    color: str | None = None
+    type: str | None = None
 
 
 class MediaPoolPatch(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    type: str | None = None
+    name: str | None = None
     policy: str | None = None
+    maxDrives: int | None = None
+    targetLtoGeneration: str | None = None
+    quotaGB: int | None = None
+    color: str | None = None
+    type: str | None = None
 
 
 class PoolCreateRequest(BaseModel):
-    pool: MediaPoolConfig
+    pool: MediaPoolConfig | None = None
+
+    name: str | None = None
+    policy: str | None = None
+    maxDrives: int | None = None
+    targetLtoGeneration: str | None = None
+    quotaGB: int | None = None
+    color: str | None = None
 
 
 class PoolUpdateRequest(BaseModel):
-    pool: MediaPoolPatch
+    pool: MediaPoolPatch | None = None
+
+    name: str | None = None
+    policy: str | None = None
+    maxDrives: int | None = None
+    targetLtoGeneration: str | None = None
+    quotaGB: int | None = None
+    color: str | None = None
+
+
+class PoolAssignmentRequest(BaseModel):
+    barcodes: list[str] = Field(default_factory=list)
 
 
 class MediaImportItem(BaseModel):
@@ -231,11 +266,38 @@ def _validate_media_patch(payload: MediaPatch) -> dict[str, Any]:
     return updates
 
 
-def _validate_pool_payload(payload: MediaPoolConfig | MediaPoolPatch) -> dict[str, Any]:
-    updates = payload.model_dump(exclude_none=True)
-    for field_name in ("type", "policy"):
+def _validate_pool_payload(payload: MediaPoolConfig | MediaPoolPatch | PoolCreateRequest | PoolUpdateRequest) -> dict[str, Any]:
+    if isinstance(payload, (PoolCreateRequest, PoolUpdateRequest)):
+        nested = payload.pool
+        updates = nested.model_dump(exclude_none=True) if nested is not None else payload.model_dump(exclude_none=True, exclude={"pool"})
+    else:
+        updates = payload.model_dump(exclude_none=True)
+
+    if "type" in updates and "targetLtoGeneration" not in updates:
+        updates["targetLtoGeneration"] = updates.pop("type")
+    else:
+        updates.pop("type", None)
+
+    for field_name in ("name", "policy", "targetLtoGeneration", "color"):
         if field_name in updates:
             updates[field_name] = _validate_identifier(str(updates[field_name]), field_name=field_name)
+
+    if "maxDrives" in updates:
+        try:
+            updates["maxDrives"] = max(1, int(updates["maxDrives"]))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="maxDrives must be a positive integer") from exc
+
+    if "quotaGB" in updates:
+        quota = updates["quotaGB"]
+        if quota is None:
+            updates["quotaGB"] = None
+        else:
+            try:
+                updates["quotaGB"] = max(1, int(quota))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="quotaGB must be a positive integer") from exc
+
     return updates
 
 
@@ -299,8 +361,14 @@ def _get_media_or_404(barcode: str) -> dict[str, Any]:
     return media
 
 
-def _get_pool_or_404(name: str) -> dict[str, Any]:
-    pool = aml_state.get_aml_media_pool(name)
+def _pool_id_from_name(name: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return normalized or f"pool-{hashlib.sha256(name.encode('utf-8')).hexdigest()[:8]}"
+
+
+
+def _get_pool_or_404(pool_id: str) -> dict[str, Any]:
+    pool = aml_state.get_aml_media_pool(pool_id)
     if pool is None:
         raise HTTPException(status_code=404, detail="Pool not found")
     return pool
@@ -377,19 +445,114 @@ async def list_media_pools(
     return PoolListResponse(poolList=PoolListResource(pool=[_serialize_pool(item) for item in aml_state.list_aml_media_pools()]))
 
 
-@router.get("/media/pool/{name}", response_model=PoolResponse)
+@router.get("/media/pools/{pool_id}", response_model=PoolResponse)
 async def get_media_pool(
-    name: str,
+    pool_id: str,
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> PoolResponse:
     _ensure_state(context)
-    pool_name = _validate_identifier(name, field_name="Pool name")
-    return PoolResponse(pool=_serialize_pool(_get_pool_or_404(pool_name)))
+    normalized_pool_id = _validate_identifier(pool_id, field_name="Pool id")
+    return PoolResponse(pool=_serialize_pool(_get_pool_or_404(normalized_pool_id)))
+
+
+@router.post("/media/pools", response_model=PoolResponse, status_code=status.HTTP_201_CREATED)
+async def create_media_pool(
+    payload: PoolCreateRequest,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    updates = _validate_pool_payload(payload)
+    pool_name = _validate_identifier(str(updates.get("name", "")), field_name="name")
+    pool_id = _pool_id_from_name(pool_name)
+    created = aml_state.create_aml_media_pool(pool_id, updates)
+    if created is None:
+        raise HTTPException(status_code=409, detail="Pool already exists")
+    return PoolResponse(pool=_serialize_pool(created))
+
+
+@router.put("/media/pools/{pool_id}", response_model=PoolResponse)
+async def update_media_pool(
+    pool_id: str,
+    payload: PoolUpdateRequest,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    normalized_pool_id = _validate_identifier(pool_id, field_name="Pool id")
+    if aml_state.get_aml_media_pool(normalized_pool_id) is None:
+        raise HTTPException(status_code=404, detail="Pool not found")
+    updated = aml_state.update_aml_media_pool(normalized_pool_id, _validate_pool_payload(payload))
+    if updated is None:
+        raise HTTPException(status_code=409, detail="Pool already exists")
+    return PoolResponse(pool=_serialize_pool(updated))
+
+
+@router.delete("/media/pools/{pool_id}", response_model=WSResultCode)
+async def delete_media_pool(
+    pool_id: str,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> WSResultCode:
+    _ensure_state(context)
+    _require_admin(current_user)
+    normalized_pool_id = _validate_identifier(pool_id, field_name="Pool id")
+    if not aml_state.delete_aml_media_pool(normalized_pool_id):
+        raise HTTPException(status_code=404, detail="Pool not found")
+    return _ws_result(f"Deleted media pool {normalized_pool_id}")
+
+
+@router.post("/media/pools/{pool_id}/assign", response_model=PoolResponse)
+async def assign_media_to_pool(
+    pool_id: str,
+    payload: PoolAssignmentRequest,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    normalized_pool_id = _validate_identifier(pool_id, field_name="Pool id")
+    barcodes = [_validate_identifier(item, field_name="barcode") for item in payload.barcodes]
+    missing = [barcode for barcode in barcodes if aml_state.get_aml_media(barcode) is None]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Media not found: {missing[0]}")
+    updated = aml_state.assign_aml_media_to_pool(normalized_pool_id, barcodes)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Pool not found")
+    return PoolResponse(pool=_serialize_pool(updated))
+
+
+@router.delete("/media/pools/{pool_id}/assign/{barcode}", response_model=PoolResponse)
+async def unassign_media_from_pool(
+    pool_id: str,
+    barcode: str,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    normalized_pool_id = _validate_identifier(pool_id, field_name="Pool id")
+    normalized_barcode = _validate_identifier(barcode, field_name="barcode")
+    updated = aml_state.unassign_aml_media_from_pool(normalized_pool_id, [normalized_barcode])
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Pool not found")
+    return PoolResponse(pool=_serialize_pool(updated))
+
+
+@router.get("/media/pool/{name}", response_model=PoolResponse)
+async def get_media_pool_legacy(
+    name: str,
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    return await get_media_pool(name, _, context)
 
 
 @router.post("/media/pool/{name}", response_model=PoolResponse, status_code=status.HTTP_201_CREATED)
-async def create_media_pool(
+async def create_media_pool_legacy(
     name: str,
     payload: PoolCreateRequest,
     current_user: AmlUser = Depends(require_auth),
@@ -397,78 +560,61 @@ async def create_media_pool(
 ) -> PoolResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    pool_name = _validate_identifier(name, field_name="Pool name")
-    created = aml_state.create_aml_media_pool(pool_name, _validate_pool_payload(payload.pool))
+    updates = _validate_pool_payload(payload)
+    updates.setdefault("name", _validate_identifier(name, field_name="Pool name"))
+    created = aml_state.create_aml_media_pool(name, updates)
     if created is None:
         raise HTTPException(status_code=409, detail="Pool already exists")
     return PoolResponse(pool=_serialize_pool(created))
 
 
 @router.put("/media/pool/{name}", response_model=PoolResponse)
-async def update_media_pool(
+async def update_media_pool_legacy(
     name: str,
     payload: PoolUpdateRequest,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> PoolResponse:
-    _ensure_state(context)
-    _require_admin(current_user)
-    pool_name = _validate_identifier(name, field_name="Pool name")
-    updated = aml_state.update_aml_media_pool(pool_name, _validate_pool_payload(payload.pool))
-    if updated is None:
-        raise HTTPException(status_code=404, detail="Pool not found")
-    return PoolResponse(pool=_serialize_pool(updated))
+    return await update_media_pool(name, payload, current_user, context)
 
 
 @router.delete("/media/pool/{name}", response_model=WSResultCode)
-async def delete_media_pool(
+async def delete_media_pool_legacy(
     name: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
-    _ensure_state(context)
-    _require_admin(current_user)
-    pool_name = _validate_identifier(name, field_name="Pool name")
-    if not aml_state.delete_aml_media_pool(pool_name):
-        raise HTTPException(status_code=404, detail="Pool not found")
-    return _ws_result(f"Deleted media pool {pool_name}")
+    return await delete_media_pool(name, current_user, context)
 
 
 @router.post("/media/pool/{name}/assign", response_model=PoolResponse)
-async def assign_media_to_pool(
+async def assign_media_to_pool_legacy(
     name: str,
     payload: BarcodeListRequest,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> PoolResponse:
-    _ensure_state(context)
-    _require_admin(current_user)
-    pool_name = _validate_identifier(name, field_name="Pool name")
-    barcodes = [_validate_identifier(item, field_name="barcode") for item in payload.barcodeList.barcode]
-    missing = [barcode for barcode in barcodes if aml_state.get_aml_media(barcode) is None]
-    if missing:
-        raise HTTPException(status_code=404, detail=f"Media not found: {missing[0]}")
-    updated = aml_state.assign_aml_media_to_pool(pool_name, barcodes)
-    if updated is None:
-        raise HTTPException(status_code=404, detail="Pool not found")
-    return PoolResponse(pool=_serialize_pool(updated))
+    return await assign_media_to_pool(
+        name,
+        PoolAssignmentRequest(barcodes=payload.barcodeList.barcode),
+        current_user,
+        context,
+    )
 
 
 @router.post("/media/pool/{name}/unassign", response_model=PoolResponse)
-async def unassign_media_from_pool(
+async def unassign_media_from_pool_legacy(
     name: str,
     payload: BarcodeListRequest,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> PoolResponse:
-    _ensure_state(context)
-    _require_admin(current_user)
-    pool_name = _validate_identifier(name, field_name="Pool name")
-    barcodes = [_validate_identifier(item, field_name="barcode") for item in payload.barcodeList.barcode]
-    updated = aml_state.unassign_aml_media_from_pool(pool_name, barcodes)
+    updated: PoolResponse | None = None
+    for barcode in payload.barcodeList.barcode:
+        updated = await unassign_media_from_pool(name, barcode, current_user, context)
     if updated is None:
-        raise HTTPException(status_code=404, detail="Pool not found")
-    return PoolResponse(pool=_serialize_pool(updated))
+        return PoolResponse(pool=_serialize_pool(_get_pool_or_404(name)))
+    return updated
 
 
 @router.post("/media/import", response_model=WSResultCode)
