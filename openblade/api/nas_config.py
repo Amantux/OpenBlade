@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from uuid import uuid4
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
@@ -27,7 +29,11 @@ from openblade.nas.types import (
     CacheDriveConfig,
     EffectivePolicy,
     IngestMode,
+    NasFileRecord,
+    NasPool,
+    NasRestoreJob,
     NasShareDefinition,
+    RestoreJobStatus,
     SidecarValidationError,
     SourceStreamConfig,
     StoragePolicy,
@@ -58,6 +64,14 @@ class StartIngestRequest(BaseModel):
 
 class CancelIngestResponse(BaseModel):
     cancelled: bool
+
+
+class RestorePlanRequest(BaseModel):
+    paths: list[str] = Field(default_factory=list)
+    destination: str = "/openblade/restore"
+    priority: int = 5
+    allow_parallel: bool = True
+    max_drives: int = 2
 
 
 @router.get("/policies", response_model=list[StoragePolicy])
@@ -215,6 +229,128 @@ async def delete_share(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Share {normalized_share_id} not found")
     return {"deleted": True}
+
+
+@router.get("/pools", response_model=list[NasPool])
+async def list_pools(service: NasService = Depends(get_nas_service)) -> list[NasPool]:
+    return service.list_pools()
+
+
+@router.post("/pools", response_model=NasPool)
+async def create_pool(pool: NasPool, service: NasService = Depends(get_nas_service)) -> JSONResponse:
+    created = service.get_pool(pool.id) is None
+    try:
+        saved = service.upsert_pool(pool)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        content=saved.model_dump(mode="json"),
+    )
+
+
+@router.get("/pools/{pool_id}", response_model=NasPool)
+async def get_pool(pool_id: str, service: NasService = Depends(get_nas_service)) -> NasPool:
+    pool = service.get_pool(pool_id)
+    if pool is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+    return pool
+
+
+@router.put("/pools/{pool_id}", response_model=NasPool)
+async def update_pool(
+    pool_id: str,
+    pool: NasPool,
+    service: NasService = Depends(get_nas_service),
+) -> NasPool:
+    if service.get_pool(pool_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+    try:
+        return service.upsert_pool(pool.model_copy(update={"id": pool_id}))
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.delete("/pools/{pool_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pool(pool_id: str, service: NasService = Depends(get_nas_service)) -> Response:
+    if not service.delete_pool(pool_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/pools/{pool_id}/browse")
+async def browse_pool(
+    pool_id: str,
+    path: str = Query(default=""),
+    service: NasService = Depends(get_nas_service),
+) -> dict[str, object]:
+    try:
+        return service.browse_pool(pool_id, path)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found") from exc
+
+
+@router.get("/pools/{pool_id}/files/{file_path:path}", response_model=NasFileRecord)
+async def get_pool_file_detail(
+    pool_id: str,
+    file_path: str,
+    service: NasService = Depends(get_nas_service),
+) -> NasFileRecord:
+    try:
+        return service.get_pool_file_detail(pool_id, file_path)
+    except KeyError as exc:
+        detail = exc.args[0] if exc.args else "file not found"
+        if detail == "pool not found":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found") from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from exc
+
+
+@router.post("/pools/{pool_id}/request-restore", response_model=NasRestoreJob)
+async def request_restore(
+    pool_id: str,
+    request: RestorePlanRequest,
+    service: NasService = Depends(get_nas_service),
+) -> JSONResponse:
+    if service.get_pool(pool_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+    job = NasRestoreJob(
+        id=str(uuid4()),
+        pool_id=pool_id,
+        paths=request.paths,
+        destination=request.destination,
+        priority=request.priority,
+        allow_parallel=request.allow_parallel,
+        max_drives=request.max_drives,
+        status=RestoreJobStatus.QUEUED,
+    )
+    saved = service.upsert_restore_job(job)
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=saved.model_dump(mode="json"))
+
+
+@router.get("/restore-jobs", response_model=list[NasRestoreJob])
+async def list_restore_jobs(service: NasService = Depends(get_nas_service)) -> list[NasRestoreJob]:
+    return service.list_restore_jobs()
+
+
+@router.get("/restore-jobs/{job_id}", response_model=NasRestoreJob)
+async def get_restore_job(
+    job_id: str,
+    service: NasService = Depends(get_nas_service),
+) -> NasRestoreJob:
+    job = service.get_restore_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found")
+    return job
+
+
+@router.delete("/restore-jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_restore_job(
+    job_id: str,
+    service: NasService = Depends(get_nas_service),
+) -> Response:
+    if not service.update_restore_job_status(job_id, RestoreJobStatus.CANCELLED.value):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/resolve-policy", response_model=EffectivePolicy)

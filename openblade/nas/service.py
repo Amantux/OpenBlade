@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath
 
 from openblade.catalog.models import Cartridge, NasCacheDrive, NasShare, NasStoragePolicy
 from openblade.catalog.repository import CatalogRepository
@@ -10,6 +11,7 @@ from openblade.nas.types import (
     CacheDriveConfig,
     NasDataset,
     NasFileRecord,
+    NasFileState,
     NasPool,
     NasRestoreJob,
     NasShareDefinition,
@@ -136,6 +138,136 @@ class NasService:
 
     def delete_pool(self, pool_id: str) -> bool:
         return self.repository.delete_nas_pool(pool_id)
+
+    def _normalize_logical_path(self, path: str) -> str:
+        normalized = str(PurePosixPath("/" + str(path or "").lstrip("/"))).lstrip("/")
+        return "" if normalized == "." else normalized
+
+    def _list_pool_file_records(self, pool_id: str) -> list[NasFileRecord]:
+        records: list[NasFileRecord] = []
+        for dataset in self.list_datasets(pool_id):
+            records.extend(self.list_file_records(dataset.id))
+        return sorted(records, key=lambda record: (record.relative_path, record.id))
+
+    def derive_file_state(
+        self,
+        record: NasFileRecord,
+        loaded_tapes: list[str] | None = None,
+    ) -> NasFileState:
+        if record.status is NasFileState.HYDRATING:
+            return NasFileState.HYDRATING
+        if record.status is NasFileState.FAILED:
+            return NasFileState.FAILED
+        if record.status is NasFileState.CORRUPT:
+            return NasFileState.CORRUPT
+        if record.status is NasFileState.EXPORTED:
+            return NasFileState.EXPORTED
+        if record.tape_barcode is None:
+            return NasFileState.MISSING_TAPE
+        if loaded_tapes is not None:
+            loaded_tape_set = set(loaded_tapes)
+            return (
+                NasFileState.ONLINE_CACHED
+                if record.tape_barcode in loaded_tape_set
+                else NasFileState.OFFLINE_ON_TAPE
+            )
+        return record.status
+
+    def browse_pool(self, pool_id: str, path: str = "") -> dict[str, object]:
+        if self.get_pool(pool_id) is None:
+            raise KeyError("pool not found")
+
+        requested_path = self._normalize_logical_path(path)
+        prefix = f"{requested_path}/" if requested_path else ""
+        directory_entries: dict[str, dict[str, object]] = {}
+        file_entries: list[dict[str, object]] = []
+        total_files = 0
+        total_bytes = 0
+        offline_count = 0
+        online_count = 0
+        hydrating_count = 0
+
+        for record in self._list_pool_file_records(pool_id):
+            logical_path = self._normalize_logical_path(record.relative_path)
+            if requested_path:
+                if logical_path == requested_path:
+                    remainder = PurePosixPath(logical_path).name
+                elif logical_path.startswith(prefix):
+                    remainder = logical_path[len(prefix) :]
+                else:
+                    continue
+            else:
+                remainder = logical_path
+
+            parts = [part for part in remainder.split("/") if part]
+            if not parts:
+                continue
+
+            if len(parts) > 1:
+                directory_name = parts[0]
+                directory_entries.setdefault(
+                    directory_name,
+                    {
+                        "name": directory_name,
+                        "type": "directory",
+                        "size_bytes": 0,
+                        "mtime": None,
+                        "state": None,
+                        "tape_barcode": None,
+                        "checksum_sha256": None,
+                        "logical_path": "/".join(
+                            segment for segment in (requested_path, directory_name) if segment
+                        ),
+                    },
+                )
+                continue
+
+            state = self.derive_file_state(record, loaded_tapes=None)
+            file_entries.append(
+                {
+                    "name": parts[0],
+                    "type": "file",
+                    "size_bytes": record.size_bytes,
+                    "mtime": record.mtime,
+                    "state": state,
+                    "tape_barcode": record.tape_barcode,
+                    "checksum_sha256": record.checksum_sha256,
+                    "logical_path": logical_path,
+                }
+            )
+            total_files += 1
+            total_bytes += record.size_bytes
+            if state is NasFileState.ONLINE_CACHED:
+                online_count += 1
+            elif state is NasFileState.OFFLINE_ON_TAPE:
+                offline_count += 1
+            elif state is NasFileState.HYDRATING:
+                hydrating_count += 1
+
+        entries = sorted(
+            [*directory_entries.values(), *file_entries],
+            key=lambda entry: (entry["type"] != "directory", entry["name"]),
+        )
+        return {
+            "pool_id": pool_id,
+            "path": requested_path,
+            "entries": entries,
+            "total_files": total_files,
+            "total_bytes": total_bytes,
+            "offline_count": offline_count,
+            "online_count": online_count,
+            "hydrating_count": hydrating_count,
+        }
+
+    def get_pool_file_detail(self, pool_id: str, logical_path: str) -> NasFileRecord:
+        if self.get_pool(pool_id) is None:
+            raise KeyError("pool not found")
+
+        normalized_path = self._normalize_logical_path(logical_path)
+        for record in self._list_pool_file_records(pool_id):
+            if self._normalize_logical_path(record.relative_path) == normalized_path:
+                return record
+        raise KeyError("file not found")
 
     def list_datasets(self, pool_id: str | None = None) -> list[NasDataset]:
         return [NasDataset.model_validate(row) for row in self.repository.list_nas_datasets(pool_id)]
