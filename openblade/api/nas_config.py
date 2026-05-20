@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
@@ -10,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
+from openblade.nas.fuse_hook import FuseHook
 from openblade.nas.hydration import HydrationExecutor
 from openblade.nas.ingest import (
     IngestJob,
@@ -29,9 +32,11 @@ from openblade.nas.types import (
     ArchivePlan,
     ArchivePlanRequest,
     CacheDriveConfig,
+    DatasetStatus,
     EffectivePolicy,
     IngestMode,
     NasFileRecord,
+    NasFileState,
     NasPool,
     NasRestoreJob,
     NasShareDefinition,
@@ -43,6 +48,7 @@ from openblade.nas.types import (
 )
 
 router = APIRouter(prefix="/nas", tags=["NAS Config"])
+_FUSE_HOOKS: dict[int, FuseHook] = {}
 
 
 def get_nas_service(repo=Depends(get_catalog_repository)) -> NasService:
@@ -64,6 +70,73 @@ def _require_restore_job(service: NasService, job_id: str) -> NasRestoreJob:
     return job
 
 
+def _require_dataset(service: NasService, dataset_id: str):
+    dataset = service.get_dataset(dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset {dataset_id} not found")
+    return dataset
+
+
+def _get_fuse_hook(service: NasService) -> FuseHook:
+    repository_id = id(service.repository)
+    hook = _FUSE_HOOKS.get(repository_id)
+    if hook is None:
+        hook = FuseHook(service)
+        _FUSE_HOOKS[repository_id] = hook
+    else:
+        hook.service = service
+    return hook
+
+
+def _dataset_detail_or_404(service: NasService, dataset_id: str) -> dict[str, object]:
+    try:
+        return service.get_dataset_detail(dataset_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset {dataset_id} not found") from exc
+
+
+def _manifest_payload(service: NasService, dataset_id: str) -> dict[str, object]:
+    detail = _dataset_detail_or_404(service, dataset_id)
+    records = service.list_file_records(dataset_id)
+    return {
+        "dataset_id": detail["id"],
+        "policy_id": detail["policy_id"],
+        "ingest_mode": detail["ingest_mode"],
+        "tape_set": detail["tape_set"],
+        "shard_map": detail["shard_map"],
+        "files": [
+            {
+                "logical_path": record.relative_path,
+                "size_bytes": record.size_bytes,
+                "checksum_sha256": record.checksum_sha256,
+                "tape_barcode": record.tape_barcode,
+                "state": record.status.value,
+            }
+            for record in records
+        ],
+        "total_files": detail["file_count"],
+        "total_bytes": detail["total_bytes"],
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def _report_payload(service: NasService, dataset_id: str) -> dict[str, object]:
+    detail = _dataset_detail_or_404(service, dataset_id)
+    records = service.list_file_records(dataset_id)
+    return {
+        "dataset": detail,
+        "files": [
+            {
+                **record.model_dump(mode="json"),
+                "logical_path": record.relative_path,
+            }
+            for record in records
+        ],
+        "checksums": {record.relative_path: record.checksum_sha256 for record in records},
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 class ResolvePolicyRequest(BaseModel):
     directory: str
     share_id: str | None = None
@@ -78,6 +151,101 @@ class StartIngestRequest(BaseModel):
 
 class CancelIngestResponse(BaseModel):
     cancelled: bool
+
+
+class FuseOpenRequest(BaseModel):
+    pool_id: str
+    logical_path: str
+
+
+@router.get("/datasets")
+async def list_datasets(
+    pool_id: str | None = Query(default=None),
+    status_filter: DatasetStatus | None = Query(default=None, alias="status"),
+    service: NasService = Depends(get_nas_service),
+) -> list[dict[str, object]]:
+    datasets = service.list_datasets(pool_id)
+    if status_filter is not None:
+        datasets = [dataset for dataset in datasets if dataset.status is status_filter]
+    return [service.get_dataset_detail(dataset.id) for dataset in datasets]
+
+
+@router.get("/datasets/{dataset_id}")
+async def get_dataset_detail(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+    return _dataset_detail_or_404(service, dataset_id)
+
+
+@router.get("/datasets/{dataset_id}/files", response_model=list[NasFileRecord])
+async def list_dataset_files(
+    dataset_id: str,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=1000),
+    service: NasService = Depends(get_nas_service),
+) -> list[NasFileRecord]:
+    _require_dataset(service, dataset_id)
+    return service.list_file_records(dataset_id)[skip : skip + limit]
+
+
+@router.get("/datasets/{dataset_id}/manifest")
+async def get_dataset_manifest(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+    return _manifest_payload(service, dataset_id)
+
+
+@router.post("/datasets/{dataset_id}/verify")
+async def verify_dataset(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+    _require_dataset(service, dataset_id)
+    files_verified = 0
+    files_corrupt = 0
+    files_updated = 0
+    checksums: dict[str, str] = {}
+
+    for record in service.list_file_records(dataset_id):
+        expected = hashlib.sha256(f"{record.relative_path}:{record.tape_barcode}".encode()).hexdigest()
+        files_verified += 1
+        checksums[record.relative_path] = expected
+        if record.checksum_sha256 in {None, expected}:
+            updates = {"checksum_sha256": expected}
+            if record.checksum_sha256 is None:
+                files_updated += 1
+            service.upsert_file_record(record.model_copy(update=updates))
+            continue
+        files_corrupt += 1
+        service.upsert_file_record(record.model_copy(update={"status": NasFileState.CORRUPT}))
+
+    return {
+        "dataset_id": dataset_id,
+        "files_verified": files_verified,
+        "files_corrupt": files_corrupt,
+        "files_updated": files_updated,
+        "checksums": checksums,
+    }
+
+
+@router.post("/datasets/{dataset_id}/export")
+async def export_dataset(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+    dataset = _require_dataset(service, dataset_id)
+    service.upsert_dataset(dataset.model_copy(update={"status": DatasetStatus.EXPORTED}))
+    for record in service.list_file_records(dataset_id):
+        service.upsert_file_record(record.model_copy(update={"status": NasFileState.EXPORTED}))
+    return _dataset_detail_or_404(service, dataset_id)
+
+
+@router.get("/datasets/{dataset_id}/report")
+async def get_dataset_report(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+    return _report_payload(service, dataset_id)
+
+
+@router.post("/fuse/open")
+async def open_virtual_file(
+    request: FuseOpenRequest,
+    service: NasService = Depends(get_nas_service),
+) -> dict[str, object]:
+    return _get_fuse_hook(service).on_file_open(request.pool_id, request.logical_path)
+
+
+@router.get("/fuse/log")
+async def get_fuse_log(service: NasService = Depends(get_nas_service)) -> list[dict[str, object]]:
+    return _get_fuse_hook(service).get_access_log()
 
 
 @router.get("/policies", response_model=list[StoragePolicy])

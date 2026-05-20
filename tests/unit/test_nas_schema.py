@@ -138,6 +138,7 @@ def test_dataset_status_enum() -> None:
     assert DatasetStatus.ARCHIVED.value == "archived"
     assert DatasetStatus.FAILED.value == "failed"
     assert DatasetStatus.VERIFIED.value == "verified"
+    assert DatasetStatus.EXPORTED.value == "exported"
     assert DatasetStatus.CANCELLED.value == "cancelled"
 
 

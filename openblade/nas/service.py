@@ -281,6 +281,43 @@ class NasService:
             return None
         return NasDataset.model_validate(row)
 
+    def get_dataset_detail(self, dataset_id: str) -> dict[str, object]:
+        """Returns dataset + tape_set + shard_map + file_count + total_bytes + copies_completed + policy_name."""
+        dataset = self.get_dataset(dataset_id)
+        if dataset is None:
+            raise KeyError("dataset not found")
+
+        records = self.list_file_records(dataset_id)
+        shard_map: dict[str, list[str]] = {}
+        total_bytes = 0
+        for record in records:
+            total_bytes += record.size_bytes
+            if record.tape_barcode is None:
+                continue
+            shard_map.setdefault(record.tape_barcode, []).append(record.relative_path)
+
+        for logical_paths in shard_map.values():
+            logical_paths.sort()
+
+        tape_set = sorted(shard_map)
+        policy_name = None
+        if dataset.policy_id is not None:
+            policy = self.get_policy(dataset.policy_id)
+            policy_name = None if policy is None else policy.name
+
+        detail = dataset.model_dump(mode="json")
+        detail.update(
+            {
+                "tape_set": tape_set,
+                "shard_map": shard_map,
+                "file_count": len(records),
+                "total_bytes": total_bytes,
+                "copies_completed": len(tape_set),
+                "policy_name": policy_name,
+            }
+        )
+        return detail
+
     def upsert_dataset(self, dataset: NasDataset) -> NasDataset:
         return NasDataset.model_validate(
             self.repository.upsert_nas_dataset(dataset.model_dump(mode="json"))
