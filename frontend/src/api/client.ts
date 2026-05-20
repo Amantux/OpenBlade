@@ -1,4 +1,4 @@
-import { clearStoredUsername } from '../lib/auth';
+import { clearStoredUsername, notifyAuthRedirect } from '../lib/auth';
 
 type BodyInitLike = BodyInit | FormData | URLSearchParams | Blob;
 
@@ -63,6 +63,7 @@ function redirectToLogin(): void {
 
   if (!window.location.pathname.startsWith('/login')) {
     clearStoredUsername();
+    notifyAuthRedirect();
     window.location.assign(`/login?redirect=${redirect}`);
   }
 }

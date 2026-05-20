@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SystemHealth } from '../../types/api';
-import { getStoredUsername } from '../../lib/auth';
+import { useAuth } from '../../lib/auth-context';
 import StatusPill from '../ui/StatusPill';
 
 interface TopBarProps {
@@ -16,8 +16,9 @@ const statusCopy: Record<SystemHealth, string> = {
 };
 
 export default function TopBar({ libraryName, health, backend }: TopBarProps) {
+  const auth = useAuth();
   const [now, setNow] = useState(() => new Date());
-  const [username] = useState(() => getStoredUsername() ?? 'operator');
+  const username = auth.username ?? 'operator';
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1_000);

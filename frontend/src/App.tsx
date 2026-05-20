@@ -1,6 +1,9 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Layout from './components/layout/Layout';
-import { isAuthenticated } from './lib/auth';
+import Spinner from './components/ui/Spinner';
+import { AuthProvider, useAuth } from './lib/auth-context';
+import Archive from './pages/Archive';
+import Catalog from './pages/Catalog';
 import Dashboard from './pages/Dashboard';
 import DriveOperations from './pages/DriveOperations';
 import Drives from './pages/Drives';
@@ -11,6 +14,7 @@ import Jobs from './pages/Jobs';
 import Libraries from './pages/Libraries';
 import Library from './pages/Library';
 import LibraryIE from './pages/LibraryIE';
+import LibraryMap from './pages/LibraryMap';
 import Login from './pages/Login';
 import LtfsBrowse from './pages/LtfsBrowse';
 import Media from './pages/Media';
@@ -28,8 +32,17 @@ import SystemNetwork from './pages/SystemNetwork';
 
 function ProtectedLayout() {
   const location = useLocation();
+  const auth = useAuth();
 
-  if (!isAuthenticated()) {
+  if (auth.isChecking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-quantum-panel">
+        <Spinner />
+      </div>
+    );
+  }
+
+  if (!auth.isAuthenticated) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}${location.hash}` || '/')}`} replace />;
   }
 
@@ -42,16 +55,18 @@ function RoutedApp() {
       <Route path="/login" element={<Login />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<Dashboard />} />
-        <Route path="dashboard" element={<Navigate to="/" replace />} />
+        <Route path="dashboard" element={<Dashboard />} />
         <Route path="libraries" element={<Libraries />} />
         <Route path="health" element={<Health />} />
-        <Route path="library" element={<Dashboard />} />
+        <Route path="library" element={<LibraryMap />} />
         <Route path="library/inventory" element={<Library />} />
         <Route path="library/ie" element={<LibraryIE />} />
         <Route path="partitions" element={<Partitions />} />
         <Route path="media" element={<Media />} />
         <Route path="media/pools" element={<MediaPools />} />
         <Route path="media/ltfs" element={<LtfsBrowse />} />
+        <Route path="catalog" element={<Catalog />} />
+        <Route path="archive" element={<Archive />} />
         <Route path="drives" element={<Drives />} />
         <Route path="drives/ops" element={<DriveOperations />} />
         <Route path="jobs" element={<Jobs />} />
@@ -75,7 +90,9 @@ function RoutedApp() {
 export default function App() {
   return (
     <BrowserRouter>
-      <RoutedApp />
+      <AuthProvider>
+        <RoutedApp />
+      </AuthProvider>
     </BrowserRouter>
   );
 }

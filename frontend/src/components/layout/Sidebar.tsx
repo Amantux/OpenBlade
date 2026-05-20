@@ -53,6 +53,8 @@ const sections: NavSection[] = [
     icon: Database,
     items: [
       { label: 'Cartridges', to: '/media' },
+      { label: 'Catalog', to: '/catalog' },
+      { label: 'Archive', to: '/archive' },
       { label: 'Media Pools', to: '/media/pools' },
       { label: 'LTFS Browse', to: '/media/ltfs' },
     ],

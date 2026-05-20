@@ -10,14 +10,7 @@ import Spinner from '../components/ui/Spinner';
 import { useHealth } from '../hooks/useHealth';
 import { useInventory } from '../hooks/useInventory';
 import { useJobs } from '../hooks/useJobs';
-import {
-  buildRasTickets,
-  getJobState,
-  getSlotTone,
-  normalizeDrive,
-  normalizeSlot,
-  type NormalizedSlot,
-} from '../lib/lmc';
+import { buildRasTickets, getJobState, getSlotTone, normalizeDrive, normalizeSlot, type NormalizedSlot } from '../lib/lmc';
 import { formatDate } from '../lib/utils';
 
 interface PartitionRow {
@@ -27,18 +20,6 @@ interface PartitionRow {
   loaded: number;
   magazines: number;
   state: string;
-}
-
-function slotClasses(tone: ReturnType<typeof getSlotTone>, isIeArea: boolean): string {
-  const base = 'rounded-sm border px-2 py-1 text-[11px] font-semibold';
-  const toneClasses = {
-    gray: 'border-slate-600 bg-slate-800 text-slate-300',
-    green: 'border-emerald-700 bg-emerald-900/30 text-emerald-200',
-    blue: 'border-sky-700 bg-sky-900/30 text-sky-200',
-    red: 'border-red-700 bg-red-900/40 text-red-200',
-  }[tone];
-
-  return `${base} ${toneClasses} ${isIeArea ? 'ring-1 ring-amber-400/80' : ''}`;
 }
 
 export default function Dashboard() {
@@ -85,16 +66,6 @@ export default function Dashboard() {
 
   const selectedPartition = partitionRows.find((row) => row.id === selectedPartitionId) ?? partitionRows[0];
 
-  const magazines = useMemo(() => {
-    const grouped = new Map<number, NormalizedSlot[]>();
-    for (const slot of slots) {
-      const current = grouped.get(slot.magazine) ?? [];
-      current.push(slot);
-      grouped.set(slot.magazine, current);
-    }
-    return Array.from(grouped.entries()).sort((left, right) => left[0] - right[0]);
-  }, [slots]);
-
   const summaryCards = [
     { label: 'Total Elements', value: health?.slots_total ?? slots.length },
     { label: 'Elements Used', value: health?.slots_used ?? slots.filter((slot) => slot.occupied).length },
@@ -132,40 +103,23 @@ export default function Dashboard() {
           </Card>
 
           <Card className="bg-quantum-north">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Physical Layout</div>
-                <h2 className="mt-1 text-lg font-semibold text-slate-100">Magazine / Element Map</h2>
+            <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Operations Snapshot</div>
+            <h2 className="mt-1 text-lg font-semibold text-slate-100">Overview</h2>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Robot State</div>
+                <div className="mt-2 text-lg font-semibold text-slate-100">{inventory.changer_state ?? 'UNKNOWN'}</div>
               </div>
-              <div className="flex flex-wrap gap-2 text-xs text-slate-400">
-                <Badge variant="gray">Empty</Badge>
-                <Badge variant="green">Loaded</Badge>
-                <Badge variant="blue">Drive Busy</Badge>
-                <Badge variant="red">Error</Badge>
+              <div className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Loaded Media</div>
+                <div className="mt-2 text-lg font-semibold text-slate-100">{slots.filter((slot) => slot.occupied).length}</div>
               </div>
-            </div>
-            <div className="mt-4 grid gap-3 lg:grid-cols-4">
-              {magazines.map(([magazine, magazineSlots]) => (
-                <div key={magazine} className="rounded-md border border-quantum-border bg-quantum-panel p-3">
-                  <div className="mb-3 flex items-center justify-between text-xs uppercase tracking-[0.18em] text-slate-400">
-                    <span>Magazine {magazine}</span>
-                    <span>{magazineSlots.filter((slot) => slot.occupied).length}/5</span>
-                  </div>
-                  <div className="space-y-2">
-                    {magazineSlots.map((slot) => (
-                      <div key={slot.element} className={slotClasses(getSlotTone(slot), slot.isIeArea)}>
-                        <div className="flex items-center justify-between gap-2">
-                          <span>Element {slot.element}</span>
-                          {slot.isCleaning ? <span>🧹</span> : null}
-                        </div>
-                        <div className="mt-1 truncate text-[10px] font-normal uppercase tracking-[0.14em] text-slate-300">
-                          {slot.barcode ?? 'Empty'}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              <div className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Drive Attention</div>
+                <div className="mt-2 text-lg font-semibold text-slate-100">
+                  {drives.filter((drive) => ['FAULTED', 'OFFLINE', 'FAILED'].includes(drive.state)).length}
                 </div>
-              ))}
+              </div>
             </div>
           </Card>
         </div>
@@ -223,9 +177,10 @@ export default function Dashboard() {
         title="Library Operations"
         subtitle="Quick actions commonly used from the overview screen."
         actions={[
-          { label: 'Inventory', onClick: () => void inventoryQuery.refetch(), variant: 'primary' },
-          { label: 'View Inventory', onClick: () => void navigate('/library/inventory'), variant: 'secondary' },
+          { label: 'Refresh', onClick: () => void Promise.all([healthQuery.refetch(), inventoryQuery.refetch(), jobsQuery.refetch()]), variant: 'primary' },
+          { label: 'Physical Map', onClick: () => void navigate('/library'), variant: 'secondary' },
           { label: 'Open Archive', onClick: () => void navigate('/archive'), variant: 'secondary' },
+          { label: 'Open Catalog', onClick: () => void navigate('/catalog'), variant: 'secondary' },
           { label: 'View Jobs', onClick: () => void navigate('/jobs'), variant: 'secondary' },
         ]}
       />

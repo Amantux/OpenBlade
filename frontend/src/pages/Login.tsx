@@ -5,11 +5,13 @@ import { login } from '../api/auth';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
-import { isAuthenticated, storeUsername } from '../lib/auth';
+import Spinner from '../components/ui/Spinner';
+import { useAuth } from '../lib/auth-context';
 
 export default function Login() {
   const location = useLocation();
   const navigate = useNavigate();
+  const auth = useAuth();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('password');
   const [error, setError] = useState<unknown>(null);
@@ -20,7 +22,15 @@ export default function Login() {
     return params.get('redirect') || '/';
   }, [location.search]);
 
-  if (isAuthenticated()) {
+  if (auth.isChecking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-quantum-panel">
+        <Spinner />
+      </div>
+    );
+  }
+
+  if (auth.isAuthenticated) {
     return <Navigate to={redirectPath} replace />;
   }
 
@@ -31,7 +41,7 @@ export default function Login() {
 
     try {
       await login(username, password);
-      storeUsername(username);
+      auth.markAuthenticated(username);
       navigate(redirectPath, { replace: true });
     } catch (submitError) {
       setError(submitError);
