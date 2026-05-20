@@ -677,6 +677,20 @@ async def create_mount(
             "previousSlot": media.get("slotAddress"),
         },
     )
+    aml_state.set_aml_drive_operation_task(
+        job["id"],
+        {
+            "id": job["id"],
+            "componentId": drive_name,
+            "type": "load",
+            "opened": mount_time,
+            "closed": mount_time,
+            "state": 5,
+            "status": "Completed",
+            "description": f"Loaded {barcode} into drive {drive_name}",
+            "sessionId": None,
+        },
+    )
     aml_state.update_aml_job(job["id"], {"status": "active", "progress": 50, "result": f"Mounted {barcode} on {drive_name}"})
     _archive_job(job["id"], status="completed", result=f"Mounted {barcode} on {drive_name}")
     return _ws_result(f"Mounted {barcode} on {drive_name}")
@@ -703,6 +717,20 @@ async def create_unmount(
     aml_state.pop_aml_mount(mount_id)
     aml_state.update_aml_drive(drive_name, {"loadedMedia": None, "state": "idle"})
     aml_state.update_aml_media(barcode, {"slotAddress": previous_slot, "state": "home"})
+    aml_state.set_aml_drive_operation_task(
+        job["id"],
+        {
+            "id": job["id"],
+            "componentId": drive_name,
+            "type": "unload",
+            "opened": job["startTime"],
+            "closed": job["startTime"],
+            "state": 5,
+            "status": "Completed",
+            "description": f"Unloaded {barcode} from drive {drive_name}",
+            "sessionId": None,
+        },
+    )
     _archive_job(job["id"], status="completed", result=f"Unmounted {barcode} from {drive_name}")
     return _ws_result(f"Unmounted {barcode} from {drive_name}")
 
@@ -1022,6 +1050,7 @@ async def clean_drives(
     drives = [_validate_identifier(drive, field_name="drive") for drive in payload.clean.drives]
     if not drives:
         raise HTTPException(status_code=400, detail="At least one drive is required")
+    cleaned_at = _timestamp()
     for drive_name in drives:
         drive = _get_drive_or_404(drive_name)
         aml_state.update_aml_drive(
@@ -1029,7 +1058,20 @@ async def clean_drives(
             {
                 "state": "cleaning",
                 "cleaningCount": int(drive.get("cleaningCount", 0)) + 1,
-                "lastCleaned": _timestamp(),
+                "lastCleaned": cleaned_at,
+            },
+        )
+        aml_state.set_aml_drive_operation_task(
+            f"{drive_name}-{uuid4().hex[:8]}",
+            {
+                "componentId": drive_name,
+                "type": "clean",
+                "opened": cleaned_at,
+                "closed": None,
+                "state": 1,
+                "status": "Running",
+                "description": f"Cleaning drive {drive_name}",
+                "sessionId": None,
             },
         )
     job = _create_job("clean")
@@ -1053,6 +1095,7 @@ async def clean_drives_compat(
     validated_drives = [_validate_identifier(drive, field_name="drive") for drive in drives]
     if not validated_drives:
         raise HTTPException(status_code=400, detail="At least one drive is required")
+    cleaned_at = _timestamp()
     for drive_name in validated_drives:
         drive = _get_drive_or_404(drive_name)
         aml_state.update_aml_drive(
@@ -1060,7 +1103,20 @@ async def clean_drives_compat(
             {
                 "state": "cleaning",
                 "cleaningCount": int(drive.get("cleaningCount", 0)) + 1,
-                "lastCleaned": _timestamp(),
+                "lastCleaned": cleaned_at,
+            },
+        )
+        aml_state.set_aml_drive_operation_task(
+            f"{drive_name}-{uuid4().hex[:8]}",
+            {
+                "componentId": drive_name,
+                "type": "clean",
+                "opened": cleaned_at,
+                "closed": None,
+                "state": 1,
+                "status": "Running",
+                "description": f"Cleaning drive {drive_name}",
+                "sessionId": None,
             },
         )
     job = _create_job("clean")

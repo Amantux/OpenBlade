@@ -151,6 +151,10 @@ class AMLState:
     aml_cleaning_status: dict[str, Any] = field(
         default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None, "drives": []}
     )
+    aml_drive_cleaning_reports: list[dict[str, Any]] = field(default_factory=lambda: _default_aml_drive_cleaning_reports())
+    aml_drive_operation_tasks: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_drive_operation_tasks())
+    aml_diagnostic_tests: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_diagnostic_tests())
+    aml_diagnostic_results: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_diagnostic_results())
     aml_robotics_last_test_time: str | None = None
     aml_system_certificates: list[dict[str, Any]] = field(default_factory=lambda: [{
         "id": "cert-001", "name": "default", "subject": "CN=OpenBlade",
@@ -726,6 +730,146 @@ def _default_aml_magazines() -> dict[str, dict[str, Any]]:
             "slotCount": 10,
             "occupiedSlots": 3,
             "tapes": ["VOL001L9", "VOL002L9", "VOL003L9"],
+        }
+    }
+
+
+
+def _default_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
+    return [
+        {
+            "serialNumber": "DRV-001",
+            "lastCleaned": "2024-01-10T08:00:00Z",
+            "mediaBarcode": "CLN001L9",
+            "useCount": 18,
+            "expired": False,
+        },
+        {
+            "serialNumber": "DRV-002",
+            "lastCleaned": "2024-01-08T14:00:00Z",
+            "mediaBarcode": "CLN001L9",
+            "useCount": 17,
+            "expired": False,
+        },
+    ]
+
+
+
+def _default_aml_drive_operation_tasks() -> dict[str, dict[str, Any]]:
+    return {
+        "task-load-drv-001": {
+            "id": "task-load-drv-001",
+            "componentId": "DRV-001",
+            "type": "load",
+            "opened": "2024-01-15T10:00:00Z",
+            "closed": "2024-01-15T10:00:12Z",
+            "state": 5,
+            "status": "Completed",
+            "description": "Loaded VOL001L9 into drive DRV-001",
+            "sessionId": "session-001",
+        },
+        "task-unload-drv-001": {
+            "id": "task-unload-drv-001",
+            "componentId": "DRV-001",
+            "type": "unload",
+            "opened": "2024-01-15T10:30:00Z",
+            "closed": "2024-01-15T10:30:10Z",
+            "state": 5,
+            "status": "Completed",
+            "description": "Unloaded VOL001L9 from drive DRV-001",
+            "sessionId": "session-001",
+        },
+        "task-load-drv-002": {
+            "id": "task-load-drv-002",
+            "componentId": "DRV-002",
+            "type": "load",
+            "opened": "2024-01-14T08:00:00Z",
+            "closed": "2024-01-14T08:00:15Z",
+            "state": 5,
+            "status": "Completed",
+            "description": "Loaded VOL002L9 into drive DRV-002",
+            "sessionId": "session-002",
+        },
+        "task-unload-drv-002": {
+            "id": "task-unload-drv-002",
+            "componentId": "DRV-002",
+            "type": "unload",
+            "opened": "2024-01-14T08:45:00Z",
+            "closed": "2024-01-14T08:45:09Z",
+            "state": 5,
+            "status": "Completed",
+            "description": "Unloaded VOL002L9 from drive DRV-002",
+            "sessionId": "session-002",
+        },
+        "task-clean-drv-001": {
+            "id": "task-clean-drv-001",
+            "componentId": "DRV-001",
+            "type": "clean",
+            "opened": "2024-01-10T08:00:00Z",
+            "closed": "2024-01-10T08:04:00Z",
+            "state": 5,
+            "status": "Completed",
+            "description": "Cleaned drive DRV-001 using CLN001L9",
+            "sessionId": "session-003",
+        },
+    }
+
+
+
+def _default_aml_diagnostic_tests() -> dict[str, dict[str, Any]]:
+    return {
+        "inventory-integrity": {
+            "id": "inventory-integrity",
+            "name": "Inventory Integrity",
+            "description": "Validate slot inventory, media assignments, and barcode visibility.",
+            "category": "library",
+            "estimatedDuration": 90,
+        },
+        "robotics-path": {
+            "id": "robotics-path",
+            "name": "Robotics Path Check",
+            "description": "Exercise the robot arm pathing and confirm home position transitions.",
+            "category": "robotics",
+            "estimatedDuration": 120,
+        },
+        "drive-connectivity": {
+            "id": "drive-connectivity",
+            "name": "Drive Connectivity",
+            "description": "Verify each configured drive responds and reports healthy transport links.",
+            "category": "drives",
+            "estimatedDuration": 60,
+        },
+    }
+
+
+
+def _default_aml_diagnostic_results() -> dict[str, dict[str, Any]]:
+    return {
+        "diag-result-001": {
+            "id": "diag-result-001",
+            "testId": "suite:default",
+            "startTime": "2024-01-15T09:00:00Z",
+            "endTime": "2024-01-15T09:02:30Z",
+            "status": "completed",
+            "passed": 3,
+            "failed": 0,
+            "details": [
+                {
+                    "name": "Inventory Integrity",
+                    "status": "passed",
+                    "message": "Inventory matches configured media layout.",
+                },
+                {
+                    "name": "Robotics Path Check",
+                    "status": "passed",
+                    "message": "Robot arm returned to home position without errors.",
+                },
+                {
+                    "name": "Drive Connectivity",
+                    "status": "passed",
+                    "message": "All configured drives reported online.",
+                },
+            ],
         }
     }
 
@@ -2443,6 +2587,85 @@ def get_aml_cleaning_status() -> dict[str, Any]:
 def set_aml_cleaning_status(status: dict[str, Any]) -> dict[str, Any]:
     _STATE.aml_cleaning_status = deepcopy(status)
     return get_aml_cleaning_status()
+
+
+
+def list_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
+    return [deepcopy(item) for item in sorted(_STATE.aml_drive_cleaning_reports, key=lambda item: str(item.get("lastCleaned", "")), reverse=True)]
+
+
+
+def append_aml_drive_cleaning_report(report: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(report)
+    _STATE.aml_drive_cleaning_reports.append(stored)
+    return deepcopy(stored)
+
+
+
+def list_aml_drive_operation_tasks(
+    *,
+    task_type: str | None = None,
+    component_id: str | None = None,
+) -> list[dict[str, Any]]:
+    tasks = [deepcopy(item) for _, item in sorted(_STATE.aml_drive_operation_tasks.items())]
+    if task_type is not None:
+        tasks = [task for task in tasks if str(task.get("type")) == task_type]
+    if component_id is not None:
+        tasks = [task for task in tasks if str(task.get("componentId")) == component_id]
+    return sorted(tasks, key=lambda item: (str(item.get("opened", "")), str(item.get("id", ""))), reverse=True)
+
+
+
+def get_aml_drive_operation_task(task_id: str) -> dict[str, Any] | None:
+    task = _STATE.aml_drive_operation_tasks.get(task_id)
+    return deepcopy(task) if task is not None else None
+
+
+
+def set_aml_drive_operation_task(task_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(task)
+    stored["id"] = task_id
+    _STATE.aml_drive_operation_tasks[task_id] = stored
+    return deepcopy(stored)
+
+
+
+def list_aml_diagnostic_tests() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_diagnostic_tests.items())]
+
+
+
+def get_aml_diagnostic_test(test_id: str) -> dict[str, Any] | None:
+    test = _STATE.aml_diagnostic_tests.get(test_id)
+    return deepcopy(test) if test is not None else None
+
+
+
+def list_aml_diagnostic_results() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_diagnostic_results.items())]
+
+
+
+def get_aml_diagnostic_result(result_id: str) -> dict[str, Any] | None:
+    result = _STATE.aml_diagnostic_results.get(result_id)
+    return deepcopy(result) if result is not None else None
+
+
+
+def set_aml_diagnostic_result(result_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(result)
+    stored["id"] = result_id
+    _STATE.aml_diagnostic_results[result_id] = stored
+    return deepcopy(stored)
+
+
+
+def get_latest_aml_diagnostic_result() -> dict[str, Any] | None:
+    results = list_aml_diagnostic_results()
+    if not results:
+        return None
+    return max(results, key=lambda item: (str(item.get("endTime", "")), str(item.get("startTime", "")), str(item.get("id", ""))))
+
 
 
 def get_aml_robotics_last_test_time() -> str | None:
