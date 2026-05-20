@@ -105,6 +105,9 @@ class AMLState:
     eth_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_eth_blades())
     fc_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_fc_blades())
     mgmt_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_mgmt_blades())
+    blade_firmware: list[dict[str, Any]] = field(default_factory=lambda: _default_blade_firmware())
+    drive_firmware_images: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_drive_firmware_images())
+    system_firmware_info: dict[str, Any] = field(default_factory=lambda: _default_system_firmware_info())
     drive_sleds: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_drive_sleds())
     power_supplies: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_power_supplies())
     aml_fans: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_fans())
@@ -149,6 +152,37 @@ class AMLState:
         default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None, "drives": []}
     )
     aml_robotics_last_test_time: str | None = None
+    aml_system_certificates: list[dict[str, Any]] = field(default_factory=lambda: [{
+        "id": "cert-001", "name": "default", "subject": "CN=OpenBlade",
+        "issuer": "CN=OpenBlade CA", "notBefore": "2024-01-01T00:00:00Z",
+        "notAfter": "2025-01-01T00:00:00Z", "fingerprint": "AA:BB:CC:DD",
+        "status": "active", "type": "self-signed"
+    }])
+    aml_system_cert_info: dict[str, Any] = field(default_factory=lambda: {
+        "subject": "CN=OpenBlade", "issuer": "CN=OpenBlade CA",
+        "notBefore": "2024-01-01T00:00:00Z", "notAfter": "2025-01-01T00:00:00Z",
+        "fingerprint": "AA:BB:CC:DD", "status": "active"
+    })
+    aml_system_recent_traps: list[dict[str, Any]] = field(default_factory=list)
+    aml_system_storage_volumes: dict[str, dict[str, Any]] = field(default_factory=lambda: {
+        "system": {"name": "system", "total": 500, "used": 120, "free": 380, "unit": "GB", "status": "healthy"},
+        "data": {"name": "data", "total": 2000, "used": 800, "free": 1200, "unit": "GB", "status": "healthy"},
+    })
+    aml_system_backup_status: dict[str, Any] = field(default_factory=lambda: {
+        "state": "idle", "lastBackup": None, "nextBackup": None, "progress": 0
+    })
+    aml_system_backup_history: list[dict[str, Any]] = field(default_factory=list)
+    aml_system_available_updates: list[dict[str, Any]] = field(default_factory=list)
+    aml_system_update_status: dict[str, Any] = field(default_factory=lambda: {
+        "state": "idle", "progress": 0, "message": "No update in progress"
+    })
+    aml_system_last_diagnostics: dict[str, Any] = field(default_factory=lambda: {
+        "state": "idle", "lastRun": None, "result": None, "tests": []
+    })
+    aml_system_support_bundle: dict[str, Any] = field(default_factory=lambda: {
+        "state": "idle", "filename": None, "createdAt": None, "size": 0
+    })
+    aml_system_manual_time_utc: str | None = None
 
 
 def _utcnow() -> datetime:
@@ -416,6 +450,93 @@ def _default_aml_drives() -> dict[str, dict[str, Any]]:
             "errors": [],
             "diagnosticResult": None,
         },
+    }
+
+
+
+def _default_blade_firmware() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "eth-blade-2.1.0.bundle",
+            "target": "ethernet",
+            "version": "2.1.0",
+            "status": "active",
+            "uploadedAt": "2024-01-05T12:00:00Z",
+            "size": 15728640,
+            "checksum": "simulated-eth-210",
+        },
+        {
+            "name": "fc-blade-3.2.1.bundle",
+            "target": "fibre-channel",
+            "version": "3.2.1",
+            "status": "active",
+            "uploadedAt": "2024-01-05T12:05:00Z",
+            "size": 17825792,
+            "checksum": "simulated-fc-321",
+        },
+        {
+            "name": "mgmt-blade-5.0.1.bundle",
+            "target": "management",
+            "version": "5.0.1",
+            "status": "active",
+            "uploadedAt": "2024-01-05T12:10:00Z",
+            "size": 33554432,
+            "checksum": "simulated-mgmt-501",
+        },
+    ]
+
+
+
+def _default_drive_firmware_images() -> dict[str, dict[str, Any]]:
+    return {
+        "lto9-h3j4.img": {
+            "name": "lto9-h3j4.img",
+            "version": "H3J4",
+            "driveType": "LTO-9",
+            "extension": ".img",
+            "size": 8388608,
+            "uploadedAt": "2024-01-05T13:00:00Z",
+            "checksum": "simulated-h3j4",
+            "active": True,
+        },
+        "lto9-h3j5.fmr": {
+            "name": "lto9-h3j5.fmr",
+            "version": "H3J5",
+            "driveType": "LTO-9",
+            "extension": ".fmr",
+            "size": 8650752,
+            "uploadedAt": "2024-01-20T13:00:00Z",
+            "checksum": "simulated-h3j5",
+            "active": False,
+        },
+    }
+
+
+
+def _default_system_firmware_info() -> dict[str, Any]:
+    return {
+        "currentVersion": "6.0.1",
+        "stagedPackage": None,
+        "uploadedPackages": [
+            {
+                "name": "system-6.0.1.pkg",
+                "version": "6.0.1",
+                "size": 50331648,
+                "uploadedAt": "2024-01-05T14:00:00Z",
+                "checksum": "simulated-system-601",
+                "active": True,
+            }
+        ],
+        "status": {
+            "state": "idle",
+            "progress": 0,
+            "message": "No firmware activation pending",
+            "currentVersion": "6.0.1",
+            "stagedVersion": None,
+            "lastUpdated": "2024-01-05T14:00:00Z",
+            "lastActivated": "2024-01-05T14:00:00Z",
+        },
+        "lastActivated": "2024-01-05T14:00:00Z",
     }
 
 
@@ -2091,6 +2212,70 @@ def update_aml_drive(serial_number: str, updates: dict[str, Any]) -> dict[str, A
 
 
 
+def list_blade_firmware() -> list[dict[str, Any]]:
+    return [deepcopy(item) for item in sorted(_STATE.blade_firmware, key=lambda entry: str(entry.get("name", "")))]
+
+
+
+def upsert_blade_firmware(item: dict[str, Any]) -> dict[str, Any]:
+    current = deepcopy(item)
+    name = str(current.get("name", "")).strip()
+    for index, existing in enumerate(_STATE.blade_firmware):
+        if str(existing.get("name", "")) == name:
+            _STATE.blade_firmware[index] = current
+            return deepcopy(current)
+    _STATE.blade_firmware.append(current)
+    return deepcopy(current)
+
+
+
+def list_drive_firmware_images() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.drive_firmware_images.items())]
+
+
+
+def get_drive_firmware_image(name: str) -> dict[str, Any] | None:
+    image = _STATE.drive_firmware_images.get(name)
+    return deepcopy(image) if image is not None else None
+
+
+
+def upsert_drive_firmware_image(image: dict[str, Any]) -> dict[str, Any]:
+    current = deepcopy(image)
+    name = str(current.get("name", "")).strip()
+    _STATE.drive_firmware_images[name] = current
+    return deepcopy(current)
+
+
+
+def delete_drive_firmware_image(name: str) -> bool:
+    if name not in _STATE.drive_firmware_images:
+        return False
+    del _STATE.drive_firmware_images[name]
+    return True
+
+
+
+def activate_drive_firmware_image(name: str) -> dict[str, Any] | None:
+    if name not in _STATE.drive_firmware_images:
+        return None
+    for image_name, image in _STATE.drive_firmware_images.items():
+        image["active"] = image_name == name
+    return get_drive_firmware_image(name)
+
+
+
+def get_system_firmware_info() -> dict[str, Any]:
+    return deepcopy(_STATE.system_firmware_info)
+
+
+
+def set_system_firmware_info(info: dict[str, Any]) -> dict[str, Any]:
+    _STATE.system_firmware_info = deepcopy(info)
+    return get_system_firmware_info()
+
+
+
 def list_aml_jobs() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_jobs.items())]
 
@@ -2482,3 +2667,99 @@ def add_aml_event_subscription(subscription: dict[str, Any]) -> dict[str, Any]:
 
 def clear_aml_event_subscriptions() -> None:
     _STATE.aml_event_subscriptions.clear()
+
+
+def get_aml_system_certificates() -> list[dict[str, Any]]:
+    return deepcopy(_STATE.aml_system_certificates)
+
+
+def set_aml_system_certificates(certs: list[dict[str, Any]]) -> None:
+    _STATE.aml_system_certificates = deepcopy(certs)
+
+
+def get_aml_system_cert_info() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_system_cert_info)
+
+
+def set_aml_system_cert_info(info: dict[str, Any]) -> None:
+    _STATE.aml_system_cert_info = deepcopy(info)
+
+
+def get_aml_system_recent_traps() -> list[dict[str, Any]]:
+    return deepcopy(_STATE.aml_system_recent_traps)
+
+
+def set_aml_system_recent_traps(traps: list[dict[str, Any]]) -> None:
+    _STATE.aml_system_recent_traps = deepcopy(traps)
+
+
+def append_aml_system_trap(trap: dict[str, Any]) -> None:
+    _STATE.aml_system_recent_traps.append(deepcopy(trap))
+
+
+def get_aml_system_storage_volumes() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.aml_system_storage_volumes)
+
+
+def set_aml_system_storage_volumes(volumes: dict[str, dict[str, Any]]) -> None:
+    _STATE.aml_system_storage_volumes = deepcopy(volumes)
+
+
+def get_aml_system_backup_status() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_system_backup_status)
+
+
+def set_aml_system_backup_status(status: dict[str, Any]) -> None:
+    _STATE.aml_system_backup_status = deepcopy(status)
+
+
+def get_aml_system_backup_history() -> list[dict[str, Any]]:
+    return deepcopy(_STATE.aml_system_backup_history)
+
+
+def set_aml_system_backup_history(entries: list[dict[str, Any]]) -> None:
+    _STATE.aml_system_backup_history = deepcopy(entries)
+
+
+def append_aml_system_backup(entry: dict[str, Any]) -> None:
+    _STATE.aml_system_backup_history.append(deepcopy(entry))
+
+
+def get_aml_system_available_updates() -> list[dict[str, Any]]:
+    return deepcopy(_STATE.aml_system_available_updates)
+
+
+def set_aml_system_available_updates(updates: list[dict[str, Any]]) -> None:
+    _STATE.aml_system_available_updates = deepcopy(updates)
+
+
+def get_aml_system_update_status() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_system_update_status)
+
+
+def set_aml_system_update_status(status: dict[str, Any]) -> None:
+    _STATE.aml_system_update_status = deepcopy(status)
+
+
+def get_aml_system_last_diagnostics() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_system_last_diagnostics)
+
+
+def set_aml_system_last_diagnostics(diag: dict[str, Any]) -> None:
+    _STATE.aml_system_last_diagnostics = deepcopy(diag)
+
+
+def get_aml_system_support_bundle() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_system_support_bundle)
+
+
+def set_aml_system_support_bundle(bundle: dict[str, Any]) -> None:
+    _STATE.aml_system_support_bundle = deepcopy(bundle)
+
+
+def get_aml_system_manual_time_utc() -> str | None:
+    return _STATE.aml_system_manual_time_utc
+
+
+def set_aml_system_manual_time_utc(ts: str | None) -> None:
+    _STATE.aml_system_manual_time_utc = ts

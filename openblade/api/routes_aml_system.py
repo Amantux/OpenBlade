@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openblade.api import aml_state
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
@@ -25,100 +25,119 @@ _API_VERSION = "v1"
 _BUILD_DATE = "2024-01-15T06:00:00Z"
 _BUILD_NUMBER = "20240115.1"
 _INSTALLED_DATE = "2024-01-01T00:00:00Z"
-_CERTIFICATE_INFO: dict[str, Any] = {
-    "subject": "CN=openblade-1,O=OpenBlade",
-    "issuer": "CN=OpenBlade Self-Signed CA",
-    "notBefore": "2024-01-01T00:00:00Z",
-    "notAfter": "2025-12-31T23:59:59Z",
-    "fingerprint": "AA:BB:CC:DD:EE:FF:11:22:33:44:55:66:77:88:99:00",
-}
-_CERTIFICATES: list[dict[str, Any]] = [
-    {
-        "name": "system-default",
-        "subject": _CERTIFICATE_INFO["subject"],
-        "expiry": "2025-12-31",
-        "status": "valid",
+_DEFAULT_CERTIFICATE_IDS = {"cert-001"}
+_DEFAULT_CERTIFICATE_NAMES = {"default", "system-default"}
+
+
+def _volume_response_payload(volume: dict[str, Any]) -> dict[str, Any]:
+    name = str(volume.get("name", ""))
+    total = int(volume.get("total", 0))
+    used = int(volume.get("used", 0))
+    free = int(volume.get("free", max(total - used, 0)))
+    percent = volume.get("percent")
+    if percent is None:
+        percent = int((used / total) * 100) if total else 0
+    return {
+        "name": name,
+        "mountPoint": str(volume.get("mountPoint", "/" if name == "system" else f"/{name}")),
+        "total": total,
+        "used": used,
+        "free": free,
+        "percent": int(percent),
+        "fsType": str(volume.get("fsType", "ext4" if name == "system" else "xfs")),
     }
-]
-_RECENT_TRAPS: list[dict[str, Any]] = []
-_STORAGE_VOLUMES: dict[str, dict[str, Any]] = {
-    "system": {
-        "name": "system",
-        "mountPoint": "/",
-        "total": 512000,
-        "used": 128000,
-        "free": 384000,
-        "percent": 25,
-        "fsType": "ext4",
-    },
-    "data": {
-        "name": "data",
-        "mountPoint": "/data",
-        "total": 2048000,
-        "used": 614400,
-        "free": 1433600,
-        "percent": 30,
-        "fsType": "xfs",
-    },
-}
-_BACKUP_STATUS: dict[str, Any] = {
-    "lastBackup": "2024-01-15T05:00:00Z",
-    "location": "/var/backups/openblade/openblade-backup-20240115.tar.gz",
-    "size": 1048576,
-    "status": "completed",
-}
-_BACKUP_HISTORY: list[dict[str, Any]] = [
-    {
-        "timestamp": "2024-01-14T05:00:00Z",
-        "location": "/var/backups/openblade/openblade-backup-20240114.tar.gz",
-        "size": 1044480,
-        "status": "completed",
-    },
-    {
-        "timestamp": "2024-01-15T05:00:00Z",
-        "location": "/var/backups/openblade/openblade-backup-20240115.tar.gz",
-        "size": 1048576,
-        "status": "completed",
-    },
-]
-_AVAILABLE_UPDATES: list[dict[str, Any]] = [
-    {
-        "name": "OpenBlade Firmware",
-        "version": "1.0.1",
-        "description": "Maintenance firmware release",
-        "type": "firmware",
-        "size": 52428800,
-    },
-    {
-        "name": "OpenBlade API",
-        "version": "0.1.1",
-        "description": "REST API fixes and enhancements",
-        "type": "software",
-        "size": 10485760,
-    },
-]
-_UPDATE_STATUS: dict[str, Any] = {
-    "status": "idle",
-    "currentUpdate": None,
-    "progress": 0,
-    "lastChecked": "2024-01-15T06:00:00Z",
-    "lastInstalled": None,
-}
-_LAST_FULL_DIAGNOSTICS: dict[str, Any] = {
-    "timestamp": "2024-01-15T06:00:00Z",
-    "tests": [
-        {"name": "cpu", "status": "passed", "details": "CPU health normal"},
-        {"name": "memory", "status": "passed", "details": "Memory health normal"},
-        {"name": "network", "status": "passed", "details": "Network reachable"},
-    ],
-}
-_SUPPORT_BUNDLE: dict[str, Any] = {
-    "lastGenerated": None,
-    "location": None,
-    "size": 0,
-    "status": "not-generated",
-}
-_MANUAL_TIME_UTC: str | None = None
+
+
+
+def _backup_status_payload(backup_status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "lastBackup": backup_status.get("lastBackup"),
+        "location": backup_status.get("location"),
+        "size": int(backup_status.get("size", 0)),
+        "status": str(backup_status.get("status", backup_status.get("state", "idle"))),
+    }
+
+
+
+def _update_status_payload(update_status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": str(update_status.get("status", update_status.get("state", "idle"))),
+        "currentUpdate": update_status.get("currentUpdate"),
+        "progress": int(update_status.get("progress", 0)),
+        "lastChecked": update_status.get("lastChecked"),
+        "lastInstalled": update_status.get("lastInstalled"),
+    }
+
+
+
+def _diagnostics_payload(diag: dict[str, Any]) -> dict[str, Any]:
+    timestamp = diag.get("timestamp") or diag.get("lastRun") or _iso(_now())
+    return {"timestamp": str(timestamp), "tests": list(diag.get("tests", []))}
+
+
+
+def _support_bundle_payload(bundle: dict[str, Any]) -> dict[str, Any]:
+    filename = bundle.get("filename")
+    location = bundle.get("location")
+    if location is None and filename:
+        location = f"/var/support/{filename}"
+    return {
+        "lastGenerated": bundle.get("lastGenerated", bundle.get("createdAt")),
+        "location": location,
+        "size": int(bundle.get("size", 0)),
+        "status": str(bundle.get("status", bundle.get("state", "idle"))),
+    }
+
+
+
+def _certificate_summary(cert: dict[str, Any]) -> dict[str, Any]:
+    expiry = cert.get("expiry")
+    if expiry is None and cert.get("notAfter") is not None:
+        expiry = str(cert["notAfter"])[:10]
+    return {
+        "name": str(cert.get("name") or cert.get("id") or "certificate"),
+        "subject": str(cert.get("subject", "")),
+        "expiry": expiry,
+        "status": str(cert.get("status", "unknown")),
+    }
+
+
+
+def _default_certificate_index(certificates: list[dict[str, Any]]) -> int:
+    return next(
+        (
+            idx
+            for idx, cert in enumerate(certificates)
+            if cert.get("id") in _DEFAULT_CERTIFICATE_IDS or cert.get("name") in _DEFAULT_CERTIFICATE_NAMES
+        ),
+        0 if certificates else -1,
+    )
+
+
+
+def _sync_default_certificate(cert_info: dict[str, Any]) -> None:
+    certificates = aml_state.get_aml_system_certificates()
+    cert_payload = {
+        "id": "cert-001",
+        "name": "default",
+        "subject": str(cert_info.get("subject", "CN=OpenBlade")),
+        "issuer": str(cert_info.get("issuer", "CN=OpenBlade CA")),
+        "notBefore": str(cert_info.get("notBefore", "2024-01-01T00:00:00Z")),
+        "notAfter": str(cert_info.get("notAfter", "2025-01-01T00:00:00Z")),
+        "fingerprint": str(cert_info.get("fingerprint", "AA:BB:CC:DD")),
+        "status": str(cert_info.get("status", "active")),
+        "type": "self-signed",
+    }
+    index = _default_certificate_index(certificates)
+    if index >= 0:
+        existing = certificates[index]
+        cert_payload["id"] = str(existing.get("id", cert_payload["id"]))
+        cert_payload["name"] = str(existing.get("name", cert_payload["name"]))
+        cert_payload["type"] = str(existing.get("type", cert_payload["type"]))
+        certificates[index] = {**existing, **cert_payload}
+    else:
+        certificates.append(cert_payload)
+    aml_state.set_aml_system_certificates(certificates)
 
 
 class Interface(BaseModel):
@@ -478,7 +497,7 @@ class UpdateListResponse(BaseModel):
 
 
 class UpdateStatusInfo(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     status: str
     currentUpdate: str | None = None
@@ -534,7 +553,7 @@ class DiagResultResponse(BaseModel):
 
 
 class SupportInfo(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     lastGenerated: str | None = None
     location: str | None = None
@@ -557,7 +576,7 @@ class DebugInfoResponse(BaseModel):
 
 
 class Preferences(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     sessionTimeout: int
     idleTimeout: int
@@ -676,8 +695,9 @@ def _iso(value: datetime) -> str:
 
 
 def _current_utc() -> datetime:
-    if _MANUAL_TIME_UTC is not None:
-        return datetime.fromisoformat(_MANUAL_TIME_UTC.replace("Z", "+00:00"))
+    manual_time_utc = aml_state.get_aml_system_manual_time_utc()
+    if manual_time_utc is not None:
+        return datetime.fromisoformat(manual_time_utc.replace("Z", "+00:00"))
     return _now()
 
 
@@ -718,6 +738,15 @@ def _extract_payload(payload: dict[str, Any] | None, key: str) -> dict[str, Any]
     return payload
 
 
+
+def _merge_validated_model(model_cls: type[BaseModel], current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    try:
+        validated = model_cls.model_validate({**current, **{key: value for key, value in updates.items() if value is not None}})
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+    return validated.model_dump(by_alias=True)
+
+
 def _record_audit(current_user: AmlUser | None, action: str, resource: str, *, result: str = "success") -> None:
     aml_state.aml_audit_log.append(
         {
@@ -754,8 +783,9 @@ def _get_service_or_404(name: str) -> dict[str, Any]:
     return service
 
 
-def _get_volume_or_404(name: str) -> dict[str, Any]:
-    volume = _STORAGE_VOLUMES.get(name)
+def _get_volume_or_404(name: str, volumes: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    current_volumes = aml_state.get_aml_system_storage_volumes() if volumes is None else volumes
+    volume = current_volumes.get(name)
     if volume is None:
         raise HTTPException(status_code=404, detail="Volume not found")
     return volume
@@ -770,7 +800,10 @@ def _system_mem_usage() -> int:
 
 
 def _system_disk_usage() -> int:
-    return max((volume["percent"] for volume in _STORAGE_VOLUMES.values()), default=0)
+    return max(
+        (_volume_response_payload(volume)["percent"] for volume in aml_state.get_aml_system_storage_volumes().values()),
+        default=0,
+    )
 
 
 def _system_network_health() -> str:
@@ -1101,7 +1134,7 @@ async def get_system_info(
     context: AppContext = Depends(get_context),
 ) -> SystemDetailResponse:
     _ensure_state(context)
-    total_disk = sum(volume["total"] for volume in _STORAGE_VOLUMES.values())
+    total_disk = sum(volume["total"] for volume in aml_state.get_aml_system_storage_volumes().values())
     return SystemDetailResponse(
         systemDetail=SystemDetail(
             os="Linux",
@@ -1309,14 +1342,13 @@ async def set_system_time(
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
-    global _MANUAL_TIME_UTC
     _ensure_state(context)
     _require_admin(current_user)
     updates = _extract_payload(payload, "systemTime")
     utc_value = updates.get("utc") if isinstance(updates, dict) else payload.get("utc")
     if not isinstance(utc_value, str) or not utc_value.strip():
         raise HTTPException(status_code=400, detail="UTC time is required")
-    _MANUAL_TIME_UTC = utc_value.strip()
+    aml_state.set_aml_system_manual_time_utc(utc_value.strip())
     aml_state.aml_network_config["ntp"]["enabled"] = False
     aml_state.aml_network_config["ntp"]["status"] = "manual"
     _record_audit(current_user, "update", "system/time")
@@ -1382,7 +1414,7 @@ async def get_security_certificate(
     context: AppContext = Depends(get_context),
 ) -> CertInfoResponse:
     _ensure_state(context)
-    return CertInfoResponse(certInfo=CertInfo.model_validate(_CERTIFICATE_INFO))
+    return CertInfoResponse(certInfo=CertInfo.model_validate(aml_state.get_aml_system_cert_info()))
 
 
 @router.post("/system/security/certificate", response_model=WSResultCode)
@@ -1394,10 +1426,12 @@ async def upload_security_certificate(
     _ensure_state(context)
     _require_admin(current_user)
     data = _extract_payload(payload, "certInfo")
+    cert_info = aml_state.get_aml_system_cert_info()
     if data:
-        _CERTIFICATE_INFO.update({key: value for key, value in data.items() if value is not None})
-    aml_state.aml_system_security["certExpiry"] = str(_CERTIFICATE_INFO.get("notAfter", "2025-12-31T23:59:59Z"))[:10]
-    _CERTIFICATES[0] = {"name": "system-default", "subject": _CERTIFICATE_INFO["subject"], "expiry": aml_state.aml_system_security["certExpiry"], "status": "valid"}
+        cert_info.update({key: value for key, value in data.items() if value is not None})
+    aml_state.set_aml_system_cert_info(cert_info)
+    aml_state.aml_system_security["certExpiry"] = str(cert_info.get("notAfter", "2025-12-31T23:59:59Z"))[:10]
+    _sync_default_certificate(cert_info)
     _record_audit(current_user, "upload", "system/security/certificate")
     return _ws_result("Certificate updated")
 
@@ -1410,15 +1444,18 @@ async def generate_security_certificate(
     _ensure_state(context)
     _require_admin(current_user)
     now = _now()
-    _CERTIFICATE_INFO.update({
+    cert_info = aml_state.get_aml_system_cert_info()
+    cert_info.update({
         "subject": f"CN={aml_state.aml_system_config.get('hostname', 'openblade-1')},O=OpenBlade",
         "issuer": "CN=OpenBlade Self-Signed CA",
         "notBefore": _iso(now),
         "notAfter": _iso(now + timedelta(days=365)),
         "fingerprint": now.strftime("%H:%M:%S:%f"),
+        "status": "active",
     })
-    aml_state.aml_system_security["certExpiry"] = _CERTIFICATE_INFO["notAfter"][:10]
-    _CERTIFICATES[0] = {"name": "system-default", "subject": _CERTIFICATE_INFO["subject"], "expiry": aml_state.aml_system_security["certExpiry"], "status": "valid"}
+    aml_state.set_aml_system_cert_info(cert_info)
+    aml_state.aml_system_security["certExpiry"] = str(cert_info["notAfter"])[:10]
+    _sync_default_certificate(cert_info)
     _record_audit(current_user, "generate", "system/security/certificate")
     return _ws_result("Generated self-signed certificate")
 
@@ -1455,8 +1492,9 @@ async def test_snmp(
     _ensure_state(context)
     _require_admin(current_user)
     host = aml_state.aml_snmp_config.get("trapHosts", ["127.0.0.1"])
-    _RECENT_TRAPS.insert(0, {"timestamp": _iso(_now()), "oid": "1.3.6.1.4.1.3764.1", "value": "OpenBlade SNMP test", "host": host[0] if host else "127.0.0.1"})
-    del _RECENT_TRAPS[20:]
+    traps = aml_state.get_aml_system_recent_traps()
+    traps.insert(0, {"timestamp": _iso(_now()), "oid": "1.3.6.1.4.1.3764.1", "value": "OpenBlade SNMP test", "host": host[0] if host else "127.0.0.1"})
+    aml_state.set_aml_system_recent_traps(traps[:20])
     _record_audit(current_user, "test", "system/snmp")
     return _ws_result("Sent SNMP test trap")
 
@@ -1467,7 +1505,9 @@ async def list_snmp_traps(
     context: AppContext = Depends(get_context),
 ) -> TrapListResponse:
     _ensure_state(context)
-    return TrapListResponse(trapList=TrapListResource(trap=[Trap.model_validate(item) for item in _RECENT_TRAPS]))
+    return TrapListResponse(
+        trapList=TrapListResource(trap=[Trap.model_validate(item) for item in aml_state.get_aml_system_recent_traps()])
+    )
 
 
 # Email/alerting
@@ -1547,7 +1587,14 @@ async def get_storage_overview(
     context: AppContext = Depends(get_context),
 ) -> StorageInfoResponse:
     _ensure_state(context)
-    return StorageInfoResponse(storageInfo=StorageInfo(volumes=[Volume.model_validate(item) for item in _STORAGE_VOLUMES.values()]))
+    return StorageInfoResponse(
+        storageInfo=StorageInfo(
+            volumes=[
+                Volume.model_validate(_volume_response_payload(item))
+                for item in aml_state.get_aml_system_storage_volumes().values()
+            ]
+        )
+    )
 
 
 @router.post("/system/storage/format", response_model=WSResultCode)
@@ -1562,10 +1609,12 @@ async def format_storage_volume(
     volume_name = str(request.get("volume", request.get("name", ""))).strip()
     if not volume_name:
         raise HTTPException(status_code=400, detail="Volume is required")
-    volume = _get_volume_or_404(volume_name)
+    volumes = aml_state.get_aml_system_storage_volumes()
+    volume = _get_volume_or_404(volume_name, volumes)
     volume["used"] = 0
     volume["free"] = volume["total"]
     volume["percent"] = 0
+    aml_state.set_aml_system_storage_volumes(volumes)
     _record_audit(current_user, "format", f"system/storage/{volume_name}")
     return _ws_result(f"Formatted volume {volume_name}")
 
@@ -1577,7 +1626,7 @@ async def get_storage_volume(
     context: AppContext = Depends(get_context),
 ) -> VolumeResponse:
     _ensure_state(context)
-    return VolumeResponse(volume=Volume.model_validate(_get_volume_or_404(volume)))
+    return VolumeResponse(volume=Volume.model_validate(_volume_response_payload(_get_volume_or_404(volume))))
 
 
 # Services
@@ -1649,7 +1698,9 @@ async def get_backup_status(
     context: AppContext = Depends(get_context),
 ) -> BackupStatusResponse:
     _ensure_state(context)
-    return BackupStatusResponse(backupStatus=BackupStatus.model_validate(_BACKUP_STATUS))
+    return BackupStatusResponse(
+        backupStatus=BackupStatus.model_validate(_backup_status_payload(aml_state.get_aml_system_backup_status()))
+    )
 
 
 @router.post("/system/backup", response_model=WSResultCode)
@@ -1666,8 +1717,20 @@ async def trigger_backup(
         "size": 1052672,
         "status": "completed",
     }
-    _BACKUP_STATUS.update({"lastBackup": item["timestamp"], "location": item["location"], "size": item["size"], "status": item["status"]})
-    _BACKUP_HISTORY.append(item)
+    backup_status = aml_state.get_aml_system_backup_status()
+    backup_status.update(
+        {
+            "state": item["status"],
+            "lastBackup": item["timestamp"],
+            "nextBackup": None,
+            "progress": 100,
+            "location": item["location"],
+            "size": item["size"],
+            "status": item["status"],
+        }
+    )
+    aml_state.set_aml_system_backup_status(backup_status)
+    aml_state.append_aml_system_backup(item)
     _record_audit(current_user, "backup", "system/backup")
     return _ws_result("Backup completed")
 
@@ -1694,7 +1757,11 @@ async def get_backup_history(
     context: AppContext = Depends(get_context),
 ) -> BackupListResponse:
     _ensure_state(context)
-    return BackupListResponse(backupList=BackupListResource(backup=[BackupItem.model_validate(item) for item in _BACKUP_HISTORY]))
+    return BackupListResponse(
+        backupList=BackupListResource(
+            backup=[BackupItem.model_validate(item) for item in aml_state.get_aml_system_backup_history()]
+        )
+    )
 
 
 # Updates/Patches
@@ -1704,7 +1771,9 @@ async def get_updates(
     context: AppContext = Depends(get_context),
 ) -> UpdateListResponse:
     _ensure_state(context)
-    return UpdateListResponse(updateList=UpdateListResource(update=[Update.model_validate(item) for item in _AVAILABLE_UPDATES]))
+    return UpdateListResponse(
+        updateList=UpdateListResource(update=[Update.model_validate(item) for item in aml_state.get_aml_system_available_updates()])
+    )
 
 
 @router.post("/system/updates/install", response_model=WSResultCode)
@@ -1714,7 +1783,19 @@ async def install_updates(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    _UPDATE_STATUS.update({"status": "completed", "currentUpdate": None, "progress": 100, "lastInstalled": _iso(_now())})
+    update_status = aml_state.get_aml_system_update_status()
+    update_status.update(
+        {
+            "state": "completed",
+            "status": "completed",
+            "currentUpdate": None,
+            "progress": 100,
+            "lastChecked": update_status.get("lastChecked", _iso(_now())),
+            "lastInstalled": _iso(_now()),
+            "message": "Installed updates",
+        }
+    )
+    aml_state.set_aml_system_update_status(update_status)
     _record_audit(current_user, "install", "system/updates")
     return _ws_result("Installed updates")
 
@@ -1725,7 +1806,9 @@ async def get_update_status(
     context: AppContext = Depends(get_context),
 ) -> UpdateStatusResponse:
     _ensure_state(context)
-    return UpdateStatusResponse(updateStatus=UpdateStatusInfo.model_validate(_UPDATE_STATUS))
+    return UpdateStatusResponse(
+        updateStatus=UpdateStatusInfo.model_validate(_update_status_payload(aml_state.get_aml_system_update_status()))
+    )
 
 
 # Licensing
@@ -1745,7 +1828,11 @@ async def list_certificates(
     context: AppContext = Depends(get_context),
 ) -> CertListResponse:
     _ensure_state(context)
-    return CertListResponse(certList=CertListResource(cert=[Certificate.model_validate(item) for item in _CERTIFICATES]))
+    return CertListResponse(
+        certList=CertListResource(
+            cert=[Certificate.model_validate(_certificate_summary(item)) for item in aml_state.get_aml_system_certificates()]
+        )
+    )
 
 
 @router.post("/system/certificate/import", response_model=WSResultCode)
@@ -1757,10 +1844,24 @@ async def import_certificate(
     _ensure_state(context)
     _require_admin(current_user)
     request = _extract_payload(payload, "cert")
-    name = str(request.get("name", f"imported-{len(_CERTIFICATES) + 1}")).strip()
+    certificates = aml_state.get_aml_system_certificates()
+    name = str(request.get("name", f"imported-{len(certificates) + 1}")).strip()
     subject = str(request.get("subject", f"CN={name},O=OpenBlade")).strip()
     expiry = str(request.get("expiry", "2025-12-31"))
-    _CERTIFICATES.append({"name": name, "subject": subject, "expiry": expiry, "status": "valid"})
+    certificates.append(
+        {
+            "id": f"cert-{len(certificates) + 1:03d}",
+            "name": name,
+            "subject": subject,
+            "issuer": request.get("issuer", "CN=OpenBlade CA"),
+            "notBefore": request.get("notBefore", _iso(_now())),
+            "notAfter": request.get("notAfter", f"{expiry}T23:59:59Z"),
+            "fingerprint": request.get("fingerprint", f"IMPORTED-{len(certificates) + 1:03d}"),
+            "status": request.get("status", "valid"),
+            "type": request.get("type", "imported"),
+        }
+    )
+    aml_state.set_aml_system_certificates(certificates)
     _record_audit(current_user, "import", f"system/certificate/{name}")
     return _ws_result(f"Imported certificate {name}")
 
@@ -1773,10 +1874,11 @@ async def delete_certificate(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    remaining = [item for item in _CERTIFICATES if item.get("name") != name]
-    if len(remaining) == len(_CERTIFICATES):
+    certificates = aml_state.get_aml_system_certificates()
+    remaining = [item for item in certificates if item.get("name") != name and item.get("id") != name]
+    if len(remaining) == len(certificates):
         raise HTTPException(status_code=404, detail="Certificate not found")
-    _CERTIFICATES[:] = remaining
+    aml_state.set_aml_system_certificates(remaining)
     _record_audit(current_user, "delete", f"system/certificate/{name}")
     return _ws_result(f"Deleted certificate {name}")
 
@@ -1827,18 +1929,21 @@ async def run_full_diagnostics(
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
-    global _LAST_FULL_DIAGNOSTICS
     _ensure_state(context)
     _require_admin(current_user)
-    _LAST_FULL_DIAGNOSTICS = {
-        "timestamp": _iso(_now()),
-        "tests": [
-            {"name": "cpu", "status": "passed", "details": "CPU diagnostics completed"},
-            {"name": "memory", "status": "passed", "details": "Memory diagnostics completed"},
-            {"name": "disk", "status": "passed", "details": "Disk diagnostics completed"},
-            {"name": "network", "status": "passed", "details": "Network diagnostics completed"},
-        ],
-    }
+    aml_state.set_aml_system_last_diagnostics(
+        {
+            "state": "completed",
+            "lastRun": _iso(_now()),
+            "result": "passed",
+            "tests": [
+                {"name": "cpu", "status": "passed", "details": "CPU diagnostics completed"},
+                {"name": "memory", "status": "passed", "details": "Memory diagnostics completed"},
+                {"name": "disk", "status": "passed", "details": "Disk diagnostics completed"},
+                {"name": "network", "status": "passed", "details": "Network diagnostics completed"},
+            ],
+        }
+    )
     _record_audit(current_user, "run", "system/diagnostics")
     return _ws_result("Full diagnostics started")
 
@@ -1849,7 +1954,9 @@ async def get_full_diagnostics_results(
     context: AppContext = Depends(get_context),
 ) -> DiagResultResponse:
     _ensure_state(context)
-    return DiagResultResponse(diagResult=DiagResult.model_validate(_LAST_FULL_DIAGNOSTICS))
+    return DiagResultResponse(
+        diagResult=DiagResult.model_validate(_diagnostics_payload(aml_state.get_aml_system_last_diagnostics()))
+    )
 
 
 @router.get("/system/diagnostics", response_model=DiagResultResponse)
@@ -1876,7 +1983,9 @@ async def get_support_info(
     context: AppContext = Depends(get_context),
 ) -> SupportInfoResponse:
     _ensure_state(context)
-    return SupportInfoResponse(support=SupportInfo.model_validate(_SUPPORT_BUNDLE))
+    return SupportInfoResponse(
+        support=SupportInfo.model_validate(_support_bundle_payload(aml_state.get_aml_system_support_bundle()))
+    )
 
 
 @router.post("/system/support/generate", response_model=WSResultCode)
@@ -1887,7 +1996,17 @@ async def generate_support_bundle(
     _ensure_state(context)
     _require_admin(current_user)
     timestamp = _iso(_now())
-    _SUPPORT_BUNDLE.update({"lastGenerated": timestamp, "location": f"/var/support/openblade-support-{timestamp[:10].replace('-', '')}.tgz", "size": 409600, "status": "ready"})
+    aml_state.set_aml_system_support_bundle(
+        {
+            "state": "ready",
+            "status": "ready",
+            "filename": f"openblade-support-{timestamp[:10].replace('-', '')}.tgz",
+            "createdAt": timestamp,
+            "lastGenerated": timestamp,
+            "location": f"/var/support/openblade-support-{timestamp[:10].replace('-', '')}.tgz",
+            "size": 409600,
+        }
+    )
     _record_audit(current_user, "generate", "system/support")
     return _ws_result("Generated support bundle")
 
@@ -1934,7 +2053,7 @@ async def update_preferences(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _extract_payload(payload, "preferences")
-    aml_state.aml_system_preferences.update({key: value for key, value in updates.items() if value is not None})
+    aml_state.aml_system_preferences = _merge_validated_model(Preferences, aml_state.aml_system_preferences, updates)
     _record_audit(current_user, "update", "system/preferences")
     return PreferencesResponse(preferences=Preferences.model_validate(aml_state.aml_system_preferences))
 
@@ -1966,7 +2085,6 @@ async def clear_audit_log(
     _ensure_state(context)
     _require_admin(current_user)
     aml_state.aml_audit_log.clear()
-    _record_audit(current_user, "clear", "system/audit")
     return _ws_result("Cleared audit log")
 
 
