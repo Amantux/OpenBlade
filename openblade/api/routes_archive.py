@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, status
@@ -11,11 +11,15 @@ from pydantic import BaseModel, Field
 
 from openblade.api import aml_state
 from openblade.bootstrap import AppContext, get_context
+from openblade.jobs.archive import ArchiveRequest as ArchiveJobRequest
+from openblade.jobs.archive import run_archive_job
 from openblade.jobs.scheduler import DriveScheduler
 from openblade.jobs.shard import ShardMode
 from openblade.jobs.sharded_archive import ShardedArchiveRequest, run_sharded_archive
 
 router = APIRouter()
+
+_TERMINAL_JOB_STATUSES = {"completed", "failed", "failed_recoverable", "cancelled"}
 
 
 def _timestamp(value: datetime | None) -> str:
@@ -49,7 +53,7 @@ def _bridge_to_aml(
             "status": status,
             "priority": "normal",
             "startTime": _timestamp(job.created_at),
-            "completedTime": _timestamp(job.updated_at) if status in {"completed", "failed", "cancelled"} else None,
+            "completedTime": _timestamp(job.updated_at) if status in _TERMINAL_JOB_STATUSES else None,
             "progress": 100 if status == "completed" else 0,
             "result": result,
         },
@@ -67,7 +71,7 @@ def _bridge_to_aml(
         {
             "id": str(uuid4()),
             "timestamp": _timestamp(job.updated_at),
-            "severity": "info",
+            "severity": "error" if error is not None or status.startswith("failed") else "info",
             "component": "archive",
             "message": message,
             "details": details,
@@ -93,21 +97,67 @@ class EnqueuedJobResponse(BaseModel):
     status: str
 
 
+def _iter_archive_source_files(source_path: Path) -> list[Path]:
+    if source_path.is_file():
+        return [source_path]
+    return sorted(path for path in source_path.rglob("*") if path.is_file())
+
+
+def _cleanup_failed_archive(context: AppContext, source_path: Path, volume_group: str) -> None:
+    for file_path in _iter_archive_source_files(source_path):
+        relative = (
+            file_path.name
+            if source_path.is_file()
+            else str(file_path.relative_to(source_path))
+        )
+        catalog_path = str(PurePosixPath("/") / volume_group / relative)
+        context.catalog.delete_file_record_if_unarchived(catalog_path)
+
+
 @router.post("/", response_model=EnqueuedJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def enqueue_archive(
     request: ArchiveRequest,
     context: AppContext = Depends(get_context),
 ) -> EnqueuedJobResponse:
-    job = context.archive_service.enqueue(request.volume_group, Path(request.source_path))
+    source_path = Path(request.source_path)
+    job = context.catalog.create_job(
+        "archive",
+        {"source_path": request.source_path, "volume_group": request.volume_group},
+    )
+    try:
+        run_archive_job(
+            ArchiveJobRequest(
+                source_path=source_path,
+                volume_group_name=request.volume_group,
+            ),
+            context.library,
+            context.ltfs,
+            context.catalog,
+            job.id,
+        )
+    except Exception as exc:
+        _cleanup_failed_archive(context, source_path, request.volume_group)
+        context.catalog.update_job_state(job.id, "failed", str(exc))
+        _bridge_to_aml(
+            context,
+            job_id=job.id,
+            status="failed",
+            source_path=request.source_path,
+            volume_group=request.volume_group,
+            error=str(exc),
+        )
+        raise
+    refreshed = context.catalog.get_job(job.id)
+    assert refreshed is not None
     _bridge_to_aml(
         context,
-        job_id=job.id,
-        status=job.state,
+        job_id=refreshed.id,
+        status=refreshed.state,
         source_path=request.source_path,
         volume_group=request.volume_group,
-        error=job.error,
+        error=refreshed.error,
     )
-    return EnqueuedJobResponse(job_id=job.id, status="pending")
+    return EnqueuedJobResponse(job_id=refreshed.id, status="pending")
 
 
 @router.post(
@@ -130,18 +180,40 @@ async def enqueue_sharded_archive(
         },
     )
     scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
-    run_sharded_archive(
-        ShardedArchiveRequest(
-            source_path=Path(request.source_path),
-            volume_group_name=request.volume_group,
-            lane_barcodes=request.lane_barcodes,
-            mode=request.mode,
-            block_size=request.block_size_mb * 1024 * 1024,
-        ),
-        context.library,
-        context.ltfs,
-        context.catalog,
-        scheduler,
-        job.id,
+    try:
+        run_sharded_archive(
+            ShardedArchiveRequest(
+                source_path=Path(request.source_path),
+                volume_group_name=request.volume_group,
+                lane_barcodes=request.lane_barcodes,
+                mode=request.mode,
+                block_size=request.block_size_mb * 1024 * 1024,
+            ),
+            context.library,
+            context.ltfs,
+            context.catalog,
+            scheduler,
+            job.id,
+        )
+    except Exception as exc:
+        context.catalog.update_job_state(job.id, "failed", str(exc))
+        _bridge_to_aml(
+            context,
+            job_id=job.id,
+            status="failed",
+            source_path=request.source_path,
+            volume_group=request.volume_group,
+            error=str(exc),
+        )
+        raise
+    refreshed = context.catalog.get_job(job.id)
+    assert refreshed is not None
+    _bridge_to_aml(
+        context,
+        job_id=refreshed.id,
+        status=refreshed.state,
+        source_path=request.source_path,
+        volume_group=request.volume_group,
+        error=refreshed.error,
     )
-    return EnqueuedJobResponse(job_id=job.id, status="pending")
+    return EnqueuedJobResponse(job_id=refreshed.id, status="pending")

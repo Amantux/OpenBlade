@@ -2659,7 +2659,9 @@ def _sync_aml_media_counts() -> None:
         pool["assignedBarcodes"] = normalized
         pool["barcodes"] = list(normalized)
         pool["mediaCount"] = len(normalized)
-        pool["type"] = normalized_target or str(pool.get("type", "LTO-9")).strip() or "LTO-9"
+        existing_type = pool.get("type")
+        normalized_type = str(existing_type).strip() if isinstance(existing_type, str) and str(existing_type).strip() else None
+        pool["type"] = normalized_target if normalized_target is not None else normalized_type
         pool["createdAt"] = created_at
 
         if normalized_id != pool_id:
@@ -2909,7 +2911,16 @@ def update_aml_media_pool(pool_id: str, updates: dict[str, Any]) -> dict[str, An
         if str(existing_pool.get("name", "")).strip().lower() == next_name.lower():
             return None
 
-    for key, value in deepcopy(updates).items():
+    normalized_updates = deepcopy(updates)
+    if "targetLtoGeneration" in normalized_updates:
+        target_generation = normalized_updates["targetLtoGeneration"]
+        if isinstance(target_generation, str):
+            stripped_target = target_generation.strip()
+            normalized_updates["type"] = stripped_target if stripped_target.upper().startswith("LTO-") else f"LTO-{stripped_target}"
+        else:
+            normalized_updates["type"] = None
+
+    for key, value in normalized_updates.items():
         if key == "id":
             continue
         pool[key] = value

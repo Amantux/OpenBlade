@@ -246,8 +246,13 @@ def run_archive_job(
             except Exception:
                 logger.exception("failed to unmount archive handle for job %s", job_id)
         if current_barcode is not None and current_drive_id is not None:
+            if current_slot_id is not None:
+                try:
+                    library.unload(current_drive_id, current_slot_id)
+                except Exception:
+                    logger.exception("failed to unload archive drive for job %s", job_id)
             try:
-                _mark_aml_drive_idle(current_barcode, current_drive_id, None)
+                _mark_aml_drive_idle(current_barcode, current_drive_id, current_slot_id)
             except Exception:
                 logger.exception("failed to reset archive AML drive state for job %s", job_id)
         catalog.update_job_state(job_id, "failed", str(exc))

@@ -475,12 +475,11 @@ async def create_media_pool(
     return PoolResponse(pool=_serialize_pool(created))
 
 
-@router.put("/media/pools/{pool_id}", response_model=PoolResponse)
-async def update_media_pool(
+async def _update_media_pool(
     pool_id: str,
     payload: PoolUpdateRequest,
-    current_user: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
+    current_user: AmlUser,
+    context: AppContext,
 ) -> PoolResponse:
     _ensure_state(context)
     _require_admin(current_user)
@@ -491,6 +490,26 @@ async def update_media_pool(
     if updated is None:
         raise HTTPException(status_code=409, detail="Pool already exists")
     return PoolResponse(pool=_serialize_pool(updated))
+
+
+@router.put("/media/pools/{pool_id}", response_model=PoolResponse)
+async def update_media_pool(
+    pool_id: str,
+    payload: PoolUpdateRequest,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    return await _update_media_pool(pool_id, payload, current_user, context)
+
+
+@router.patch("/media/pools/{pool_id}", response_model=PoolResponse)
+async def patch_media_pool(
+    pool_id: str,
+    payload: PoolUpdateRequest,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    return await _update_media_pool(pool_id, payload, current_user, context)
 
 
 @router.delete("/media/pools/{pool_id}", response_model=WSResultCode)

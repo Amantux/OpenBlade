@@ -217,11 +217,12 @@ export async function updatePool(id: string, patch: Partial<MediaPool>): Promise
     ...patch,
     id,
     name: typeof patch.name === 'string' ? patch.name : currentPool.name,
-    policy: patch.policy ?? currentPool.policy,
-    maxDrives: patch.maxDrives ?? currentPool.maxDrives,
-    targetLtoGeneration: patch.targetLtoGeneration ?? currentPool.targetLtoGeneration,
-    quotaGB: patch.quotaGB ?? currentPool.quotaGB,
-    color: patch.color ?? currentPool.color,
+    policy: patch.policy !== undefined ? patch.policy : currentPool.policy,
+    maxDrives: patch.maxDrives !== undefined ? patch.maxDrives : currentPool.maxDrives,
+    targetLtoGeneration:
+      patch.targetLtoGeneration !== undefined ? patch.targetLtoGeneration : currentPool.targetLtoGeneration,
+    quotaGB: patch.quotaGB !== undefined ? patch.quotaGB : currentPool.quotaGB,
+    color: patch.color !== undefined ? patch.color : currentPool.color,
   });
 }
 

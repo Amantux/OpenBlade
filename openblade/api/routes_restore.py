@@ -11,8 +11,12 @@ from pydantic import BaseModel
 
 from openblade.api import aml_state
 from openblade.bootstrap import AppContext, get_context
+from openblade.jobs.restore import RestoreRequest as RestoreJobRequest
+from openblade.jobs.restore import run_restore_job
 
 router = APIRouter()
+
+_TERMINAL_JOB_STATUSES = {"completed", "failed", "failed_recoverable", "cancelled"}
 
 
 def _timestamp(value: datetime | None) -> str:
@@ -46,7 +50,7 @@ def _bridge_to_aml(
             "status": status,
             "priority": "normal",
             "startTime": _timestamp(job.created_at),
-            "completedTime": _timestamp(job.updated_at) if status in {"completed", "failed", "cancelled"} else None,
+            "completedTime": _timestamp(job.updated_at) if status in _TERMINAL_JOB_STATUSES else None,
             "progress": 100 if status == "completed" else 0,
             "result": result,
         },
@@ -64,7 +68,7 @@ def _bridge_to_aml(
         {
             "id": str(uuid4()),
             "timestamp": _timestamp(job.updated_at),
-            "severity": "info",
+            "severity": "error" if error is not None or status.startswith("failed") else "info",
             "component": "restore",
             "message": message,
             "details": details,
@@ -91,13 +95,37 @@ async def enqueue_restore(
     catalog_path = request.catalog_path or request.source_path
     if catalog_path is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="catalog_path or source_path is required")
-    job = context.restore_service.enqueue(catalog_path, Path(request.dest_path))
+    job = context.catalog.create_job(
+        "restore",
+        {"catalog_path": catalog_path, "dest_path": request.dest_path},
+    )
+    try:
+        run_restore_job(
+            RestoreJobRequest(catalog_path=catalog_path, dest_path=Path(request.dest_path)),
+            context.library,
+            context.ltfs,
+            context.catalog,
+            job.id,
+        )
+    except Exception as exc:
+        context.catalog.update_job_state(job.id, "failed", str(exc))
+        _bridge_to_aml(
+            context,
+            job_id=job.id,
+            status="failed",
+            catalog_path=catalog_path,
+            dest_path=request.dest_path,
+            error=str(exc),
+        )
+        raise
+    refreshed = context.catalog.get_job(job.id)
+    assert refreshed is not None
     _bridge_to_aml(
         context,
-        job_id=job.id,
-        status=job.state,
+        job_id=refreshed.id,
+        status=refreshed.state,
         catalog_path=catalog_path,
         dest_path=request.dest_path,
-        error=job.error,
+        error=refreshed.error,
     )
-    return EnqueuedJobResponse(job_id=job.id, status="pending")
+    return EnqueuedJobResponse(job_id=refreshed.id, status="pending")

@@ -8,11 +8,15 @@ from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
 
 
-@pytest.fixture()
-def client(tmp_path: Path) -> TestClient:
+def _make_client(tmp_path: Path, *, raise_server_exceptions: bool = True) -> TestClient:
     context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'archive-aml-bridge.db'}"))
     reset_context(context)
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
+
+
+@pytest.fixture()
+def client(tmp_path: Path) -> TestClient:
+    return _make_client(tmp_path)
 
 
 def _login_admin(client: TestClient) -> None:
@@ -81,6 +85,129 @@ def test_archive_bridges_into_aml_jobs_events_and_catalog(client: TestClient, tm
     assert drive["state"] == "idle"
     assert drive["loadedMedia"] is None
     assert archived_file.stat().st_size > 0
+
+
+def test_sharded_archive_bridges_into_aml_jobs_and_events(client: TestClient, tmp_path: Path) -> None:
+    _login_admin(client)
+    barcode = _prepare_volume_group(client)
+
+    source = tmp_path / "sharded-source"
+    source.mkdir()
+    (source / "striped.txt").write_text("sharded aml bridge")
+
+    response = client.post(
+        "/archive/sharded",
+        json={
+            "source_path": str(source),
+            "volume_group": "photos",
+            "lane_barcodes": [barcode],
+            "mode": "stripe",
+            "block_size_mb": 1,
+        },
+    )
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+
+    jobs = client.get("/aml/jobs").json()["jobList"]["job"]
+    aml_job = next(job for job in jobs if job["id"] == job_id)
+    assert aml_job["type"] == "archive"
+    assert aml_job["status"] == "completed"
+
+    events = client.get("/aml/events").json()["eventList"]["event"]
+    assert any(
+        event["component"] == "archive"
+        and event["details"].get("jobId") == job_id
+        and event["details"].get("sourcePath") == str(source)
+        for event in events
+    )
+
+
+def test_archive_failure_bridges_into_aml_jobs_events_and_resets_drive_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client = _make_client(tmp_path, raise_server_exceptions=False)
+    _login_admin(client)
+    barcode = _prepare_volume_group(client)
+
+    source = tmp_path / "broken-source"
+    source.mkdir()
+    (source / "boom.txt").write_text("archive failure bridge")
+
+    context = get_context()
+    original_write_file = context.ltfs.write_file
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("archive bridge boom")
+
+    monkeypatch.setattr(context.ltfs, "write_file", _boom)
+    response = client.post("/archive/", json={"source_path": str(source), "volume_group": "photos"})
+    assert response.status_code == 500
+    monkeypatch.setattr(context.ltfs, "write_file", original_write_file)
+
+    jobs = client.get("/aml/jobs").json()["jobList"]["job"]
+    aml_job = next(job for job in jobs if job["result"] == "archive bridge boom")
+    assert aml_job["type"] == "archive"
+    assert aml_job["status"] == "failed"
+
+    events = client.get("/aml/events").json()["eventList"]["event"]
+    failure_event = next(
+        event
+        for event in events
+        if event["component"] == "archive" and event["details"].get("jobId") == aml_job["id"]
+    )
+    assert failure_event["severity"] == "error"
+    assert failure_event["details"]["error"] == "archive bridge boom"
+
+    drive = client.get("/aml/drive/DRV-001").json().get("drive") or client.get("/aml/drive/DRV-001").json()
+    assert drive["state"] == "idle"
+    assert drive["loadedMedia"] is None
+
+    media = client.get(f"/aml/media/{barcode}").json().get("media") or client.get(f"/aml/media/{barcode}").json()
+    assert media["state"] == "home"
+    assert media["slotAddress"] == "1,1,1"
+
+
+def test_restore_failure_bridges_into_aml_jobs_and_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client = _make_client(tmp_path, raise_server_exceptions=False)
+    _login_admin(client)
+    _prepare_volume_group(client)
+
+    source = tmp_path / "source"
+    source.mkdir()
+    archived_file = source / "restore.txt"
+    archived_file.write_text("restore aml bridge")
+    archive_response = client.post("/archive/", json={"source_path": str(source), "volume_group": "photos"})
+    assert archive_response.status_code == 202
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("restore bridge boom")
+
+    monkeypatch.setattr("openblade.api.routes_restore.run_restore_job", _boom)
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    response = client.post(
+        "/restore/",
+        json={"catalog_path": "/photos/restore.txt", "dest_path": str(restore_dir)},
+    )
+    assert response.status_code == 500
+
+    jobs = client.get("/aml/jobs").json()["jobList"]["job"]
+    aml_job = next(job for job in jobs if job["result"] == "restore bridge boom")
+    assert aml_job["type"] == "restore"
+    assert aml_job["status"] == "failed"
+
+    events = client.get("/aml/events").json()["eventList"]["event"]
+    failure_event = next(
+        event
+        for event in events
+        if event["component"] == "restore" and event["details"].get("jobId") == aml_job["id"]
+    )
+    assert failure_event["severity"] == "error"
+    assert failure_event["details"]["error"] == "restore bridge boom"
+    assert failure_event["details"]["catalogPath"] == "/photos/restore.txt"
+    assert archived_file.read_text() == "restore aml bridge"
 
 
 def test_restore_bridges_into_aml_jobs_and_events(client: TestClient, tmp_path: Path) -> None:
