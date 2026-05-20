@@ -14,12 +14,16 @@ function toVariant(value: string): BadgeVariant {
     case 'failed':
     case 'error':
     case 'not safe':
+    case 'missing_tape':
+    case 'corrupt':
       return 'red';
     case 'noncritical_sharded':
     case 'warning':
     case 'after_days':
     case 'manual':
     case 'watch':
+    case 'hydrating':
+    case 'paused':
       return 'amber';
     case 'balanced':
     case 'cache_drive':
@@ -27,15 +31,26 @@ function toVariant(value: string): BadgeVariant {
     case 'completed':
     case 'safe':
     case 'healthy':
+    case 'verified':
+    case 'archived':
+    case 'read_write':
+    case 'running':
       return 'green';
     case 'source_stream':
     case 'streaming':
-    case 'running':
+    case 'planning':
+    case 'archiving':
       return 'blue';
     case 'offline_on_tape':
     case 'manual_only':
     case 'disabled':
+    case 'queued':
+    case 'cancelled':
+    case 'pending':
+    case 'read_only':
       return 'gray';
+    case 'exported':
+      return 'purple';
     default:
       return 'gray';
   }

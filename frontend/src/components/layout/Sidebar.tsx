@@ -89,6 +89,9 @@ const sections: NavSection[] = [
       { label: 'Cache Drives', to: '/storage/cache-drives' },
       { label: 'Source Streaming', to: '/storage/source-streaming' },
       { label: 'Archive Planning', to: '/storage/archive-planning' },
+      { label: 'Virtual Pools', to: '/storage/virtual-pools' },
+      { label: 'Restore Queue', to: '/storage/restore-queue' },
+      { label: 'Dataset Details', to: '/storage/dataset-details' },
     ],
   },
   {

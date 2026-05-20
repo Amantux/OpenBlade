@@ -5,7 +5,7 @@ import type {
   SystemHealthLevel,
 } from '../types/api';
 
-export type BadgeVariant = 'gray' | 'blue' | 'green' | 'amber' | 'red' | 'redDim';
+export type BadgeVariant = 'gray' | 'blue' | 'green' | 'amber' | 'red' | 'redDim' | 'purple';
 
 /**
  * UUID v4 generator that works in both secure (HTTPS/localhost) and non-secure

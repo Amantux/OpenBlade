@@ -31,8 +31,11 @@ import SystemFirmware from './pages/SystemFirmware';
 import SystemNetwork from './pages/SystemNetwork';
 import ArchivePlanning from './pages/nas/ArchivePlanning';
 import CacheDrives from './pages/nas/CacheDrives';
+import DatasetDetails from './pages/nas/DatasetDetails';
+import RestoreQueue from './pages/nas/RestoreQueue';
 import SourceStreaming from './pages/nas/SourceStreaming';
 import StoragePolicies from './pages/nas/StoragePolicies';
+import VirtualPools from './pages/nas/VirtualPools';
 
 function ProtectedLayout() {
   const location = useLocation();
@@ -81,6 +84,9 @@ function RoutedApp() {
         <Route path="storage/cache-drives" element={<CacheDrives />} />
         <Route path="storage/source-streaming" element={<SourceStreaming />} />
         <Route path="storage/archive-planning" element={<ArchivePlanning />} />
+        <Route path="storage/virtual-pools" element={<VirtualPools />} />
+        <Route path="storage/restore-queue" element={<RestoreQueue />} />
+        <Route path="storage/dataset-details" element={<DatasetDetails />} />
         <Route path="system" element={<System />} />
         <Route path="system/network" element={<SystemNetwork />} />
         <Route path="system/config" element={<SystemConfiguration />} />

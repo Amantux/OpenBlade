@@ -8,6 +8,7 @@ const variantClasses: Record<BadgeVariant, string> = {
   amber: 'border-amber-500/30 bg-amber-500/15 text-amber-300',
   red: 'border-red-500/30 bg-red-500/15 text-red-300',
   redDim: 'border-red-900/50 bg-red-950/30 text-red-400',
+  purple: 'border-purple-500/30 bg-purple-500/15 text-purple-300',
 };
 
 interface BadgeProps {
