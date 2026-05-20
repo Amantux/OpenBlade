@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SystemHealth } from '../../types/api';
+import { getStoredUsername } from '../../lib/auth';
 import StatusPill from '../ui/StatusPill';
 
 interface TopBarProps {
@@ -16,6 +17,7 @@ const statusCopy: Record<SystemHealth, string> = {
 
 export default function TopBar({ libraryName, health, backend }: TopBarProps) {
   const [now, setNow] = useState(() => new Date());
+  const [username] = useState(() => getStoredUsername() ?? 'operator');
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1_000);
@@ -43,12 +45,12 @@ export default function TopBar({ libraryName, health, backend }: TopBarProps) {
         <div className="flex items-center gap-3 text-right text-xs text-slate-300">
           <StatusPill status={health} />
           <div className="hidden border-l border-quantum-border pl-3 md:block">
-            <div className="uppercase tracking-[0.18em] text-slate-500">Firmware</div>
-            <div className="mt-1 font-medium text-slate-200">8.x.x</div>
+            <div className="uppercase tracking-[0.18em] text-slate-500">Interface</div>
+            <div className="mt-1 font-medium text-slate-200">AML</div>
           </div>
           <div className="hidden border-l border-quantum-border pl-3 md:block">
             <div className="uppercase tracking-[0.18em] text-slate-500">User</div>
-            <div className="mt-1 font-medium text-slate-200">admin</div>
+            <div className="mt-1 font-medium text-slate-200">{username}</div>
           </div>
           <div className="border-l border-quantum-border pl-3">
             <div className="uppercase tracking-[0.18em] text-slate-500">Time</div>

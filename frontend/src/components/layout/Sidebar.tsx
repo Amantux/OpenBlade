@@ -1,4 +1,14 @@
-import { ChevronDown, ChevronRight, Cpu, HardDrive, Layers3, Shield, SquareStack, Workflow } from 'lucide-react';
+import {
+  Activity,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  Gauge,
+  HardDrive,
+  Layers3,
+  Shield,
+  Workflow,
+} from 'lucide-react';
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../../lib/utils';
@@ -17,14 +27,34 @@ interface NavSection {
 
 const sections: NavSection[] = [
   {
+    id: 'overview',
+    label: 'Overview',
+    icon: Gauge,
+    items: [
+      { label: 'Dashboard', to: '/' },
+      { label: 'Multi-Library Grid', to: '/libraries' },
+      { label: 'Health & Alerts', to: '/health' },
+    ],
+  },
+  {
     id: 'library',
     label: 'Library',
     icon: Layers3,
     items: [
-      { label: 'Overview', to: '/library' },
+      { label: 'Physical Map', to: '/library' },
       { label: 'Inventory', to: '/library/inventory' },
-      { label: 'IE Area', to: '/library/inventory#ie-area' },
-      { label: 'Cleaning Slots', to: '/library/inventory#cleaning-slots' },
+      { label: 'Partitions', to: '/partitions' },
+      { label: 'IE Station', to: '/library/ie' },
+    ],
+  },
+  {
+    id: 'media',
+    label: 'Media',
+    icon: Database,
+    items: [
+      { label: 'Cartridges', to: '/media' },
+      { label: 'Media Pools', to: '/media/pools' },
+      { label: 'LTFS Browse', to: '/media/ltfs' },
     ],
   },
   {
@@ -33,16 +63,18 @@ const sections: NavSection[] = [
     icon: HardDrive,
     items: [
       { label: 'Drive Overview', to: '/drives' },
-      { label: 'Drive States', to: '/drives#drive-states' },
+      { label: 'Drive Operations', to: '/drives/ops' },
     ],
   },
   {
-    id: 'devices',
-    label: 'Devices',
-    icon: Cpu,
+    id: 'operations',
+    label: 'Operations',
+    icon: Workflow,
     items: [
-      { label: 'Robots', to: '/health#robots' },
-      { label: 'iBlades', to: '/health#iblades' },
+      { label: 'Job Queue', to: '/jobs' },
+      { label: 'Move Operations', to: '/operations/move' },
+      { label: 'Inventory Scan', to: '/operations/inventory' },
+      { label: 'Import / Export', to: '/operations/ie' },
     ],
   },
   {
@@ -50,46 +82,42 @@ const sections: NavSection[] = [
     label: 'System',
     icon: Shield,
     items: [
-      { label: 'Configuration', to: '/health#configuration' },
-      { label: 'Health', to: '/health' },
+      { label: 'System Info', to: '/system' },
+      { label: 'Network', to: '/system/network' },
+      { label: 'Configuration', to: '/system/config' },
+      { label: 'Firmware', to: '/system/firmware' },
+      { label: 'Diagnostics', to: '/system/diagnostics' },
     ],
   },
   {
     id: 'reports',
     label: 'Reports',
-    icon: SquareStack,
+    icon: Activity,
     items: [
-      { label: 'RAS Tickets', to: '/health#ras-tickets' },
-      { label: 'Activity Log', to: '/jobs#activity-log' },
-    ],
-  },
-  {
-    id: 'jobs',
-    label: 'Jobs',
-    icon: Workflow,
-    items: [
-      { label: 'Active Jobs', to: '/jobs' },
-      { label: 'Archive', to: '/archive' },
+      { label: 'RAS Tickets', to: '/reports/ras' },
+      { label: 'Events Log', to: '/reports/events' },
+      { label: 'Activity', to: '/reports/activity' },
     ],
   },
 ];
 
 export default function Sidebar() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    overview: true,
     library: true,
+    media: true,
     drives: true,
-    devices: false,
+    operations: true,
     system: true,
     reports: true,
-    jobs: true,
   });
 
   return (
-    <aside className="flex min-h-screen w-[260px] flex-col border-r border-quantum-border bg-quantum-sidebar">
+    <aside className="flex min-h-screen w-[280px] flex-col border-r border-quantum-border bg-quantum-sidebar">
       <div className="border-b border-quantum-border px-4 py-4">
         <div className="text-xs uppercase tracking-[0.32em] text-slate-500">Quantum Scalar i3</div>
-        <div className="mt-2 text-lg font-semibold text-slate-100">Library Management Console</div>
-        <div className="mt-1 text-xs text-slate-400">Desktop operator interface emulation</div>
+        <div className="mt-2 text-lg font-semibold text-slate-100">OpenBlade Control Plane</div>
+        <div className="mt-1 text-xs text-slate-400">Modern SaaS telemetry + operator workflows</div>
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
@@ -122,6 +150,7 @@ export default function Sidebar() {
                     <NavLink
                       key={item.to}
                       to={item.to}
+                      end={item.to === '/'}
                       className={({ isActive }) =>
                         cn(
                           'flex items-center rounded-md border-l-2 border-transparent px-3 py-2 text-sm text-slate-300 transition hover:bg-quantum-north hover:text-white',

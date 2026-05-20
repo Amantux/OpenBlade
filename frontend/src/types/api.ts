@@ -1,6 +1,9 @@
 export interface HealthResponse {
   status: string;
   backend: string;
+  hostname?: string;
+  firmware?: string;
+  uptime?: number;
   drives?: number;
   slots_used?: number;
   slots_total?: number;
@@ -10,22 +13,34 @@ export interface HealthResponse {
 export interface SlotResponse {
   slot_id?: number;
   id?: number;
+  address?: string;
   occupied?: boolean;
   barcode: string | null;
   state?: string;
   drive_id?: number | null;
+  type?: string;
+  partition?: string;
 }
 
 export interface DriveResponse {
   drive_id?: number;
   id?: number;
+  serialNumber?: string;
   loaded?: boolean;
   tape_loaded?: boolean;
   barcode: string | null;
   drive_state?: string;
   state?: string;
+  status?: string;
   mount_state?: string;
   type?: string;
+  partition?: string;
+  location?: string;
+  firmware?: string;
+  loadCount?: number;
+  errorCount?: number;
+  cleaningCount?: number;
+  lastCleaned?: string | null;
 }
 
 export interface InventoryResponse {
@@ -36,6 +51,7 @@ export interface InventoryResponse {
   changer?: {
     state: string;
   };
+  partitions?: string[];
 }
 
 export interface JobResponse {
@@ -44,9 +60,11 @@ export interface JobResponse {
   state?: string;
   job_type?: string;
   type?: string;
+  priority?: string;
   created_at: string;
   updated_at: string;
   error?: string | null;
+  result?: string | null;
   metadata?: Record<string, unknown>;
   bytes_written?: number;
   progress?: number;
@@ -64,11 +82,35 @@ export interface VolumeGroup {
 
 export interface CartridgeResponse {
   barcode: string;
-  volume_group_id: string | null;
-  capacity_bytes: number;
-  used_bytes: number;
+  type: string;
+  partition: string | null;
+  slotAddress: string;
   state: string;
-  formatted: boolean;
+  writeProtected: boolean;
+  worm: boolean;
+  generations: number;
+  loadCount: number;
+  errorCount: number;
+  lastLoaded?: string | null;
+}
+
+export interface MediaPoolResponse {
+  name: string;
+  type: string;
+  mediaCount: number;
+  policy: string;
+}
+
+export interface PartitionResponse {
+  id: string;
+  name: string;
+  status: string;
+  type: string;
+  driveCount: number;
+  slotCount: number;
+  ieSlotCount: number;
+  cleaningSlots: number;
+  mediaCount: number;
 }
 
 export interface EnqueuedJobResponse {
@@ -105,6 +147,125 @@ export interface CatalogEntryResponse {
 
 export interface CatalogResponse {
   entries: CatalogEntryResponse[];
+}
+
+export interface SystemOverviewResponse {
+  hostname: string;
+  model: string;
+  serialNumber: string;
+  firmware: string;
+  uptime: number;
+  cpuUsage: number;
+  memUsage: number;
+  diskUsage: number;
+}
+
+export interface SystemDetailResponse {
+  os: string;
+  kernel: string;
+  arch: string;
+  cpuModel: string;
+  cpuCount: number;
+  totalMem: number;
+  totalDisk: number;
+  installedDate: string;
+}
+
+export interface SystemStatusResponse {
+  overall: string;
+  cpu: string;
+  memory: string;
+  disk: string;
+  network: string;
+  services: string;
+}
+
+export interface SystemVersionResponse {
+  firmware: string;
+  software: string;
+  api: string;
+  buildDate: string;
+  buildNumber: string;
+}
+
+export interface UptimeResponse {
+  seconds: number;
+  formatted: string;
+  bootTime: string;
+}
+
+export interface NetworkInterfaceResponse {
+  name: string;
+  type: string;
+  ip: string;
+  mask: string;
+  gateway: string;
+  mac: string;
+  status: string;
+  speed: string;
+  duplex: string;
+}
+
+export interface NetworkConfigResponse {
+  interfaces: NetworkInterfaceResponse[];
+  dns: {
+    primary: string;
+    secondary: string;
+    search: string[];
+    domain: string;
+  };
+  ntp: {
+    enabled: boolean;
+    servers: string[];
+    status: string;
+    lastSync?: string | null;
+  };
+  hostname: string;
+  domain: string;
+}
+
+export interface SystemConfigResponse {
+  hostname: string;
+  timezone: string;
+  locale: string;
+  dateFormat: string;
+  temperatureUnit: string;
+}
+
+export interface FirmwarePackageResponse {
+  name: string;
+  version: string;
+  size: number;
+  uploadedAt: string;
+  checksum: string;
+  active: boolean;
+}
+
+export interface DiagnosticsResponse {
+  timestamp?: string | null;
+  status: string;
+  tests: Array<{
+    name: string;
+    result: string;
+    details?: string | null;
+  }>;
+}
+
+export interface EventLogResponse {
+  id: string;
+  timestamp: string;
+  severity: string;
+  category: string;
+  message: string;
+}
+
+export interface RasTicketResponse {
+  id: string;
+  severity: string;
+  summary: string;
+  status: string;
+  createdAt: string;
+  component?: string;
 }
 
 export type SystemHealth = 'Healthy' | 'Degraded' | 'Critical';

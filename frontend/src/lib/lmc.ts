@@ -24,6 +24,7 @@ export interface NormalizedSlot {
 
 export interface NormalizedDrive {
   id: number;
+  serialNumber: string;
   state: string;
   barcode: string | null;
   tapeLoaded: boolean;
@@ -44,19 +45,28 @@ export interface SubsystemSummary {
   state: PanelStatus;
 }
 
-const HEALTHY_STATES = ['OK', 'HEALTHY'];
+const HEALTHY_STATES = ['OK', 'HEALTHY', 'GOOD', 'READY'];
 const FAILED_DRIVE_STATES = ['FAULTED', 'OFFLINE', 'FAILED'];
 const WARNING_DRIVE_STATES = ['BUSY', 'MOUNTING', 'UNMOUNTING', 'LOADING', 'UNLOADING'];
 const FAILED_CHANGER_STATES = ['FAULTED', 'FAILED', 'ERROR'];
 const WARNING_CHANGER_STATES = ['BUSY', 'MOVING', 'SCANNING'];
 const MAGAZINE_SIZE = 5;
 
+function parseTrailingNumber(value?: string | null): number {
+  if (!value) {
+    return 0;
+  }
+
+  const match = value.match(/(\d+)$/);
+  return match ? Number(match[1]) : 0;
+}
+
 export function getSlotElement(slot: SlotResponse): number {
-  return slot.id ?? slot.slot_id ?? 0;
+  return slot.id ?? slot.slot_id ?? parseTrailingNumber(slot.address) ?? 0;
 }
 
 export function getDriveId(drive: DriveResponse): number {
-  return drive.id ?? drive.drive_id ?? 0;
+  return drive.id ?? drive.drive_id ?? parseTrailingNumber(drive.serialNumber) ?? 0;
 }
 
 export function getDriveState(drive: DriveResponse): string {
@@ -75,6 +85,7 @@ export function normalizeSlot(slot: SlotResponse): NormalizedSlot {
   const element = getSlotElement(slot);
   const driveId = slot.drive_id ?? null;
   const occupied = slot.occupied ?? Boolean(slot.barcode);
+  const slotType = String(slot.type ?? '').toUpperCase();
   const state = String(slot.state ?? (driveId !== null ? 'IN_DRIVE' : occupied ? 'LOADED' : 'EMPTY')).toUpperCase();
   const barcode = slot.barcode ?? null;
 
@@ -85,21 +96,23 @@ export function normalizeSlot(slot: SlotResponse): NormalizedSlot {
     driveId,
     occupied,
     magazine: Math.max(1, Math.ceil(element / MAGAZINE_SIZE)),
-    isIeArea: element >= 1 && element <= MAGAZINE_SIZE,
+    isIeArea: slotType === 'IE' || slot.address?.startsWith('0,0,') === true,
     isCleaning: /CLN|CLEAN/i.test(barcode ?? '') || state.includes('CLEAN'),
   };
 }
 
 export function normalizeDrive(drive: DriveResponse): NormalizedDrive {
   const state = getDriveState(drive);
+  const serialNumber = drive.serialNumber ?? `DRV-${String(getDriveId(drive)).padStart(3, '0')}`;
 
   return {
     id: getDriveId(drive),
+    serialNumber,
     state,
     barcode: drive.barcode ?? null,
     tapeLoaded: isDriveLoaded(drive),
     mountState: String(drive.mount_state ?? (isDriveLoaded(drive) ? 'MOUNTED' : 'EMPTY')).toUpperCase(),
-    type: drive.type ?? 'LTO-8 HH FC / SAS',
+    type: drive.type ?? 'LTO-9',
   };
 }
 
@@ -266,9 +279,9 @@ export function buildRasTickets(
 
   for (const drive of drives.filter((item) => FAILED_DRIVE_STATES.includes(item.state))) {
     tickets.push({
-      id: `drive-${drive.id}`,
+      id: `drive-${drive.serialNumber}`,
       severity: 1,
-      component: `Drive ${drive.id}`,
+      component: drive.serialNumber,
       message: `${drive.type} reports ${toTitleCase(drive.state)} and requires service attention.`,
       time: new Date().toISOString(),
     });

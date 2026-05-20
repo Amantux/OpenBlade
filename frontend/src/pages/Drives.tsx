@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { bringDriveOnline, takeDriveOffline, unloadDrive } from '../api/drives';
 import InformationPanel from '../components/panels/InformationPanel';
 import NorthPanel from '../components/panels/NorthPanel';
 import OperationsPanel from '../components/panels/OperationsPanel';
@@ -16,8 +18,10 @@ function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red
 }
 
 export default function Drives() {
+  const queryClient = useQueryClient();
   const inventoryQuery = useInventory();
   const [selectedDriveId, setSelectedDriveId] = useState<string>();
+  const [operationMessage, setOperationMessage] = useState<string | null>(null);
 
   const drives = useMemo(() => (inventoryQuery.data?.drives ?? []).map(normalizeDrive), [inventoryQuery.data?.drives]);
 
@@ -28,6 +32,27 @@ export default function Drives() {
   }, [drives, selectedDriveId]);
 
   const selectedDrive: NormalizedDrive | undefined = drives.find((drive) => String(drive.id) === selectedDriveId) ?? drives[0];
+
+  const onlineMutation = useMutation({
+    mutationFn: (serialNumber: string) => bringDriveOnline(serialNumber),
+    onSuccess: async (result) => {
+      setOperationMessage(result.summary);
+      await queryClient.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
+
+  const offlineMutation = useMutation({
+    mutationFn: async ({ serialNumber, tapeLoaded }: { serialNumber: string; tapeLoaded: boolean }) => {
+      if (tapeLoaded) {
+        await unloadDrive(serialNumber);
+      }
+      return takeDriveOffline(serialNumber);
+    },
+    onSuccess: async (result) => {
+      setOperationMessage(result.summary);
+      await queryClient.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
 
   if (inventoryQuery.isLoading) {
     return <Spinner />;
@@ -40,9 +65,9 @@ export default function Drives() {
     <div className="space-y-4">
       <NorthPanel
         title="Drive Overview"
-        subtitle="LTO-8 HH FC / SAS drive status, mount state, and current media placement."
+        subtitle="LTO drive status, mount state, and current media placement."
         columns={[
-          { key: 'drive', header: 'Drive', render: (row: NormalizedDrive) => `Drive ${row.id}` },
+          { key: 'drive', header: 'Drive', render: (row: NormalizedDrive) => row.serialNumber },
           { key: 'type', header: 'Type', render: (row: NormalizedDrive) => row.type },
           { key: 'state', header: 'State', render: (row: NormalizedDrive) => <Badge variant={stateVariant(row.state)}>{row.state}</Badge> },
           { key: 'loaded', header: 'Tape Loaded', render: (row: NormalizedDrive) => (row.tapeLoaded ? 'Yes' : 'No') },
@@ -56,7 +81,7 @@ export default function Drives() {
       />
 
       <InformationPanel
-        title={selectedDrive ? `Drive ${selectedDrive.id}` : 'Drive Details'}
+        title={selectedDrive ? selectedDrive.serialNumber : 'Drive Details'}
         subtitle="Detailed status for the selected drive."
         items={[
           { label: 'Drive Type', value: selectedDrive?.type ?? '—' },
@@ -67,20 +92,32 @@ export default function Drives() {
         ]}
       />
 
+      {operationMessage ? (
+        <div className="rounded-md border border-emerald-700 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-200">
+          {operationMessage}
+        </div>
+      ) : null}
+
+      {(onlineMutation.isError || offlineMutation.isError) ? (
+        <ErrorMessage error={onlineMutation.error ?? offlineMutation.error} />
+      ) : null}
+
       <OperationsPanel
         title="Drive Operations"
-        subtitle="Vary-On or Vary-Off controls are enabled according to the selected drive state."
+        subtitle="Vary-On and Vary-Off now call the AML drive control routes."
         actions={[
           {
-            label: 'Vary-On',
-            onClick: () => undefined,
-            disabled: !selectedDrive || !['OFFLINE', 'FAILED'].includes(selectedDrive.state),
+            label: onlineMutation.isPending ? 'Vary-On…' : 'Vary-On',
+            onClick: () => selectedDrive && onlineMutation.mutate(selectedDrive.serialNumber),
+            disabled: !selectedDrive || !['OFFLINE', 'FAILED'].includes(selectedDrive.state) || onlineMutation.isPending,
             variant: 'primary',
           },
           {
-            label: 'Vary-Off',
-            onClick: () => undefined,
-            disabled: !selectedDrive || ['OFFLINE', 'FAILED'].includes(selectedDrive.state),
+            label: offlineMutation.isPending ? 'Vary-Off…' : 'Vary-Off',
+            onClick: () =>
+              selectedDrive &&
+              offlineMutation.mutate({ serialNumber: selectedDrive.serialNumber, tapeLoaded: selectedDrive.tapeLoaded }),
+            disabled: !selectedDrive || ['OFFLINE', 'FAILED'].includes(selectedDrive.state) || offlineMutation.isPending,
             variant: 'secondary',
           },
           { label: 'Refresh', onClick: () => void inventoryQuery.refetch(), variant: 'secondary' },

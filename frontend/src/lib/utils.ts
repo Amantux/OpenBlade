@@ -45,16 +45,36 @@ export function formatDate(value: string): string {
   }).format(parsed);
 }
 
+export function formatDuration(seconds?: number): string {
+  if (!seconds || seconds <= 0) {
+    return '0m';
+  }
+
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+}
+
 export function deriveSystemHealth(
   health?: HealthResponse,
   drives: DriveResponse[] = [],
   changerState?: string,
 ): SystemHealth {
-  if (!health || !['ok', 'healthy'].includes(health.status.toLowerCase())) {
+  const status = health?.status?.toLowerCase() ?? 'unknown';
+
+  if (!health || !['ok', 'healthy', 'good', 'ready'].includes(status)) {
     return 'Critical';
   }
 
-  if (drives.some((drive) => ['FAULTED', 'OFFLINE'].includes(String(drive.drive_state ?? drive.state ?? '').toUpperCase()))) {
+  if (drives.some((drive) => ['FAULTED', 'OFFLINE', 'FAILED'].includes(String(drive.drive_state ?? drive.state ?? '').toUpperCase()))) {
     return 'Critical';
   }
 
@@ -74,6 +94,7 @@ export function getDriveStateVariant(state: string): BadgeVariant {
     case 'BUSY':
       return 'blue';
     case 'FAULTED':
+    case 'FAILED':
       return 'red';
     case 'OFFLINE':
       return 'redDim';

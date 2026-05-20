@@ -1,4 +1,14 @@
+import { clearStoredUsername } from '../lib/auth';
+
 type BodyInitLike = BodyInit | FormData | URLSearchParams | Blob;
+
+type ApiNamespace = 'aml' | 'root';
+
+interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
+  body?: unknown;
+  namespace?: ApiNamespace;
+  skipAuthRedirect?: boolean;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -16,7 +26,7 @@ export class ApiError extends Error {
   }
 }
 
-const API_PREFIX = '/api';
+const API_PREFIX = '/aml';
 
 function isBodyInitLike(value: unknown): value is BodyInitLike {
   return (
@@ -35,9 +45,31 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
+function buildUrl(path: string, namespace: ApiNamespace): string {
+  if (/^https?:\/\//.test(path) || path.startsWith('/aml')) {
+    return path;
+  }
+
+  return namespace === 'root' ? path : `${API_PREFIX}${path}`;
+}
+
+function redirectToLogin(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const redirect = encodeURIComponent(currentPath || '/');
+
+  if (!window.location.pathname.startsWith('/login')) {
+    clearStoredUsername();
+    window.location.assign(`/login?redirect=${redirect}`);
+  }
+}
+
 export async function apiRequest<T>(
   path: string,
-  init: Omit<RequestInit, 'body'> & { body?: unknown } = {},
+  init: ApiRequestOptions = {},
 ): Promise<T> {
   const headers = new Headers(init.headers);
   const rawBody = init.body;
@@ -50,14 +82,20 @@ export async function apiRequest<T>(
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_PREFIX}${path}`, {
+  const namespace = init.namespace ?? 'aml';
+  const response = await fetch(buildUrl(path, namespace), {
     ...init,
     headers,
     body,
+    credentials: 'include',
   });
 
   const text = await response.text();
   const payload = text ? safeJsonParse(text) : null;
+
+  if (response.status === 401 && !init.skipAuthRedirect) {
+    redirectToLogin();
+  }
 
   if (!response.ok) {
     const details =
@@ -67,12 +105,16 @@ export async function apiRequest<T>(
     const message =
       typeof payload === 'object' && payload !== null && 'detail' in payload
         ? String(payload.detail)
-        : `Request failed with status ${response.status}`;
+        : typeof payload === 'object' && payload !== null && 'summary' in payload
+          ? String(payload.summary)
+          : `Request failed with status ${response.status}`;
     throw new ApiError(
       message,
       response.status,
       `The backend could not complete ${init.method ?? 'GET'} ${path}.`,
-      'Check the appliance state, then retry the request.',
+      response.status === 401
+        ? 'Sign in again to continue using the AML console.'
+        : 'Check the appliance state, then retry the request.',
       details,
     );
   }

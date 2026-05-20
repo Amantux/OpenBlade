@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import InformationPanel from '../components/panels/InformationPanel';
 import NorthPanel from '../components/panels/NorthPanel';
 import OperationsPanel from '../components/panels/OperationsPanel';
 import Badge from '../components/ui/Badge';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
-import { useJob, useJobs } from '../hooks/useJobs';
+import { cancelJob, useJob, useJobs } from '../hooks/useJobs';
 import {
   getJobBarcode,
   getJobProgress,
@@ -32,6 +33,7 @@ function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red
 }
 
 export default function Jobs() {
+  const queryClient = useQueryClient();
   const jobsQuery = useJobs();
   const [selectedJobId, setSelectedJobId] = useState<string>();
 
@@ -50,6 +52,16 @@ export default function Jobs() {
     Boolean(selectedSummary && ['PENDING', 'RUNNING'].includes(getJobState(selectedSummary))),
   );
 
+  const cancelMutation = useMutation({
+    mutationFn: (jobId: string) => cancelJob(jobId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['jobs'] }),
+        queryClient.invalidateQueries({ queryKey: ['jobs', 'history'] }),
+      ]);
+    },
+  });
+
   if (jobsQuery.isLoading) {
     return <Spinner />;
   }
@@ -64,7 +76,7 @@ export default function Jobs() {
     <div className="space-y-4">
       <NorthPanel
         title="Active Jobs"
-        subtitle="Archive and restore activity across all partitions."
+        subtitle="AML job queue across partitions and operator workflows."
         columns={[
           { key: 'id', header: 'Job ID', render: (row: JobResponse) => <span className="font-mono text-xs">{row.id}</span> },
           { key: 'type', header: 'Type', render: (row: JobResponse) => getJobTypeLabel(row) },
@@ -99,12 +111,12 @@ export default function Jobs() {
         getRowId={(row) => row.id}
         selectedId={selectedJob?.id}
         onSelect={(row) => setSelectedJobId(row.id)}
-        emptyMessage="No active jobs reported by the archive engine."
+        emptyMessage="No active jobs reported by the AML queue."
       />
 
       <InformationPanel
         title={selectedJob ? `Job ${selectedJob.id}` : 'Job Details'}
-        subtitle="Expanded detail for the selected archive workflow."
+        subtitle="Expanded detail for the selected workflow."
         items={[
           { label: 'Type', value: selectedJob ? getJobTypeLabel(selectedJob) : '—' },
           { label: 'State', value: selectedJob ? getJobState(selectedJob) : '—' },
@@ -117,14 +129,16 @@ export default function Jobs() {
         ]}
       />
 
+      {cancelMutation.isError ? <ErrorMessage error={cancelMutation.error} /> : null}
+
       <OperationsPanel
         title="Job Operations"
-        subtitle="Cancel is available for selected jobs that are still queued or running."
+        subtitle="Cancel is available for jobs that are still queued or running."
         actions={[
           {
-            label: 'Cancel',
-            onClick: () => undefined,
-            disabled: !selectedJob || !['PENDING', 'RUNNING'].includes(getJobState(selectedJob)),
+            label: cancelMutation.isPending ? 'Cancelling…' : 'Cancel',
+            onClick: () => selectedJob && cancelMutation.mutate(selectedJob.id),
+            disabled: !selectedJob || !['PENDING', 'RUNNING'].includes(getJobState(selectedJob)) || cancelMutation.isPending,
             variant: 'danger',
           },
           { label: 'Refresh', onClick: () => void jobsQuery.refetch(), variant: 'secondary' },
