@@ -146,13 +146,55 @@ def _validate_identifier(value: str, *, field_name: str) -> str:
 
 
 def _guess_version(filename: str) -> str:
+    """Extract a human-readable version string from a firmware filename.
+
+    Handles formats like:
+      - lto9_fw_D9.1.0.img  → D9.1.0
+      - lto9_d9_1_0.img     → D9.1.0
+      - drive_fw_9_0_5.drv  → 9.0.5
+      - firmware-1.2.3.fmr  → 1.2.3
+    """
     stem = Path(filename).stem
-    dotted = re.search(r"(\d+(?:\.\d+)+)", stem)
+    # Prefer an explicit dotted version string (e.g. D9.1.0, 9.0.5)
+    dotted = re.search(r"([A-Za-z]*\d+(?:\.\d+)+)", stem)
     if dotted:
-        return dotted.group(1)
-    for token in reversed(re.split(r"[^A-Za-z0-9]+", stem)):
-        if any(char.isdigit() for char in token):
-            return token.upper()
+        v = dotted.group(1)
+        return v.upper() if v[0].isalpha() else v
+    # Try underscore/dash-separated segments: collect a letter+digit prefix followed
+    # by consecutive pure-numeric tokens, OR a run of consecutive pure-numeric tokens ≥ 2
+    tokens = re.split(r"[_\-]", stem)
+    best: list[str] = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if re.fullmatch(r"[A-Za-z]\d+", t):
+            # letter-prefixed version seed (e.g. d9)
+            run = [t.upper()]
+            j = i + 1
+            while j < len(tokens) and re.fullmatch(r"\d+", tokens[j]):
+                run.append(tokens[j])
+                j += 1
+            if len(run) > len(best):
+                best = run
+            i = j
+        elif re.fullmatch(r"\d+", t):
+            # pure-numeric run
+            run = [t]
+            j = i + 1
+            while j < len(tokens) and re.fullmatch(r"\d+", tokens[j]):
+                run.append(tokens[j])
+                j += 1
+            if len(run) >= 2 and len(run) > len(best):
+                best = run
+            i = j
+        else:
+            i += 1
+    if best:
+        return ".".join(best)
+    # Last resort: first token that contains a digit
+    for token in tokens:
+        if any(c.isdigit() for c in token):
+            return token.upper() if token[0].isalpha() else token
     return stem or "unknown"
 
 
