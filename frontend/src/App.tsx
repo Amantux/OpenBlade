@@ -29,6 +29,10 @@ import SystemConfiguration from './pages/SystemConfiguration';
 import SystemDiagnostics from './pages/SystemDiagnostics';
 import SystemFirmware from './pages/SystemFirmware';
 import SystemNetwork from './pages/SystemNetwork';
+import ArchivePlanning from './pages/nas/ArchivePlanning';
+import CacheDrives from './pages/nas/CacheDrives';
+import SourceStreaming from './pages/nas/SourceStreaming';
+import StoragePolicies from './pages/nas/StoragePolicies';
 
 function ProtectedLayout() {
   const location = useLocation();
@@ -73,6 +77,10 @@ function RoutedApp() {
         <Route path="operations/move" element={<MoveOperations />} />
         <Route path="operations/inventory" element={<InventoryScan />} />
         <Route path="operations/ie" element={<ImportExport />} />
+        <Route path="storage/policies" element={<StoragePolicies />} />
+        <Route path="storage/cache-drives" element={<CacheDrives />} />
+        <Route path="storage/source-streaming" element={<SourceStreaming />} />
+        <Route path="storage/archive-planning" element={<ArchivePlanning />} />
         <Route path="system" element={<System />} />
         <Route path="system/network" element={<SystemNetwork />} />
         <Route path="system/config" element={<SystemConfiguration />} />

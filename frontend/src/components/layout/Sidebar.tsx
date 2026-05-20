@@ -6,6 +6,7 @@ import {
   Gauge,
   HardDrive,
   Layers3,
+  ServerCog,
   Shield,
   Workflow,
 } from 'lucide-react';
@@ -80,6 +81,17 @@ const sections: NavSection[] = [
     ],
   },
   {
+    id: 'storage',
+    label: 'Storage',
+    icon: ServerCog,
+    items: [
+      { label: 'Storage Policies', to: '/storage/policies' },
+      { label: 'Cache Drives', to: '/storage/cache-drives' },
+      { label: 'Source Streaming', to: '/storage/source-streaming' },
+      { label: 'Archive Planning', to: '/storage/archive-planning' },
+    ],
+  },
+  {
     id: 'system',
     label: 'System',
     icon: Shield,
@@ -110,6 +122,7 @@ export default function Sidebar() {
     media: true,
     drives: true,
     operations: true,
+    storage: true,
     system: true,
     reports: true,
   });

@@ -32,7 +32,7 @@ export function toTitleCase(value: string): string {
   return value
     .toLowerCase()
     .replace(/[_-]+/g, ' ')
-    .replace(/\w/g, (char) => char.toUpperCase());
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export function formatBytes(value: number): string {
