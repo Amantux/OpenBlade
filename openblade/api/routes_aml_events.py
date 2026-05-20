@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from openblade.api import aml_state
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
@@ -29,7 +29,7 @@ _HEALTH_ORDER = {"good": 0, "warning": 1, "critical": 2}
 
 
 class Event(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     timestamp: str
@@ -88,7 +88,7 @@ class SubscriptionRequest(BaseModel):
 
 
 class Ticket(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     timestamp: str
@@ -126,6 +126,14 @@ class TicketUpdatePayload(BaseModel):
     status: str | None = None
     resolution: str | None = None
     assignee: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _validate_status(cls, v: str | None) -> str | None:
+        _VALID_STATUSES = {"open", "acknowledged", "resolved", "closed"}
+        if v is not None and v.lower() not in _VALID_STATUSES:
+            raise ValueError(f"status must be one of {sorted(_VALID_STATUSES)}")
+        return v.lower() if v is not None else v
 
 
 class TicketUpdateRequest(BaseModel):
@@ -200,7 +208,7 @@ class LogLevelResponse(BaseModel):
 
 
 class Alert(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     timestamp: str
@@ -250,7 +258,7 @@ class TapeAlertListResponse(BaseModel):
 
 
 class Notification(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     timestamp: str
