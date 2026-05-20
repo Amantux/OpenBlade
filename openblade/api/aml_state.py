@@ -107,6 +107,10 @@ class AMLState:
     drive_sleds: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_drive_sleds())
     power_supplies: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_power_supplies())
     aml_fans: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_fans())
+    aml_robots: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_robots())
+    aml_towers: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_towers())
+    aml_ie_stations: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_ie_stations())
+    aml_magazines: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_magazines())
 
 
 def _utcnow() -> datetime:
@@ -287,6 +291,69 @@ def _default_aml_fans() -> dict[str, dict[str, Any]]:
             "rpm": 2800,
             "speed": "normal",
         },
+    }
+
+
+def _default_aml_robots() -> dict[str, dict[str, Any]]:
+    return {
+        "ROB-1": {
+            "id": "ROB-1",
+            "serialNumber": "ROB0001",
+            "model": "Scalar i3 Robot",
+            "status": "online",
+            "state": "idle",
+            "location": "base",
+            "homeSlot": "1,1,1",
+        }
+    }
+
+
+def _default_aml_towers() -> dict[str, dict[str, Any]]:
+    return {
+        "TWR-1": {
+            "id": "TWR-1",
+            "serialNumber": "TWR0001",
+            "model": "Scalar i3 Base Module",
+            "status": "online",
+            "slots": 50,
+            "occupiedSlots": 12,
+            "drives": ["DRV-001", "DRV-002"],
+        }
+    }
+
+
+def _default_aml_ie_stations() -> dict[str, dict[str, Any]]:
+    return {
+        "IE-1": {
+            "id": "IE-1",
+            "serialNumber": "IE0001",
+            "status": "online",
+            "state": "closed",
+            "slotCount": 6,
+            "slots": [
+                {
+                    "id": f"IE-1-S{i}",
+                    "address": f"0,0,{i}",
+                    "state": "empty",
+                    "barcode": None,
+                    "type": "ie",
+                }
+                for i in range(1, 7)
+            ],
+        }
+    }
+
+
+def _default_aml_magazines() -> dict[str, dict[str, Any]]:
+    return {
+        "MAG-1": {
+            "id": "MAG-1",
+            "location": "TWR-1,col1,row1",
+            "status": "online",
+            "slotCount": 10,
+            "occupiedSlots": 3,
+            "tapes": ["VOL001L9", "VOL002L9", "VOL003L9"],
+        }
     }
 
 
@@ -841,6 +908,154 @@ def get_aml_fans() -> dict[str, dict[str, Any]]:
 def get_aml_fan(fan_id: str) -> dict[str, Any] | None:
     fan = _STATE.aml_fans.get(fan_id)
     return None if fan is None else deepcopy(fan)
+
+
+def _normalize_ie_station_slots(slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for index, slot in enumerate(slots, start=1):
+        current = deepcopy(slot)
+        current.setdefault("id", f"IE-1-S{index}")
+        current.setdefault("address", f"0,0,{index}")
+        current.setdefault("state", "empty")
+        current.setdefault("barcode", None)
+        current.setdefault("type", "ie")
+        normalized.append(current)
+    return normalized
+
+
+def get_aml_robots() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.aml_robots)
+
+
+def get_aml_robot(robot_id: str) -> dict[str, Any] | None:
+    robot = _STATE.aml_robots.get(robot_id)
+    return None if robot is None else deepcopy(robot)
+
+
+def update_aml_robot(robot_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    robot = _STATE.aml_robots.get(robot_id)
+    if robot is None:
+        return None
+    robot.update(deepcopy(updates))
+    return deepcopy(robot)
+
+
+def move_aml_robot_home(robot_id: str) -> dict[str, Any] | None:
+    robot = _STATE.aml_robots.get(robot_id)
+    if robot is None:
+        return None
+    robot["state"] = "idle"
+    robot["location"] = robot.get("homeSlot", "base")
+    return deepcopy(robot)
+
+
+def calibrate_aml_robot(robot_id: str) -> dict[str, Any] | None:
+    robot = _STATE.aml_robots.get(robot_id)
+    if robot is None:
+        return None
+    robot["state"] = "calibrated"
+    robot["status"] = "online"
+    return deepcopy(robot)
+
+
+def get_aml_towers() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.aml_towers)
+
+
+def get_aml_tower(tower_id: str) -> dict[str, Any] | None:
+    tower = _STATE.aml_towers.get(tower_id)
+    return None if tower is None else deepcopy(tower)
+
+
+def update_aml_tower(tower_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    tower = _STATE.aml_towers.get(tower_id)
+    if tower is None:
+        return None
+    tower.update(deepcopy(updates))
+    return deepcopy(tower)
+
+
+def get_aml_ie_stations() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.aml_ie_stations)
+
+
+def get_aml_ie_station(station_id: str) -> dict[str, Any] | None:
+    station = _STATE.aml_ie_stations.get(station_id)
+    return None if station is None else deepcopy(station)
+
+
+def update_aml_ie_station(station_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    station = _STATE.aml_ie_stations.get(station_id)
+    if station is None:
+        return None
+    slots = updates.pop("slots", None)
+    station.update(deepcopy(updates))
+    if slots is not None:
+        station["slots"] = _normalize_ie_station_slots(slots)
+        station["slotCount"] = len(station["slots"])
+    return deepcopy(station)
+
+
+def open_aml_ie_station(station_id: str) -> dict[str, Any] | None:
+    station = _STATE.aml_ie_stations.get(station_id)
+    if station is None:
+        return None
+    station["state"] = "open"
+    return deepcopy(station)
+
+
+def close_aml_ie_station(station_id: str) -> dict[str, Any] | None:
+    station = _STATE.aml_ie_stations.get(station_id)
+    if station is None:
+        return None
+    station["state"] = "closed"
+    return deepcopy(station)
+
+
+def get_aml_magazines() -> dict[str, dict[str, Any]]:
+    return deepcopy(_STATE.aml_magazines)
+
+
+def get_aml_magazine(magazine_id: str) -> dict[str, Any] | None:
+    magazine = _STATE.aml_magazines.get(magazine_id)
+    return None if magazine is None else deepcopy(magazine)
+
+
+def update_aml_magazine(magazine_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    magazine = _STATE.aml_magazines.get(magazine_id)
+    if magazine is None:
+        return None
+    tapes = updates.pop("tapes", None)
+    magazine.update(deepcopy(updates))
+    if tapes is not None:
+        magazine["tapes"] = list(tapes)
+    magazine["occupiedSlots"] = len(magazine.get("tapes", []))
+    return deepcopy(magazine)
+
+
+def eject_aml_magazine(magazine_id: str) -> dict[str, Any] | None:
+    magazine = _STATE.aml_magazines.get(magazine_id)
+    if magazine is None:
+        return None
+    magazine["status"] = "ejected"
+    return deepcopy(magazine)
+
+
+def insert_aml_magazine(magazine_id: str) -> dict[str, Any] | None:
+    magazine = _STATE.aml_magazines.get(magazine_id)
+    if magazine is None:
+        return None
+    magazine["status"] = "online"
+    return deepcopy(magazine)
+
+
+def run_physical_audit() -> dict[str, int]:
+    return {
+        "robots": len(_STATE.aml_robots),
+        "towers": len(_STATE.aml_towers),
+        "ieStations": len(_STATE.aml_ie_stations),
+        "magazines": len(_STATE.aml_magazines),
+    }
 
 
 def refresh_devices() -> dict[str, int]:
