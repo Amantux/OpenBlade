@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -44,6 +46,10 @@ class Media(BaseModel):
     loadCount: int
     errorCount: int
     lastLoaded: str | None = None
+    capacityGB: int | None = None
+    usedGB: int | None = None
+    percentUsed: int | None = None
+    poolName: str | None = None
 
 
 class MediaListResource(BaseModel):
@@ -233,8 +239,49 @@ def _validate_pool_payload(payload: MediaPoolConfig | MediaPoolPatch) -> dict[st
     return updates
 
 
+def _lto_capacity_gb(tape_type: str) -> int:
+    match = re.search(r"LTO-(\d+)", tape_type.upper())
+    generation = int(match.group(1)) if match else None
+    return {
+        6: 2500,
+        7: 6000,
+        8: 12000,
+        9: 18000,
+    }.get(generation, 6000)
+
+
+
+def _estimate_used_gb(barcode: str, capacity_gb: int) -> int:
+    if capacity_gb <= 0:
+        return 0
+    seed = int.from_bytes(hashlib.sha256(barcode.encode("utf-8")).digest()[:8], "big")
+    percent_used = 20 + (seed % 66)
+    return round(capacity_gb * percent_used / 100)
+
+
+
+def _find_pool_name(barcode: str) -> str | None:
+    return aml_state.find_aml_media_pool_name(barcode)
+
+
+
+def _enrich_media(media: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(media)
+    capacity_gb = _lto_capacity_gb(str(enriched.get("type", "")))
+    used_gb = _estimate_used_gb(str(enriched.get("barcode", "")), capacity_gb)
+    percent_used = round((used_gb / capacity_gb) * 100) if capacity_gb > 0 else 0
+    enriched.update({
+        "capacityGB": capacity_gb,
+        "usedGB": used_gb,
+        "percentUsed": percent_used,
+        "poolName": _find_pool_name(str(enriched.get("barcode", ""))),
+    })
+    return enriched
+
+
+
 def _serialize_media(media: dict[str, Any]) -> Media:
-    return Media.model_validate(media)
+    return Media.model_validate(_enrich_media(media))
 
 
 def _serialize_pool(pool: dict[str, Any]) -> MediaPool:
@@ -385,6 +432,43 @@ async def delete_media_pool(
     if not aml_state.delete_aml_media_pool(pool_name):
         raise HTTPException(status_code=404, detail="Pool not found")
     return _ws_result(f"Deleted media pool {pool_name}")
+
+
+@router.post("/media/pool/{name}/assign", response_model=PoolResponse)
+async def assign_media_to_pool(
+    name: str,
+    payload: BarcodeListRequest,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    pool_name = _validate_identifier(name, field_name="Pool name")
+    barcodes = [_validate_identifier(item, field_name="barcode") for item in payload.barcodeList.barcode]
+    missing = [barcode for barcode in barcodes if aml_state.get_aml_media(barcode) is None]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Media not found: {missing[0]}")
+    updated = aml_state.assign_aml_media_to_pool(pool_name, barcodes)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Pool not found")
+    return PoolResponse(pool=_serialize_pool(updated))
+
+
+@router.post("/media/pool/{name}/unassign", response_model=PoolResponse)
+async def unassign_media_from_pool(
+    name: str,
+    payload: BarcodeListRequest,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PoolResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    pool_name = _validate_identifier(name, field_name="Pool name")
+    barcodes = [_validate_identifier(item, field_name="barcode") for item in payload.barcodeList.barcode]
+    updated = aml_state.unassign_aml_media_from_pool(pool_name, barcodes)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Pool not found")
+    return PoolResponse(pool=_serialize_pool(updated))
 
 
 @router.post("/media/import", response_model=WSResultCode)

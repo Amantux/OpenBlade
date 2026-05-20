@@ -1,64 +1,162 @@
-import { useQuery } from '@tanstack/react-query';
-import { getSystemDetail, getSystemOverview, getSystemStatus, getSystemUptime, getSystemVersion } from '../api/system';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  getBackupStatus,
+  getDnsConfig,
+  getEmailConfig,
+  getNetworkInterfaces,
+  getNtpConfig,
+  getSnmpConfig,
+  getSnmpTraps,
+  getSystemCertificates,
+  getSystemDetail,
+  getSystemOverview,
+  getSystemSecurity,
+  getSystemStatus,
+  getSystemTime,
+  getSystemUptime,
+  getSystemVersion,
+  importCertificate,
+  syncNtp,
+  testEmail,
+  testSnmp,
+  updateDnsConfig,
+  updateEmailConfig,
+  updateNetworkInterface,
+  updateNtpConfig,
+  updateSnmpConfig,
+  updateSystemSecurity,
+  type CertificateSummaryResponse,
+  type DnsConfigResponse,
+  type EmailConfigResponse,
+  type NetworkInterfaceResponse,
+  type NtpConfigResponse,
+  type SecurityConfigResponse,
+  type SnmpConfigResponse,
+  type SnmpTrapResponse,
+} from '../api/system';
 import Badge from '../components/ui/Badge';
+import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
-import { formatDate, formatDuration } from '../lib/utils';
 import Spinner from '../components/ui/Spinner';
+import { formatBytes, formatDate, formatDuration } from '../lib/utils';
+
+const tabs = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'network', label: 'Network' },
+  { id: 'security', label: 'Security' },
+  { id: 'certificates', label: 'Certificates' },
+  { id: 'snmp', label: 'SNMP' },
+  { id: 'email', label: 'Email' },
+] as const;
+
+type SystemTabId = (typeof tabs)[number]['id'];
+
+const fieldClassName = 'mt-2 w-full rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-quantum-red';
 
 function statusVariant(status: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
   switch (status.toLowerCase()) {
     case 'good':
+    case 'healthy':
+    case 'running':
+    case 'up':
+    case 'synced':
+    case 'completed':
+    case 'valid':
+    case 'passed':
       return 'green';
     case 'warning':
+    case 'uploaded':
+    case 'manual':
       return 'amber';
     case 'failed':
+    case 'critical':
+    case 'down':
+    case 'expired':
       return 'red';
     default:
       return 'gray';
   }
 }
 
-export default function System() {
+function Field({ label, children, helpText }: { label: string; children: React.ReactNode; helpText?: string }) {
+  return (
+    <label className="block text-sm text-slate-300">
+      <span className="block text-xs uppercase tracking-[0.16em] text-slate-500">{label}</span>
+      {children}
+      {helpText ? <span className="mt-1 block text-xs text-slate-500">{helpText}</span> : null}
+    </label>
+  );
+}
+
+function ToggleField({
+  label,
+  checked,
+  onChange,
+  description,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  description?: string;
+}) {
+  return (
+    <label className="flex items-start justify-between gap-4 rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-sm text-slate-200">
+      <span>
+        <span className="block font-medium text-slate-100">{label}</span>
+        {description ? <span className="mt-1 block text-xs text-slate-500">{description}</span> : null}
+      </span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="mt-1 rounded border border-quantum-border bg-quantum-panel" />
+    </label>
+  );
+}
+
+function OverviewTab() {
   const overviewQuery = useQuery({ queryKey: ['system', 'overview'], queryFn: getSystemOverview, refetchInterval: 30_000 });
   const detailQuery = useQuery({ queryKey: ['system', 'detail'], queryFn: getSystemDetail, refetchInterval: 60_000 });
   const statusQuery = useQuery({ queryKey: ['system', 'status'], queryFn: getSystemStatus, refetchInterval: 15_000 });
   const versionQuery = useQuery({ queryKey: ['system', 'version'], queryFn: getSystemVersion, refetchInterval: 60_000 });
   const uptimeQuery = useQuery({ queryKey: ['system', 'uptime'], queryFn: getSystemUptime, refetchInterval: 15_000 });
+  const timeQuery = useQuery({ queryKey: ['system', 'time'], queryFn: getSystemTime, refetchInterval: 15_000 });
+  const backupQuery = useQuery({ queryKey: ['system', 'backup'], queryFn: getBackupStatus, refetchInterval: 60_000 });
 
-  if ([overviewQuery, detailQuery, statusQuery, versionQuery, uptimeQuery].some((query) => query.isLoading)) {
+  if ([overviewQuery, detailQuery, statusQuery, versionQuery, uptimeQuery, timeQuery, backupQuery].some((query) => query.isLoading)) {
     return <Spinner />;
   }
 
-  const errorQuery = [overviewQuery, detailQuery, statusQuery, versionQuery, uptimeQuery].find((query) => query.isError);
+  const errorQuery = [overviewQuery, detailQuery, statusQuery, versionQuery, uptimeQuery, timeQuery, backupQuery].find((query) => query.isError);
   if (errorQuery) {
     return <ErrorMessage error={errorQuery.error} onRetry={() => void errorQuery.refetch()} />;
   }
 
-  const overview = overviewQuery.data;
-  const detail = detailQuery.data;
-  const status = statusQuery.data;
-  const version = versionQuery.data;
-  const uptime = uptimeQuery.data;
+  const overview = overviewQuery.data!;
+  const detail = detailQuery.data!;
+  const status = statusQuery.data!;
+  const version = versionQuery.data!;
+  const uptime = uptimeQuery.data!;
+  const time = timeQuery.data!;
+  const backup = backupQuery.data!;
 
   return (
     <div className="space-y-4">
       <Card className="bg-quantum-north">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-xs uppercase tracking-[0.26em] text-slate-500">System</div>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-100">System Info</h1>
-            <p className="mt-2 text-sm text-slate-400">Live AML system cards backed by /aml/system, /aml/system/info, and related routes.</p>
+            <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Overview</div>
+            <h2 className="mt-1 text-2xl font-semibold text-slate-100">System identity</h2>
+            <p className="mt-2 text-sm text-slate-400">Live system inventory, runtime status, backup posture, and clock state from AML system routes.</p>
           </div>
-          <Badge variant={statusVariant(status?.overall ?? 'unknown')}>{status?.overall ?? 'unknown'}</Badge>
+          <Badge variant={statusVariant(status.overall)}>{status.overall}</Badge>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
           {[
-            ['Hostname', overview?.hostname ?? '—'],
-            ['Version', `${version?.software ?? '—'} / ${version?.firmware ?? '—'}`],
-            ['Uptime', uptime ? `${uptime.formatted} (${formatDuration(overview?.uptime)})` : '—'],
-            ['Installed', detail?.installedDate ? formatDate(detail.installedDate) : '—'],
-            ['Status', status?.overall ?? '—'],
+            ['Hostname', overview.hostname],
+            ['Version', `${version.software} / ${version.firmware}`],
+            ['Serial', overview.serialNumber],
+            ['Uptime', `${uptime.formatted} (${formatDuration(overview.uptime)})`],
+            ['System Time', formatDate(time.local)],
+            ['Backup', backup.status],
           ].map(([label, value]) => (
             <div key={label} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</div>
@@ -68,45 +166,554 @@ export default function System() {
         </div>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="bg-quantum-info">
-          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Hardware</div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-3">
+        <Card>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Hardware</div>
+          <div className="mt-4 space-y-3 text-sm text-slate-300">
+            <div className="flex items-center justify-between gap-3"><span>Model</span><span className="text-slate-100">{overview.model}</span></div>
+            <div className="flex items-center justify-between gap-3"><span>CPU</span><span className="text-right text-slate-100">{detail.cpuModel}</span></div>
+            <div className="flex items-center justify-between gap-3"><span>CPU Count</span><span className="text-slate-100">{detail.cpuCount}</span></div>
+            <div className="flex items-center justify-between gap-3"><span>Memory</span><span className="text-slate-100">{detail.totalMem} GB</span></div>
+            <div className="flex items-center justify-between gap-3"><span>Disk</span><span className="text-slate-100">{detail.totalDisk} GB</span></div>
+            <div className="flex items-center justify-between gap-3"><span>Installed</span><span className="text-slate-100">{formatDate(detail.installedDate)}</span></div>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Subsystem health</div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {[
-              ['Model', overview?.model ?? '—'],
-              ['Serial', overview?.serialNumber ?? '—'],
-              ['CPU', detail?.cpuModel ?? '—'],
-              ['CPU Count', detail?.cpuCount ?? '—'],
-              ['Memory', `${detail?.totalMem ?? '—'} GB`],
-              ['Disk', `${detail?.totalDisk ?? '—'} GB`],
+              ['CPU', status.cpu],
+              ['Memory', status.memory],
+              ['Disk', status.disk],
+              ['Network', status.network],
+              ['Services', status.services],
+              ['Clock Sync', time.ntp ? 'NTP' : 'Manual'],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</div>
-                <div className="mt-2 text-sm text-slate-100">{value}</div>
+              <div key={label} className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-4">
+                <div className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</div>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span className="text-sm text-slate-100">{value}</span>
+                  <Badge variant={statusVariant(String(value))}>{value}</Badge>
+                </div>
               </div>
             ))}
           </div>
         </Card>
 
-        <Card className="bg-quantum-info">
-          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Subsystem health</div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {[
-              ['CPU', status?.cpu ?? '—'],
-              ['Memory', status?.memory ?? '—'],
-              ['Disk', status?.disk ?? '—'],
-              ['Network', status?.network ?? '—'],
-              ['Services', status?.services ?? '—'],
-              ['Boot Time', uptime?.bootTime ? formatDate(uptime.bootTime) : '—'],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</div>
-                <div className="mt-2 text-sm text-slate-100">{value}</div>
-              </div>
-            ))}
+        <Card>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Time & backup</div>
+          <div className="mt-4 space-y-3 text-sm text-slate-300">
+            <div>
+              <div className="text-xs uppercase tracking-[0.16em] text-slate-500">UTC</div>
+              <div className="mt-1 text-slate-100">{formatDate(time.utc)}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Local</div>
+              <div className="mt-1 text-slate-100">{formatDate(time.local)}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Timezone</div>
+              <div className="mt-1 text-slate-100">{time.timezone}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Last Backup</div>
+              <div className="mt-1 text-slate-100">{backup.lastBackup ? formatDate(backup.lastBackup) : 'No backup recorded'}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Backup Size</div>
+              <div className="mt-1 text-slate-100">{formatBytes(backup.size)}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Location</div>
+              <div className="mt-1 break-all text-slate-100">{backup.location ?? '—'}</div>
+            </div>
           </div>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function NetworkTab() {
+  const queryClient = useQueryClient();
+  const interfacesQuery = useQuery({ queryKey: ['system', 'network', 'interfaces'], queryFn: getNetworkInterfaces });
+  const dnsQuery = useQuery({ queryKey: ['system', 'network', 'dns'], queryFn: getDnsConfig });
+  const ntpQuery = useQuery({ queryKey: ['system', 'network', 'ntp'], queryFn: getNtpConfig });
+  const [interfaceEdits, setInterfaceEdits] = useState<Record<string, Partial<NetworkInterfaceResponse>>>({});
+  const [dnsForm, setDnsForm] = useState<DnsConfigResponse>({ primary: '', secondary: '', search: [], domain: '' });
+  const [ntpForm, setNtpForm] = useState<NtpConfigResponse>({ enabled: false, servers: [], status: 'unknown', lastSync: null });
+
+  useEffect(() => {
+    if (interfacesQuery.data) {
+      setInterfaceEdits(
+        Object.fromEntries(
+          interfacesQuery.data.map((item) => [
+            item.name,
+            { ip: item.ip, mask: item.mask, gateway: item.gateway, duplex: item.duplex },
+          ]),
+        ),
+      );
+    }
+  }, [interfacesQuery.data]);
+
+  useEffect(() => {
+    if (dnsQuery.data) {
+      setDnsForm(dnsQuery.data);
+    }
+  }, [dnsQuery.data]);
+
+  useEffect(() => {
+    if (ntpQuery.data) {
+      setNtpForm(ntpQuery.data);
+    }
+  }, [ntpQuery.data]);
+
+  const interfaceMutation = useMutation({
+    mutationFn: ({ name, payload }: { name: string; payload: Partial<NetworkInterfaceResponse> }) => updateNetworkInterface(name, payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'network', 'interfaces'] });
+    },
+  });
+  const dnsMutation = useMutation({
+    mutationFn: () => updateDnsConfig({ ...dnsForm, search: dnsForm.search.filter(Boolean) }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'network', 'dns'] });
+    },
+  });
+  const ntpMutation = useMutation({
+    mutationFn: () => updateNtpConfig({ ...ntpForm, servers: ntpForm.servers.filter(Boolean) }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'network', 'ntp'] });
+    },
+  });
+  const syncMutation = useMutation({
+    mutationFn: syncNtp,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'network', 'ntp'] });
+    },
+  });
+
+  if ([interfacesQuery, dnsQuery, ntpQuery].some((query) => query.isLoading)) {
+    return <Spinner />;
+  }
+
+  const errorQuery = [interfacesQuery, dnsQuery, ntpQuery].find((query) => query.isError);
+  if (errorQuery) {
+    return <ErrorMessage error={errorQuery.error} onRetry={() => void errorQuery.refetch()} />;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Interfaces</div>
+            <h2 className="mt-1 text-lg font-semibold text-slate-100">Network interface table</h2>
+          </div>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full divide-y divide-quantum-border text-sm">
+            <thead className="text-left text-xs uppercase tracking-[0.16em] text-slate-500">
+              <tr>
+                <th className="px-3 py-3">Name</th>
+                <th className="px-3 py-3">IP</th>
+                <th className="px-3 py-3">Mask</th>
+                <th className="px-3 py-3">Gateway</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-quantum-border/80">
+              {interfacesQuery.data!.map((item) => (
+                <tr key={item.name} className="text-slate-200">
+                  <td className="px-3 py-3 align-top">
+                    <div className="font-medium text-slate-100">{item.name}</div>
+                    <div className="text-xs text-slate-500">{item.type} · {item.speed}</div>
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <input className={fieldClassName} value={interfaceEdits[item.name]?.ip ?? ''} onChange={(event) => setInterfaceEdits((current) => ({ ...current, [item.name]: { ...current[item.name], ip: event.target.value } }))} />
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <input className={fieldClassName} value={interfaceEdits[item.name]?.mask ?? ''} onChange={(event) => setInterfaceEdits((current) => ({ ...current, [item.name]: { ...current[item.name], mask: event.target.value } }))} />
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <input className={fieldClassName} value={interfaceEdits[item.name]?.gateway ?? ''} onChange={(event) => setInterfaceEdits((current) => ({ ...current, [item.name]: { ...current[item.name], gateway: event.target.value } }))} />
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <Button
+                      variant="secondary"
+                      disabled={interfaceMutation.isPending}
+                      onClick={() => interfaceMutation.mutate({ name: item.name, payload: interfaceEdits[item.name] ?? {} })}
+                    >
+                      Save
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {interfaceMutation.isError ? <ErrorMessage error={interfaceMutation.error} /> : null}
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">DNS Servers</div>
+          <div className="mt-4 space-y-4">
+            <Field label="Primary DNS"><input className={fieldClassName} value={dnsForm.primary} onChange={(event) => setDnsForm((current) => ({ ...current, primary: event.target.value }))} /></Field>
+            <Field label="Secondary DNS"><input className={fieldClassName} value={dnsForm.secondary} onChange={(event) => setDnsForm((current) => ({ ...current, secondary: event.target.value }))} /></Field>
+            <Field label="Search Domains" helpText="Comma-separated domains.">
+              <input className={fieldClassName} value={dnsForm.search.join(', ')} onChange={(event) => setDnsForm((current) => ({ ...current, search: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} />
+            </Field>
+            <Field label="Domain"><input className={fieldClassName} value={dnsForm.domain} onChange={(event) => setDnsForm((current) => ({ ...current, domain: event.target.value }))} /></Field>
+            <div className="flex justify-end"><Button disabled={dnsMutation.isPending} onClick={() => dnsMutation.mutate()}>{dnsMutation.isPending ? 'Saving…' : 'Save DNS'}</Button></div>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">NTP Servers</div>
+          <div className="mt-4 space-y-4">
+            <ToggleField label="Enable NTP" checked={ntpForm.enabled} onChange={(checked) => setNtpForm((current) => ({ ...current, enabled: checked }))} description={`Current sync status: ${ntpForm.status}`} />
+            <Field label="NTP Servers" helpText="Comma-separated servers.">
+              <input className={fieldClassName} value={ntpForm.servers.join(', ')} onChange={(event) => setNtpForm((current) => ({ ...current, servers: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} />
+            </Field>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-sm text-slate-300">
+              Last sync: <span className="font-medium text-slate-100">{ntpForm.lastSync ? formatDate(ntpForm.lastSync) : 'Never'}</span>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" disabled={syncMutation.isPending} onClick={() => syncMutation.mutate()}>{syncMutation.isPending ? 'Syncing…' : 'Sync now'}</Button>
+              <Button disabled={ntpMutation.isPending} onClick={() => ntpMutation.mutate()}>{ntpMutation.isPending ? 'Saving…' : 'Save NTP'}</Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {dnsMutation.isError ? <ErrorMessage error={dnsMutation.error} /> : null}
+      {ntpMutation.isError ? <ErrorMessage error={ntpMutation.error} /> : null}
+      {syncMutation.isError ? <ErrorMessage error={syncMutation.error} /> : null}
+    </div>
+  );
+}
+
+function SecurityTab() {
+  const queryClient = useQueryClient();
+  const securityQuery = useQuery({ queryKey: ['system', 'security'], queryFn: getSystemSecurity });
+  const [form, setForm] = useState<SecurityConfigResponse>({
+    tlsEnabled: true,
+    tlsVersion: 'TLS1.3',
+    cipherSuites: [],
+    certExpiry: '',
+    sshEnabled: true,
+    loginBanner: '',
+  });
+
+  useEffect(() => {
+    if (securityQuery.data) {
+      setForm(securityQuery.data);
+    }
+  }, [securityQuery.data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => updateSystemSecurity(form),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'security'] });
+    },
+  });
+
+  if (securityQuery.isLoading) {
+    return <Spinner />;
+  }
+  if (securityQuery.isError) {
+    return <ErrorMessage error={securityQuery.error} onRetry={() => void securityQuery.refetch()} />;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">TLS & Access</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="space-y-4">
+            <ToggleField label="TLS Enabled" checked={form.tlsEnabled} onChange={(checked) => setForm((current) => ({ ...current, tlsEnabled: checked }))} description="Controls HTTPS termination on the appliance." />
+            <ToggleField label="SSH Enabled" checked={form.sshEnabled} onChange={(checked) => setForm((current) => ({ ...current, sshEnabled: checked }))} description="Mirrors the AML system security configuration." />
+            <Field label="TLS Version"><input className={fieldClassName} value={form.tlsVersion} onChange={(event) => setForm((current) => ({ ...current, tlsVersion: event.target.value }))} /></Field>
+            <Field label="Certificate Expiry"><input className={fieldClassName} value={form.certExpiry ?? ''} onChange={(event) => setForm((current) => ({ ...current, certExpiry: event.target.value }))} /></Field>
+          </div>
+          <div className="space-y-4">
+            <Field label="Cipher Suites" helpText="Comma-separated cipher suite list.">
+              <textarea className={`${fieldClassName} min-h-28`} value={form.cipherSuites.join(', ')} onChange={(event) => setForm((current) => ({ ...current, cipherSuites: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} />
+            </Field>
+            <Field label="Login Banner">
+              <textarea className={`${fieldClassName} min-h-40`} value={form.loginBanner} onChange={(event) => setForm((current) => ({ ...current, loginBanner: event.target.value }))} />
+            </Field>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end"><Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? 'Saving…' : 'Save Security Settings'}</Button></div>
+      </Card>
+      {saveMutation.isError ? <ErrorMessage error={saveMutation.error} /> : null}
+    </div>
+  );
+}
+
+function CertificatesTab() {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const certificatesQuery = useQuery({ queryKey: ['system', 'certificates'], queryFn: getSystemCertificates });
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => importCertificate(file),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'certificates'] });
+    },
+  });
+
+  if (certificatesQuery.isLoading) {
+    return <Spinner />;
+  }
+  if (certificatesQuery.isError) {
+    return <ErrorMessage error={certificatesQuery.error} onRetry={() => void certificatesQuery.refetch()} />;
+  }
+
+  const certificates = certificatesQuery.data ?? [];
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Certificates</div>
+            <h2 className="mt-1 text-lg font-semibold text-slate-100">Installed certificates</h2>
+          </div>
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  uploadMutation.mutate(file);
+                }
+                event.target.value = '';
+              }}
+            />
+            <Button onClick={() => fileInputRef.current?.click()}>{uploadMutation.isPending ? 'Uploading…' : 'Upload Certificate'}</Button>
+          </>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full divide-y divide-quantum-border text-sm">
+            <thead className="text-left text-xs uppercase tracking-[0.16em] text-slate-500">
+              <tr>
+                <th className="px-3 py-3">Name</th>
+                <th className="px-3 py-3">Subject</th>
+                <th className="px-3 py-3">Expiry</th>
+                <th className="px-3 py-3">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-quantum-border/80">
+              {certificates.map((certificate: CertificateSummaryResponse) => (
+                <tr key={certificate.name} className="text-slate-200">
+                  <td className="px-3 py-3 font-medium text-slate-100">{certificate.name}</td>
+                  <td className="px-3 py-3">{certificate.subject}</td>
+                  <td className="px-3 py-3">{certificate.expiry ? formatDate(certificate.expiry) : '—'}</td>
+                  <td className="px-3 py-3"><Badge variant={statusVariant(certificate.status)}>{certificate.status}</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      {uploadMutation.isError ? <ErrorMessage error={uploadMutation.error} /> : null}
+    </div>
+  );
+}
+
+function SnmpTab() {
+  const queryClient = useQueryClient();
+  const snmpQuery = useQuery({ queryKey: ['system', 'snmp'], queryFn: getSnmpConfig });
+  const trapsQuery = useQuery({ queryKey: ['system', 'snmp', 'traps'], queryFn: getSnmpTraps });
+  const [form, setForm] = useState<SnmpConfigResponse>({ enabled: false, version: 'v2c', community: '', trapHosts: [], contact: '', location: '' });
+
+  useEffect(() => {
+    if (snmpQuery.data) {
+      setForm(snmpQuery.data);
+    }
+  }, [snmpQuery.data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => updateSnmpConfig(form),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'snmp'] });
+    },
+  });
+  const testMutation = useMutation({
+    mutationFn: testSnmp,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'snmp', 'traps'] });
+    },
+  });
+
+  if ([snmpQuery, trapsQuery].some((query) => query.isLoading)) {
+    return <Spinner />;
+  }
+  const errorQuery = [snmpQuery, trapsQuery].find((query) => query.isError);
+  if (errorQuery) {
+    return <ErrorMessage error={errorQuery.error} onRetry={() => void errorQuery.refetch()} />;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">SNMP</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="space-y-4">
+            <ToggleField label="SNMP Enabled" checked={form.enabled} onChange={(checked) => setForm((current) => ({ ...current, enabled: checked }))} description="Enable SNMP polling and trap delivery." />
+            <Field label="Version"><input className={fieldClassName} value={form.version} onChange={(event) => setForm((current) => ({ ...current, version: event.target.value }))} /></Field>
+            <Field label="Community String"><input className={fieldClassName} value={form.community} onChange={(event) => setForm((current) => ({ ...current, community: event.target.value }))} /></Field>
+            <Field label="Trap Hosts" helpText="Comma-separated trap targets.">
+              <textarea className={`${fieldClassName} min-h-28`} value={form.trapHosts.join(', ')} onChange={(event) => setForm((current) => ({ ...current, trapHosts: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} />
+            </Field>
+            <Field label="Contact"><input className={fieldClassName} value={form.contact} onChange={(event) => setForm((current) => ({ ...current, contact: event.target.value }))} /></Field>
+            <Field label="Location"><input className={fieldClassName} value={form.location} onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))} /></Field>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" disabled={testMutation.isPending} onClick={() => testMutation.mutate()}>{testMutation.isPending ? 'Sending…' : 'Send Test Trap'}</Button>
+              <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? 'Saving…' : 'Save SNMP'}</Button>
+            </div>
+          </div>
+          <div>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar p-4">
+              <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Recent Traps</div>
+              <div className="mt-3 space-y-3">
+                {(trapsQuery.data ?? []).length === 0 ? (
+                  <div className="text-sm text-slate-400">No SNMP traps recorded yet.</div>
+                ) : (
+                  (trapsQuery.data ?? []).map((trap: SnmpTrapResponse) => (
+                    <div key={`${trap.timestamp}-${trap.oid}`} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3 text-sm text-slate-300">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium text-slate-100">{trap.host}</span>
+                        <span className="text-xs text-slate-500">{formatDate(trap.timestamp)}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">{trap.oid}</div>
+                      <div className="mt-2">{trap.value}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+      {saveMutation.isError ? <ErrorMessage error={saveMutation.error} /> : null}
+      {testMutation.isError ? <ErrorMessage error={testMutation.error} /> : null}
+    </div>
+  );
+}
+
+function EmailTab() {
+  const queryClient = useQueryClient();
+  const emailQuery = useQuery({ queryKey: ['system', 'email'], queryFn: getEmailConfig });
+  const [form, setForm] = useState<EmailConfigResponse>({ enabled: false, smtpHost: '', smtpPort: 587, smtpUser: '', from: '', tls: true, recipients: [] });
+
+  useEffect(() => {
+    if (emailQuery.data) {
+      setForm(emailQuery.data);
+    }
+  }, [emailQuery.data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => updateEmailConfig(form),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system', 'email'] });
+    },
+  });
+  const testMutation = useMutation({ mutationFn: testEmail });
+
+  if (emailQuery.isLoading) {
+    return <Spinner />;
+  }
+  if (emailQuery.isError) {
+    return <ErrorMessage error={emailQuery.error} onRetry={() => void emailQuery.refetch()} />;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Email</div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="space-y-4">
+            <ToggleField label="Email Alerts Enabled" checked={form.enabled} onChange={(checked) => setForm((current) => ({ ...current, enabled: checked }))} description="Send appliance notifications through SMTP." />
+            <Field label="SMTP Host"><input className={fieldClassName} value={form.smtpHost} onChange={(event) => setForm((current) => ({ ...current, smtpHost: event.target.value }))} /></Field>
+            <Field label="SMTP Port"><input type="number" className={fieldClassName} value={form.smtpPort} onChange={(event) => setForm((current) => ({ ...current, smtpPort: Number(event.target.value) || 0 }))} /></Field>
+            <Field label="SMTP User"><input className={fieldClassName} value={form.smtpUser} onChange={(event) => setForm((current) => ({ ...current, smtpUser: event.target.value }))} /></Field>
+          </div>
+          <div className="space-y-4">
+            <ToggleField label="Use TLS" checked={form.tls} onChange={(checked) => setForm((current) => ({ ...current, tls: checked }))} description="Negotiates STARTTLS for outbound email delivery." />
+            <Field label="From Address"><input className={fieldClassName} value={form.from} onChange={(event) => setForm((current) => ({ ...current, from: event.target.value }))} /></Field>
+            <Field label="Recipients" helpText="Comma-separated recipients for test and alert mail.">
+              <textarea className={`${fieldClassName} min-h-28`} value={form.recipients.join(', ')} onChange={(event) => setForm((current) => ({ ...current, recipients: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} />
+            </Field>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" disabled={testMutation.isPending} onClick={() => testMutation.mutate()}>{testMutation.isPending ? 'Sending…' : 'Send Test Email'}</Button>
+              <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? 'Saving…' : 'Save Email'}</Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+      {saveMutation.isError ? <ErrorMessage error={saveMutation.error} /> : null}
+      {testMutation.isError ? <ErrorMessage error={testMutation.error} /> : null}
+    </div>
+  );
+}
+
+export default function System() {
+  const [activeTab, setActiveTab] = useState<SystemTabId>('overview');
+
+  const activeContent = useMemo(() => {
+    switch (activeTab) {
+      case 'overview':
+        return <OverviewTab />;
+      case 'network':
+        return <NetworkTab />;
+      case 'security':
+        return <SecurityTab />;
+      case 'certificates':
+        return <CertificatesTab />;
+      case 'snmp':
+        return <SnmpTab />;
+      case 'email':
+        return <EmailTab />;
+      default:
+        return null;
+    }
+  }, [activeTab]);
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-quantum-north">
+        <div className="text-xs uppercase tracking-[0.26em] text-slate-500">System</div>
+        <h1 className="mt-1 text-2xl font-semibold text-slate-100">System Configuration</h1>
+        <p className="mt-2 text-sm text-slate-400">Tabbed controls for overview, network, security, certificates, SNMP, and email services.</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`rounded-md border px-4 py-2 text-sm font-medium transition ${
+                activeTab === tab.id
+                  ? 'border-quantum-red bg-quantum-red text-white'
+                  : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:bg-quantum-panel hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </Card>
+      {activeContent}
     </div>
   );
 }

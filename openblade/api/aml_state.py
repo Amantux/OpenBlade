@@ -586,8 +586,8 @@ def _default_aml_media() -> dict[str, dict[str, Any]]:
 
 def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
     return {
-        "default": {"name": "default", "type": "LTO-9", "mediaCount": 2, "policy": "scratch"},
-        "cleaning": {"name": "cleaning", "type": "LTO-9-CLN", "mediaCount": 1, "policy": "cleaning"},
+        "default": {"name": "default", "type": "LTO-9", "mediaCount": 0, "policy": "scratch", "barcodes": []},
+        "cleaning": {"name": "cleaning", "type": "LTO-9-CLN", "mediaCount": 0, "policy": "cleaning", "barcodes": []},
     }
 
 
@@ -2617,8 +2617,23 @@ def _sync_aml_media_counts() -> None:
         quota.setdefault("totalSlots", int(partition.get("slotCount", 0)))
         quota.setdefault("totalDrives", int(partition.get("driveCount", 0)))
         quota.setdefault("usedDrives", len(partition.get("drives", [])))
+
+    valid_barcodes = set(_STATE.aml_media)
+    assigned_barcodes: set[str] = set()
     for pool in _STATE.aml_media_pools.values():
-        pool["mediaCount"] = sum(1 for media in _STATE.aml_media.values() if media.get("type") == pool.get("type"))
+        raw_barcodes = pool.get("barcodes")
+        normalized: list[str] = []
+        if isinstance(raw_barcodes, list):
+            for barcode in raw_barcodes:
+                if not isinstance(barcode, str):
+                    continue
+                normalized_barcode = barcode.strip()
+                if not normalized_barcode or normalized_barcode not in valid_barcodes or normalized_barcode in assigned_barcodes:
+                    continue
+                normalized.append(normalized_barcode)
+                assigned_barcodes.add(normalized_barcode)
+        pool["barcodes"] = normalized
+        pool["mediaCount"] = len(normalized)
 
 
 
@@ -2629,6 +2644,7 @@ def list_aml_media() -> list[dict[str, Any]]:
 
 
 def get_aml_media(barcode: str) -> dict[str, Any] | None:
+    _sync_aml_media_counts()
     media = _STATE.aml_media.get(barcode)
     return deepcopy(media) if media is not None else None
 
@@ -2775,6 +2791,52 @@ def get_aml_media_pool(name: str) -> dict[str, Any] | None:
 
 
 
+def find_aml_media_pool_name(barcode: str) -> str | None:
+    _sync_aml_media_counts()
+    for name, pool in _STATE.aml_media_pools.items():
+        if barcode in pool.get("barcodes", []):
+            return name
+    return None
+
+
+
+def assign_aml_media_to_pool(name: str, barcodes: list[str]) -> dict[str, Any] | None:
+    pool = _STATE.aml_media_pools.get(name)
+    if pool is None:
+        return None
+
+    normalized_barcodes = [barcode for barcode in dict.fromkeys(barcodes) if barcode in _STATE.aml_media]
+    if not normalized_barcodes:
+        _sync_aml_media_counts()
+        return get_aml_media_pool(name)
+
+    for candidate in _STATE.aml_media_pools.values():
+        existing = candidate.get("barcodes") if isinstance(candidate.get("barcodes"), list) else []
+        candidate["barcodes"] = [barcode for barcode in existing if barcode not in normalized_barcodes]
+
+    assigned = pool.get("barcodes") if isinstance(pool.get("barcodes"), list) else []
+    for barcode in normalized_barcodes:
+        if barcode not in assigned:
+            assigned.append(barcode)
+    pool["barcodes"] = assigned
+    _sync_aml_media_counts()
+    return get_aml_media_pool(name)
+
+
+
+def unassign_aml_media_from_pool(name: str, barcodes: list[str]) -> dict[str, Any] | None:
+    pool = _STATE.aml_media_pools.get(name)
+    if pool is None:
+        return None
+
+    normalized_barcodes = set(barcodes)
+    existing = pool.get("barcodes") if isinstance(pool.get("barcodes"), list) else []
+    pool["barcodes"] = [barcode for barcode in existing if barcode not in normalized_barcodes]
+    _sync_aml_media_counts()
+    return get_aml_media_pool(name)
+
+
+
 def create_aml_media_pool(name: str, pool: dict[str, Any]) -> dict[str, Any] | None:
     if name in _STATE.aml_media_pools:
         return None
@@ -2783,6 +2845,7 @@ def create_aml_media_pool(name: str, pool: dict[str, Any]) -> dict[str, Any] | N
         "type": pool.get("type", "LTO-9"),
         "mediaCount": 0,
         "policy": pool.get("policy", "scratch"),
+        "barcodes": [],
     }
     _STATE.aml_media_pools[name] = stored
     _sync_aml_media_counts()

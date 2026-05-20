@@ -1,3 +1,5 @@
+import { ApiError, apiRequest } from '../api/client';
+
 export type PoolPolicy = 'critical' | 'standard' | 'archive';
 
 export interface MediaPool {
@@ -190,11 +192,68 @@ function readStoredPools(): MediaPool[] {
   }
 }
 
+function encodePoolName(name: string): string {
+  return encodeURIComponent(name);
+}
+
+function backendPoolPayload(pool: MediaPool): { pool: { type: string; policy: PoolPolicy } } {
+  return {
+    pool: {
+      type: pool.targetLtoGeneration ?? 'LTO-9',
+      policy: pool.policy,
+    },
+  };
+}
+
+async function upsertBackendPool(pool: MediaPool): Promise<void> {
+  const path = `/media/pool/${encodePoolName(pool.name)}`;
+  try {
+    await apiRequest(path, { method: 'PUT', body: backendPoolPayload(pool) });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
+    await apiRequest(path, { method: 'POST', body: backendPoolPayload(pool) });
+  }
+}
+
+async function deleteBackendPool(name: string): Promise<void> {
+  try {
+    await apiRequest(`/media/pool/${encodePoolName(name)}`, { method: 'DELETE' });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
+  }
+}
+
+function persistAssignmentCache(poolId: string, barcode: string): void {
+  const normalizedBarcode = barcode.trim();
+  const next = readStoredPools().map((pool) => {
+    const assigned = pool.assignedBarcodes.filter((item) => item !== normalizedBarcode);
+    if (pool.id !== poolId) {
+      return { ...pool, assignedBarcodes: assigned };
+    }
+    return { ...pool, assignedBarcodes: [...assigned, normalizedBarcode] };
+  });
+  persistPools(next);
+}
+
+function removeFromAssignmentCache(poolId: string, barcode: string): void {
+  const normalizedBarcode = barcode.trim();
+  const next = readStoredPools().map((pool) => (
+    pool.id === poolId
+      ? { ...pool, assignedBarcodes: pool.assignedBarcodes.filter((item) => item !== normalizedBarcode) }
+      : pool
+  ));
+  persistPools(next);
+}
+
 export function getPools(): MediaPool[] {
   return readStoredPools();
 }
 
-export function createPool(pool: Omit<MediaPool, 'id' | 'createdAt'>): MediaPool {
+export async function createPool(pool: Omit<MediaPool, 'id' | 'createdAt'>): Promise<MediaPool> {
   const policy = normalizePolicy(pool.policy);
   const created: MediaPool = {
     id: crypto.randomUUID(),
@@ -208,13 +267,19 @@ export function createPool(pool: Omit<MediaPool, 'id' | 'createdAt'>): MediaPool
     createdAt: new Date().toISOString(),
   };
 
-  const next = [...readStoredPools(), created];
-  persistPools(next);
+  await upsertBackendPool(created);
+  persistPools([...readStoredPools(), created]);
   return created;
 }
 
-export function updatePool(id: string, patch: Partial<MediaPool>): void {
-  const next = readStoredPools().map((pool, index) => {
+export async function updatePool(id: string, patch: Partial<MediaPool>): Promise<void> {
+  const pools = readStoredPools();
+  const currentPool = pools.find((pool) => pool.id === id);
+  if (!currentPool) {
+    return;
+  }
+
+  const next = pools.map((pool, index) => {
     if (pool.id !== id) {
       return pool;
     }
@@ -235,41 +300,69 @@ export function updatePool(id: string, patch: Partial<MediaPool>): void {
     };
   });
 
+  const updatedPool = next.find((pool) => pool.id === id);
+  if (!updatedPool) {
+    return;
+  }
+
+  await upsertBackendPool(updatedPool);
+  if (currentPool.name !== updatedPool.name && updatedPool.assignedBarcodes.length > 0) {
+    await apiRequest(`/media/pool/${encodePoolName(updatedPool.name)}/assign`, {
+      method: 'POST',
+      body: { barcodeList: { barcode: updatedPool.assignedBarcodes } },
+    });
+    await deleteBackendPool(currentPool.name);
+  } else if (currentPool.name !== updatedPool.name) {
+    await deleteBackendPool(currentPool.name);
+  }
+
   persistPools(next);
 }
 
-export function deletePool(id: string): void {
-  persistPools(readStoredPools().filter((pool) => pool.id !== id));
+export async function deletePool(id: string): Promise<void> {
+  const pools = readStoredPools();
+  const pool = pools.find((entry) => entry.id === id);
+  if (!pool) {
+    return;
+  }
+
+  await deleteBackendPool(pool.name);
+  persistPools(pools.filter((entry) => entry.id !== id));
 }
 
-export function assignCartridge(poolId: string, barcode: string): void {
+export async function assignCartridge(poolId: string, barcode: string): Promise<void> {
   const normalizedBarcode = barcode.trim();
   if (!normalizedBarcode) {
     return;
   }
 
-  const next = readStoredPools().map((pool) => {
-    const assigned = pool.assignedBarcodes.filter((item) => item !== normalizedBarcode);
-    if (pool.id !== poolId) {
-      return { ...pool, assignedBarcodes: assigned };
-    }
+  const pool = readStoredPools().find((entry) => entry.id === poolId);
+  if (!pool) {
+    return;
+  }
 
-    return { ...pool, assignedBarcodes: [...assigned, normalizedBarcode] };
+  await upsertBackendPool(pool);
+  await apiRequest(`/media/pool/${encodePoolName(pool.name)}/assign`, {
+    method: 'POST',
+    body: { barcodeList: { barcode: [normalizedBarcode] } },
   });
-
-  persistPools(next);
+  persistAssignmentCache(poolId, normalizedBarcode);
 }
 
-export function unassignCartridge(barcode: string): void {
+export async function unassignCartridge(poolId: string, barcode: string): Promise<void> {
   const normalizedBarcode = barcode.trim();
   if (!normalizedBarcode) {
     return;
   }
 
-  persistPools(
-    readStoredPools().map((pool) => ({
-      ...pool,
-      assignedBarcodes: pool.assignedBarcodes.filter((item) => item !== normalizedBarcode),
-    })),
-  );
+  const pool = readStoredPools().find((entry) => entry.id === poolId);
+  if (!pool) {
+    return;
+  }
+
+  await apiRequest(`/media/pool/${encodePoolName(pool.name)}/unassign`, {
+    method: 'POST',
+    body: { barcodeList: { barcode: [normalizedBarcode] } },
+  });
+  removeFromAssignmentCache(poolId, normalizedBarcode);
 }

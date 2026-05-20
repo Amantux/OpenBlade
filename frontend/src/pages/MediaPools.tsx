@@ -81,7 +81,7 @@ function getPolicyCopy(pool: MediaPool): string {
 }
 
 function getPoolStats(pool: MediaPool, cartridges: Cartridge[]): PoolStats {
-  const assigned = cartridges.filter((cartridge) => pool.assignedBarcodes.includes(cartridge.barcode));
+  const assigned = cartridges.filter((cartridge) => cartridge.poolName === pool.name);
   return {
     cartridges: assigned,
     totalGB: assigned.reduce((sum, cartridge) => sum + (cartridge.capacityGB ?? 0), 0),
@@ -181,15 +181,6 @@ export default function MediaPools() {
   }, []);
 
   const cartridges = mediaQuery.data ?? EMPTY_CARTRIDGES;
-  const poolByBarcode = useMemo(() => {
-    const map = new Map<string, MediaPool>();
-    pools.forEach((pool) => {
-      pool.assignedBarcodes.forEach((barcode) => {
-        map.set(barcode, pool);
-      });
-    });
-    return map;
-  }, [pools]);
 
   const summary = useMemo(() => {
     const totalCapacityGB = cartridges.reduce((sum, cartridge) => sum + (cartridge.capacityGB ?? 0), 0);
@@ -202,8 +193,8 @@ export default function MediaPools() {
   }, [cartridges]);
 
   const unassignedCartridges = useMemo(
-    () => cartridges.filter((cartridge) => !poolByBarcode.has(cartridge.barcode)),
-    [cartridges, poolByBarcode],
+    () => cartridges.filter((cartridge) => !cartridge.poolName),
+    [cartridges],
   );
 
   const unassignedAssignable = useMemo(
@@ -217,6 +208,11 @@ export default function MediaPools() {
   );
 
   const refreshPools = () => setPools(getPools());
+  const refreshAll = async () => {
+    refreshPools();
+    await mediaQuery.refetch();
+  };
+  const detailPoolStats = detailPool ? getPoolStats(detailPool, cartridges) : null;
 
   const openCreateModal = () => {
     setEditingPool(null);
@@ -230,7 +226,7 @@ export default function MediaPools() {
     setShowCreateModal(true);
   };
 
-  const handleSavePool = (event: FormEvent<HTMLFormElement>) => {
+  const handleSavePool = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const payload = {
@@ -239,7 +235,7 @@ export default function MediaPools() {
       maxDrives: form.policy === 'critical' ? 1 : form.maxDrives,
       targetLtoGeneration: form.targetLtoGeneration || null,
       quotaGB: form.quotaGB ? Number(form.quotaGB) : null,
-      assignedBarcodes: editingPool?.assignedBarcodes ?? [],
+      assignedBarcodes: editingPool ? getPoolStats(editingPool, cartridges).cartridges.map((cartridge) => cartridge.barcode) : [],
       color: form.color,
     };
 
@@ -247,29 +243,37 @@ export default function MediaPools() {
       return;
     }
 
-    if (editingPool) {
-      updatePool(editingPool.id, payload);
-    } else {
-      createPool(payload);
-    }
+    try {
+      if (editingPool) {
+        await updatePool(editingPool.id, payload);
+      } else {
+        await createPool(payload);
+      }
 
-    refreshPools();
-    setShowCreateModal(false);
-    setEditingPool(null);
-    setForm(emptyForm);
+      await refreshAll();
+      setShowCreateModal(false);
+      setEditingPool(null);
+      setForm(emptyForm);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to save media pool.');
+    }
   };
 
-  const handleDeletePool = () => {
+  const handleDeletePool = async () => {
     if (!editingPool) {
       return;
     }
 
     if (window.confirm(`Delete pool “${editingPool.name}”? Assigned cartridges will become unassigned.`)) {
-      deletePool(editingPool.id);
-      refreshPools();
-      setShowCreateModal(false);
-      setEditingPool(null);
-      setForm(emptyForm);
+      try {
+        await deletePool(editingPool.id);
+        await refreshAll();
+        setShowCreateModal(false);
+        setEditingPool(null);
+        setForm(emptyForm);
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : 'Failed to delete media pool.');
+      }
     }
   };
 
@@ -285,26 +289,34 @@ export default function MediaPools() {
     );
   };
 
-  const handleBulkAssign = () => {
+  const handleBulkAssign = async () => {
     if (!bulkAssignPoolId || selectedUnassigned.length === 0) {
       return;
     }
 
-    selectedUnassigned.forEach((barcode) => assignCartridge(bulkAssignPoolId, barcode));
-    refreshPools();
-    setSelectedUnassigned([]);
-    setBulkAssignPoolId('');
+    try {
+      await Promise.all(selectedUnassigned.map((barcode) => assignCartridge(bulkAssignPoolId, barcode)));
+      await refreshAll();
+      setSelectedUnassigned([]);
+      setBulkAssignPoolId('');
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to assign cartridges.');
+    }
   };
 
-  const handleAssignToPool = () => {
+  const handleAssignToPool = async () => {
     if (!assignPool || selectedAssignBarcodes.length === 0) {
       return;
     }
 
-    selectedAssignBarcodes.forEach((barcode) => assignCartridge(assignPool.id, barcode));
-    refreshPools();
-    setSelectedAssignBarcodes([]);
-    setAssignPool(null);
+    try {
+      await Promise.all(selectedAssignBarcodes.map((barcode) => assignCartridge(assignPool.id, barcode)));
+      await refreshAll();
+      setSelectedAssignBarcodes([]);
+      setAssignPool(null);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to assign cartridges.');
+    }
   };
 
   if (mediaQuery.isLoading) {
@@ -652,7 +664,7 @@ export default function MediaPools() {
                     <th className="px-3 py-3">Barcode</th>
                     <th className="px-3 py-3">Type</th>
                     <th className="px-3 py-3">State</th>
-                    <th className="px-3 py-3">Location</th>
+                    <th className="px-3 py-3">Slot Address</th>
                     <th className="px-3 py-3">Capacity</th>
                   </tr>
                 </thead>
@@ -675,7 +687,7 @@ export default function MediaPools() {
                         <td className="px-3 py-3 font-medium text-white">{cartridge.barcode}</td>
                         <td className="px-3 py-3">{cartridge.type}</td>
                         <td className="px-3 py-3">{cartridge.state}</td>
-                        <td className="px-3 py-3">{cartridge.location}</td>
+                        <td className="px-3 py-3">{cartridge.slotAddress ?? '—'}</td>
                         <td className="px-3 py-3">{formatTb(cartridge.capacityGB)}</td>
                       </tr>
                     ))
@@ -702,7 +714,7 @@ export default function MediaPools() {
       {detailPool ? (
         <Modal
           title={detailPool.name}
-          subtitle={`${getPolicyBadge(detailPool)} • ${detailPool.targetLtoGeneration ?? 'Any LTO'} • ${detailPool.assignedBarcodes.length} assigned`}
+          subtitle={`${getPolicyBadge(detailPool)} • ${detailPool.targetLtoGeneration ?? 'Any LTO'} • ${detailPoolStats?.cartridges.length ?? 0} assigned`}
           onClose={() => setDetailPool(null)}
         >
           <div className="space-y-4">
@@ -722,12 +734,12 @@ export default function MediaPools() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-quantum-border/80">
-                  {getPoolStats(detailPool, cartridges).cartridges.length === 0 ? (
+                  {detailPoolStats?.cartridges.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-3 py-8 text-center text-slate-400">No cartridges are assigned to this pool yet.</td>
                     </tr>
                   ) : (
-                    getPoolStats(detailPool, cartridges).cartridges.map((cartridge) => (
+                    detailPoolStats?.cartridges.map((cartridge) => (
                       <tr key={cartridge.barcode} className="text-slate-200">
                         <td className="px-3 py-3 font-medium text-white">{cartridge.barcode}</td>
                         <td className="px-3 py-3">{cartridge.type}</td>
@@ -738,9 +750,13 @@ export default function MediaPools() {
                             type="button"
                             variant="ghost"
                             className="px-2 py-1 text-xs"
-                            onClick={() => {
-                              unassignCartridge(cartridge.barcode);
-                              refreshPools();
+                            onClick={async () => {
+                              try {
+                                await unassignCartridge(detailPool.id, cartridge.barcode);
+                                await refreshAll();
+                              } catch (error) {
+                                window.alert(error instanceof Error ? error.message : 'Failed to unassign cartridge.');
+                              }
                             }}
                           >
                             Unassign

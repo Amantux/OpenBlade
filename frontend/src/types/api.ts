@@ -92,6 +92,10 @@ export interface CartridgeResponse {
   loadCount: number;
   errorCount: number;
   lastLoaded?: string | null;
+  capacityGB?: number;
+  usedGB?: number;
+  percentUsed?: number;
+  poolName?: string | null;
 }
 
 export interface MediaPoolResponse {
