@@ -260,6 +260,7 @@ class NasRestoreJob(Base):
     bytes_restored: Mapped[int] = mapped_column(Integer, default=0)
     files_restored: Mapped[int] = mapped_column(Integer, default=0)
     files_failed: Mapped[int] = mapped_column(Integer, default=0)
+    partial_success: Mapped[bool] = mapped_column(Boolean, default=False)
     unavailable_files: Mapped[str] = mapped_column(Text, default="[]")
     warnings: Mapped[str] = mapped_column(Text, default="[]")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

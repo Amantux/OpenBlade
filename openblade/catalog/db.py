@@ -54,6 +54,14 @@ def _migrate_schema(engine: Engine) -> None:
         for name, column_type in required_columns.items()
         if existing_columns and name not in existing_columns
     }
+    restore_job_columns: set[str] = set()
+    if "nas_restore_jobs" in inspector.get_table_names():
+        restore_job_columns = {column["name"] for column in inspector.get_columns("nas_restore_jobs")}
+    missing_restore_job_columns = (
+        {"partial_success": "BOOLEAN NOT NULL DEFAULT 0"}
+        if restore_job_columns and "partial_success" not in restore_job_columns
+        else {}
+    )
     with engine.begin() as connection:
         if missing_columns:
             for name, column_type in missing_columns.items():
@@ -62,6 +70,9 @@ def _migrate_schema(engine: Engine) -> None:
             connection.execute(
                 text("CREATE INDEX IF NOT EXISTS ix_file_records_parent_id ON file_records (parent_id)")
             )
+        if missing_restore_job_columns:
+            for name, column_type in missing_restore_job_columns.items():
+                connection.execute(text(f"ALTER TABLE nas_restore_jobs ADD COLUMN {name} {column_type}"))
         connection.execute(
             text(
                 """
@@ -206,6 +217,7 @@ def _migrate_schema(engine: Engine) -> None:
                     bytes_restored INTEGER NOT NULL DEFAULT 0,
                     files_restored INTEGER NOT NULL DEFAULT 0,
                     files_failed INTEGER NOT NULL DEFAULT 0,
+                    partial_success INTEGER NOT NULL DEFAULT 0,
                     unavailable_files TEXT NOT NULL DEFAULT '[]',
                     warnings TEXT NOT NULL DEFAULT '[]',
                     error_message TEXT,

@@ -176,6 +176,7 @@ class CatalogRepository:
             "bytes_restored": row.bytes_restored,
             "files_restored": row.files_restored,
             "files_failed": row.files_failed,
+            "partial_success": row.partial_success,
             "unavailable_files": _load_json_value(row.unavailable_files, []),
             "warnings": _load_json_value(row.warnings, []),
             "error_message": row.error_message,
@@ -797,6 +798,7 @@ class CatalogRepository:
         row.bytes_restored = parsed.bytes_restored
         row.files_restored = parsed.files_restored
         row.files_failed = parsed.files_failed
+        row.partial_success = parsed.partial_success
         row.unavailable_files = json.dumps(parsed.unavailable_files)
         row.warnings = json.dumps(parsed.warnings)
         row.error_message = parsed.error_message
@@ -815,6 +817,7 @@ class CatalogRepository:
         bytes_restored: int | None = None,
         files_restored: int | None = None,
         files_failed: int | None = None,
+        partial_success: bool | None = None,
         error_message: str | None = None,
     ) -> bool:
         row = self.session.get(NasRestoreJob, job_id)
@@ -830,6 +833,8 @@ class CatalogRepository:
             row.files_restored = files_restored
         if files_failed is not None:
             row.files_failed = files_failed
+        if partial_success is not None:
+            row.partial_success = partial_success
         if error_message is not None:
             row.error_message = error_message
         if row.status in {
@@ -838,6 +843,8 @@ class CatalogRepository:
             RestoreJobStatus.CANCELLED.value,
         }:
             row.completed_at = _utcnow_iso()
+        else:
+            row.completed_at = None
 
         self.session.commit()
         return True

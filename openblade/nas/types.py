@@ -391,6 +391,7 @@ class NasRestoreJob(BaseModel):
     bytes_restored: int = 0
     files_restored: int = 0
     files_failed: int = 0
+    partial_success: bool = False
     unavailable_files: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     error_message: str | None = None

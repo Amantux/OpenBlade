@@ -353,6 +353,7 @@ class NasService:
         bytes_restored: int | None = None,
         files_restored: int | None = None,
         files_failed: int | None = None,
+        partial_success: bool | None = None,
         error_message: str | None = None,
     ) -> bool:
         return self.repository.update_nas_restore_job_status(
@@ -361,6 +362,7 @@ class NasService:
             bytes_restored=bytes_restored,
             files_restored=files_restored,
             files_failed=files_failed,
+            partial_success=partial_success,
             error_message=error_message,
         )
 

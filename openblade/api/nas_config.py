@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
+from openblade.nas.hydration import HydrationExecutor
 from openblade.nas.ingest import (
     IngestJob,
     StartIngestResponse,
@@ -50,6 +51,17 @@ def get_nas_service(repo=Depends(get_catalog_repository)) -> NasService:
 
 def _bad_request(exc: ValueError | ValidationError | SidecarValidationError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+def _get_hydration_executor(service: NasService) -> HydrationExecutor:
+    return HydrationExecutor(service, get_context().ltfs)
+
+
+def _require_restore_job(service: NasService, job_id: str) -> NasRestoreJob:
+    job = service.get_restore_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found")
+    return job
 
 
 class ResolvePolicyRequest(BaseModel):
@@ -369,6 +381,66 @@ async def cancel_restore_job(
     if not service.update_restore_job_status(job_id, RestoreJobStatus.CANCELLED.value):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/restore-jobs/{job_id}/run", response_model=NasRestoreJob, status_code=status.HTTP_202_ACCEPTED)
+async def run_restore_job_endpoint(
+    job_id: str,
+    service: NasService = Depends(get_nas_service),
+) -> NasRestoreJob:
+    _require_restore_job(service, job_id)
+    try:
+        return _get_hydration_executor(service).run(job_id)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/restore-jobs/{job_id}/cancel", response_model=NasRestoreJob)
+async def cancel_restore_job_endpoint(
+    job_id: str,
+    service: NasService = Depends(get_nas_service),
+) -> NasRestoreJob:
+    _require_restore_job(service, job_id)
+    try:
+        return _get_hydration_executor(service).cancel(job_id)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/restore-jobs/{job_id}/pause", response_model=NasRestoreJob)
+async def pause_restore_job_endpoint(
+    job_id: str,
+    service: NasService = Depends(get_nas_service),
+) -> NasRestoreJob:
+    _require_restore_job(service, job_id)
+    try:
+        return _get_hydration_executor(service).pause(job_id)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/restore-jobs/{job_id}/resume", response_model=NasRestoreJob)
+async def resume_restore_job_endpoint(
+    job_id: str,
+    service: NasService = Depends(get_nas_service),
+) -> NasRestoreJob:
+    _require_restore_job(service, job_id)
+    try:
+        return _get_hydration_executor(service).resume(job_id)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/restore-jobs/{job_id}/retry", response_model=NasRestoreJob)
+async def retry_restore_job_endpoint(
+    job_id: str,
+    service: NasService = Depends(get_nas_service),
+) -> NasRestoreJob:
+    _require_restore_job(service, job_id)
+    try:
+        return _get_hydration_executor(service).retry(job_id)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
 
 
 @router.post("/resolve-policy", response_model=EffectivePolicy)
