@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getInventoryResult, getInventoryStatus, runInventory } from '../api/operations';
+import type { InventoryResult } from '../types/api';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
@@ -49,8 +50,22 @@ export default function InventoryScan() {
     return <ErrorMessage error={resultQuery.error} onRetry={() => resultQuery.refetch()} />;
   }
 
-  const status = statusQuery.data;
-  const result = resultQuery.data;
+  const status = statusQuery.data ?? {
+    state: 'idle',
+    startTime: null,
+    completedTime: null,
+    progress: 0,
+    elementsScanned: 0,
+    elementsTotal: 0,
+    lastCompleted: null,
+  };
+  const result: InventoryResult = resultQuery.data ?? {
+    timestamp: null,
+    elementsScanned: 0,
+    mediaFound: 0,
+    emptySlots: 0,
+    errors: [],
+  };
   const progress = status.elementsTotal > 0 ? Math.max(status.progress, Math.round((status.elementsScanned / status.elementsTotal) * 100)) : status.progress;
 
   return (

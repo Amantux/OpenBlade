@@ -36,8 +36,8 @@ import {
   type SecurityConfigResponse,
   type SnmpConfigResponse,
   type SnmpTrapResponse,
-  type SystemConfigResponse,
 } from '../api/system';
+import type { SystemConfigResponse } from '../types/api';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';

@@ -57,6 +57,8 @@ export default function ImportExport() {
 
   const stations = stationsQuery.data ?? [];
   const slotCount = stations.reduce((sum, station) => sum + station.slotCount, 0);
+  const importStatus = importQuery.data ?? { state: 'idle' };
+  const exportStatus = exportQuery.data ?? { state: 'idle' };
 
   return (
     <div className="space-y-4">
@@ -80,8 +82,8 @@ export default function ImportExport() {
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Import</p>
               <h2 className="mt-2 text-xl font-semibold text-white">Media intake</h2>
             </div>
-            <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${stateClass(importQuery.data.state)}`}>
-              {importQuery.data.state.toUpperCase()}
+            <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${stateClass(importStatus.state)}`}>
+              {importStatus.state.toUpperCase()}
             </span>
           </div>
           <div className="mt-4 space-y-3 text-sm text-slate-300">
@@ -105,8 +107,8 @@ export default function ImportExport() {
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Export</p>
               <h2 className="mt-2 text-xl font-semibold text-white">Media handoff</h2>
             </div>
-            <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${stateClass(exportQuery.data.state)}`}>
-              {exportQuery.data.state.toUpperCase()}
+            <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${stateClass(exportStatus.state)}`}>
+              {exportStatus.state.toUpperCase()}
             </span>
           </div>
           <div className="mt-4 space-y-3 text-sm text-slate-300">
