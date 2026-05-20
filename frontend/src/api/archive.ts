@@ -3,10 +3,10 @@ import type {
   EnqueuedJobResponse,
   ShardedArchiveRequestPayload,
 } from '../types/api';
-import { apiRequest } from './client';
+import { rootApiRequest } from './client';
 
 export function postArchive(payload: ArchiveRequestPayload): Promise<EnqueuedJobResponse> {
-  return apiRequest<EnqueuedJobResponse>('/archive/', {
+  return rootApiRequest<EnqueuedJobResponse>('/archive/', {
     method: 'POST',
     body: payload,
   });
@@ -15,7 +15,7 @@ export function postArchive(payload: ArchiveRequestPayload): Promise<EnqueuedJob
 export function postShardedArchive(
   payload: ShardedArchiveRequestPayload,
 ): Promise<EnqueuedJobResponse> {
-  return apiRequest<EnqueuedJobResponse>('/archive/sharded', {
+  return rootApiRequest<EnqueuedJobResponse>('/archive/sharded', {
     method: 'POST',
     body: payload,
   });

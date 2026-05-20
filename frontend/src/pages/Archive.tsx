@@ -8,7 +8,7 @@ import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
 import { postArchive } from '../api/archive';
-import { apiRequest } from '../api/client';
+import { rootApiRequest } from '../api/client';
 import { getVolumeGroups } from '../api/volumeGroups';
 import { useJobs } from '../hooks/useJobs';
 import { getJobBarcode, getJobState, getJobStrategy, getJobTypeLabel } from '../lib/lmc';
@@ -52,7 +52,7 @@ export default function Archive() {
 
   const createGroupMutation = useMutation({
     mutationFn: (name: string) =>
-      apiRequest<VolumeGroup>('/volume-groups/', { method: 'POST', body: { name } }),
+      rootApiRequest<VolumeGroup>('/volume-groups/', { method: 'POST', body: { name } }),
     onSuccess: async (created) => {
       await queryClient.invalidateQueries({ queryKey: ['volume-groups'] });
       setVolumeGroup(created.name);

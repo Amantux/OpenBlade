@@ -17,7 +17,7 @@ from openblade.jobs.restore import RestoreService
 from openblade.jobs.worker import Worker
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
-from openblade.simulator.scenarios import one_drive_twenty_slots_five_cartridges
+from openblade.simulator.scenarios import scalar_i3_default
 
 structlog.configure()
 
@@ -46,7 +46,7 @@ def get_library() -> MockLibraryBackend:
         cfg = load_config()
         if cfg.backend != BackendMode.MOCK:
             raise NotImplementedError("Real hardware backend not yet implemented")
-        _library, _ltfs = one_drive_twenty_slots_five_cartridges()
+        _library, _ltfs = scalar_i3_default()
     return _library
 
 
@@ -72,7 +72,7 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     if active_config.backend != BackendMode.MOCK:
         raise NotImplementedError("Real hardware backend not yet implemented")
     init_db(active_config.db_url)
-    library, ltfs = one_drive_twenty_slots_five_cartridges()
+    library, ltfs = scalar_i3_default()
     catalog = CatalogRepository(get_session())
     run_inventory_job(library, catalog)
     queue = JobQueue()

@@ -19,7 +19,7 @@ router = APIRouter()
 
 class DriveCleaningRecord(BaseModel):
     serialNumber: str
-    lastCleaned: str
+    lastCleaned: str | None = None
     mediaBarcode: str
     useCount: int
     expired: bool

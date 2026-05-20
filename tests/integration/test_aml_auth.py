@@ -71,6 +71,15 @@ def test_list_users_requires_auth(client: TestClient) -> None:
 
 
 
+def test_get_current_user_returns_authenticated_user(client: TestClient) -> None:
+    assert client.get("/aml/users/me").status_code == 401
+    _login(client)
+    response = client.get("/aml/users/me")
+    assert response.status_code == 200
+    assert response.json() == {"name": "admin", "role": 0, "requirePasswordChange": True}
+
+
+
 def test_create_and_get_user(client: TestClient) -> None:
     _login(client)
     create_response = client.post(

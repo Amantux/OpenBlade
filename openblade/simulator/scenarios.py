@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 
 from openblade.domain.models import CartridgeState, DriveState, MountState
 from openblade.domain.policies import FormatConfirmation, SafetyToken
+from openblade.simulator.i3_config import scalar_i3_default_config
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockFileRecord, MockLTFSBackend
 
@@ -60,6 +61,23 @@ def empty_library(
 
 def one_drive_twenty_slots_five_cartridges() -> tuple[MockLibraryBackend, MockLTFSBackend]:
     return _paired([f"PHO00{i}L8" for i in range(1, 6)])
+
+
+def scalar_i3_default() -> tuple[MockLibraryBackend, MockLTFSBackend]:
+    config = scalar_i3_default_config()
+    partition = config["partition"]
+    library = MockLibraryBackend(
+        library_id=str(config["library"].get("mockLibraryId", "mock-i3-001")),
+        num_slots=int(partition["slotCount"]),
+        num_drives=len(config["drives"]),
+    )
+    for item in config["media"]:
+        barcode = str(item["barcode"])
+        library.add_cartridge(int(item.get("mockSlotId", 1)), barcode)
+        if barcode.startswith("CLN"):
+            library._cartridge_states[barcode] = CartridgeState.CLEANING
+    ltfs = MockLTFSBackend(library)
+    return library, ltfs
 
 
 def partially_full_library() -> tuple[MockLibraryBackend, MockLTFSBackend]:

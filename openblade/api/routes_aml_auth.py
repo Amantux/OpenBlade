@@ -319,6 +319,16 @@ async def list_users(
     return UserList(user=[_serialize_user(user) for user in users])
 
 
+@router.get("/users/me", response_model=UserResponse, openapi_extra={"no_auth": False})
+async def get_current_user(
+    request: Request,
+    context: AppContext = Depends(get_context),
+) -> UserResponse:
+    _ensure_state(context)
+    user = await require_auth(request, context)
+    return UserResponse(name=user.name, role=user.role, requirePasswordChange=user.require_password_change)
+
+
 @router.post(
     "/users",
     response_model=UserResponse,

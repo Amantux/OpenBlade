@@ -16,11 +16,15 @@ def reset_app_context(tmp_path: Path) -> None:
     reset_context(context)
 
 
-def _format_first_tape() -> tuple[str, str]:
+def _first_data_barcode() -> str:
     from openblade.bootstrap import get_context
 
     context = get_context()
-    barcode = context.catalog.list_cartridges()[0].barcode
+    return next(cartridge.barcode for cartridge in context.catalog.list_cartridges() if not cartridge.barcode.startswith("CLN"))
+
+
+def _format_first_tape() -> tuple[str, str]:
+    barcode = _first_data_barcode()
     plan = client.post(f"/cartridges/{barcode}/format/dry-run")
     return barcode, plan.json()["token"]
 
@@ -118,14 +122,14 @@ def test_get_nonexistent_job_returns_404() -> None:
 
 
 def test_format_dry_run() -> None:
-    barcode = client.get("/cartridges/").json()[0]["barcode"]
+    barcode = _first_data_barcode()
     response = client.post(f"/cartridges/{barcode}/format/dry-run")
     assert response.status_code == 200
     assert response.json()["token"]
 
 
 def test_format_confirm_requires_token() -> None:
-    barcode = client.get("/cartridges/").json()[0]["barcode"]
+    barcode = _first_data_barcode()
     response = client.post(
         "/cartridges/format/confirm", json={"barcode": barcode, "token": "bad-token"}
     )

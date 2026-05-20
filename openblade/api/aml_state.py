@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.models import AmlUser
+from openblade.simulator.i3_config import scalar_i3_default_config
 
 DEFAULT_ADMIN_PASSWORD = "password"
 DEFAULT_SERVICE_PASSWORD = "service123"
@@ -390,18 +391,23 @@ def _default_aml_licenses() -> dict[str, dict[str, Any]]:
 
 
 def _default_aml_partitions() -> dict[str, dict[str, Any]]:
+    config = scalar_i3_default_config()
+    partition = config["partition"]
+    drives = [str(drive["id"]) for drive in config["drives"]]
+    media_count = len(config["media"])
+    cleaning_barcodes = [str(media["barcode"]) for media in config["media"] if media.get("role") == "cleaning"]
     return {
-        "partition1": {
-            "name": "partition1",
-            "id": "PART-001",
-            "status": "online",
-            "type": "data",
-            "driveCount": 2,
-            "slotCount": 20,
-            "ieSlotCount": 6,
-            "cleaningSlots": 2,
-            "mediaCount": 10,
-            "drives": ["DRV-001", "DRV-002"],
+        str(partition["name"]): {
+            "name": str(partition["name"]),
+            "id": str(partition["id"]),
+            "status": str(partition["status"]),
+            "type": str(partition["type"]),
+            "driveCount": len(drives),
+            "slotCount": int(partition["slotCount"]),
+            "ieSlotCount": int(partition["ieSlotCount"]),
+            "cleaningSlots": int(partition["cleaningSlots"]),
+            "mediaCount": media_count,
+            "drives": drives,
             "policy": {
                 "autoClean": True,
                 "cleaningThreshold": 100,
@@ -415,7 +421,7 @@ def _default_aml_partitions() -> dict[str, dict[str, Any]]:
             "cleaning": {
                 "autoClean": True,
                 "threshold": 100,
-                "cleaningTapeBarcode": None,
+                "cleaningTapeBarcode": cleaning_barcodes[0] if cleaning_barcodes else None,
                 "lastCleaned": None,
             },
             "worm": {"enabled": False, "mode": "none"},
@@ -424,7 +430,12 @@ def _default_aml_partitions() -> dict[str, dict[str, Any]]:
             "lme": {"enabled": False, "exportPath": None},
             "alerts": [],
             "moveQueue": [],
-            "quota": {"totalSlots": 20, "usedSlots": 10, "totalDrives": 2, "usedDrives": 2},
+            "quota": {
+                "totalSlots": int(partition["slotCount"]),
+                "usedSlots": media_count,
+                "totalDrives": len(drives),
+                "usedDrives": len(drives),
+            },
             "statistics": {
                 "mountCount": 0,
                 "unmountCount": 0,
@@ -509,78 +520,25 @@ def _default_aml_log_level() -> dict[str, Any]:
 
 
 def _default_aml_media() -> dict[str, dict[str, Any]]:
-    return {
-        "VOL001L9": {
-            "barcode": "VOL001L9",
-            "type": "LTO-9",
-            "partition": "partition1",
-            "slotAddress": "1,1,1",
+    media: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(scalar_i3_default_config()["media"], start=1):
+        barcode = str(item["barcode"])
+        is_cleaning = str(item.get("role", "data")) == "cleaning"
+        media[barcode] = {
+            "barcode": barcode,
+            "type": str(item["type"]),
+            "partition": str(item["partition"]),
+            "slotAddress": str(item["slotAddress"]),
             "state": "home",
-            "writeProtected": False,
+            "writeProtected": is_cleaning,
             "worm": False,
-            "generations": 1,
-            "loadCount": 5,
+            "generations": 0 if is_cleaning else 1,
+            "loadCount": 0 if is_cleaning else index - 1,
             "errorCount": 0,
-            "lastLoaded": "2024-01-15T10:00:00Z",
-            "history": [
-                {
-                    "timestamp": "2024-01-15T10:00:00Z",
-                    "type": "mount",
-                    "action": "mount",
-                    "source": "1,1,1",
-                    "destination": "DRV-001",
-                    "drive": "DRV-001",
-                    "result": "success",
-                },
-                {
-                    "timestamp": "2024-01-15T10:30:00Z",
-                    "type": "unmount",
-                    "action": "unmount",
-                    "source": "DRV-001",
-                    "destination": "1,1,1",
-                    "drive": "DRV-001",
-                    "result": "success",
-                },
-            ],
-        },
-        "VOL002L9": {
-            "barcode": "VOL002L9",
-            "type": "LTO-9",
-            "partition": "partition1",
-            "slotAddress": "1,1,2",
-            "state": "home",
-            "writeProtected": False,
-            "worm": False,
-            "generations": 1,
-            "loadCount": 3,
-            "errorCount": 0,
-            "lastLoaded": "2024-01-14T08:00:00Z",
-            "history": [
-                {
-                    "timestamp": "2024-01-14T08:00:00Z",
-                    "type": "inventory",
-                    "action": "inventory",
-                    "source": "1,1,2",
-                    "destination": None,
-                    "drive": None,
-                    "result": "success",
-                }
-            ],
-        },
-        "CLN001L9": {
-            "barcode": "CLN001L9",
-            "type": "LTO-9-CLN",
-            "partition": "partition1",
-            "slotAddress": "1,0,1",
-            "state": "home",
-            "writeProtected": True,
-            "worm": False,
-            "generations": 0,
-            "loadCount": 2,
-            "errorCount": 0,
-            "lastLoaded": "2024-01-10T12:00:00Z",
-        },
-    }
+            "lastLoaded": None,
+            "history": [],
+        }
+    return media
 
 
 
@@ -593,20 +551,23 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
 
 
 def _default_aml_drives() -> dict[str, dict[str, Any]]:
-    return {
-        "DRV-001": {
-            "serialNumber": "DRV-001",
-            "model": "IBM LTO-9 HH",
-            "type": "LTO-9",
+    drives: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(scalar_i3_default_config()["drives"], start=1):
+        drive_id = str(item["id"])
+        drives[drive_id] = {
+            "serialNumber": drive_id,
+            "hardwareSerialNumber": str(item["serial"]),
+            "model": str(item["model"]),
+            "type": str(item["type"]),
             "status": "online",
             "state": "idle",
             "partition": "partition1",
-            "location": "1,1,1",
+            "location": str(item["location"]),
             "firmware": "H3J4",
-            "loadCount": 142,
+            "loadCount": 60 - (index * 5),
             "errorCount": 0,
-            "cleaningCount": 3,
-            "lastCleaned": "2024-01-10T08:00:00Z",
+            "cleaningCount": index,
+            "lastCleaned": None,
             "loadedMedia": None,
             "config": {"compression": True, "encryption": False, "speed": "400MB/s", "bufferSize": "256MB"},
             "encryptionState": {
@@ -618,33 +579,8 @@ def _default_aml_drives() -> dict[str, dict[str, Any]]:
             },
             "errors": [],
             "diagnosticResult": None,
-        },
-        "DRV-002": {
-            "serialNumber": "DRV-002",
-            "model": "IBM LTO-9 HH",
-            "type": "LTO-9",
-            "status": "online",
-            "state": "idle",
-            "partition": "partition1",
-            "location": "1,1,2",
-            "firmware": "H3J4",
-            "loadCount": 87,
-            "errorCount": 0,
-            "cleaningCount": 2,
-            "lastCleaned": "2024-01-08T14:00:00Z",
-            "loadedMedia": None,
-            "config": {"compression": True, "encryption": False, "speed": "400MB/s", "bufferSize": "256MB"},
-            "encryptionState": {
-                "enabled": False,
-                "mode": "applicationManaged",
-                "keyManager": None,
-                "keyAlias": None,
-                "status": "disabled",
-            },
-            "errors": [],
-            "diagnosticResult": None,
-        },
-    }
+        }
+    return drives
 
 
 
@@ -993,25 +929,18 @@ def _default_aml_towers() -> dict[str, dict[str, Any]]:
 
 
 def _default_aml_ie_stations() -> dict[str, dict[str, Any]]:
-    return {
-        "IE-1": {
-            "id": "IE-1",
-            "serialNumber": "IE0001",
-            "status": "online",
-            "state": "closed",
-            "slotCount": 6,
-            "slots": [
-                {
-                    "id": f"IE-1-S{i}",
-                    "address": f"0,0,{i}",
-                    "state": "empty",
-                    "barcode": None,
-                    "type": "ie",
-                }
-                for i in range(1, 7)
-            ],
+    stations: dict[str, dict[str, Any]] = {}
+    for item in scalar_i3_default_config()["ieStations"]:
+        slots = [deepcopy(slot) for slot in item["slots"]]
+        stations[str(item["id"])] = {
+            "id": str(item["id"]),
+            "serialNumber": str(item["serialNumber"]),
+            "status": str(item["status"]),
+            "state": str(item["state"]),
+            "slotCount": len(slots),
+            "slots": slots,
         }
-    }
+    return stations
 
 
 def _default_aml_magazines() -> dict[str, dict[str, Any]]:
@@ -1030,25 +959,8 @@ def _default_aml_magazines() -> dict[str, dict[str, Any]]:
 
 def _default_aml_ltfs_sections() -> dict[str, dict[str, Any]]:
     return {
-        "1": {
-            "sectionNumber": 1,
-            "name": "LTFS Section 1",
-            "status": "ready",
-            "mounted": False,
-            "mountPoint": "/ltfs/partition1",
-            "fileSystem": "LTFS 2.4",
-            "partitionName": "partition1",
-            "readOnly": False,
-            "lastMounted": None,
-            "drives": [
-                {"serialNumber": "DRV-001", "state": "available", "role": "primary"},
-                {"serialNumber": "DRV-002", "state": "available", "role": "secondary"},
-            ],
-            "media": [
-                {"barcode": "VOL001L9", "state": "cataloged", "type": "LTO-9"},
-                {"barcode": "VOL002L9", "state": "cataloged", "type": "LTO-9"},
-            ],
-        }
+        str(section["sectionNumber"]): deepcopy(section)
+        for section in scalar_i3_default_config()["ltfsSections"]
     }
 
 
@@ -1234,14 +1146,14 @@ def _default_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
             "serialNumber": "DRV-001",
             "lastCleaned": "2024-01-10T08:00:00Z",
             "mediaBarcode": "CLN001L9",
-            "useCount": 18,
+            "useCount": 0,
             "expired": False,
         },
         {
             "serialNumber": "DRV-002",
             "lastCleaned": "2024-01-08T14:00:00Z",
-            "mediaBarcode": "CLN001L9",
-            "useCount": 17,
+            "mediaBarcode": "CLN002L9",
+            "useCount": 0,
             "expired": False,
         },
     ]

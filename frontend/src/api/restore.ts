@@ -1,8 +1,8 @@
 import type { EnqueuedJobResponse, RestoreRequestPayload } from '../types/api';
-import { apiRequest } from './client';
+import { rootApiRequest } from './client';
 
 export function postRestore(payload: RestoreRequestPayload): Promise<EnqueuedJobResponse> {
-  return apiRequest<EnqueuedJobResponse>('/restore/', {
+  return rootApiRequest<EnqueuedJobResponse>('/restore/', {
     method: 'POST',
     body: {
       catalog_path: payload.file_id,

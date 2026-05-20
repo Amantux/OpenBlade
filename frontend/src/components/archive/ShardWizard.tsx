@@ -7,7 +7,7 @@ import Button from '../ui/Button';
 import Card from '../ui/Card';
 import ErrorMessage from '../ui/ErrorMessage';
 
-type Profile = 'STANDARD' | 'STRIPE' | 'BLOCK_STRIPE';
+type Profile = 'standard' | 'stripe' | 'block_stripe';
 
 interface ShardWizardProps {
   volumeGroups: VolumeGroup[];
@@ -15,14 +15,14 @@ interface ShardWizardProps {
 }
 
 const profiles: Array<{ key: Profile; label: string; description: string }> = [
-  { key: 'STANDARD', label: 'Standard', description: 'Single tape workflow for straightforward archive jobs.' },
-  { key: 'STRIPE', label: 'Balanced throughput', description: 'Parallel stripe files across multiple loaded tapes.' },
-  { key: 'BLOCK_STRIPE', label: 'Large sequential archive', description: 'Split large streams across loaded tapes with a tunable block size.' },
+  { key: 'standard', label: 'Standard', description: 'Single tape workflow for straightforward archive jobs.' },
+  { key: 'stripe', label: 'Balanced throughput', description: 'Parallel stripe files across multiple loaded tapes.' },
+  { key: 'block_stripe', label: 'Large sequential archive', description: 'Split large streams across loaded tapes with a tunable block size.' },
 ];
 
 export default function ShardWizard({ volumeGroups, drives }: ShardWizardProps) {
   const loadedDrives = useMemo(() => drives.filter((drive) => drive.loaded && drive.barcode), [drives]);
-  const [profile, setProfile] = useState<Profile>('STANDARD');
+  const [profile, setProfile] = useState<Profile>('standard');
   const [sourcePath, setSourcePath] = useState('');
   const [volumeGroup, setVolumeGroup] = useState(volumeGroups[0]?.name ?? '');
   const [selectedBarcodes, setSelectedBarcodes] = useState<string[]>([]);
@@ -36,14 +36,14 @@ export default function ShardWizard({ volumeGroups, drives }: ShardWizardProps) 
 
   const mutation = useMutation({
     mutationFn: async () => {
-      if (profile === 'STANDARD') {
+      if (profile === 'standard') {
         return postArchive({ source_path: sourcePath, volume_group: volumeGroup });
       }
       return postShardedArchive({
         source_path: sourcePath,
         volume_group: volumeGroup,
         lane_barcodes: selectedBarcodes,
-        mode: profile === 'BLOCK_STRIPE' ? 'BLOCK_STRIPE' : 'STRIPE',
+        mode: profile,
         block_size_mb: blockSizeMb,
       });
     },
@@ -55,7 +55,7 @@ export default function ShardWizard({ volumeGroups, drives }: ShardWizardProps) 
     );
   }
 
-  const needsLaneSelection = profile !== 'STANDARD';
+  const needsLaneSelection = profile !== 'standard';
   const canSubmit = !needsLaneSelection || selectedBarcodes.length > 0;
 
   return (
@@ -127,7 +127,7 @@ export default function ShardWizard({ volumeGroups, drives }: ShardWizardProps) 
             {loadedDrives.length === 0 ? <p className="text-sm text-amber-300">No loaded drives are available for striping.</p> : null}
           </div>
         ) : null}
-        {profile === 'BLOCK_STRIPE' ? (
+        {profile === 'block_stripe' ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm text-slate-300">
               <label htmlFor="block-size">Block size</label>
@@ -149,7 +149,7 @@ export default function ShardWizard({ volumeGroups, drives }: ShardWizardProps) 
             {mutation.isPending ? 'Queueing…' : 'Launch workflow'}
           </Button>
           <span className="text-sm text-slate-400">
-            {profile === 'BLOCK_STRIPE' ? 'Advanced' : profile === 'STRIPE' ? 'Balanced throughput' : 'Single-tape'}
+            {profile === 'block_stripe' ? 'Advanced' : profile === 'stripe' ? 'Balanced throughput' : 'Single-tape'}
           </span>
         </div>
       </form>

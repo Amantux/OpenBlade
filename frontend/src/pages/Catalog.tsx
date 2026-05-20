@@ -5,9 +5,7 @@ import NorthPanel from '../components/panels/NorthPanel';
 import OperationsPanel from '../components/panels/OperationsPanel';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
-import { ApiError, apiRequest } from '../api/client';
-import { getJobs } from '../api/jobs';
-import { buildCatalogFallback } from '../lib/lmc';
+import { ApiError, rootApiRequest } from '../api/client';
 import { formatBytes, formatDate } from '../lib/utils';
 import type { CatalogEntryResponse, CatalogResponse } from '../types/api';
 
@@ -16,8 +14,14 @@ async function getCatalogEntries(): Promise<CatalogEntryResponse[]> {
 
   for (const path of candidates) {
     try {
-      const payload = await apiRequest<CatalogResponse | CatalogEntryResponse[]>(path);
-      return Array.isArray(payload) ? payload : payload.entries;
+      const payload = await rootApiRequest<CatalogResponse | CatalogEntryResponse[]>(path);
+      if (Array.isArray(payload)) {
+        return payload;
+      }
+      if (payload && typeof payload === 'object' && 'entries' in payload && Array.isArray(payload.entries)) {
+        return payload.entries;
+      }
+      return [];
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 404) {
         throw error;
@@ -25,8 +29,7 @@ async function getCatalogEntries(): Promise<CatalogEntryResponse[]> {
     }
   }
 
-  const jobs = await getJobs();
-  return buildCatalogFallback(jobs);
+  return [];
 }
 
 export default function Catalog() {
@@ -70,7 +73,7 @@ export default function Catalog() {
         getRowId={(row) => row.id}
         selectedId={selectedEntry?.id}
         onSelect={(row) => setSelectedEntryId(row.id)}
-        emptyMessage="No catalog entries are available."
+        emptyMessage="No archives yet — run your first archive."
       />
 
       <InformationPanel

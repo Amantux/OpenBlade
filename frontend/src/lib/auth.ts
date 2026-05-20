@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'openblade.username';
-const SESSION_PING_PATHS = ['/aml/users/whoami', '/aml/users/me', '/aml/users'] as const;
+const SESSION_PING_PATHS = ['/aml/users/me'] as const;
 
 export const AUTH_REDIRECT_EVENT = 'openblade:auth-redirect';
 

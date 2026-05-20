@@ -122,3 +122,7 @@ export async function apiRequest<T>(
 
   return payload as T;
 }
+
+export function rootApiRequest<T>(path: string, init: Omit<ApiRequestOptions, 'namespace'> = {}): Promise<T> {
+  return apiRequest<T>(path, { ...init, namespace: 'root' });
+}

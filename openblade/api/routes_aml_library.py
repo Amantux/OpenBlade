@@ -7,13 +7,14 @@ from pydantic import BaseModel
 
 from openblade.api import aml_state
 from openblade.api.routes_aml_auth import require_auth
+from openblade.simulator.i3_config import scalar_i3_default_config
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
 from openblade.domain.models import CartridgeState, ChangerState, DriveState
 
 router = APIRouter()
 
-_IE_SLOT_COUNT = 1
+_IE_SLOT_COUNT = int(scalar_i3_default_config()["partition"]["ieSlotCount"])
 _FIRMWARE_VERSION = "1.0.0-mock"
 _LIBRARY_MODEL = "Scalar i3"
 _LIBRARY_TYPE = "i3"

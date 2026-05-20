@@ -129,7 +129,7 @@ export interface ArchiveRequestPayload {
 
 export interface ShardedArchiveRequestPayload extends ArchiveRequestPayload {
   lane_barcodes: string[];
-  mode: 'STRIPE' | 'BLOCK_STRIPE';
+  mode: 'stripe' | 'block_stripe';
   block_size_mb: number;
 }
 

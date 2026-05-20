@@ -46,6 +46,10 @@ def _inventory_barcodes(library: MockLibraryBackend) -> list[str]:
     return sorted(barcodes)
 
 
+def _is_cleaning_barcode(barcode: str) -> bool:
+    return barcode.upper().startswith("CLN")
+
+
 def _choose_tape(
     catalog: CatalogRepository,
     library: MockLibraryBackend,
@@ -59,9 +63,13 @@ def _choose_tape(
         if cartridge.volume_group_id == volume_group_id and cartridge.state != "exported"
     ]
     for cartridge in assigned:
+        if _is_cleaning_barcode(cartridge.barcode):
+            continue
         if ltfs.remaining_capacity(cartridge.barcode) >= size_bytes:
             return cartridge.barcode
     for barcode in _inventory_barcodes(library):
+        if _is_cleaning_barcode(barcode):
+            continue
         cartridge = catalog.add_cartridge(barcode)
         if (
             cartridge.volume_group_id not in {None, volume_group_id}

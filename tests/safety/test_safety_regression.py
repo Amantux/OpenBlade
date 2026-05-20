@@ -156,7 +156,7 @@ def test_format_endpoint_requires_token(app_context) -> None:
 
     reset_context(app_context)
     client = TestClient(app)
-    barcode = client.get("/cartridges/").json()[0]["barcode"]
+    barcode = next(item["barcode"] for item in client.get("/cartridges/").json() if not item["barcode"].startswith("CLN"))
     response = client.post(
         "/cartridges/format/confirm", json={"barcode": barcode, "token": "bad-token"}
     )
