@@ -11,7 +11,9 @@ from openblade.api import (
     routes_aml_auth,
     routes_aml_blades,
     routes_aml_drives,
+    routes_aml_events,
     routes_aml_library,
+    routes_aml_system,
     routes_aml_media,
     routes_aml_operations,
     routes_aml_partitions,
@@ -51,6 +53,7 @@ app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_aml_auth.router, prefix="/aml", tags=["aml-auth"])
 app.include_router(routes_aml_access.router, prefix="/aml", tags=["aml-access"])
+app.include_router(routes_aml_events.router, prefix="/aml", tags=["aml-events"])
 app.include_router(routes_aml_library.router, prefix="/aml", tags=["aml-library"])
 app.include_router(routes_aml_blades.router, prefix="/aml", tags=["aml-blades"])
 app.include_router(routes_aml_drives.router, prefix="/aml", tags=["aml-drives"])
@@ -58,6 +61,7 @@ app.include_router(routes_aml_partitions.router, prefix="/aml", tags=["aml-parti
 app.include_router(routes_aml_physical.router, prefix="/aml", tags=["aml-physical"])
 app.include_router(routes_aml_media.router, prefix="/aml", tags=["aml-media"])
 app.include_router(routes_aml_operations.router, prefix="/aml", tags=["aml-operations"])
+app.include_router(routes_aml_system.router, prefix="/aml", tags=["aml-system"])
 
 
 @app.on_event("startup")
