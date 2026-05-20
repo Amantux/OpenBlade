@@ -60,6 +60,7 @@ class DatasetStatus(str, Enum):
     ARCHIVED = "archived"
     FAILED = "failed"
     VERIFIED = "verified"
+    CANCELLED = "cancelled"
 
 
 class HydrationBehavior(str, Enum):

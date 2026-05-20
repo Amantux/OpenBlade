@@ -138,6 +138,7 @@ def test_dataset_status_enum() -> None:
     assert DatasetStatus.ARCHIVED.value == "archived"
     assert DatasetStatus.FAILED.value == "failed"
     assert DatasetStatus.VERIFIED.value == "verified"
+    assert DatasetStatus.CANCELLED.value == "cancelled"
 
 
 def test_pool_validates_name() -> None:

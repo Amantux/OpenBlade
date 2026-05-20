@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from openblade.catalog.models import NasCacheDrive, NasShare, NasStoragePolicy
+from openblade.catalog.models import Cartridge, NasCacheDrive, NasShare, NasStoragePolicy
 from openblade.catalog.repository import CatalogRepository
 from openblade.nas.types import (
     CacheDriveConfig,
@@ -153,6 +153,26 @@ class NasService:
 
     def delete_dataset(self, dataset_id: str) -> bool:
         return self.repository.delete_nas_dataset(dataset_id)
+
+    def update_cartridge(
+        self,
+        barcode: str,
+        *,
+        volume_group_id: str | None = None,
+        used_bytes: int | None = None,
+        capacity_bytes: int | None = None,
+        formatted: bool | None = None,
+    ) -> Cartridge:
+        cartridge = self.repository.add_cartridge(barcode, volume_group_id)
+        if used_bytes is not None:
+            cartridge.used_bytes = used_bytes
+        if capacity_bytes is not None:
+            cartridge.capacity_bytes = capacity_bytes
+        if formatted is not None:
+            cartridge.formatted = formatted
+        self.repository.session.commit()
+        self.repository.session.refresh(cartridge)
+        return cartridge
 
     def list_file_records(self, dataset_id: str) -> list[NasFileRecord]:
         return [

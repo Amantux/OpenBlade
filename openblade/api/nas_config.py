@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
+from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
+from openblade.nas.ingest import (
+    IngestJob,
+    StartIngestResponse,
+    cancel_ingest_job,
+    get_archive_plan,
+    get_ingest_job,
+    register_archive_plan,
+    run_ingest_job,
+    start_ingest_job,
+)
 from openblade.nas.planner import ArchivePlanner
 from openblade.nas.service import NasService
 from openblade.nas.sidecar import SidecarResolver
@@ -15,6 +26,7 @@ from openblade.nas.types import (
     ArchivePlanRequest,
     CacheDriveConfig,
     EffectivePolicy,
+    IngestMode,
     NasShareDefinition,
     SidecarValidationError,
     SourceStreamConfig,
@@ -35,6 +47,17 @@ def _bad_request(exc: ValueError | ValidationError | SidecarValidationError) -> 
 class ResolvePolicyRequest(BaseModel):
     directory: str
     share_id: str | None = None
+
+
+class StartIngestRequest(BaseModel):
+    plan_id: str
+    dataset_name: str
+    pool_id: str | None = None
+    cache_drive_id: str | None = None
+
+
+class CancelIngestResponse(BaseModel):
+    cancelled: bool
 
 
 @router.get("/policies", response_model=list[StoragePolicy])
@@ -258,4 +281,60 @@ async def archive_plan(
     if policy is not None:
         plan.policy_name = policy.name
         plan.policy_type = policy.policy_type
-    return plan
+    return register_archive_plan(plan)
+
+
+@router.post("/ingest/start", response_model=StartIngestResponse)
+async def start_ingest(
+    request: StartIngestRequest,
+    background_tasks: BackgroundTasks,
+    service: NasService = Depends(get_nas_service),
+) -> StartIngestResponse:
+    plan = get_archive_plan(request.plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Plan {request.plan_id} not found")
+    if not plan.is_safe_to_enqueue:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Archive plan is not safe to enqueue")
+    if plan.ingest_mode is IngestMode.CACHE_DRIVE:
+        if request.cache_drive_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="cache_drive_id is required for cache-drive ingest",
+            )
+        if service.get_cache_drive(request.cache_drive_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cache drive {request.cache_drive_id} not found",
+            )
+    context = get_context()
+    job = start_ingest_job(
+        plan=plan,
+        dataset_name=request.dataset_name,
+        pool_id=request.pool_id,
+        nas_service=service,
+        cache_drive_id=request.cache_drive_id,
+    )
+    background_tasks.add_task(
+        run_ingest_job,
+        job.job_id,
+        nas_service=service,
+        library=context.library,
+        ltfs=context.ltfs,
+        cache_drive_id=request.cache_drive_id,
+    )
+    return StartIngestResponse(job_id=job.job_id, dataset_id=job.dataset_id, status="running")
+
+
+@router.get("/ingest/{job_id}", response_model=IngestJob)
+async def ingest_status(job_id: str) -> IngestJob:
+    job = get_ingest_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingest job {job_id} not found")
+    return job
+
+
+@router.post("/ingest/{job_id}/cancel", response_model=CancelIngestResponse)
+async def cancel_ingest(job_id: str) -> CancelIngestResponse:
+    if not cancel_ingest_job(job_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingest job {job_id} not found")
+    return CancelIngestResponse(cancelled=True)

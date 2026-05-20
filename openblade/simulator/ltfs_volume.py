@@ -265,12 +265,23 @@ class MockLTFSBackend:
         )
 
     def write_file(self, handle: MountHandle, source: Path, dest: PurePosixPath) -> FileInstance:
+        return self.write_bytes(handle, dest, source.read_bytes())
+
+    def write_bytes(
+        self,
+        handle: MountHandle,
+        dest: PurePosixPath,
+        content: bytes,
+        *,
+        size_bytes: int | None = None,
+        checksum_sha256: str | None = None,
+    ) -> FileInstance:
         active_mount = self._require_active_mount(handle)
         if handle.mode != MountMode.READ_WRITE:
             raise PermissionError("Cannot write to a read-only mount")
         tape = self.ensure_tape(str(handle.barcode))
-        data = source.read_bytes()
         path_key = str(dest)
+        stored_size = len(content) if size_bytes is None else size_bytes
         with self._lock:
             active_mount.write_in_progress = True
             if self.fault_config.should_fail(FaultType.NO_FREE_SPACE):
@@ -282,7 +293,7 @@ class MockLTFSBackend:
                 raise SimulatedWriteFailure("Injected write failure")
             if self.fault_config.write_fail_after_bytes is not None:
                 failure_point = self.fault_config.write_fail_after_bytes
-                if failure_point < len(data):
+                if failure_point < len(content):
                     active_mount.write_in_progress = False
                     active_mount.dirty = True
                     raise SimulatedWriteFailure(
@@ -290,16 +301,16 @@ class MockLTFSBackend:
                     )
             existing = tape.files.get(path_key)
             previous_size = existing.size_bytes if existing is not None else 0
-            projected_used_bytes = tape.used_bytes - previous_size + len(data)
+            projected_used_bytes = tape.used_bytes - previous_size + stored_size
             if projected_used_bytes > tape.capacity_bytes:
                 active_mount.write_in_progress = False
                 raise TapeFullError(f"Tape {tape.barcode} is out of space")
-            checksum = hashlib.sha256(data).hexdigest()
+            checksum = checksum_sha256 or hashlib.sha256(content).hexdigest()
             tape.files[path_key] = MockFileRecord(
                 tape_path=path_key,
-                size_bytes=len(data),
+                size_bytes=stored_size,
                 checksum_sha256=checksum,
-                content=data,
+                content=content,
             )
             tape.used_bytes = projected_used_bytes
             tape.mount_state = MountState.MOUNTED_RW
