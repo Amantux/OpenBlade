@@ -13,6 +13,8 @@ from openblade.api import aml_state
 from openblade.bootstrap import AppContext, get_context
 from openblade.jobs.restore import RestoreRequest as RestoreJobRequest
 from openblade.jobs.restore import run_restore_job
+from openblade.jobs.scheduler import DriveScheduler
+from openblade.jobs.sharded_restore import ShardedRestoreRequest, run_sharded_restore
 
 router = APIRouter()
 
@@ -99,14 +101,29 @@ async def enqueue_restore(
         "restore",
         {"catalog_path": catalog_path, "dest_path": request.dest_path},
     )
+    record = context.catalog.get_file_record(catalog_path)
+    use_sharded_restore = False
+    if record is not None:
+        use_sharded_restore = bool(context.catalog.list_shard_records(record.id)) or (record.shard_count or 1) > 1
     try:
-        run_restore_job(
-            RestoreJobRequest(catalog_path=catalog_path, dest_path=Path(request.dest_path)),
-            context.library,
-            context.ltfs,
-            context.catalog,
-            job.id,
-        )
+        if use_sharded_restore:
+            scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+            run_sharded_restore(
+                ShardedRestoreRequest(catalog_path=catalog_path, dest_path=Path(request.dest_path)),
+                context.library,
+                context.ltfs,
+                context.catalog,
+                scheduler,
+                job.id,
+            )
+        else:
+            run_restore_job(
+                RestoreJobRequest(catalog_path=catalog_path, dest_path=Path(request.dest_path)),
+                context.library,
+                context.ltfs,
+                context.catalog,
+                job.id,
+            )
     except Exception as exc:
         context.catalog.update_job_state(job.id, "failed", str(exc))
         _bridge_to_aml(

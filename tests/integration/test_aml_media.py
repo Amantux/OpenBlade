@@ -119,3 +119,34 @@ def test_update_media_pool_allows_clearing_nullable_fields(authed: TestClient) -
     assert pool["quotaGB"] is None
     assert pool["targetLtoGeneration"] is None
     assert pool["type"] is None
+
+
+def test_patch_media_pool_clears_quota_gb(authed: TestClient) -> None:
+    response = authed.patch(
+        "/aml/media/pools/pool-critical",
+        json={"quotaGB": None},
+    )
+    assert response.status_code == 200
+    assert response.json()["pool"]["quotaGB"] is None
+
+    get_response = authed.get("/aml/media/pools/pool-critical")
+    assert get_response.status_code == 200
+    assert get_response.json()["pool"]["quotaGB"] is None
+
+
+def test_patch_media_pool_clears_target_generation_and_legacy_type(authed: TestClient) -> None:
+    response = authed.patch(
+        "/aml/media/pools/pool-critical",
+        json={"targetLtoGeneration": None},
+    )
+    assert response.status_code == 200
+
+    pool = response.json()["pool"]
+    assert pool["targetLtoGeneration"] is None
+    assert pool["type"] is None
+
+    get_response = authed.get("/aml/media/pools/pool-critical")
+    assert get_response.status_code == 200
+    pool = get_response.json()["pool"]
+    assert pool["targetLtoGeneration"] is None
+    assert pool["type"] is None

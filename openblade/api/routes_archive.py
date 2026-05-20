@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from threading import RLock
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from openblade.api import aml_state
 from openblade.bootstrap import AppContext, get_context
+from openblade.domain.errors import FileNotFoundError
 from openblade.jobs.archive import ArchiveRequest as ArchiveJobRequest
 from openblade.jobs.archive import run_archive_job
 from openblade.jobs.scheduler import DriveScheduler
@@ -20,6 +22,7 @@ from openblade.jobs.sharded_archive import ShardedArchiveRequest, run_sharded_ar
 router = APIRouter()
 
 _TERMINAL_JOB_STATUSES = {"completed", "failed", "failed_recoverable", "cancelled"}
+_ARCHIVE_REQUEST_LOCK = RLock()
 
 
 def _timestamp(value: datetime | None) -> str:
@@ -87,7 +90,7 @@ class ArchiveRequest(BaseModel):
 class ShardedArchiveApiRequest(BaseModel):
     source_path: str
     volume_group: str
-    lane_barcodes: list[str]
+    lane_barcodes: list[str] = Field(min_length=1)
     mode: ShardMode = ShardMode.STRIPE
     block_size_mb: int = Field(default=128, ge=1)
 
@@ -120,44 +123,47 @@ async def enqueue_archive(
     context: AppContext = Depends(get_context),
 ) -> EnqueuedJobResponse:
     source_path = Path(request.source_path)
-    job = context.catalog.create_job(
-        "archive",
-        {"source_path": request.source_path, "volume_group": request.volume_group},
-    )
-    try:
-        run_archive_job(
-            ArchiveJobRequest(
-                source_path=source_path,
-                volume_group_name=request.volume_group,
-            ),
-            context.library,
-            context.ltfs,
-            context.catalog,
-            job.id,
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source path {request.source_path} not found")
+    with _ARCHIVE_REQUEST_LOCK:
+        job = context.catalog.create_job(
+            "archive",
+            {"source_path": request.source_path, "volume_group": request.volume_group},
         )
-    except Exception as exc:
-        _cleanup_failed_archive(context, source_path, request.volume_group)
-        context.catalog.update_job_state(job.id, "failed", str(exc))
+        try:
+            run_archive_job(
+                ArchiveJobRequest(
+                    source_path=source_path,
+                    volume_group_name=request.volume_group,
+                ),
+                context.library,
+                context.ltfs,
+                context.catalog,
+                job.id,
+            )
+        except Exception as exc:
+            _cleanup_failed_archive(context, source_path, request.volume_group)
+            context.catalog.update_job_state(job.id, "failed", str(exc))
+            _bridge_to_aml(
+                context,
+                job_id=job.id,
+                status="failed",
+                source_path=request.source_path,
+                volume_group=request.volume_group,
+                error=str(exc),
+            )
+            raise
+        refreshed = context.catalog.get_job(job.id)
+        assert refreshed is not None
         _bridge_to_aml(
             context,
-            job_id=job.id,
-            status="failed",
+            job_id=refreshed.id,
+            status=refreshed.state,
             source_path=request.source_path,
             volume_group=request.volume_group,
-            error=str(exc),
+            error=refreshed.error,
         )
-        raise
-    refreshed = context.catalog.get_job(job.id)
-    assert refreshed is not None
-    _bridge_to_aml(
-        context,
-        job_id=refreshed.id,
-        status=refreshed.state,
-        source_path=request.source_path,
-        volume_group=request.volume_group,
-        error=refreshed.error,
-    )
-    return EnqueuedJobResponse(job_id=refreshed.id, status="pending")
+        return EnqueuedJobResponse(job_id=refreshed.id, status="pending")
 
 
 @router.post(
@@ -169,51 +175,59 @@ async def enqueue_sharded_archive(
     request: ShardedArchiveApiRequest,
     context: AppContext = Depends(get_context),
 ) -> EnqueuedJobResponse:
-    job = context.catalog.create_job(
-        "archive",
-        {
-            "source_path": request.source_path,
-            "volume_group": request.volume_group,
-            "lane_barcodes": request.lane_barcodes,
-            "mode": request.mode.value,
-            "block_size_mb": request.block_size_mb,
-        },
-    )
-    scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
-    try:
-        run_sharded_archive(
-            ShardedArchiveRequest(
-                source_path=Path(request.source_path),
-                volume_group_name=request.volume_group,
-                lane_barcodes=request.lane_barcodes,
-                mode=request.mode,
-                block_size=request.block_size_mb * 1024 * 1024,
-            ),
-            context.library,
-            context.ltfs,
-            context.catalog,
-            scheduler,
-            job.id,
+    if not Path(request.source_path).exists():
+        raise FileNotFoundError(f"Source path {request.source_path} not found")
+    if request.mode == ShardMode.BLOCK_STRIPE and len(request.lane_barcodes) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="block_stripe mode requires at least 2 lane_barcodes",
         )
-    except Exception as exc:
-        context.catalog.update_job_state(job.id, "failed", str(exc))
+    with _ARCHIVE_REQUEST_LOCK:
+        job = context.catalog.create_job(
+            "archive",
+            {
+                "source_path": request.source_path,
+                "volume_group": request.volume_group,
+                "lane_barcodes": request.lane_barcodes,
+                "mode": request.mode.value,
+                "block_size_mb": request.block_size_mb,
+            },
+        )
+        scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+        try:
+            run_sharded_archive(
+                ShardedArchiveRequest(
+                    source_path=Path(request.source_path),
+                    volume_group_name=request.volume_group,
+                    lane_barcodes=request.lane_barcodes,
+                    mode=request.mode,
+                    block_size=request.block_size_mb * 1024 * 1024,
+                ),
+                context.library,
+                context.ltfs,
+                context.catalog,
+                scheduler,
+                job.id,
+            )
+        except Exception as exc:
+            context.catalog.update_job_state(job.id, "failed", str(exc))
+            _bridge_to_aml(
+                context,
+                job_id=job.id,
+                status="failed",
+                source_path=request.source_path,
+                volume_group=request.volume_group,
+                error=str(exc),
+            )
+            raise
+        refreshed = context.catalog.get_job(job.id)
+        assert refreshed is not None
         _bridge_to_aml(
             context,
-            job_id=job.id,
-            status="failed",
+            job_id=refreshed.id,
+            status=refreshed.state,
             source_path=request.source_path,
             volume_group=request.volume_group,
-            error=str(exc),
+            error=refreshed.error,
         )
-        raise
-    refreshed = context.catalog.get_job(job.id)
-    assert refreshed is not None
-    _bridge_to_aml(
-        context,
-        job_id=refreshed.id,
-        status=refreshed.state,
-        source_path=request.source_path,
-        volume_group=request.volume_group,
-        error=refreshed.error,
-    )
-    return EnqueuedJobResponse(job_id=refreshed.id, status="pending")
+        return EnqueuedJobResponse(job_id=refreshed.id, status="pending")

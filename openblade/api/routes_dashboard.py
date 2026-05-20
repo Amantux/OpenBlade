@@ -7,6 +7,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from openblade.api import aml_state
 from openblade.bootstrap import AppContext, get_context
 
 router = APIRouter()
@@ -34,16 +35,23 @@ class VolumeGroupStorage(BaseModel):
 class DashboardStatsResponse(BaseModel):
     storage: StorageSummary
     volumeGroups: list[VolumeGroupStorage]
+    drive_count: int
+    slot_count: int
+    job_count: int
+    event_count: int
+    pool_count: int
 
 
 @router.get("/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(
     context: AppContext = Depends(get_context),
 ) -> DashboardStatsResponse:
+    aml_state.ensure_initialized(context.config.db_url)
     groups = context.catalog.list_volume_groups()
     files = context.catalog.list_file_records("/")
     assigned_tapes = [cartridge for cartridge in context.catalog.list_cartridges() if cartridge.volume_group_id is not None]
     catalog_tapes = context.catalog.list_catalog_tape_barcodes()
+    inventory = context.library.inventory()
 
     file_count_by_group: dict[str, int] = defaultdict(int)
     bytes_by_group: dict[str, int] = defaultdict(int)
@@ -78,4 +86,9 @@ async def get_dashboard_stats(
             )
             for group in groups
         ],
+        drive_count=len(inventory.drives),
+        slot_count=len(inventory.slots),
+        job_count=len(aml_state.list_aml_jobs()),
+        event_count=len(aml_state.list_aml_events()),
+        pool_count=len(aml_state.list_aml_media_pools()),
     )

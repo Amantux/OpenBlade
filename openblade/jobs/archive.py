@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 
 from openblade.api import aml_state
 from openblade.catalog.repository import CatalogRepository
-from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError
+from openblade.domain.errors import ChecksumMismatchError, DriveOccupiedError, NoScratchMediaError
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.verify import sha256sum
@@ -143,9 +143,15 @@ def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int
     slot_id = library.find_slot_by_barcode(barcode)
     if slot_id is None:
         raise NoScratchMediaError(f"Barcode {barcode} not found in inventory")
-    drive_id = 0
-    library.load(slot_id, drive_id)
-    return drive_id, slot_id
+    for drive in library.inventory().drives:
+        if drive.barcode is not None:
+            continue
+        try:
+            library.load(slot_id, drive.drive_id)
+            return drive.drive_id, slot_id
+        except DriveOccupiedError:
+            continue
+    raise NoScratchMediaError("No available drives for archive load")
 
 
 def run_archive_job(

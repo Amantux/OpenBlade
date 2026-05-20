@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from openblade.catalog.repository import CatalogRepository
-from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError
+from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError, FileNotFoundError
 from openblade.domain.models import MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import DEFAULT_BLOCK_SIZE, compute_checksum, reassemble_block_stripe
@@ -68,6 +68,12 @@ def run_sharded_restore(
         )
 
     shard_records = catalog.list_shard_records(file_record.id)
+    expected_shard_count = file_record.shard_count or 0
+    requires_shard_records = expected_shard_count > 1 or file_record.shard_profile == "block_stripe"
+    if requires_shard_records and len(shard_records) != expected_shard_count:
+        error = "Missing shard catalog entries"
+        catalog.update_job_state(job_id, "failed", error=error)
+        raise FileNotFoundError(error)
     if shard_records:
         ordered_shards = sorted(shard_records, key=lambda record: record.shard_index or 0)
         instances = [
@@ -78,13 +84,7 @@ def run_sharded_restore(
         if len(instances) != len(ordered_shards):
             error = "Missing archived shard instances"
             catalog.update_job_state(job_id, "failed", error=error)
-            return ShardedRestoreResult(
-                job_id=job_id,
-                source_barcodes=[],
-                checksum_verified=False,
-                bytes_restored=0,
-                error=error,
-            )
+            raise FileNotFoundError(error)
         restore_block_size = file_record.block_size or request.block_size
     else:
         instances = sorted(
