@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal, Optional
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
@@ -144,6 +144,75 @@ class EffectivePolicy(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class TapeAssignment(BaseModel):
+    """Files assigned to a single tape."""
+
+    barcode: str
+    files: list[str]
+    estimated_bytes: int = 0
+    is_spillover: bool = False
+    shard_index: int | None = None
+
+
+class ArchivePlanWarning(BaseModel):
+    level: str
+    message: str
+    field: str | None = None
+
+
+class ArchivePlan(BaseModel):
+    """Dry-run output from the archive planner. No side effects."""
+
+    plan_id: str = Field(default_factory=lambda: str(uuid4()))
+    policy_name: str | None = None
+    policy_type: PolicyType | None = None
+    ingest_mode: IngestMode = IngestMode.CACHE_DRIVE
+    source_path: str | None = None
+    pool: str | None = None
+    volume_group: str | None = None
+
+    files: list[str] = Field(default_factory=list)
+    total_files: int = 0
+    total_bytes: int = 0
+
+    tape_assignments: list[TapeAssignment] = Field(default_factory=list)
+    estimated_tape_swaps: int = 0
+    estimated_parallelism: int = 1
+
+    copies_required: int = 1
+    verify_before_archive: bool = True
+    verify_after_archive: bool = True
+
+    capacity_warnings: list[ArchivePlanWarning] = Field(default_factory=list)
+    safety_warnings: list[ArchivePlanWarning] = Field(default_factory=list)
+    manifest_strategy: str = "per_tape"
+
+    is_safe_to_enqueue: bool = True
+    enqueue_blockers: list[str] = Field(default_factory=list)
+
+    created_at: str | None = None
+
+
+class ArchivePlanRequest(BaseModel):
+    """Input to the archive planner."""
+
+    policy_id: str | None = None
+    policy_type: PolicyType | None = None
+    ingest_mode: IngestMode = IngestMode.CACHE_DRIVE
+    source_path: str | None = None
+    pool: str | None = None
+    volume_group: str | None = None
+    files: list[str] = Field(default_factory=list)
+    file_sizes: dict[str, int] = Field(default_factory=dict)
+    available_tapes: list[str] = Field(default_factory=list)
+    tape_capacities: dict[str, int] = Field(default_factory=dict)
+    copies: int = Field(default=1, ge=1, le=4)
+    verify_before_archive: bool = True
+    verify_after_archive: bool = True
+    shard_strategy: ShardStrategy | None = None
+    max_parallelism: int = Field(default=1, ge=1, le=16)
+
+
 class CacheDriveConfig(BaseModel):
     id: str
     name: str = Field(max_length=64)
@@ -236,7 +305,7 @@ class NasDataset(BaseModel):
     source_path: str | None = None
     source_host: str | None = None
     policy_id: str | None = None
-    ingest_mode: Optional[IngestMode] = None
+    ingest_mode: IngestMode | None = None
     volume_group_id: str | None = None
     tape_set: list[str] = Field(default_factory=list)
     shard_map: dict[str, list[str]] = Field(default_factory=dict)

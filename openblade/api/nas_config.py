@@ -7,13 +7,16 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from openblade.catalog.db import get_catalog_repository
+from openblade.nas.planner import ArchivePlanner
 from openblade.nas.service import NasService
 from openblade.nas.sidecar import SidecarResolver
 from openblade.nas.types import (
-    SidecarValidationError,
+    ArchivePlan,
+    ArchivePlanRequest,
     CacheDriveConfig,
     EffectivePolicy,
     NasShareDefinition,
+    SidecarValidationError,
     SourceStreamConfig,
     StoragePolicy,
 )
@@ -220,3 +223,39 @@ async def resolve_policy(
         )
     except (ValidationError, SidecarValidationError, ValueError) as exc:
         raise _bad_request(exc) from exc
+
+
+@router.post("/archive-plan", response_model=ArchivePlan)
+async def archive_plan(
+    request: ArchivePlanRequest,
+    service: NasService = Depends(get_nas_service),
+) -> ArchivePlan:
+    policy = None
+    if request.policy_id is not None:
+        policy = service.get_policy(request.policy_id)
+        if policy is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Policy {request.policy_id} not found",
+            )
+
+        updates: dict[str, object] = {"policy_type": policy.policy_type}
+        if "ingest_mode" not in request.model_fields_set:
+            updates["ingest_mode"] = policy.default_ingest_mode
+        if "copies" not in request.model_fields_set:
+            updates["copies"] = policy.copies_required
+        if "verify_before_archive" not in request.model_fields_set:
+            updates["verify_before_archive"] = policy.verify_before_archive
+        if "verify_after_archive" not in request.model_fields_set:
+            updates["verify_after_archive"] = policy.verify_after_archive
+        if "shard_strategy" not in request.model_fields_set and policy.shard_strategy is not None:
+            updates["shard_strategy"] = policy.shard_strategy
+        if "max_parallelism" not in request.model_fields_set:
+            updates["max_parallelism"] = policy.max_parallelism
+        request = request.model_copy(update=updates)
+
+    plan = ArchivePlanner().plan(request)
+    if policy is not None:
+        plan.policy_name = policy.name
+        plan.policy_type = policy.policy_type
+    return plan
