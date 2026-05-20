@@ -569,6 +569,12 @@ async def unload_drive_media(
             "history": _append_history(drive, event_type="unload", media=loaded_media.barcode if loaded_media else None),
         },
     )
+    # Sync media record: move it back to its home slot as stored
+    if loaded_media:
+        barcode = loaded_media.barcode
+        media_obj = aml_state.get_aml_media(barcode) or {}
+        home_slot = media_obj.get("homeSlot") or media_obj.get("previousSlot") or f"slot-{barcode}"
+        aml_state.update_aml_media(barcode, {"state": "stored", "slotAddress": home_slot})
     return _ws_result(f"Drive {serial_number} media unloaded")
 
 

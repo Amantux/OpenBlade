@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import secrets
+import time
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -120,6 +121,14 @@ class AMLState:
     aml_job_history: list[dict[str, Any]] = field(default_factory=list)
     aml_moves: dict[str, dict[str, Any]] = field(default_factory=dict)
     aml_mounts: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aml_events: list[dict[str, Any]] = field(default_factory=lambda: _default_aml_events())
+    aml_ras_tickets: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aml_logs_store: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_logs_store())
+    aml_alerts_store: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aml_tapealerts: list[dict[str, Any]] = field(default_factory=list)
+    aml_notifications: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aml_log_level: dict[str, Any] = field(default_factory=lambda: _default_aml_log_level())
+    aml_event_subscriptions: list[dict[str, Any]] = field(default_factory=list)
     aml_inventory_status: dict[str, Any] = field(
         default_factory=lambda: {
             "state": "idle",
@@ -136,6 +145,10 @@ class AMLState:
     aml_export_status: dict[str, Any] = field(
         default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None}
     )
+    aml_cleaning_status: dict[str, Any] = field(
+        default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None, "drives": []}
+    )
+    aml_robotics_last_test_time: str | None = None
 
 
 def _utcnow() -> datetime:
@@ -248,6 +261,66 @@ def _default_aml_partitions_global() -> dict[str, Any]:
         "defaultCleaningThreshold": 100,
         "maxPartitions": 8,
         "currentPartitions": 1,
+    }
+
+
+
+def _default_aml_events() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": str(uuid4()),
+            "timestamp": "2024-01-15T10:00:00Z",
+            "severity": "info",
+            "component": "library",
+            "message": "Library initialized",
+            "details": {},
+        },
+        {
+            "id": str(uuid4()),
+            "timestamp": "2024-01-15T10:05:00Z",
+            "severity": "warning",
+            "component": "drive",
+            "message": "Drive DRV-001 cleaning recommended",
+            "details": {"drive": "DRV-001"},
+        },
+    ]
+
+
+
+def _default_aml_logs_store() -> dict[str, dict[str, Any]]:
+    return {
+        "system.log": {
+            "name": "system.log",
+            "size": 102400,
+            "lastModified": "2024-01-15T10:00:00Z",
+            "type": "system",
+            "lines": [
+                "2024-01-15T10:00:00Z INFO Library initialized",
+                "2024-01-15T10:05:00Z WARN Drive needs cleaning",
+            ],
+        },
+        "audit.log": {
+            "name": "audit.log",
+            "size": 20480,
+            "lastModified": "2024-01-15T09:00:00Z",
+            "type": "audit",
+            "lines": ["2024-01-15T09:00:00Z admin LOGIN success"],
+        },
+        "error.log": {
+            "name": "error.log",
+            "size": 0,
+            "lastModified": "2024-01-15T00:00:00Z",
+            "type": "error",
+            "lines": [],
+        },
+    }
+
+
+
+def _default_aml_log_level() -> dict[str, Any]:
+    return {
+        "level": "INFO",
+        "components": {"api": "INFO", "archive": "INFO", "robotics": "DEBUG"},
     }
 
 
@@ -635,6 +708,141 @@ def _migrate_plaintext_passwords() -> None:
 def list_users() -> list[AmlUser]:
     with get_session() as session:
         return list(session.execute(select(AmlUser).order_by(AmlUser.name)).scalars())
+
+
+aml_system_config: dict[str, Any] = {
+    "hostname": "openblade-1",
+    "timezone": "UTC",
+    "locale": "en_US",
+    "dateFormat": "YYYY-MM-DD",
+    "temperatureUnit": "celsius",
+}
+aml_network_config: dict[str, Any] = {
+    "interfaces": {
+        "eth0": {
+            "name": "eth0",
+            "type": "ethernet",
+            "ip": "192.168.1.100",
+            "mask": "255.255.255.0",
+            "gateway": "192.168.1.1",
+            "mac": "00:1A:2B:3C:4D:5E",
+            "status": "up",
+            "speed": "1G",
+            "duplex": "full",
+            "enabled": True,
+        },
+        "eth1": {
+            "name": "eth1",
+            "type": "ethernet",
+            "ip": "10.0.0.100",
+            "mask": "255.255.255.0",
+            "gateway": "10.0.0.1",
+            "mac": "00:1A:2B:3C:4D:5F",
+            "status": "up",
+            "speed": "1G",
+            "duplex": "full",
+            "enabled": True,
+        },
+    },
+    "dns": {"primary": "8.8.8.8", "secondary": "8.8.4.4", "search": ["local"], "domain": "local"},
+    "ntp": {
+        "enabled": True,
+        "servers": ["pool.ntp.org", "time.cloudflare.com"],
+        "status": "synced",
+        "lastSync": "2024-01-15T06:00:00Z",
+    },
+    "routes": [],
+}
+aml_snmp_config: dict[str, Any] = {
+    "enabled": True,
+    "version": "v2c",
+    "community": "public",
+    "trapHosts": [],
+    "contact": "admin@example.com",
+    "location": "Data Center",
+}
+aml_email_config: dict[str, Any] = {
+    "enabled": False,
+    "smtpHost": "",
+    "smtpPort": 587,
+    "smtpUser": "",
+    "from": "openblade@example.com",
+    "tls": True,
+    "recipients": [],
+}
+aml_syslog_config: dict[str, Any] = {
+    "enabled": False,
+    "host": "",
+    "port": 514,
+    "protocol": "UDP",
+    "facility": "local0",
+    "severity": "warning",
+}
+aml_services: dict[str, dict[str, Any]] = {
+    "api": {
+        "name": "api",
+        "status": "running",
+        "pid": 1234,
+        "uptime": 86400,
+        "description": "OpenBlade API",
+    },
+    "web": {
+        "name": "web",
+        "status": "running",
+        "pid": 1235,
+        "uptime": 86400,
+        "description": "Web UI",
+    },
+    "archiver": {
+        "name": "archiver",
+        "status": "running",
+        "pid": 1236,
+        "uptime": 86400,
+        "description": "Archive Service",
+    },
+}
+aml_audit_log: list[dict[str, Any]] = []
+aml_ha_config: dict[str, Any] = {
+    "enabled": False,
+    "role": "standalone",
+    "partner": None,
+    "state": "active",
+    "lastFailover": None,
+}
+aml_callhome_config: dict[str, Any] = {
+    "enabled": False,
+    "endpoint": "https://callhome.quantum.com",
+    "interval": 3600,
+    "lastContact": None,
+}
+aml_system_security: dict[str, Any] = {
+    "tlsEnabled": True,
+    "tlsVersion": "TLS1.3",
+    "cipherSuites": ["TLS_AES_256_GCM_SHA384"],
+    "certExpiry": "2025-12-31",
+    "sshEnabled": True,
+    "loginBanner": "",
+}
+aml_debug_config: dict[str, Any] = {"logLevel": "INFO", "debugMode": False, "traceEnabled": False}
+aml_system_preferences: dict[str, Any] = {
+    "sessionTimeout": 1800,
+    "idleTimeout": 900,
+    "passwordPolicy": {"minLength": 8, "requireSpecial": True},
+    "auditLog": True,
+}
+aml_remote_config: dict[str, Any] = {
+    "ssh": {"enabled": True, "port": 22},
+    "vnc": {"enabled": False, "port": 5900},
+    "rdp": {"enabled": False},
+}
+aml_proxy_config: dict[str, Any] = {
+    "enabled": False,
+    "host": "",
+    "port": 8080,
+    "user": "",
+    "noProxy": ["localhost", "127.0.0.1"],
+}
+aml_system_started_at: float = time.time() - 86400.0
 
 
 def get_user(name: str) -> AmlUser | None:
@@ -2041,3 +2249,236 @@ def get_aml_export_status() -> dict[str, Any]:
 def set_aml_export_status(status: dict[str, Any]) -> dict[str, Any]:
     _STATE.aml_export_status = deepcopy(status)
     return get_aml_export_status()
+
+
+def get_aml_cleaning_status() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_cleaning_status)
+
+
+def set_aml_cleaning_status(status: dict[str, Any]) -> dict[str, Any]:
+    _STATE.aml_cleaning_status = deepcopy(status)
+    return get_aml_cleaning_status()
+
+
+def get_aml_robotics_last_test_time() -> str | None:
+    return _STATE.aml_robotics_last_test_time
+
+
+def set_aml_robotics_last_test_time(ts: str | None) -> None:
+    _STATE.aml_robotics_last_test_time = ts
+
+
+
+def list_aml_events() -> list[dict[str, Any]]:
+    return [deepcopy(item) for item in sorted(_STATE.aml_events, key=lambda item: str(item.get("timestamp", "")), reverse=True)]
+
+
+
+def get_aml_event(event_id: str) -> dict[str, Any] | None:
+    for event in _STATE.aml_events:
+        if event.get("id") == event_id:
+            return deepcopy(event)
+    return None
+
+
+
+def append_aml_event(event: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(event)
+    _STATE.aml_events.append(stored)
+    _STATE.aml_events.sort(key=lambda item: str(item.get("timestamp", "")), reverse=True)
+    return deepcopy(stored)
+
+
+
+def clear_aml_events() -> None:
+    _STATE.aml_events.clear()
+
+
+
+def list_aml_ras_tickets() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_ras_tickets.items())]
+
+
+
+def get_aml_ras_ticket(ticket_id: str) -> dict[str, Any] | None:
+    ticket = _STATE.aml_ras_tickets.get(ticket_id)
+    return deepcopy(ticket) if ticket is not None else None
+
+
+
+def set_aml_ras_ticket(ticket_id: str, ticket: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(ticket)
+    stored["id"] = ticket_id
+    _STATE.aml_ras_tickets[ticket_id] = stored
+    return deepcopy(stored)
+
+
+
+def update_aml_ras_ticket(ticket_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    ticket = _STATE.aml_ras_tickets.get(ticket_id)
+    if ticket is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "id":
+            continue
+        ticket[key] = value
+    return deepcopy(ticket)
+
+
+
+def pop_aml_ras_ticket(ticket_id: str) -> dict[str, Any] | None:
+    ticket = _STATE.aml_ras_tickets.pop(ticket_id, None)
+    return deepcopy(ticket) if ticket is not None else None
+
+
+
+def list_aml_logs() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_logs_store.items())]
+
+
+
+def get_aml_log(name: str) -> dict[str, Any] | None:
+    log = _STATE.aml_logs_store.get(name)
+    return deepcopy(log) if log is not None else None
+
+
+
+def set_aml_log(name: str, log: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(log)
+    stored["name"] = name
+    _STATE.aml_logs_store[name] = stored
+    return deepcopy(stored)
+
+
+
+def pop_aml_log(name: str) -> dict[str, Any] | None:
+    log = _STATE.aml_logs_store.pop(name, None)
+    return deepcopy(log) if log is not None else None
+
+
+
+def list_aml_alerts() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_alerts_store.items())]
+
+
+
+def get_aml_alert(alert_id: str) -> dict[str, Any] | None:
+    alert = _STATE.aml_alerts_store.get(alert_id)
+    return deepcopy(alert) if alert is not None else None
+
+
+
+def set_aml_alert(alert_id: str, alert: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(alert)
+    stored["id"] = alert_id
+    _STATE.aml_alerts_store[alert_id] = stored
+    return deepcopy(stored)
+
+
+
+def update_aml_alert(alert_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    alert = _STATE.aml_alerts_store.get(alert_id)
+    if alert is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "id":
+            continue
+        alert[key] = value
+    return deepcopy(alert)
+
+
+
+def pop_aml_alert(alert_id: str) -> dict[str, Any] | None:
+    alert = _STATE.aml_alerts_store.pop(alert_id, None)
+    return deepcopy(alert) if alert is not None else None
+
+
+
+def clear_aml_alerts() -> None:
+    _STATE.aml_alerts_store.clear()
+
+
+
+def list_aml_tapealerts() -> list[dict[str, Any]]:
+    return [deepcopy(item) for item in _STATE.aml_tapealerts]
+
+
+
+def set_aml_tapealerts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    _STATE.aml_tapealerts = [deepcopy(item) for item in items]
+    return list_aml_tapealerts()
+
+
+
+def clear_aml_tapealerts() -> None:
+    _STATE.aml_tapealerts.clear()
+
+
+
+def list_aml_notifications() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.aml_notifications.items())]
+
+
+
+def get_aml_notification(notification_id: str) -> dict[str, Any] | None:
+    notification = _STATE.aml_notifications.get(notification_id)
+    return deepcopy(notification) if notification is not None else None
+
+
+
+def set_aml_notification(notification_id: str, notification: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(notification)
+    stored["id"] = notification_id
+    _STATE.aml_notifications[notification_id] = stored
+    return deepcopy(stored)
+
+
+
+def update_aml_notification(notification_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    notification = _STATE.aml_notifications.get(notification_id)
+    if notification is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if key == "id":
+            continue
+        notification[key] = value
+    return deepcopy(notification)
+
+
+
+def pop_aml_notification(notification_id: str) -> dict[str, Any] | None:
+    notification = _STATE.aml_notifications.pop(notification_id, None)
+    return deepcopy(notification) if notification is not None else None
+
+
+
+def clear_aml_notifications() -> None:
+    _STATE.aml_notifications.clear()
+
+
+
+def get_aml_log_level() -> dict[str, Any]:
+    return deepcopy(_STATE.aml_log_level)
+
+
+
+def set_aml_log_level(payload: dict[str, Any]) -> dict[str, Any]:
+    _STATE.aml_log_level = deepcopy(payload)
+    return get_aml_log_level()
+
+
+
+def list_aml_event_subscriptions() -> list[dict[str, Any]]:
+    return [deepcopy(item) for item in _STATE.aml_event_subscriptions]
+
+
+
+def add_aml_event_subscription(subscription: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(subscription)
+    _STATE.aml_event_subscriptions.append(stored)
+    return deepcopy(stored)
+
+
+
+def clear_aml_event_subscriptions() -> None:
+    _STATE.aml_event_subscriptions.clear()

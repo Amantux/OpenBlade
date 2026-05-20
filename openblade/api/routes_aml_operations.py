@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from openblade.api import aml_state
@@ -15,9 +15,6 @@ from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
 
 router = APIRouter()
-
-_cleaning_status: dict[str, Any] = {"state": "idle", "startTime": None, "completedTime": None, "drives": []}
-_robotics_last_test_time: str | None = None
 
 
 class MoveOperation(BaseModel):
@@ -564,7 +561,7 @@ def _robotics_status() -> RoboticsStatus:
         state="busy" if any(str(robot.get("state", "")).lower() not in {"idle", "homed"} for robot in robot_items) else "ready",
         robotsOnline=sum(1 for robot in robot_items if str(robot.get("status", "")).lower() == "online"),
         robotsBusy=sum(1 for robot in robot_items if str(robot.get("state", "")).lower() not in {"idle", "homed"}),
-        lastTestTime=_robotics_last_test_time,
+        lastTestTime=aml_state.get_aml_robotics_last_test_time(),
     )
 
 
@@ -657,7 +654,7 @@ async def create_mount(
         raise HTTPException(status_code=409, detail="Media is already mounted")
     job = _create_job("mount")
     mount_time = job["startTime"]
-    aml_state.update_aml_drive(drive_name, {"loadedMedia": barcode, "state": "mounted"})
+    aml_state.update_aml_drive(drive_name, {"loadedMedia": {"barcode": barcode, "type": media.get("type", "LTO-9"), "state": "loaded"}, "state": "mounted"})
     aml_state.update_aml_media(
         barcode,
         {
@@ -681,6 +678,7 @@ async def create_mount(
         },
     )
     aml_state.update_aml_job(job["id"], {"status": "active", "progress": 50, "result": f"Mounted {barcode} on {drive_name}"})
+    _archive_job(job["id"], status="completed", result=f"Mounted {barcode} on {drive_name}")
     return _ws_result(f"Mounted {barcode} on {drive_name}")
 
 
@@ -731,6 +729,7 @@ async def get_mount(
 
 
 @router.post("/inventory", response_model=WSResultCode)
+@router.post("/operations/inventory", response_model=WSResultCode)
 async def trigger_inventory(
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
@@ -752,6 +751,7 @@ async def trigger_inventory(
 
 
 @router.get("/inventory/status", response_model=InventoryStatusResponse)
+@router.get("/operations/inventory/status", response_model=InventoryStatusResponse)
 async def get_inventory_status(
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
@@ -831,6 +831,7 @@ async def start_import(
 
 
 @router.get("/import/status", response_model=ImportStatusResponse)
+@router.get("/operations/import/status", response_model=ImportStatusResponse)
 async def get_import_status(
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
@@ -866,6 +867,7 @@ async def start_export(
 
 
 @router.get("/export/status", response_model=ExportStatusResponse)
+@router.get("/operations/export/status", response_model=ExportStatusResponse)
 async def get_export_status(
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
@@ -925,7 +927,7 @@ async def list_job_history(
     context: AppContext = Depends(get_context),
 ) -> JobListResponse:
     _ensure_state(context)
-    jobs = [item for item in aml_state.list_aml_job_history() if item.get("status") == "completed"]
+    jobs = [item for item in aml_state.list_aml_job_history() if item.get("status") in {"completed", "cancelled", "failed"}]
     return JobListResponse(jobList=JobListResource(job=[_serialize_job(item) for item in _sorted_jobs(jobs)]))
 
 
@@ -1031,9 +1033,39 @@ async def clean_drives(
             },
         )
     job = _create_job("clean")
-    global _cleaning_status
-    _cleaning_status = {"state": "running", "startTime": job["startTime"], "completedTime": None, "drives": drives}
+    aml_state.set_aml_cleaning_status({"state": "running", "startTime": job["startTime"], "completedTime": None, "drives": drives})
     aml_state.update_aml_job(job["id"], {"status": "active", "progress": 25, "result": f"Cleaning {len(drives)} drives"})
+    return _ws_result("Cleaning started")
+
+
+@router.post("/operations/cleaning", response_model=WSResultCode)
+async def clean_drives_compat(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> WSResultCode:
+    _ensure_state(context)
+    _require_admin(current_user)
+    raw_payload = payload.get("clean") if isinstance(payload.get("clean"), dict) else payload
+    drives = raw_payload.get("drives")
+    if not isinstance(drives, list):
+        raise HTTPException(status_code=422, detail="drives must be provided")
+    validated_drives = [_validate_identifier(drive, field_name="drive") for drive in drives]
+    if not validated_drives:
+        raise HTTPException(status_code=400, detail="At least one drive is required")
+    for drive_name in validated_drives:
+        drive = _get_drive_or_404(drive_name)
+        aml_state.update_aml_drive(
+            drive_name,
+            {
+                "state": "cleaning",
+                "cleaningCount": int(drive.get("cleaningCount", 0)) + 1,
+                "lastCleaned": _timestamp(),
+            },
+        )
+    job = _create_job("clean")
+    aml_state.set_aml_cleaning_status({"state": "running", "startTime": job["startTime"], "completedTime": None, "drives": validated_drives})
+    aml_state.update_aml_job(job["id"], {"status": "active", "progress": 25, "result": f"Cleaning {len(validated_drives)} drives"})
     return _ws_result("Cleaning started")
 
 
@@ -1043,7 +1075,7 @@ async def get_cleaning_status(
     context: AppContext = Depends(get_context),
 ) -> CleaningStatusResponse:
     _ensure_state(context)
-    return CleaningStatusResponse(cleaningStatus=CleaningStatus.model_validate(_cleaning_status))
+    return CleaningStatusResponse(cleaningStatus=CleaningStatus.model_validate(aml_state.get_aml_cleaning_status()))
 
 
 @router.post("/operations/robotics/home", response_model=WSResultCode)
@@ -1075,8 +1107,7 @@ async def test_robotics(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    global _robotics_last_test_time
-    _robotics_last_test_time = _timestamp()
+    aml_state.set_aml_robotics_last_test_time(_timestamp())
     for robot_id in aml_state.get_aml_robots():
         aml_state.update_aml_robot(robot_id, {"state": "testing"})
     _create_job("robotics-test")
