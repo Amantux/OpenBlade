@@ -52,6 +52,7 @@ export default function SystemNetwork() {
   const [interfaceEdits, setInterfaceEdits] = useState<Record<string, Pick<NetworkInterfaceResponse, 'ip' | 'mask' | 'gateway' | 'duplex'>>>({});
   const [dnsForm, setDnsForm] = useState<DnsConfigResponse>({ primary: '', secondary: '', search: [], domain: '' });
   const [ntpForm, setNtpForm] = useState<NtpConfigResponse>({ enabled: false, servers: [], status: 'unknown', lastSync: null });
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     if (interfacesQuery.data && !editMode) {
@@ -77,6 +78,15 @@ export default function SystemNetwork() {
       setNtpForm(ntpQuery.data);
     }
   }, [editMode, ntpQuery.data]);
+
+  useEffect(() => {
+    if (!saveSuccess) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => setSaveSuccess(false), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [saveSuccess]);
 
   const resetForms = () => {
     if (interfacesQuery.data) {
@@ -133,6 +143,7 @@ export default function SystemNetwork() {
     },
     onSuccess: async () => {
       setEditMode(false);
+      setSaveSuccess(true);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['system', 'network', 'interfaces'] }),
         queryClient.invalidateQueries({ queryKey: ['system', 'network', 'dns'] }),
@@ -171,6 +182,7 @@ export default function SystemNetwork() {
                   variant="ghost"
                   disabled={saveMutation.isPending}
                   onClick={() => {
+                    setSaveSuccess(false);
                     resetForms();
                     setEditMode(false);
                   }}
@@ -182,7 +194,19 @@ export default function SystemNetwork() {
                 </Button>
               </>
             ) : (
-              <Button type="button" variant="secondary" onClick={() => setEditMode(true)}>Edit Network</Button>
+              <>
+                {saveSuccess ? <span className="self-center text-sm font-medium text-emerald-300">Saved ✓</span> : null}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setSaveSuccess(false);
+                    setEditMode(true);
+                  }}
+                >
+                  Edit Network
+                </Button>
+              </>
             )}
           </div>
         </div>

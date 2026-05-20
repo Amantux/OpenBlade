@@ -67,6 +67,15 @@ export interface CertificateSummaryResponse {
   status: string;
 }
 
+export interface CertificateCreateRequest {
+  name: string;
+  pem: string;
+}
+
+interface WsResultResponse {
+  summary: string;
+}
+
 export interface SnmpConfigResponse {
   enabled: boolean;
   version: string;
@@ -319,22 +328,39 @@ export async function getSystemCertificates(): Promise<CertificateSummaryRespons
   return response.certList.cert;
 }
 
-export async function importCertificate(file: File): Promise<void> {
-  const baseName = file.name.replace(/\.[^.]+$/, '') || 'uploaded-certificate';
-  const expiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+export async function createSystemCertificate(payload: CertificateCreateRequest): Promise<string> {
+  const name = payload.name.trim();
+  const pem = payload.pem.trim();
 
-  await apiRequest('/aml/system/certificate/import', {
+  if (!name) {
+    throw new Error('Certificate name is required.');
+  }
+  if (!pem) {
+    throw new Error('PEM content is required.');
+  }
+
+  const expiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const response = await apiRequest<WsResultResponse>('/system/certificate/import', {
     method: 'POST',
     body: {
       cert: {
-        name: baseName,
-        subject: `CN=${baseName},O=OpenBlade Upload`,
+        name,
+        subject: `CN=${name},O=OpenBlade Upload`,
         expiry,
         status: 'valid',
         type: 'uploaded',
       },
     },
   });
+
+  return response.summary;
+}
+
+export async function deleteSystemCertificate(name: string): Promise<string> {
+  const response = await apiRequest<WsResultResponse>(`/system/certificate/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+  return response.summary;
 }
 
 export async function getSnmpConfig(): Promise<SnmpConfigResponse> {

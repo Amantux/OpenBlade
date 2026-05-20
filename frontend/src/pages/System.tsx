@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  createSystemCertificate,
+  deleteSystemCertificate,
   getBackupStatus,
-  getDnsConfig,
   getEmailConfig,
-  getNetworkInterfaces,
-  getNtpConfig,
   getSnmpConfig,
   getSnmpTraps,
   getSystemCertificates,
@@ -17,22 +16,15 @@ import {
   getSystemTime,
   getSystemUptime,
   getSystemVersion,
-  importCertificate,
-  syncNtp,
   testEmail,
   testSnmp,
-  updateDnsConfig,
   updateEmailConfig,
-  updateNetworkInterface,
-  updateNtpConfig,
   updateSnmpConfig,
   updateSystemConfig,
   updateSystemSecurity,
+  type CertificateCreateRequest,
   type CertificateSummaryResponse,
-  type DnsConfigResponse,
   type EmailConfigResponse,
-  type NetworkInterfaceResponse,
-  type NtpConfigResponse,
   type SecurityConfigResponse,
   type SnmpConfigResponse,
   type SnmpTrapResponse,
@@ -43,14 +35,19 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
+import SystemDiagnostics from './SystemDiagnostics';
+import SystemFirmware from './SystemFirmware';
+import SystemNetwork from './SystemNetwork';
 import { formatBytes, formatDate, formatDuration } from '../lib/utils';
 
 const tabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'network', label: 'Network' },
-  { id: 'security', label: 'Security' },
+  { id: 'firmware', label: 'Firmware' },
+  { id: 'diagnostics', label: 'Diagnostics' },
   { id: 'certificates', label: 'Certificates' },
   { id: 'snmp', label: 'SNMP' },
+  { id: 'security', label: 'Security' },
   { id: 'email', label: 'Email' },
 ] as const;
 
@@ -315,171 +312,6 @@ function OverviewTab() {
   );
 }
 
-function NetworkTab() {
-  const queryClient = useQueryClient();
-  const interfacesQuery = useQuery({ queryKey: ['system', 'network', 'interfaces'], queryFn: getNetworkInterfaces });
-  const dnsQuery = useQuery({ queryKey: ['system', 'network', 'dns'], queryFn: getDnsConfig });
-  const ntpQuery = useQuery({ queryKey: ['system', 'network', 'ntp'], queryFn: getNtpConfig });
-  const [interfaceEdits, setInterfaceEdits] = useState<Record<string, Partial<NetworkInterfaceResponse>>>({});
-  const [dnsForm, setDnsForm] = useState<DnsConfigResponse>({ primary: '', secondary: '', search: [], domain: '' });
-  const [ntpForm, setNtpForm] = useState<NtpConfigResponse>({ enabled: false, servers: [], status: 'unknown', lastSync: null });
-
-  useEffect(() => {
-    if (interfacesQuery.data) {
-      setInterfaceEdits(
-        Object.fromEntries(
-          interfacesQuery.data.map((item) => [
-            item.name,
-            { ip: item.ip, mask: item.mask, gateway: item.gateway, duplex: item.duplex },
-          ]),
-        ),
-      );
-    }
-  }, [interfacesQuery.data]);
-
-  useEffect(() => {
-    if (dnsQuery.data) {
-      setDnsForm(dnsQuery.data);
-    }
-  }, [dnsQuery.data]);
-
-  useEffect(() => {
-    if (ntpQuery.data) {
-      setNtpForm(ntpQuery.data);
-    }
-  }, [ntpQuery.data]);
-
-  const interfaceMutation = useMutation({
-    mutationFn: ({ name, payload }: { name: string; payload: Partial<NetworkInterfaceResponse> }) => updateNetworkInterface(name, payload),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['system', 'network', 'interfaces'] });
-    },
-  });
-  const dnsMutation = useMutation({
-    mutationFn: () => updateDnsConfig({ ...dnsForm, search: dnsForm.search.filter(Boolean) }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['system', 'network', 'dns'] });
-    },
-  });
-  const ntpMutation = useMutation({
-    mutationFn: () => updateNtpConfig({ ...ntpForm, servers: ntpForm.servers.filter(Boolean) }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['system', 'network', 'ntp'] });
-    },
-  });
-  const syncMutation = useMutation({
-    mutationFn: syncNtp,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['system', 'network', 'ntp'] });
-    },
-  });
-
-  if ([interfacesQuery, dnsQuery, ntpQuery].some((query) => query.isLoading)) {
-    return <Spinner />;
-  }
-
-  const errorQuery = [interfacesQuery, dnsQuery, ntpQuery].find((query) => query.isError);
-  if (errorQuery) {
-    return <ErrorMessage error={errorQuery.error} onRetry={() => void errorQuery.refetch()} />;
-  }
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Interfaces</div>
-            <h2 className="mt-1 text-lg font-semibold text-slate-100">Network interface table</h2>
-          </div>
-        </div>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full divide-y divide-quantum-border text-sm">
-            <thead className="text-left text-xs uppercase tracking-[0.16em] text-slate-500">
-              <tr>
-                <th className="px-3 py-3">Name</th>
-                <th className="px-3 py-3">IP</th>
-                <th className="px-3 py-3">Mask</th>
-                <th className="px-3 py-3">Gateway</th>
-                <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-quantum-border/80">
-              {interfacesQuery.data!.map((item) => (
-                <tr key={item.name} className="text-slate-200">
-                  <td className="px-3 py-3 align-top">
-                    <div className="font-medium text-slate-100">{item.name}</div>
-                    <div className="text-xs text-slate-500">{item.type} · {item.speed}</div>
-                  </td>
-                  <td className="px-3 py-3 align-top">
-                    <input className={fieldClassName} value={interfaceEdits[item.name]?.ip ?? ''} onChange={(event) => setInterfaceEdits((current) => ({ ...current, [item.name]: { ...current[item.name], ip: event.target.value } }))} />
-                  </td>
-                  <td className="px-3 py-3 align-top">
-                    <input className={fieldClassName} value={interfaceEdits[item.name]?.mask ?? ''} onChange={(event) => setInterfaceEdits((current) => ({ ...current, [item.name]: { ...current[item.name], mask: event.target.value } }))} />
-                  </td>
-                  <td className="px-3 py-3 align-top">
-                    <input className={fieldClassName} value={interfaceEdits[item.name]?.gateway ?? ''} onChange={(event) => setInterfaceEdits((current) => ({ ...current, [item.name]: { ...current[item.name], gateway: event.target.value } }))} />
-                  </td>
-                  <td className="px-3 py-3 align-top">
-                    <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
-                  </td>
-                  <td className="px-3 py-3 align-top">
-                    <Button
-                      variant="secondary"
-                      disabled={interfaceMutation.isPending}
-                      onClick={() => interfaceMutation.mutate({ name: item.name, payload: interfaceEdits[item.name] ?? {} })}
-                    >
-                      Save
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {interfaceMutation.isError ? <ErrorMessage error={interfaceMutation.error} /> : null}
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">DNS Servers</div>
-          <div className="mt-4 space-y-4">
-            <Field label="Primary DNS"><input className={fieldClassName} value={dnsForm.primary} onChange={(event) => setDnsForm((current) => ({ ...current, primary: event.target.value }))} /></Field>
-            <Field label="Secondary DNS"><input className={fieldClassName} value={dnsForm.secondary} onChange={(event) => setDnsForm((current) => ({ ...current, secondary: event.target.value }))} /></Field>
-            <Field label="Search Domains" helpText="Comma-separated domains.">
-              <input className={fieldClassName} value={dnsForm.search.join(', ')} onChange={(event) => setDnsForm((current) => ({ ...current, search: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} />
-            </Field>
-            <Field label="Domain"><input className={fieldClassName} value={dnsForm.domain} onChange={(event) => setDnsForm((current) => ({ ...current, domain: event.target.value }))} /></Field>
-            <div className="flex justify-end"><Button disabled={dnsMutation.isPending} onClick={() => dnsMutation.mutate()}>{dnsMutation.isPending ? 'Saving…' : 'Save DNS'}</Button></div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">NTP Servers</div>
-          <div className="mt-4 space-y-4">
-            <ToggleField label="Enable NTP" checked={ntpForm.enabled} onChange={(checked) => setNtpForm((current) => ({ ...current, enabled: checked }))} description={`Current sync status: ${ntpForm.status}`} />
-            <Field label="NTP Servers" helpText="Comma-separated servers.">
-              <input className={fieldClassName} value={ntpForm.servers.join(', ')} onChange={(event) => setNtpForm((current) => ({ ...current, servers: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} />
-            </Field>
-            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-sm text-slate-300">
-              Last sync: <span className="font-medium text-slate-100">{ntpForm.lastSync ? formatDate(ntpForm.lastSync) : 'Never'}</span>
-            </div>
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="secondary" disabled={syncMutation.isPending} onClick={() => syncMutation.mutate()}>{syncMutation.isPending ? 'Syncing…' : 'Sync now'}</Button>
-              <Button disabled={ntpMutation.isPending} onClick={() => ntpMutation.mutate()}>{ntpMutation.isPending ? 'Saving…' : 'Save NTP'}</Button>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {dnsMutation.isError ? <ErrorMessage error={dnsMutation.error} /> : null}
-      {ntpMutation.isError ? <ErrorMessage error={ntpMutation.error} /> : null}
-      {syncMutation.isError ? <ErrorMessage error={syncMutation.error} /> : null}
-    </div>
-  );
-}
-
 function SecurityTab() {
   const queryClient = useQueryClient();
   const securityQuery = useQuery({ queryKey: ['system', 'security'], queryFn: getSystemSecurity });
@@ -543,8 +375,37 @@ function CertificatesTab() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const certificatesQuery = useQuery({ queryKey: ['system', 'certificates'], queryFn: getSystemCertificates });
-  const uploadMutation = useMutation({
-    mutationFn: (file: File) => importCertificate(file),
+  const [form, setForm] = useState<CertificateCreateRequest>({ name: '', pem: '' });
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const resetForm = () => {
+    setForm({ name: '', pem: '' });
+    setFeedback(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: (payload: CertificateCreateRequest) => createSystemCertificate(payload),
+    onSuccess: async (summary) => {
+      setFeedback({ type: 'success', message: summary });
+      setForm({ name: '', pem: '' });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      await queryClient.invalidateQueries({ queryKey: ['system', 'certificates'] });
+    },
+    onError: (error: unknown) => {
+      setFeedback({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Unable to save certificate.',
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (name: string) => deleteSystemCertificate(name),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['system', 'certificates'] });
     },
@@ -567,22 +428,6 @@ function CertificatesTab() {
             <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Certificates</div>
             <h2 className="mt-1 text-lg font-semibold text-slate-100">Installed certificates</h2>
           </div>
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".crt,.cer,.pem,.der,.p12,.pfx"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) {
-                  uploadMutation.mutate(file);
-                }
-                event.target.value = '';
-              }}
-            />
-            <Button disabled={uploadMutation.isPending} onClick={() => fileInputRef.current?.click()}>{uploadMutation.isPending ? 'Uploading…' : 'Upload Certificate'}</Button>
-          </>
         </div>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full divide-y divide-quantum-border text-sm">
@@ -592,22 +437,120 @@ function CertificatesTab() {
                 <th className="px-3 py-3">Subject</th>
                 <th className="px-3 py-3">Expiry</th>
                 <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-quantum-border/80">
-              {certificates.map((certificate: CertificateSummaryResponse) => (
-                <tr key={certificate.name} className="text-slate-200">
-                  <td className="px-3 py-3 font-medium text-slate-100">{certificate.name}</td>
-                  <td className="px-3 py-3">{certificate.subject}</td>
-                  <td className="px-3 py-3">{certificate.expiry ? formatDate(certificate.expiry) : '—'}</td>
-                  <td className="px-3 py-3"><Badge variant={statusVariant(certificate.status)}>{certificate.status}</Badge></td>
+              {certificates.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-3 py-8 text-center text-slate-400">No certificates are currently installed.</td>
                 </tr>
-              ))}
+              ) : (
+                certificates.map((certificate: CertificateSummaryResponse) => (
+                  <tr key={certificate.name} className="text-slate-200">
+                    <td className="px-3 py-3 font-medium text-slate-100">{certificate.name}</td>
+                    <td className="px-3 py-3">{certificate.subject}</td>
+                    <td className="px-3 py-3">{certificate.expiry ? formatDate(certificate.expiry) : '—'}</td>
+                    <td className="px-3 py-3"><Badge variant={statusVariant(certificate.status)}>{certificate.status}</Badge></td>
+                    <td className="px-3 py-3">
+                      <Button
+                        type="button"
+                        variant="danger"
+                        disabled={deleteMutation.isPending}
+                        onClick={() => deleteMutation.mutate(certificate.name)}
+                      >
+                        {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </Card>
-      {uploadMutation.isError ? <ErrorMessage error={uploadMutation.error} /> : null}
+
+      <Card>
+        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Add Certificate</div>
+        <div className="mt-4 space-y-4">
+          <Field label="Name">
+            <input
+              className={fieldClassName}
+              value={form.name}
+              onChange={(event) => {
+                setFeedback(null);
+                setForm((current) => ({ ...current, name: event.target.value }));
+              }}
+              placeholder="appliance-cert"
+            />
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pem,.crt,.cer"
+              className="hidden"
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) {
+                  return;
+                }
+                const pem = await file.text();
+                setFeedback(null);
+                setForm((current) => ({
+                  name: current.name || file.name.replace(/\.[^.]+$/, '') || 'uploaded-certificate',
+                  pem,
+                }));
+              }}
+            />
+            <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+              Choose PEM File
+            </Button>
+            <span className="self-center text-sm text-slate-500">Or paste PEM content below.</span>
+          </div>
+          <Field label="PEM Content">
+            <textarea
+              className={`${fieldClassName} min-h-40`}
+              value={form.pem}
+              onChange={(event) => {
+                setFeedback(null);
+                setForm((current) => ({ ...current, pem: event.target.value }));
+              }}
+              placeholder="-----BEGIN CERTIFICATE-----"
+            />
+          </Field>
+          {feedback ? (
+            <div className={`rounded-md border px-4 py-3 text-sm ${feedback.type === 'success' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-red-500/30 bg-red-950/20 text-red-200'}`}>
+              {feedback.message}
+            </div>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="ghost" disabled={saveMutation.isPending} onClick={resetForm}>Cancel</Button>
+            <Button
+              type="button"
+              disabled={saveMutation.isPending}
+              onClick={() => {
+                const name = form.name.trim();
+                const pem = form.pem.trim();
+                if (!name) {
+                  setFeedback({ type: 'error', message: 'Certificate name is required.' });
+                  return;
+                }
+                if (!pem) {
+                  setFeedback({ type: 'error', message: 'PEM content is required.' });
+                  return;
+                }
+                setFeedback(null);
+                saveMutation.mutate({ name, pem });
+              }}
+            >
+              {saveMutation.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {deleteMutation.isError ? <ErrorMessage error={deleteMutation.error} /> : null}
     </div>
   );
 }
@@ -757,7 +700,11 @@ export default function System() {
       case 'overview':
         return <OverviewTab />;
       case 'network':
-        return <NetworkTab />;
+        return <SystemNetwork />;
+      case 'firmware':
+        return <SystemFirmware />;
+      case 'diagnostics':
+        return <SystemDiagnostics />;
       case 'security':
         return <SecurityTab />;
       case 'certificates':
@@ -776,7 +723,7 @@ export default function System() {
       <Card className="bg-quantum-north">
         <div className="text-xs uppercase tracking-[0.26em] text-slate-500">System</div>
         <h1 className="mt-1 text-2xl font-semibold text-slate-100">System Configuration</h1>
-        <p className="mt-2 text-sm text-slate-400">Tabbed controls for overview, network, security, certificates, SNMP, and email services.</p>
+        <p className="mt-2 text-sm text-slate-400">Tabbed controls for overview, network, firmware, diagnostics, certificates, SNMP, security, and email services.</p>
         <div className="mt-4 flex flex-wrap gap-2">
           {tabs.map((tab) => (
             <button
