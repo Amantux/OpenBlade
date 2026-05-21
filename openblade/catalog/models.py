@@ -136,6 +136,67 @@ class AmlUser(Base):
     )
 
 
+class RbacRole(Base):
+    __tablename__ = "rbac_roles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    permissions: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    updated_at: Mapped[str] = mapped_column(
+        Text, default=lambda: datetime.utcnow().isoformat()
+    )
+
+
+class RbacUser(Base):
+    __tablename__ = "rbac_users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    username: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
+    role_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String, default="")
+    full_name: Mapped[str] = mapped_column(String, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    api_token_ids: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    updated_at: Mapped[str] = mapped_column(
+        Text, default=lambda: datetime.utcnow().isoformat()
+    )
+    last_login_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class RbacApiToken(Base):
+    __tablename__ = "rbac_api_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    permissions: Mapped[str] = mapped_column(Text, default="[]")
+    expires_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    last_used_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class RbacAuditEvent(Base):
+    __tablename__ = "rbac_audit_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    username: Mapped[str] = mapped_column(String, default="")
+    resource: Mapped[str] = mapped_column(String, default="")
+    action: Mapped[str] = mapped_column(String, default="")
+    outcome: Mapped[str] = mapped_column(String, default="")
+    details: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat(), index=True)
+    ip_address: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class NasStoragePolicy(Base):
     __tablename__ = "nas_storage_policies"
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from uuid import uuid4
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
@@ -27,6 +28,10 @@ from openblade.catalog.models import (
     NasShare,
     NasStoragePolicy,
     PathMapping,
+    RbacApiToken,
+    RbacAuditEvent,
+    RbacRole,
+    RbacUser,
     SafetyTokenRecord,
     VolumeGroup,
 )
@@ -40,6 +45,11 @@ from openblade.nas.types import (
     NasShareDefinition,
     PathMappingRecord,
     PathMappingSearchRequest,
+    RbacApiTokenRecord,
+    RbacAuditEventRecord,
+    RbacPermission,
+    RbacRoleRecord,
+    RbacUserRecord,
     RestoreJobStatus,
     StoragePolicy,
 )
@@ -238,6 +248,59 @@ class CatalogRepository:
             "file_count": row.file_count,
             "is_current": row.is_current,
             "recorded_at": row.recorded_at,
+        }
+
+    def _rbac_role_to_dict(self, row: RbacRole) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "name": row.name,
+            "description": row.description,
+            "permissions": _load_json_value(row.permissions, []),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+    def _rbac_user_to_dict(self, row: RbacUser) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "username": row.username,
+            "hashed_password": row.hashed_password,
+            "role_id": row.role_id,
+            "email": row.email,
+            "full_name": row.full_name,
+            "is_active": row.is_active,
+            "is_admin": row.is_admin,
+            "api_token_ids": _load_json_value(row.api_token_ids, []),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "last_login_at": row.last_login_at,
+        }
+
+    def _rbac_api_token_to_dict(self, row: RbacApiToken) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "user_id": row.user_id,
+            "name": row.name,
+            "token_hash": row.token_hash,
+            "permissions": _load_json_value(row.permissions, []),
+            "expires_at": row.expires_at,
+            "created_at": row.created_at,
+            "last_used_at": row.last_used_at,
+            "revoked": row.revoked,
+        }
+
+    def _rbac_audit_event_to_dict(self, row: RbacAuditEvent) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "event_type": row.event_type,
+            "user_id": row.user_id,
+            "username": row.username,
+            "resource": row.resource,
+            "action": row.action,
+            "outcome": row.outcome,
+            "details": _load_json_value(row.details, {}),
+            "created_at": row.created_at,
+            "ip_address": row.ip_address,
         }
 
     def __getattribute__(self, name: str):
@@ -1100,6 +1163,348 @@ class CatalogRepository:
         if dataset_id:
             stmt = stmt.where(PathMapping.dataset_id == dataset_id)
         return int(self.session.execute(stmt).scalar_one())
+
+    def create_role(self, role: dict[str, object]) -> dict[str, object]:
+        """Create or replace an RBAC role record."""
+        now = _utcnow_iso()
+        parsed = RbacRoleRecord.model_validate(
+            {
+                "id": str(uuid4()),
+                "description": "",
+                "permissions": [],
+                "created_at": now,
+                "updated_at": now,
+                **role,
+            }
+        )
+        row = self.session.get(RbacRole, parsed.id)
+        if row is None:
+            row = RbacRole(id=parsed.id, created_at=parsed.created_at)
+            self.session.add(row)
+        payload = parsed.model_dump(mode="json")
+        row.name = parsed.name
+        row.description = parsed.description
+        row.permissions = json.dumps(payload["permissions"])
+        row.created_at = row.created_at or parsed.created_at
+        row.updated_at = parsed.updated_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._rbac_role_to_dict(row)
+
+    def get_role(self, role_id: str) -> dict[str, object] | None:
+        """Return an RBAC role by id."""
+        row = self.session.get(RbacRole, role_id)
+        if row is None:
+            return None
+        return self._rbac_role_to_dict(row)
+
+    def get_role_by_name(self, name: str) -> dict[str, object] | None:
+        """Return an RBAC role by unique name."""
+        stmt = select(RbacRole).where(RbacRole.name == name)
+        row = self.session.execute(stmt).scalar_one_or_none()
+        if row is None:
+            return None
+        return self._rbac_role_to_dict(row)
+
+    def list_roles(self) -> list[dict[str, object]]:
+        """List all RBAC roles sorted by name."""
+        stmt = select(RbacRole).order_by(RbacRole.name)
+        return [self._rbac_role_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def update_role(self, role_id: str, updates: dict[str, object]) -> dict[str, object] | None:
+        """Update an RBAC role and return the persisted record."""
+        existing = self.get_role(role_id)
+        if existing is None:
+            return None
+        parsed = RbacRoleRecord.model_validate(
+            {
+                **existing,
+                **updates,
+                "id": role_id,
+                "updated_at": updates.get("updated_at", _utcnow_iso()),
+            }
+        )
+        row = self.session.get(RbacRole, role_id)
+        assert row is not None
+        payload = parsed.model_dump(mode="json")
+        row.name = parsed.name
+        row.description = parsed.description
+        row.permissions = json.dumps(payload["permissions"])
+        row.created_at = parsed.created_at
+        row.updated_at = parsed.updated_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._rbac_role_to_dict(row)
+
+    def delete_role(self, role_id: str) -> bool:
+        """Delete an RBAC role by id."""
+        row = self.session.get(RbacRole, role_id)
+        if row is None:
+            return False
+        self.session.delete(row)
+        self.session.commit()
+        return True
+
+    def create_user(self, user: dict[str, object]) -> dict[str, object]:
+        """Create or replace an RBAC user record."""
+        now = _utcnow_iso()
+        parsed = RbacUserRecord.model_validate(
+            {
+                "id": str(uuid4()),
+                "email": "",
+                "full_name": "",
+                "is_active": True,
+                "is_admin": False,
+                "api_token_ids": [],
+                "created_at": now,
+                "updated_at": now,
+                "last_login_at": None,
+                **user,
+            }
+        )
+        row = self.session.get(RbacUser, parsed.id)
+        if row is None:
+            row = RbacUser(id=parsed.id, created_at=parsed.created_at)
+            self.session.add(row)
+        payload = parsed.model_dump(mode="json")
+        row.username = parsed.username
+        row.hashed_password = parsed.hashed_password
+        row.role_id = parsed.role_id
+        row.email = parsed.email
+        row.full_name = parsed.full_name
+        row.is_active = parsed.is_active
+        row.is_admin = parsed.is_admin
+        row.api_token_ids = json.dumps(payload["api_token_ids"])
+        row.created_at = row.created_at or parsed.created_at
+        row.updated_at = parsed.updated_at
+        row.last_login_at = parsed.last_login_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._rbac_user_to_dict(row)
+
+    def get_user(self, user_id: str) -> dict[str, object] | None:
+        """Return an RBAC user by id."""
+        row = self.session.get(RbacUser, user_id)
+        if row is None:
+            return None
+        return self._rbac_user_to_dict(row)
+
+    def get_user_by_username(self, username: str) -> dict[str, object] | None:
+        """Return an RBAC user by unique username."""
+        stmt = select(RbacUser).where(RbacUser.username == username)
+        row = self.session.execute(stmt).scalar_one_or_none()
+        if row is None:
+            return None
+        return self._rbac_user_to_dict(row)
+
+    def list_users(self, active_only: bool = False) -> list[dict[str, object]]:
+        """List RBAC users, optionally restricted to active accounts."""
+        stmt = select(RbacUser).order_by(RbacUser.username)
+        if active_only:
+            stmt = stmt.where(RbacUser.is_active.is_(True))
+        return [self._rbac_user_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def update_user(self, user_id: str, updates: dict[str, object]) -> dict[str, object] | None:
+        """Update an RBAC user and return the persisted record."""
+        existing = self.get_user(user_id)
+        if existing is None:
+            return None
+        parsed = RbacUserRecord.model_validate(
+            {
+                **existing,
+                **updates,
+                "id": user_id,
+                "updated_at": updates.get("updated_at", _utcnow_iso()),
+            }
+        )
+        row = self.session.get(RbacUser, user_id)
+        assert row is not None
+        payload = parsed.model_dump(mode="json")
+        row.username = parsed.username
+        row.hashed_password = parsed.hashed_password
+        row.role_id = parsed.role_id
+        row.email = parsed.email
+        row.full_name = parsed.full_name
+        row.is_active = parsed.is_active
+        row.is_admin = parsed.is_admin
+        row.api_token_ids = json.dumps(payload["api_token_ids"])
+        row.created_at = parsed.created_at
+        row.updated_at = parsed.updated_at
+        row.last_login_at = parsed.last_login_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._rbac_user_to_dict(row)
+
+    def deactivate_user(self, user_id: str) -> bool:
+        """Mark an RBAC user inactive."""
+        row = self.session.get(RbacUser, user_id)
+        if row is None:
+            return False
+        row.is_active = False
+        row.updated_at = _utcnow_iso()
+        self.session.commit()
+        return True
+
+    def create_api_token(self, token: dict[str, object]) -> dict[str, object]:
+        """Create or replace an RBAC API token record."""
+        now = _utcnow_iso()
+        parsed = RbacApiTokenRecord.model_validate(
+            {
+                "id": str(uuid4()),
+                "expires_at": None,
+                "created_at": now,
+                "last_used_at": None,
+                "revoked": False,
+                **token,
+            }
+        )
+        row = self.session.get(RbacApiToken, parsed.id)
+        if row is None:
+            row = RbacApiToken(id=parsed.id, created_at=parsed.created_at)
+            self.session.add(row)
+        payload = parsed.model_dump(mode="json")
+        row.user_id = parsed.user_id
+        row.name = parsed.name
+        row.token_hash = parsed.token_hash
+        row.permissions = json.dumps(payload["permissions"])
+        row.expires_at = parsed.expires_at
+        row.created_at = row.created_at or parsed.created_at
+        row.last_used_at = parsed.last_used_at
+        row.revoked = parsed.revoked
+        self.session.commit()
+        self.session.refresh(row)
+        return self._rbac_api_token_to_dict(row)
+
+    def get_api_token(self, token_id: str) -> dict[str, object] | None:
+        """Return an RBAC API token by id."""
+        row = self.session.get(RbacApiToken, token_id)
+        if row is None:
+            return None
+        return self._rbac_api_token_to_dict(row)
+
+    def get_api_token_by_hash(self, token_hash: str) -> dict[str, object] | None:
+        """Return an RBAC API token by stored SHA-256 hash."""
+        stmt = select(RbacApiToken).where(RbacApiToken.token_hash == token_hash)
+        row = self.session.execute(stmt).scalar_one_or_none()
+        if row is None:
+            return None
+        return self._rbac_api_token_to_dict(row)
+
+    def list_api_tokens(self, user_id: str) -> list[dict[str, object]]:
+        """List API tokens belonging to a single user."""
+        stmt = (
+            select(RbacApiToken)
+            .where(RbacApiToken.user_id == user_id)
+            .order_by(RbacApiToken.created_at.desc(), RbacApiToken.name)
+        )
+        return [self._rbac_api_token_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def revoke_api_token(self, token_id: str) -> bool:
+        """Mark an API token as revoked."""
+        row = self.session.get(RbacApiToken, token_id)
+        if row is None:
+            return False
+        row.revoked = True
+        self.session.commit()
+        return True
+
+    def update_token_last_used(self, token_id: str, ts: str) -> None:
+        """Persist the last-used timestamp for an API token if it exists."""
+        row = self.session.get(RbacApiToken, token_id)
+        if row is None:
+            return
+        row.last_used_at = ts
+        self.session.commit()
+
+    def create_audit_event(self, event: dict[str, object]) -> dict[str, object]:
+        """Create an RBAC audit event record."""
+        now = _utcnow_iso()
+        parsed = RbacAuditEventRecord.model_validate(
+            {
+                "id": str(uuid4()),
+                "user_id": None,
+                "username": "",
+                "resource": "",
+                "action": "",
+                "outcome": "",
+                "details": {},
+                "created_at": now,
+                "ip_address": None,
+                **event,
+            }
+        )
+        row = self.session.get(RbacAuditEvent, parsed.id)
+        if row is None:
+            row = RbacAuditEvent(id=parsed.id, created_at=parsed.created_at)
+            self.session.add(row)
+        row.event_type = parsed.event_type
+        row.user_id = parsed.user_id
+        row.username = parsed.username
+        row.resource = parsed.resource
+        row.action = parsed.action
+        row.outcome = parsed.outcome
+        row.details = json.dumps(parsed.model_dump(mode="json")["details"])
+        row.created_at = row.created_at or parsed.created_at
+        row.ip_address = parsed.ip_address
+        self.session.commit()
+        self.session.refresh(row)
+        return self._rbac_audit_event_to_dict(row)
+
+    def list_audit_events(
+        self,
+        limit: int = 100,
+        user_id: str | None = None,
+        event_type: str | None = None,
+    ) -> list[dict[str, object]]:
+        """List audit events with optional user and event-type filters."""
+        stmt = select(RbacAuditEvent)
+        if user_id is not None:
+            stmt = stmt.where(RbacAuditEvent.user_id == user_id)
+        if event_type is not None:
+            stmt = stmt.where(RbacAuditEvent.event_type == event_type)
+        stmt = stmt.order_by(RbacAuditEvent.created_at.desc()).limit(limit)
+        return [self._rbac_audit_event_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def seed_default_roles(self) -> None:
+        """Create built-in roles if they don't exist: admin, operator, readonly."""
+        all_permissions = [permission.value for permission in RbacPermission]
+        defaults = [
+            {
+                "id": "admin",
+                "name": "admin",
+                "description": "Built-in administrator role",
+                "permissions": all_permissions,
+            },
+            {
+                "id": "operator",
+                "name": "operator",
+                "description": "Built-in operator role",
+                "permissions": [
+                    RbacPermission.TAPE_READ.value,
+                    RbacPermission.TAPE_WRITE.value,
+                    RbacPermission.TAPE_EJECT.value,
+                    RbacPermission.NAS_READ.value,
+                    RbacPermission.NAS_WRITE.value,
+                    RbacPermission.CATALOG_READ.value,
+                    RbacPermission.CATALOG_REBUILD.value,
+                    RbacPermission.TOKEN_MANAGE.value,
+                ],
+            },
+            {
+                "id": "readonly",
+                "name": "readonly",
+                "description": "Built-in read-only role",
+                "permissions": [
+                    RbacPermission.TAPE_READ.value,
+                    RbacPermission.NAS_READ.value,
+                    RbacPermission.CATALOG_READ.value,
+                    RbacPermission.AUDIT_READ.value,
+                ],
+            },
+        ]
+        for role in defaults:
+            if self.get_role_by_name(str(role["name"])) is None:
+                self.create_role(role)
 
     def save_safety_token(self, token: SafetyToken) -> None:
         row = SafetyTokenRecord(

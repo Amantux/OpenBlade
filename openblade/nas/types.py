@@ -76,6 +76,108 @@ class PoolAccessMode(str, Enum):
     READ_WRITE = "read_write"
 
 
+class RbacPermission(str, Enum):
+    TAPE_READ = "tape:read"
+    TAPE_WRITE = "tape:write"
+    TAPE_FORMAT = "tape:format"
+    TAPE_EJECT = "tape:eject"
+    NAS_READ = "nas:read"
+    NAS_WRITE = "nas:write"
+    NAS_ADMIN = "nas:admin"
+    CATALOG_READ = "catalog:read"
+    CATALOG_REBUILD = "catalog:rebuild"
+    USER_ADMIN = "user:admin"
+    TOKEN_MANAGE = "token:manage"
+    AUDIT_READ = "audit:read"
+    SYSTEM_ADMIN = "system:admin"
+
+
+class RbacRoleRecord(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    permissions: list[RbacPermission]
+    created_at: str
+    updated_at: str
+
+
+class RbacUserRecord(BaseModel):
+    id: str
+    username: str
+    hashed_password: str
+    role_id: str
+    email: str = ""
+    full_name: str = ""
+    is_active: bool = True
+    is_admin: bool = False
+    api_token_ids: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    last_login_at: str | None = None
+
+
+class RbacApiTokenRecord(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    token_hash: str
+    permissions: list[RbacPermission]
+    expires_at: str | None = None
+    created_at: str
+    last_used_at: str | None = None
+    revoked: bool = False
+
+
+class RbacAuditEventRecord(BaseModel):
+    id: str
+    event_type: str
+    user_id: str | None = None
+    username: str = ""
+    resource: str = ""
+    action: str = ""
+    outcome: str = ""
+    details: dict = Field(default_factory=dict)
+    created_at: str
+    ip_address: str | None = None
+
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role_id: str
+    email: str = ""
+    full_name: str = ""
+    is_admin: bool = False
+
+
+class CreateTokenRequest(BaseModel):
+    name: str
+    permissions: list[RbacPermission]
+    expires_at: str | None = None
+
+
+class CreateTokenResult(BaseModel):
+    token_id: str
+    raw_token: str
+    token_record: RbacApiTokenRecord
+
+
+class UserSummary(BaseModel):
+    """Safe public view of a user — no hashed_password."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    username: str
+    role_id: str
+    email: str
+    full_name: str
+    is_active: bool
+    is_admin: bool
+    created_at: str
+    last_login_at: str | None = None
+
+
 class StoragePolicy(BaseModel):
     id: str
     name: str = Field(max_length=64)
