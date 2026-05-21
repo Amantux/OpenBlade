@@ -578,6 +578,58 @@ class NasFileRecord(BaseModel):
     updated_at: str | None = None
 
 
+class VirtualFileStatus(str, Enum):
+    ONLINE_CACHED = "online_cached"
+    OFFLINE_ON_TAPE = "offline_on_tape"
+    HYDRATING = "hydrating"
+    MISSING_TAPE = "missing_tape"
+    FAILED = "failed"
+    CORRUPT = "corrupt"
+    EXPORTED = "exported"
+
+
+class VirtualFileEntry(BaseModel):
+    path: str
+    name: str
+    size_bytes: int
+    mtime: str
+    checksum_sha256: str = ""
+    tape_barcode: str = ""
+    status: VirtualFileStatus
+    is_directory: bool = False
+    pool: str = ""
+    dataset_id: str = ""
+
+
+class VirtualDirectoryListing(BaseModel):
+    path: str
+    entries: list[VirtualFileEntry]
+    total_entries: int
+
+
+class HydrationRequest(BaseModel):
+    paths: list[str]
+    pool: str = ""
+    destination: str = "/openblade/restore"
+    priority: int = Field(default=5, ge=1, le=10)
+    allow_parallel: bool = True
+
+
+class HydrationJob(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    paths: list[str]
+    destination: str
+    required_tapes: list[str]
+    missing_tapes: list[str]
+    total_files: int
+    completed_files: int
+    failed_files: int
+    created_at: str
+    updated_at: str
+    error: str = ""
+
+
 class RebuildRunStatus(str, Enum):
     PLANNED = "planned"
     RUNNING = "running"

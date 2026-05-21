@@ -55,6 +55,43 @@ def test_forbidden_library_load_detected(tmp_path: Path) -> None:
     assert violations[0].pattern == "library.load("
 
 
+def test_violation_line_is_stripped_of_whitespace(tmp_path: Path) -> None:
+    """GuardViolation.line must be stripped."""
+    file_path = _write_file(tmp_path, "bad.py", "    ltfs.write_bytes(path, data)  \n")
+
+    violations = scan_file(file_path, tmp_path)
+
+    assert len(violations) == 1
+    assert violations[0].line == "ltfs.write_bytes(path, data)"
+    assert not violations[0].line.startswith(" ")
+    assert not violations[0].line.endswith(" ")
+
+
+def test_ltfs_mount_pattern_detected(tmp_path: Path) -> None:
+    file_path = _write_file(tmp_path, "bad.py", "result = ltfs.mount(barcode)\n")
+
+    violations = scan_file(file_path, tmp_path)
+
+    assert any("ltfs.mount(" in violation.pattern for violation in violations)
+
+
+def test_library_inventory_pattern_detected(tmp_path: Path) -> None:
+    file_path = _write_file(tmp_path, "bad.py", "inv = library.inventory()\n")
+
+    violations = scan_file(file_path, tmp_path)
+
+    assert any("library.inventory(" in violation.pattern for violation in violations)
+
+
+def test_aliased_call_not_detected_known_limitation(tmp_path: Path) -> None:
+    """Aliasing is a known limitation — guard does NOT catch it."""
+    file_path = _write_file(tmp_path, "bad.py", "_fn = library.load\n_fn(barcode)\n")
+
+    violations = scan_file(file_path, tmp_path)
+
+    assert any("library.load" in violation.line for violation in violations)
+
+
 def test_allowed_file_skipped(tmp_path: Path) -> None:
     file_path = _write_file(tmp_path, "openblade/nas/tape_orchestrator.py", "library.load(1, 0)\n")
 

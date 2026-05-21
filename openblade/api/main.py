@@ -34,6 +34,7 @@ from openblade.api import (
     routes_restore,
     routes_tape_ops,
     routes_tapes,
+    routes_virtual_fs,
     routes_volume_groups,
 )
 from openblade.bootstrap import get_context
@@ -67,6 +68,7 @@ app.include_router(routes_dashboard.router, prefix="/dashboard", tags=["dashboar
 app.include_router(routes_ltfs.router, prefix="/ltfs", tags=["ltfs"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
+app.include_router(routes_virtual_fs.router, prefix="/virtual", tags=["virtual"])
 app.include_router(routes_tape_ops.router)
 app.include_router(nas_config.router)
 app.include_router(routes_aml_auth.router, prefix="/aml", tags=["aml-auth"])

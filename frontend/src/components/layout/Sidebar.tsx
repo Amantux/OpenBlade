@@ -54,10 +54,19 @@ const sections: NavSection[] = [
     icon: Database,
     items: [
       { label: 'Cartridges', to: '/media' },
-      { label: 'Catalog', to: '/catalog' },
       { label: 'Archive', to: '/archive' },
       { label: 'Media Pools', to: '/media/pools' },
       { label: 'LTFS Browse', to: '/media/ltfs' },
+    ],
+  },
+  {
+    id: 'catalog',
+    label: 'Catalog',
+    icon: Database,
+    items: [
+      { label: 'Catalog Records', to: '/catalog' },
+      { label: 'Rebuild', to: '/catalog/rebuild' },
+      { label: 'Manifest Versions', to: '/catalog/manifests' },
     ],
   },
   {
@@ -100,6 +109,10 @@ const sections: NavSection[] = [
     icon: Shield,
     items: [
       { label: 'System Info', to: '/system' },
+      { label: 'Health', to: '/system/health' },
+      { label: 'Error Codes', to: '/system/error-codes' },
+      { label: 'Library Status', to: '/system/library' },
+      { label: 'Catalog Status', to: '/system/catalog' },
       { label: 'Network', to: '/system/network' },
       { label: 'Configuration', to: '/system/config' },
       { label: 'Firmware', to: '/system/firmware' },
@@ -123,6 +136,7 @@ export default function Sidebar() {
     overview: true,
     library: true,
     media: true,
+    catalog: true,
     drives: true,
     operations: true,
     storage: true,
