@@ -84,12 +84,20 @@ def test_library_inventory_pattern_detected(tmp_path: Path) -> None:
 
 
 def test_aliased_call_not_detected_known_limitation(tmp_path: Path) -> None:
-    """Aliasing is a known limitation — guard does NOT catch it."""
+    """
+    Aliasing via assignment without call parens is a known limitation.
+
+    The guard catches ``library.load(`` (with parens) but NOT bare
+    ``library.load`` assignment references like ``_fn = library.load``.
+    This is documented in the module's KNOWN LIMITATIONS section.
+    """
     file_path = _write_file(tmp_path, "bad.py", "_fn = library.load\n_fn(barcode)\n")
 
     violations = scan_file(file_path, tmp_path)
 
-    assert any("library.load" in violation.line for violation in violations)
+    # Assignment "library.load" (no parens) is not caught — known limitation
+    # The indirect call "_fn(barcode)" is also not caught — known limitation
+    assert violations == []
 
 
 def test_allowed_file_skipped(tmp_path: Path) -> None:

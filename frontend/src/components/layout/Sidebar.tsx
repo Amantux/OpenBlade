@@ -101,6 +101,16 @@ const sections: NavSection[] = [
       { label: 'Virtual Pools', to: '/storage/virtual-pools' },
       { label: 'Restore Queue', to: '/storage/restore-queue' },
       { label: 'Dataset Details', to: '/storage/dataset-details' },
+      { label: 'File Browser', to: '/files/browse' },
+    ],
+  },
+  {
+    id: 'admin',
+    label: 'Admin',
+    icon: Shield,
+    items: [
+      { label: 'Security', to: '/admin/security' },
+      { label: 'Safety', to: '/admin/safety' },
     ],
   },
   {
@@ -140,6 +150,7 @@ export default function Sidebar() {
     drives: true,
     operations: true,
     storage: true,
+    admin: true,
     system: true,
     reports: true,
   });

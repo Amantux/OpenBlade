@@ -35,6 +35,11 @@ from openblade.domain.states import (
 )
 from openblade.simulator.changer import MockChanger
 from openblade.simulator.drive import MockDrive
+from openblade.simulator.fault_injection import (
+    FaultInjector,
+    FaultType as InjectedFaultType,
+    SimulatorFaultError,
+)
 from openblade.simulator.faults import FaultConfig, FaultType
 
 logger = structlog.get_logger(__name__)
@@ -56,10 +61,12 @@ class MockLibraryBackend:
         num_drives: int = 1,
         load_delay: float = 0.0,
         fault_config: FaultConfig | None = None,
+        fault_injector: FaultInjector | None = None,
     ) -> None:
         self.library_id = library_id
         self.load_delay = load_delay
         self.fault_config = fault_config or FaultConfig.no_faults()
+        self._fault_injector = fault_injector
         self._lock = threading.RLock()
         self._changer_lock = threading.Lock()
         self._slots: dict[int, _Slot] = {
@@ -219,6 +226,10 @@ class MockLibraryBackend:
         return backend
 
     def load(self, source_slot: int, drive_id: int) -> OperationResult:
+        self._maybe_raise_injected_fault(
+            InjectedFaultType.LOAD_FAILURE,
+            self._fault_target_for_load(source_slot, drive_id),
+        )
         self._enter_changer()
         try:
             self._maybe_fail(
@@ -255,6 +266,10 @@ class MockLibraryBackend:
             self._leave_changer()
 
     def unload(self, drive_id: int, target_slot: int) -> OperationResult:
+        self._maybe_raise_injected_fault(
+            InjectedFaultType.UNLOAD_FAILURE,
+            self._fault_target_for_unload(drive_id),
+        )
         self._enter_changer()
         try:
             self._maybe_fail(
@@ -416,6 +431,26 @@ class MockLibraryBackend:
             raise SimulatedRobotTimeout(
                 f"Injected simulator fault: {', '.join(fault.value for fault in faults)}"
             )
+
+    def _maybe_raise_injected_fault(self, fault_type: InjectedFaultType, target: str) -> None:
+        if self._fault_injector is None:
+            return
+        if self._fault_injector.should_fault(fault_type, target):
+            raise SimulatorFaultError(self._fault_injector.get_error_message(fault_type, target))
+
+    def _fault_target_for_load(self, source_slot: int, drive_id: int) -> str:
+        with self._lock:
+            slot = self._slots.get(source_slot)
+            if slot is not None and slot.barcode is not None:
+                return slot.barcode.value
+        return str(drive_id)
+
+    def _fault_target_for_unload(self, drive_id: int) -> str:
+        with self._lock:
+            drive = self._drives.get(drive_id)
+            if drive is not None and drive.barcode is not None:
+                return drive.barcode.value
+        return str(drive_id)
 
     def _location_count_locked(self, barcode: str) -> int:
         return sum(

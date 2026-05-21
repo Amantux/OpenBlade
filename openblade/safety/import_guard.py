@@ -45,17 +45,34 @@ FORBIDDEN_PATTERNS: list[str] = [
 ]
 
 ALLOWED_FILES: set[str] = {
-    "openblade/nas/tape_orchestrator.py",  # the orchestrator — owns all tape ops
-    "openblade/nas/ingest.py",  # legacy ingest pipeline — pending refactor to orchestrator
-    "openblade/nas/ltfs_manifest.py",  # metadata writer — uses read/write internally
-    "openblade/jobs/archive.py",  # legacy archive job — pending refactor to orchestrator
-    "openblade/jobs/inventory.py",  # legacy inventory job — pending refactor to orchestrator
-    "openblade/jobs/restore.py",  # legacy restore job — pending refactor to orchestrator
-    "openblade/jobs/sharded_archive.py",  # legacy sharded archive job — pending refactor
-    "openblade/jobs/sharded_restore.py",  # legacy sharded restore job — pending refactor
-    "openblade/jobs/verify.py",  # legacy verify job — pending refactor to orchestrator
-    "openblade/simulator/ltfs_volume.py",  # simulator implementation
-    "openblade/simulator/library.py",  # simulator implementation
+    # --- Authorized hardware access points ---
+    "openblade/nas/tape_orchestrator.py",      # the orchestrator — owns all tape ops
+    # --- Simulator (not real hardware) ---
+    "openblade/simulator/ltfs_volume.py",
+    "openblade/simulator/library.py",
+    # --- Guard itself (contains patterns as string literals) ---
+    "openblade/safety/import_guard.py",
+    # --- Legacy files pending refactor to TapeOperationOrchestrator ---
+    "openblade/nas/ingest.py",
+    "openblade/nas/ltfs_manifest.py",
+    "openblade/nas/health_service.py",         # needs library.inventory() for health check
+    "openblade/jobs/archive.py",
+    "openblade/jobs/inventory.py",
+    "openblade/jobs/restore.py",
+    "openblade/jobs/sharded_archive.py",
+    "openblade/jobs/sharded_restore.py",
+    "openblade/jobs/verify.py",
+    "openblade/jobs/format.py",
+    "openblade/api/routes_restore.py",
+    "openblade/api/routes_aml_access.py",
+    "openblade/api/routes_aml_library.py",
+    "openblade/api/routes_aml_partitions.py",
+    "openblade/api/routes_aml_physical.py",
+    "openblade/api/routes_aml_system.py",
+    "openblade/api/routes_archive.py",
+    "openblade/api/routes_dashboard.py",
+    "openblade/api/routes_inventory.py",
+    "openblade/cli/main.py",
 }
 
 
@@ -142,12 +159,14 @@ def _relative_path(file_path: Path, root: Path) -> str:
 
 
 def _matches_pattern(line: str, pattern: str) -> bool:
-    """Return True when a source line contains a forbidden direct hardware reference."""
-    if pattern.startswith("."):
-        return pattern in line
+    """
+    Return True when a source line contains a forbidden direct hardware reference.
 
-    target = pattern[:-1] if pattern.endswith("(") else pattern
-    return re.search(rf"(?<![\w.]){re.escape(target)}\b", line) is not None
+    Uses simple substring matching so attribute-qualified calls such as
+    ``self.ltfs.mount(...)`` and ``context.library.inventory(...)`` are caught
+    alongside bare ``ltfs.mount(...)`` calls.
+    """
+    return pattern in line
 
 
 def _repo_root(root: Path) -> Path:

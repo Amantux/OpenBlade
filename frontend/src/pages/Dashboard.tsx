@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { getCatalogStatus, getLibraryStatus, getPublicHealth } from '../api/catalogAdmin';
 import { getAmlSummary, getDashboardStats } from '../api/dashboard';
 import { getEvents, getRasTickets } from '../api/health';
+import { listTapeOperations } from '../api/safety';
+import { listHydrationJobs } from '../api/virtualFs';
 import InformationPanel from '../components/panels/InformationPanel';
 import NorthPanel from '../components/panels/NorthPanel';
 import OperationsPanel from '../components/panels/OperationsPanel';
@@ -48,6 +51,33 @@ function eventVariant(severity: string): 'blue' | 'amber' | 'red' {
   }
 }
 
+function healthVariant(status?: string): 'green' | 'amber' | 'red' | 'gray' {
+  switch ((status ?? '').toLowerCase()) {
+    case 'ok':
+      return 'green';
+    case 'degraded':
+      return 'amber';
+    case 'unhealthy':
+      return 'red';
+    default:
+      return 'gray';
+  }
+}
+
+function tapeOpVariant(status: string): 'green' | 'blue' | 'red' | 'gray' {
+  switch (status.toLowerCase()) {
+    case 'completed':
+      return 'green';
+    case 'queued':
+    case 'running':
+      return 'blue';
+    case 'failed':
+      return 'red';
+    default:
+      return 'gray';
+  }
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const inventoryQuery = useInventory();
@@ -56,6 +86,11 @@ export default function Dashboard() {
   const statsQuery = useQuery({ queryKey: ['dashboard', 'stats'], queryFn: getDashboardStats, refetchInterval: 30_000 });
   const ticketsQuery = useQuery({ queryKey: ['dashboard', 'tickets'], queryFn: getRasTickets, refetchInterval: 10_000 });
   const eventsQuery = useQuery({ queryKey: ['dashboard', 'events'], queryFn: () => getEvents(6), refetchInterval: 10_000 });
+  const publicHealthQuery = useQuery({ queryKey: ['dashboard', 'public-health'], queryFn: getPublicHealth, refetchInterval: 30_000 });
+  const catalogStatusQuery = useQuery({ queryKey: ['dashboard', 'catalog-status'], queryFn: getCatalogStatus, refetchInterval: 30_000 });
+  const libraryStatusQuery = useQuery({ queryKey: ['dashboard', 'library-status'], queryFn: getLibraryStatus, refetchInterval: 30_000 });
+  const recentTapeOpsQuery = useQuery({ queryKey: ['dashboard', 'recent-tape-ops'], queryFn: () => listTapeOperations(5), refetchInterval: 30_000 });
+  const hydrationJobsQuery = useQuery({ queryKey: ['dashboard', 'hydration-jobs'], queryFn: listHydrationJobs, refetchInterval: 30_000 });
   const [selectedPartitionId, setSelectedPartitionId] = useState<string>();
 
   const inventory = inventoryQuery.data ?? EMPTY_INVENTORY;
@@ -65,6 +100,8 @@ export default function Dashboard() {
   const slots = inventory.slots.map(normalizeSlot).sort((left, right) => left.element - right.element);
   const drives = inventory.drives.map(normalizeDrive);
   const activeJobs = jobs.filter((job) => ['PENDING', 'RUNNING'].includes(getJobState(job)));
+  const activeHydrationJobs = (hydrationJobsQuery.data ?? []).filter((job) => ['queued', 'running'].includes(job.status)).length;
+  const recentTapeOps = recentTapeOpsQuery.data ?? [];
 
   const partitionRows = useMemo<PartitionRow[]>(() => {
     const ieArea = slots.filter((slot) => slot.isIeArea);
@@ -132,8 +169,92 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[1.3fr,0.9fr]">
-        <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-4">
+        <Card>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Health Status</div>
+          {publicHealthQuery.isLoading ? <div className="mt-4 text-sm text-slate-400">Loading health…</div> : null}
+          {publicHealthQuery.isError ? <div className="mt-4 text-sm text-red-300">Unable to load /healthz.</div> : null}
+          {publicHealthQuery.data ? (
+            <>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div className="text-2xl font-semibold text-slate-100">{publicHealthQuery.data.status.toUpperCase()}</div>
+                <Badge variant={healthVariant(publicHealthQuery.data.status)}>{publicHealthQuery.data.status.toUpperCase()}</Badge>
+              </div>
+              <div className="mt-2 text-sm text-slate-400">Checked {formatDate(publicHealthQuery.data.checked_at)}</div>
+            </>
+          ) : null}
+        </Card>
+
+        <Card>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Quick Stats</div>
+          {catalogStatusQuery.isLoading ? <div className="mt-4 text-sm text-slate-400">Loading catalog…</div> : null}
+          {catalogStatusQuery.isError ? <div className="mt-4 text-sm text-red-300">Unable to load /status/catalog.</div> : null}
+          {catalogStatusQuery.data ? (
+            <div className="mt-4 grid gap-3 text-sm text-slate-300">
+              <div className="flex items-center justify-between gap-3"><span>Total datasets</span><span className="text-white">{catalogStatusQuery.data.total_datasets}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Total files</span><span className="text-white">{catalogStatusQuery.data.total_file_records}</span></div>
+            </div>
+          ) : null}
+        </Card>
+
+        <Card>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Library Status</div>
+          {libraryStatusQuery.isLoading ? <div className="mt-4 text-sm text-slate-400">Loading library…</div> : null}
+          {libraryStatusQuery.isError ? <div className="mt-4 text-sm text-red-300">Unable to load /status/library.</div> : null}
+          {libraryStatusQuery.data ? (
+            <div className="mt-4 grid gap-3 text-sm text-slate-300">
+              <div className="flex items-center justify-between gap-3"><span>Drives loaded</span><span className="text-white">{libraryStatusQuery.data.cartridges_loaded}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Slots occupied</span><span className="text-white">{libraryStatusQuery.data.slots_occupied}</span></div>
+            </div>
+          ) : null}
+        </Card>
+
+        <Card>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Hydration Queue</div>
+          {hydrationJobsQuery.isLoading ? <div className="mt-4 text-sm text-slate-400">Loading jobs…</div> : null}
+          {hydrationJobsQuery.isError ? <div className="mt-4 text-sm text-red-300">Unable to load /virtual/jobs.</div> : null}
+          {!hydrationJobsQuery.isError ? (
+            <>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div className="text-3xl font-semibold text-slate-100">{activeHydrationJobs}</div>
+                <Badge variant={activeHydrationJobs > 0 ? 'blue' : 'gray'}>{activeHydrationJobs > 0 ? 'Active' : 'Idle'}</Badge>
+              </div>
+              <div className="mt-2 text-sm text-slate-400">{hydrationJobsQuery.data?.length ?? 0} total hydration job(s).</div>
+            </>
+          ) : null}
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Tape Operations</div>
+              <h2 className="mt-1 text-lg font-semibold text-slate-100">Recent Tape Operations</h2>
+            </div>
+            <Badge variant="blue">{recentTapeOps.length}</Badge>
+          </div>
+          <div className="mt-4 space-y-3">
+            {recentTapeOpsQuery.isLoading ? <div className="text-sm text-slate-400">Loading tape operations…</div> : null}
+            {recentTapeOpsQuery.isError ? <div className="text-sm text-red-300">Unable to load /tape-ops.</div> : null}
+            {recentTapeOps.map((operation) => (
+              <div key={operation.op_id} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-100">{toTitleCase(operation.op_type)} · {operation.barcode || '—'}</div>
+                    <div className="mt-1 text-sm text-slate-400">Drive {operation.drive_id ?? '—'} · {formatDate(operation.started_at ?? operation.created_at)}</div>
+                  </div>
+                  <Badge variant={tapeOpVariant(operation.status)}>{toTitleCase(operation.status)}</Badge>
+                </div>
+              </div>
+            ))}
+            {!recentTapeOpsQuery.isLoading && recentTapeOps.length === 0 && !recentTapeOpsQuery.isError ? (
+              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No recent tape operations.</div>
+            ) : null}
+          </div>
+        </Card>
+
+        <div className="grid gap-4">
           <Card className="bg-quantum-north">
             <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Library Overview</div>
             <div className="mt-3 grid gap-3 md:grid-cols-4">
@@ -146,6 +267,32 @@ export default function Dashboard() {
             </div>
           </Card>
 
+          <Card className="bg-quantum-info">
+            <div className="text-xs uppercase tracking-[0.26em] text-slate-500">RAS Summary</div>
+            <h2 className="mt-1 text-lg font-semibold text-slate-100">Recent RAS Tickets</h2>
+            <div className="mt-4 space-y-3">
+              {(ticketsQuery.data ?? []).slice(0, 6).map((ticket) => (
+                <div key={ticket.id} className="rounded-md border border-quantum-border bg-quantum-panel px-3 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant={ticketVariant(ticket.severity)}>{ticket.severity}</Badge>
+                    <span className="text-xs uppercase tracking-[0.14em] text-slate-500">{ticket.component}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-300">{ticket.message}</p>
+                  <p className="mt-2 text-xs text-slate-500">{formatDate(ticket.opened)}</p>
+                </div>
+              ))}
+              {(ticketsQuery.data ?? []).length === 0 ? (
+                <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">
+                  No open RAS tickets.
+                </div>
+              ) : null}
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.3fr,0.9fr]">
+        <div className="space-y-4">
           <Card className="bg-quantum-north">
             <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Operations Snapshot</div>
             <h2 className="mt-1 text-lg font-semibold text-slate-100">Overview</h2>
@@ -166,24 +313,23 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        <Card className="bg-quantum-info">
-          <div className="text-xs uppercase tracking-[0.26em] text-slate-500">RAS Summary</div>
-          <h2 className="mt-1 text-lg font-semibold text-slate-100">Recent RAS Tickets</h2>
+        <Card>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Hydration Queue</div>
+          <h2 className="mt-1 text-lg font-semibold text-slate-100">Restore Activity</h2>
           <div className="mt-4 space-y-3">
-            {(ticketsQuery.data ?? []).slice(0, 6).map((ticket) => (
-              <div key={ticket.id} className="rounded-md border border-quantum-border bg-quantum-panel px-3 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <Badge variant={ticketVariant(ticket.severity)}>{ticket.severity}</Badge>
-                  <span className="text-xs uppercase tracking-[0.14em] text-slate-500">{ticket.component}</span>
+            {(hydrationJobsQuery.data ?? []).slice(0, 5).map((job) => (
+              <div key={job.job_id} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold text-slate-100">{job.paths[0] ?? job.job_id}</div>
+                    <div className="mt-1 text-sm text-slate-400">{job.completed_files}/{job.total_files} files</div>
+                  </div>
+                  <Badge variant={job.status === 'completed' ? 'green' : job.status === 'failed' ? 'red' : 'blue'}>{job.status.toUpperCase()}</Badge>
                 </div>
-                <p className="mt-2 text-sm text-slate-300">{ticket.message}</p>
-                <p className="mt-2 text-xs text-slate-500">{formatDate(ticket.opened)}</p>
               </div>
             ))}
-            {(ticketsQuery.data ?? []).length === 0 ? (
-              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">
-                No open RAS tickets.
-              </div>
+            {(hydrationJobsQuery.data ?? []).length === 0 ? (
+              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No hydration jobs reported.</div>
             ) : null}
           </div>
         </Card>
@@ -349,6 +495,11 @@ export default function Dashboard() {
               statsQuery.refetch(),
               ticketsQuery.refetch(),
               eventsQuery.refetch(),
+              publicHealthQuery.refetch(),
+              catalogStatusQuery.refetch(),
+              libraryStatusQuery.refetch(),
+              recentTapeOpsQuery.refetch(),
+              hydrationJobsQuery.refetch(),
             ]),
             variant: 'primary',
           },

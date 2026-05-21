@@ -2,6 +2,8 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import Layout from './components/layout/Layout';
 import Spinner from './components/ui/Spinner';
 import { AuthProvider, useAuth } from './lib/auth-context';
+import AdminSafetyPage from './pages/AdminSafetyPage';
+import AdminSecurityPage from './pages/AdminSecurityPage';
 import Archive from './pages/Archive';
 import Catalog from './pages/Catalog';
 import CatalogRebuildPage from './pages/CatalogRebuildPage';
@@ -35,6 +37,7 @@ import SystemDiagnostics from './pages/SystemDiagnostics';
 import SystemFirmware from './pages/SystemFirmware';
 import SystemHealthPage from './pages/SystemHealthPage';
 import SystemNetwork from './pages/SystemNetwork';
+import VirtualFileBrowserPage from './pages/VirtualFileBrowserPage';
 import ArchivePlanning from './pages/nas/ArchivePlanning';
 import CacheDrives from './pages/nas/CacheDrives';
 import DatasetDetails from './pages/nas/DatasetDetails';
@@ -95,6 +98,9 @@ function RoutedApp() {
         <Route path="storage/virtual-pools" element={<VirtualPools />} />
         <Route path="storage/restore-queue" element={<RestoreQueue />} />
         <Route path="storage/dataset-details" element={<DatasetDetails />} />
+        <Route path="files/browse" element={<VirtualFileBrowserPage />} />
+        <Route path="admin/security" element={<AdminSecurityPage />} />
+        <Route path="admin/safety" element={<AdminSafetyPage />} />
         <Route path="system" element={<System />} />
         <Route path="system/health" element={<SystemHealthPage />} />
         <Route path="system/error-codes" element={<ErrorCodesPage />} />

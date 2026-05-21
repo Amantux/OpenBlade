@@ -189,13 +189,17 @@ export interface CatalogStatusResponse {
   checked_at: string;
 }
 
+export function getPublicHealth(): Promise<PublicHealthResponse> {
+  return rootApiRequest<PublicHealthResponse>('/healthz');
+}
+
 export async function getSystemHealthDashboard(): Promise<{
   health: PublicHealthResponse;
   readiness: ReadyStatusResponse;
   version: PublicVersionResponse;
 }> {
   const [health, readiness, version] = await Promise.all([
-    rootApiRequest<PublicHealthResponse>('/healthz'),
+    getPublicHealth(),
     rootApiRequest<ReadyStatusResponse>('/readyz'),
     rootApiRequest<PublicVersionResponse>('/version'),
   ]);

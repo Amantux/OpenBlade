@@ -32,6 +32,11 @@ from openblade.domain.models import (
     OperationResult,
 )
 from openblade.domain.policies import FormatConfirmation
+from openblade.simulator.fault_injection import (
+    FaultInjector,
+    FaultType as InjectedFaultType,
+    SimulatorFaultError,
+)
 from openblade.simulator.faults import FaultConfig, FaultType
 from openblade.simulator.library import MockLibraryBackend
 
@@ -117,10 +122,12 @@ class MockLTFSBackend:
         library: MockLibraryBackend,
         capacity_bytes: int = 12_000_000_000,
         fault_config: FaultConfig | None = None,
+        fault_injector: FaultInjector | None = None,
     ) -> None:
         self.library = library
         self.capacity_bytes = capacity_bytes
         self.fault_config = fault_config or FaultConfig.no_faults()
+        self._fault_injector = fault_injector
         self._lock = threading.RLock()
         self._tapes: dict[str, MockTapeContents] = {}
         self._active_mounts: dict[str, _ActiveMount] = {}
@@ -129,6 +136,7 @@ class MockLTFSBackend:
 
     def ensure_tape(self, barcode: str) -> MockTapeContents:
         normalized = Barcode(barcode).value
+        self._maybe_raise_injected_fault(InjectedFaultType.TAPE_NOT_FOUND, normalized)
         with self._lock:
             if normalized not in self._tapes:
                 if normalized not in self.library.get_all_barcodes():
@@ -200,6 +208,9 @@ class MockLTFSBackend:
         return OperationResult(True, "formatted", {"barcode": tape.barcode})
 
     def mount(self, barcode: str, mode: MountMode) -> MountHandle:
+        normalized = Barcode(barcode).value
+        self._maybe_raise_injected_fault(InjectedFaultType.MOUNT_TIMEOUT, normalized)
+        self._maybe_raise_injected_fault(InjectedFaultType.DRIVE_UNAVAILABLE, normalized)
         if self.fault_config.should_fail(FaultType.MOUNT_FAILURE):
             raise SimulatedMountFailure("Injected mount failure")
         drive_id = self.library.find_drive_by_barcode(barcode)
@@ -296,6 +307,8 @@ class MockLTFSBackend:
         size_bytes: int | None = None,
         checksum_sha256: str | None = None,
     ) -> FileInstance:
+        self._maybe_raise_injected_fault(InjectedFaultType.WRITE_ERROR, str(handle.barcode))
+        self._maybe_raise_injected_fault(InjectedFaultType.PARTIAL_WRITE, str(handle.barcode))
         active_mount = self._require_active_mount(handle)
         if handle.mode != MountMode.READ_WRITE:
             raise PermissionError("Cannot write to a read-only mount")
@@ -345,6 +358,8 @@ class MockLTFSBackend:
         )
 
     def _write_metadata_bytes(self, barcode: str, dest: str, content: bytes) -> None:
+        self._maybe_raise_injected_fault(InjectedFaultType.WRITE_ERROR, Barcode(barcode).value)
+        self._maybe_raise_injected_fault(InjectedFaultType.PARTIAL_WRITE, Barcode(barcode).value)
         tape = self.ensure_tape(barcode)
         path_key = str(dest)
         stored_size = len(content)
@@ -364,6 +379,7 @@ class MockLTFSBackend:
 
     def read_bytes(self, barcode_or_path: str, path: PurePosixPath | str | None = None) -> bytes | None:
         if path is None:
+            self._maybe_raise_injected_fault(InjectedFaultType.READ_ERROR, "")
             target_path = str(barcode_or_path)
             with self._lock:
                 for tape in self._tapes.values():
@@ -371,12 +387,14 @@ class MockLTFSBackend:
                     if record is not None:
                         return record.content
             return None
+        self._maybe_raise_injected_fault(InjectedFaultType.READ_ERROR, Barcode(str(barcode_or_path)).value)
         tape = self.ensure_tape(str(barcode_or_path))
         with self._lock:
             record = tape.files.get(str(path))
             return None if record is None else record.content
 
     def read_file(self, handle: MountHandle, source: PurePosixPath, dest: Path) -> OperationResult:
+        self._maybe_raise_injected_fault(InjectedFaultType.READ_ERROR, str(handle.barcode))
         self._require_active_mount(handle)
         tape = self.ensure_tape(str(handle.barcode))
         with self._lock:
@@ -387,7 +405,7 @@ class MockLTFSBackend:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(payload)
         checksum = hashlib.sha256(payload).hexdigest()
-        if self.fault_config.should_fail(FaultType.CHECKSUM_MISMATCH):
+        if self._should_flip_checksum(str(handle.barcode)):
             checksum = self._flip_checksum(checksum)
         return OperationResult(True, "read", {"path": str(source), "checksum": checksum})
 
@@ -399,7 +417,7 @@ class MockLTFSBackend:
             if record is None:
                 raise OpenBladeFileNotFoundError(f"Tape path {path} not found")
             checksum = record.checksum_sha256
-            if self.fault_config.should_fail(FaultType.CHECKSUM_MISMATCH):
+            if self._should_flip_checksum(str(handle.barcode)):
                 checksum = self._flip_checksum(checksum)
             return LTFSFileStat(
                 path=path,
@@ -418,6 +436,19 @@ class MockLTFSBackend:
             if active_mount is None or not active_mount.active:
                 raise CartridgeNotFoundError(f"Mount handle {handle.handle_id} is not active")
             return active_mount
+
+    def _maybe_raise_injected_fault(self, fault_type: InjectedFaultType, target: str) -> None:
+        if self._fault_injector is None:
+            return
+        if self._fault_injector.should_fault(fault_type, target):
+            raise SimulatorFaultError(self._fault_injector.get_error_message(fault_type, target))
+
+    def _should_flip_checksum(self, target: str) -> bool:
+        if self.fault_config.should_fail(FaultType.CHECKSUM_MISMATCH):
+            return True
+        if self._fault_injector is None:
+            return False
+        return self._fault_injector.should_fault(InjectedFaultType.CHECKSUM_MISMATCH, target)
 
     @staticmethod
     def _flip_checksum(checksum: str) -> str:
