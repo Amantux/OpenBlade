@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from openblade.api.routes_aml_auth import require_auth
+from openblade.api.service_auth import require_service_token
 from openblade.bootstrap import AppContext, get_context
 
 router = APIRouter()
@@ -54,7 +56,7 @@ async def list_cartridges(context: AppContext = Depends(get_context)) -> list[Ca
     ]
 
 
-@router.post("/{barcode}/format/dry-run", response_model=DryRunResponse)
+@router.post("/{barcode}/format/dry-run", response_model=DryRunResponse, dependencies=[Depends(require_auth)])
 async def format_dry_run(
     barcode: str,
     context: AppContext = Depends(get_context),
@@ -70,7 +72,11 @@ async def format_dry_run(
     )
 
 
-@router.post("/format/confirm", response_model=OperationResponse)
+@router.post(
+    "/format/confirm",
+    response_model=OperationResponse,
+    dependencies=[Depends(require_auth), Depends(require_service_token)],
+)
 async def format_confirm(
     request: FormatConfirmRequest,
     context: AppContext = Depends(get_context),

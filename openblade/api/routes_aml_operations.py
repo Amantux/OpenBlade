@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from openblade.api import aml_state
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
+from openblade.api.service_auth import require_service_token
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
 
@@ -633,7 +634,7 @@ async def cancel_move(
     return _ws_result(f"Cancelled move {move_id}")
 
 
-@router.post("/mount", response_model=WSResultCode)
+@router.post("/mount", response_model=WSResultCode, dependencies=[Depends(require_service_token)])
 async def create_mount(
     payload: MountRequest,
     current_user: AmlUser = Depends(require_auth),
@@ -696,7 +697,7 @@ async def create_mount(
     return _ws_result(f"Mounted {barcode} on {drive_name}")
 
 
-@router.post("/unmount", response_model=WSResultCode)
+@router.post("/unmount", response_model=WSResultCode, dependencies=[Depends(require_service_token)])
 async def create_unmount(
     payload: UnmountRequest,
     current_user: AmlUser = Depends(require_auth),

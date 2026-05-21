@@ -8,6 +8,12 @@ import type {
 } from '../types/api';
 import { apiRequest } from './client';
 
+export interface OperationJobReceipt {
+  jobId: string;
+  job?: Job;
+  move?: Move;
+}
+
 interface JobResource {
   id: string;
   type: string;
@@ -156,6 +162,23 @@ function mapJob(job: JobResource, movesById: Map<string, Move>): Job {
   };
 }
 
+function newestByTime<T extends { startedAt: string }>(items: T[]): T | undefined {
+  return [...items].sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
+}
+
+async function createOperationJob(path: string, body: unknown, expectedType: string): Promise<OperationJobReceipt> {
+  const before = await listActiveJobs().catch(() => [] as Job[]);
+  await apiRequest(path, { method: 'POST', body });
+  const after = await listActiveJobs().catch(() => [] as Job[]);
+  const beforeIds = new Set(before.map((job) => job.id));
+  const created = after.filter((job) => !beforeIds.has(job.id) && job.type === expectedType);
+  const job = newestByTime(created) ?? newestByTime(after.filter((item) => item.type === expectedType));
+  return {
+    jobId: job?.id ?? '',
+    job,
+  };
+}
+
 export async function listMoves(): Promise<Move[]> {
   const response = await apiRequest<MoveListEnvelope>('/moves');
   return response.moveList.move.map(mapMove);
@@ -190,22 +213,33 @@ export async function listPhysicalSlots(): Promise<PhysicalSlot[]> {
   }));
 }
 
-export async function createMove(sourceSlot: string, destSlot: string, barcode?: string): Promise<void> {
+export async function createMove(sourceSlot: string, destSlot: string, barcode?: string): Promise<OperationJobReceipt> {
   const resolvedBarcode = barcode ?? (await listPhysicalSlots()).find((slot) => slot.address === sourceSlot)?.barcode;
   if (!resolvedBarcode) {
     throw new Error(`No barcode found in source slot ${sourceSlot}.`);
   }
 
-  await apiRequest('/move', {
-    method: 'POST',
-    body: {
+  const beforeMoves = await listMoves().catch(() => [] as Move[]);
+  const receipt = await createOperationJob(
+    '/move',
+    {
       move: {
         source: sourceSlot,
         destination: destSlot,
         barcode: resolvedBarcode,
       },
     },
-  });
+    'move',
+  );
+  const afterMoves = await listMoves().catch(() => [] as Move[]);
+  const beforeIds = new Set(beforeMoves.map((move) => move.id));
+  const move = newestByTime(afterMoves.filter((item) => !beforeIds.has(item.id))) ?? newestByTime(afterMoves);
+
+  return {
+    ...receipt,
+    jobId: move?.id ?? receipt.jobId,
+    move,
+  };
 }
 
 export async function runInventory(): Promise<void> {
@@ -313,6 +347,22 @@ export async function startCleaning(): Promise<void> {
     method: 'POST',
     body: { drives },
   });
+}
+
+export function queueDriveCleaning(drives: string[]): Promise<OperationJobReceipt> {
+  return createOperationJob('/operations/clean', { clean: { drives } }, 'clean');
+}
+
+export function queueDriveIdentify(): Promise<OperationJobReceipt> {
+  return createOperationJob('/operations/audit', {}, 'audit');
+}
+
+export function queueDrivePowerCycle(): Promise<OperationJobReceipt> {
+  return createOperationJob('/operations/calibrate', {}, 'calibrate');
+}
+
+export function queueDrivePerformanceTest(barcodes: string[]): Promise<OperationJobReceipt> {
+  return createOperationJob('/operations/verify', { verify: { barcodes } }, 'verify');
 }
 
 export async function openIeDoor(stationId?: string): Promise<void> {

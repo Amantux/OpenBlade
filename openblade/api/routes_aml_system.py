@@ -7,6 +7,7 @@ import time
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -1129,6 +1130,13 @@ def _ws_result(summary: str) -> WSResultCode:
     return WSResultCode(summary=summary)
 
 
+
+def _job_response(job_type: str, message: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    job_id = str(uuid4())
+    aml_state.set_aml_job(job_id, {"type": job_type, "status": "queued", "result": message, "metadata": metadata or {}})
+    return {"job_id": job_id, "status": "queued", "message": message}
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -1557,6 +1565,87 @@ async def sync_ntp(
     get_aml_network_config()["ntp"]["lastSync"] = _iso(_now())
     _record_audit(current_user, "sync", "network/ntp")
     return _ws_result("NTP synchronization completed")
+
+
+@router.put("/system/network", response_model=NetworkConfigResponse)
+async def update_system_network(
+    payload: NetworkConfig,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> NetworkConfigResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    network = get_aml_network_config()
+    network["interfaces"] = {
+        str(item.name): {**item.model_dump(), "enabled": str(item.status).lower() != "down"}
+        for item in payload.interfaces
+    }
+    network["dns"] = deepcopy(payload.dns)
+    network["ntp"] = deepcopy(payload.ntp)
+    get_aml_system_config()["hostname"] = payload.hostname
+    network["dns"]["domain"] = payload.domain
+    _record_audit(current_user, "update", "system/network")
+    return NetworkConfigResponse(networkConfig=payload)
+
+
+@router.get("/system/software", response_model=dict[str, Any])
+async def get_system_software(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    return {
+        "model": _SYSTEM_MODEL,
+        "firmware": _FIRMWARE_VERSION,
+        "software": _SOFTWARE_VERSION,
+        "api": _API_VERSION,
+        "buildDate": _BUILD_DATE,
+        "buildNumber": _BUILD_NUMBER,
+    }
+
+
+@router.get("/system/sensors", response_model=dict[str, list[dict[str, Any]]])
+async def get_system_sensors(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, list[dict[str, Any]]]:
+    _ensure_state(context)
+    return {
+        "sensors": [
+            {"name": "ambientTemp", "value": 24.5, "unit": "C", "status": "normal"},
+            {"name": "cpuTemp", "value": 47.0, "unit": "C", "status": "normal"},
+            {"name": "fanTrayA", "value": 9800, "unit": "rpm", "status": "normal"},
+            {"name": "fanTrayB", "value": 9750, "unit": "rpm", "status": "normal"},
+        ]
+    }
+
+
+@router.get("/system/snapshot", response_model=dict[str, Any])
+async def get_system_snapshot(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    status_payload = deepcopy(get_aml_system_backup_status())
+    return {
+        "state": str(status_payload.get("state", "idle")),
+        "lastSnapshot": status_payload.get("lastBackup"),
+        "nextSnapshot": status_payload.get("nextBackup"),
+        "progress": int(status_payload.get("progress", 0)),
+    }
+
+
+@router.post("/system/snapshot", status_code=status.HTTP_202_ACCEPTED)
+async def create_system_snapshot(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    status_payload = get_aml_system_backup_status()
+    status_payload.update({"state": "queued", "lastBackup": _iso(_now()), "progress": 0})
+    _record_audit(current_user, "create", "system/snapshot")
+    return _job_response("system-snapshot", "System snapshot queued")
 
 
 # System info

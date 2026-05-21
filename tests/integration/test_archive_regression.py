@@ -18,9 +18,12 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
-def _login_admin(client: TestClient) -> None:
+def _login_admin(client: TestClient) -> dict[str, str]:
     response = client.post("/aml/users/login", json={"name": "admin", "password": "password"})
     assert response.status_code == 200
+    session_id = response.cookies.get("sessionID")
+    assert session_id is not None
+    return {"Cookie": f"sessionID={session_id}"}
 
 
 def _data_barcodes(limit: int) -> list[str]:
@@ -33,12 +36,20 @@ def _data_barcodes(limit: int) -> list[str]:
 
 
 def _prepare_volume_group(client: TestClient, name: str, barcode: str) -> None:
+    auth_headers = _login_admin(client)
     assert client.post("/volume-groups/", json={"name": name}).status_code == 201
     assert client.post(f"/volume-groups/{name}/assign", json={"barcode": barcode}).status_code == 200
-    dry_run = client.post(f"/cartridges/{barcode}/format/dry-run")
+    dry_run = client.post(f"/cartridges/{barcode}/format/dry-run", headers=auth_headers)
     assert dry_run.status_code == 200
     token = dry_run.json()["token"]
-    assert client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}).status_code == 200
+    assert (
+        client.post(
+            "/cartridges/format/confirm",
+            json={"barcode": barcode, "token": token},
+            headers={**auth_headers, "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"},
+        ).status_code
+        == 200
+    )
 
 
 def test_archive_missing_file_returns_404_or_422(client: TestClient, tmp_path: Path) -> None:

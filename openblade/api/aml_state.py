@@ -334,6 +334,11 @@ class AMLState:
     aml_sharing_clients: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_sharing_clients())
     aml_remote_libraries: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_remote_libraries())
     aml_supported_media: list[dict[str, Any]] = field(default_factory=lambda: _default_aml_supported_media())
+    iblade_messages: list[dict[str, Any]] = field(default_factory=lambda: _default_iblade_messages())
+    iblade_hosts: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_iblade_hosts())
+    iblade_network_config: dict[str, Any] = field(default_factory=lambda: _default_iblade_network_config())
+    iblade_system_settings: dict[str, Any] = field(default_factory=lambda: _default_iblade_system_settings())
+    iblade_volume_groups: dict[int, dict[str, Any]] = field(default_factory=lambda: _default_iblade_volume_groups())
 
 
 def _utcnow() -> datetime:
@@ -669,6 +674,105 @@ def _default_aml_drives() -> dict[str, dict[str, Any]]:
         }
     return drives
 
+
+
+def _default_iblade_messages() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "MSG-001",
+            "code": "IBLADE-1001",
+            "severity": "warning",
+            "summary": "Drive cleaning recommended",
+            "description": "Drive DRV-001 has exceeded the recommended cleaning threshold.",
+            "action": "Schedule a cleaning cycle for the affected drive.",
+            "created_at": "2024-01-15T10:05:00Z",
+            "acknowledged": False,
+        },
+        {
+            "id": "MSG-002",
+            "code": "IBLADE-2001",
+            "severity": "info",
+            "summary": "Configuration saved",
+            "description": "The most recent library configuration was saved successfully.",
+            "action": "No action required.",
+            "created_at": "2024-01-15T09:45:00Z",
+            "acknowledged": True,
+        },
+    ]
+
+
+def _default_iblade_hosts() -> dict[str, dict[str, Any]]:
+    return {
+        "HOST-001": {
+            "id": "HOST-001",
+            "hostname": "backup-a",
+            "ip": "192.168.10.21",
+            "wwn": "10:00:00:00:00:00:00:01",
+            "connection_type": "fibre-channel",
+            "state": "connected",
+        },
+        "HOST-002": {
+            "id": "HOST-002",
+            "hostname": "backup-b",
+            "ip": "192.168.10.22",
+            "wwn": "10:00:00:00:00:00:00:02",
+            "connection_type": "ethernet",
+            "state": "standby",
+        },
+    }
+
+
+def _default_iblade_network_config() -> dict[str, Any]:
+    return {
+        "hostname": "iblade-1",
+        "management_ip": "192.168.10.10",
+        "subnet_mask": "255.255.255.0",
+        "gateway": "192.168.10.1",
+        "dns": ["8.8.8.8", "1.1.1.1"],
+        "mtu": 1500,
+        "vlan": 110,
+        "bondMode": "active-backup",
+    }
+
+
+def _default_iblade_system_settings() -> dict[str, Any]:
+    return {
+        "autoDiscovery": True,
+        "defaultVolumeGroup": "VG-001",
+        "exportPolicy": "manual",
+        "ioThrottle": "balanced",
+        "retentionLock": False,
+        "serviceMode": False,
+        "snapshotRetention": 5,
+    }
+
+
+def _default_iblade_volume_groups() -> dict[int, dict[str, Any]]:
+    data_barcodes = [
+        str(item["barcode"])
+        for item in scalar_i3_default_config()["media"]
+        if str(item.get("role", "data")) == "data"
+    ]
+    return {
+        1: {
+            "index": 1,
+            "name": "VG-001",
+            "state": "READY",
+            "reason": "NONE",
+            "mediaCount": 5,
+            "policy": "standard",
+            "tapes": data_barcodes[:5],
+        },
+        2: {
+            "index": 2,
+            "name": "VG-002",
+            "state": "READY",
+            "reason": "NONE",
+            "mediaCount": max(len(data_barcodes[5:10]), 0),
+            "policy": "archive",
+            "tapes": data_barcodes[5:10],
+        },
+    }
 
 
 def _default_blade_firmware() -> list[dict[str, Any]]:
@@ -2313,6 +2417,98 @@ def ensure_aml_host(wwpn: str, alias: str | None = None) -> dict[str, Any]:
     elif alias is not None:
         existing["alias"] = alias
     return get_aml_host(wwpn) or {"WWPN": wwpn, "alias": alias, "groups": []}
+
+
+def list_iblade_messages() -> list[dict[str, Any]]:
+    return [deepcopy(item) for item in _STATE.iblade_messages]
+
+
+def get_iblade_message(message_id: str) -> dict[str, Any] | None:
+    for item in _STATE.iblade_messages:
+        if str(item.get("id")) == str(message_id):
+            return deepcopy(item)
+    return None
+
+
+def update_iblade_message(message_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    for index, item in enumerate(_STATE.iblade_messages):
+        if str(item.get("id")) != str(message_id):
+            continue
+        _STATE.iblade_messages[index] = {**item, **deepcopy(updates)}
+        return deepcopy(_STATE.iblade_messages[index])
+    return None
+
+
+def list_iblade_hosts() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.iblade_hosts.items())]
+
+
+def get_iblade_host(host_id: str) -> dict[str, Any] | None:
+    host = _STATE.iblade_hosts.get(host_id)
+    return deepcopy(host) if host is not None else None
+
+
+def upsert_iblade_host(host: dict[str, Any]) -> dict[str, Any]:
+    current = deepcopy(host)
+    host_id = str(current.get("id") or f"HOST-{len(_STATE.iblade_hosts) + 1:03d}")
+    current["id"] = host_id
+    _STATE.iblade_hosts[host_id] = current
+    return deepcopy(current)
+
+
+def get_iblade_network_config() -> dict[str, Any]:
+    return deepcopy(_STATE.iblade_network_config)
+
+
+def set_iblade_network_config(updates: dict[str, Any]) -> dict[str, Any]:
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            _STATE.iblade_network_config[key] = value
+    return get_iblade_network_config()
+
+
+def get_iblade_system_settings() -> dict[str, Any]:
+    return deepcopy(_STATE.iblade_system_settings)
+
+
+def set_iblade_system_settings(updates: dict[str, Any]) -> dict[str, Any]:
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            _STATE.iblade_system_settings[key] = value
+    return get_iblade_system_settings()
+
+
+def list_iblade_volume_groups() -> list[dict[str, Any]]:
+    return [deepcopy(item) for _, item in sorted(_STATE.iblade_volume_groups.items())]
+
+
+def get_iblade_volume_group(index: int | str) -> dict[str, Any] | None:
+    key = int(index)
+    group = _STATE.iblade_volume_groups.get(key)
+    return deepcopy(group) if group is not None else None
+
+
+def update_iblade_volume_group(index: int | str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    key = int(index)
+    group = _STATE.iblade_volume_groups.get(key)
+    if group is None:
+        return None
+    for field, value in deepcopy(updates).items():
+        if field == "index" or value is None:
+            continue
+        group[field] = value
+    group["mediaCount"] = len(group.get("tapes", []))
+    return deepcopy(group)
+
+
+def replace_iblade_volume_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    _STATE.iblade_volume_groups = {}
+    for offset, item in enumerate(groups, start=1):
+        current = deepcopy(item)
+        current["index"] = offset
+        current["mediaCount"] = len(current.get("tapes", []))
+        _STATE.iblade_volume_groups[offset] = current
+    return list_iblade_volume_groups()
 
 
 def delete_aml_host(wwpn: str) -> bool:

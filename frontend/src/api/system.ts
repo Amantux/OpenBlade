@@ -172,6 +172,16 @@ export interface MgmtBladeResponse {
   role: string;
 }
 
+export interface BladeFirmwareResponse {
+  name: string;
+  target: string;
+  version: string;
+  status: string;
+  uploadedAt: string;
+  size: number;
+  checksum?: string | null;
+}
+
 export interface DriveResponse {
   serialNumber: string;
   model: string;
@@ -467,6 +477,11 @@ export async function getMgmtBlades(): Promise<MgmtBladeResponse[]> {
 export async function getDrives(): Promise<DriveResponse[]> {
   const response = await apiRequest<{ driveList: { drive: DriveResponse[] } }>('/drives');
   return response.driveList.drive;
+}
+
+export async function getBladeFirmware(): Promise<BladeFirmwareResponse[]> {
+  const response = await apiRequest<{ bladeFirmwareList: { firmware: BladeFirmwareResponse[] } }>('/devices/blades/firmware');
+  return response.bladeFirmwareList.firmware;
 }
 
 export async function getSystemDiagnostics(): Promise<DiagnosticsResponse> {

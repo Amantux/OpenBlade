@@ -10,6 +10,18 @@ from openblade.config import OpenBladeConfig
 client = TestClient(app)
 
 
+def _admin_auth_headers() -> dict[str, str]:
+    response = client.post("/aml/users/login", json={"name": "admin", "password": "password"})
+    assert response.status_code == 200
+    session_id = response.cookies.get("sessionID")
+    assert session_id is not None
+    return {"Cookie": f"sessionID={session_id}"}
+
+
+def _controller_headers() -> dict[str, str]:
+    return {**_admin_auth_headers(), "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"}
+
+
 @pytest.fixture(autouse=True)
 def reset_app_context(tmp_path: Path) -> None:
     context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'api.db'}"))
@@ -25,7 +37,7 @@ def _first_data_barcode() -> str:
 
 def _format_first_tape() -> tuple[str, str]:
     barcode = _first_data_barcode()
-    plan = client.post(f"/cartridges/{barcode}/format/dry-run")
+    plan = client.post(f"/cartridges/{barcode}/format/dry-run", headers=_admin_auth_headers())
     return barcode, plan.json()["token"]
 
 
@@ -64,7 +76,7 @@ def test_archive_returns_job_id(tmp_path: Path) -> None:
     barcode, token = _format_first_tape()
     client.post("/volume-groups/", json={"name": "photos"})
     client.post("/volume-groups/photos/assign", json={"barcode": barcode})
-    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token})
+    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_controller_headers())
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.txt").write_text("api archive")
@@ -80,7 +92,7 @@ def test_restore_returns_job_id(tmp_path: Path) -> None:
     barcode, token = _format_first_tape()
     client.post("/volume-groups/", json={"name": "photos"})
     client.post("/volume-groups/photos/assign", json={"barcode": barcode})
-    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token})
+    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_controller_headers())
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.txt").write_text("api restore")
@@ -103,7 +115,7 @@ def test_get_job_status(tmp_path: Path) -> None:
     barcode, token = _format_first_tape()
     client.post("/volume-groups/", json={"name": "photos"})
     client.post("/volume-groups/photos/assign", json={"barcode": barcode})
-    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token})
+    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_controller_headers())
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.txt").write_text("job status")
@@ -123,7 +135,7 @@ def test_get_nonexistent_job_returns_404() -> None:
 
 def test_format_dry_run() -> None:
     barcode = _first_data_barcode()
-    response = client.post(f"/cartridges/{barcode}/format/dry-run")
+    response = client.post(f"/cartridges/{barcode}/format/dry-run", headers=_admin_auth_headers())
     assert response.status_code == 200
     assert response.json()["token"]
 
@@ -131,7 +143,9 @@ def test_format_dry_run() -> None:
 def test_format_confirm_requires_token() -> None:
     barcode = _first_data_barcode()
     response = client.post(
-        "/cartridges/format/confirm", json={"barcode": barcode, "token": "bad-token"}
+        "/cartridges/format/confirm",
+        json={"barcode": barcode, "token": "bad-token"},
+        headers=_controller_headers(),
     )
     assert response.status_code == 400
 
@@ -145,7 +159,7 @@ def test_sharded_archive_returns_job_id(tmp_path: Path) -> None:
     barcode, token = _format_first_tape()
     client.post("/volume-groups/", json={"name": "photos"})
     client.post("/volume-groups/photos/assign", json={"barcode": barcode})
-    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token})
+    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_controller_headers())
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.txt").write_text("api sharded archive")

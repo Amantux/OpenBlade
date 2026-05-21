@@ -1,6 +1,7 @@
 import type {
   ArchiveRequestPayload,
   EnqueuedJobResponse,
+  JobResponse,
   ShardedArchiveRequestPayload,
 } from '../types/api';
 import { rootApiRequest } from './client';
@@ -19,4 +20,9 @@ export function postShardedArchive(
     method: 'POST',
     body: payload,
   });
+}
+
+export async function getArchiveJobs(): Promise<JobResponse[]> {
+  const jobs = await rootApiRequest<JobResponse[]>('/jobs');
+  return jobs.filter((job) => String(job.job_type ?? job.type ?? '').toLowerCase() === 'archive');
 }

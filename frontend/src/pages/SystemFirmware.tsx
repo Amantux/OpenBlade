@@ -1,11 +1,10 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { listActiveJobs } from '../api/operations';
 import {
   activateSystemFirmware,
+  getBladeFirmware,
   getDrives,
-  getEthBlades,
-  getFcBlades,
-  getMgmtBlades,
   getSystemFirmware,
   getSystemFirmwareStatus,
   uploadSystemFirmware,
@@ -19,23 +18,25 @@ import { formatBytes, formatDate } from '../lib/utils';
 
 function summarizeVersions(values: string[]): string {
   const counts = new Map<string, number>();
-  values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
+  values.filter(Boolean).forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
   return Array.from(counts.entries()).map(([version, count]) => `${version} (${count})`).join(', ');
 }
 
 export default function SystemFirmware() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [feedback, setFeedback] = useState<string>('');
+
   const firmwareQuery = useQuery({ queryKey: ['system', 'firmware'], queryFn: getSystemFirmware, refetchInterval: 30_000 });
   const statusQuery = useQuery({ queryKey: ['system', 'firmware', 'status'], queryFn: getSystemFirmwareStatus, refetchInterval: 5_000 });
   const drivesQuery = useQuery({ queryKey: ['system', 'firmware', 'drives'], queryFn: getDrives, refetchInterval: 60_000 });
-  const ethBladesQuery = useQuery({ queryKey: ['system', 'firmware', 'eth-blades'], queryFn: getEthBlades, refetchInterval: 60_000 });
-  const fcBladesQuery = useQuery({ queryKey: ['system', 'firmware', 'fc-blades'], queryFn: getFcBlades, refetchInterval: 60_000 });
-  const mgmtBladesQuery = useQuery({ queryKey: ['system', 'firmware', 'mgmt-blades'], queryFn: getMgmtBlades, refetchInterval: 60_000 });
+  const bladeFirmwareQuery = useQuery({ queryKey: ['system', 'firmware', 'blades'], queryFn: getBladeFirmware, refetchInterval: 60_000 });
+  const jobsQuery = useQuery({ queryKey: ['operations', 'jobs', 'active'], queryFn: listActiveJobs, refetchInterval: 5_000 });
 
   const uploadMutation = useMutation({
     mutationFn: (file: File) => uploadSystemFirmware(file),
     onSuccess: async () => {
+      setFeedback('Firmware package uploaded and staged.');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['system', 'firmware'] }),
         queryClient.invalidateQueries({ queryKey: ['system', 'firmware', 'status'] }),
@@ -46,6 +47,7 @@ export default function SystemFirmware() {
   const activateMutation = useMutation({
     mutationFn: activateSystemFirmware,
     onSuccess: async () => {
+      setFeedback('Firmware activation completed.');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['system', 'firmware'] }),
         queryClient.invalidateQueries({ queryKey: ['system', 'firmware', 'status'] }),
@@ -53,38 +55,53 @@ export default function SystemFirmware() {
     },
   });
 
-  if ([firmwareQuery, statusQuery, drivesQuery, ethBladesQuery, fcBladesQuery, mgmtBladesQuery].some((query) => query.isLoading)) {
+  if ([firmwareQuery, statusQuery, drivesQuery, bladeFirmwareQuery, jobsQuery].some((query) => query.isLoading)) {
     return <Spinner />;
   }
 
-  const errorQuery = [firmwareQuery, statusQuery, drivesQuery, ethBladesQuery, fcBladesQuery, mgmtBladesQuery].find((query) => query.isError);
+  const errorQuery = [firmwareQuery, statusQuery, drivesQuery, bladeFirmwareQuery, jobsQuery].find((query) => query.isError);
   if (errorQuery) {
     return <ErrorMessage error={errorQuery.error} onRetry={() => void errorQuery.refetch()} />;
   }
 
   const firmware = firmwareQuery.data!;
   const status = statusQuery.data!;
+  const bladeFirmware = bladeFirmwareQuery.data ?? [];
   const driveVersions = summarizeVersions((drivesQuery.data ?? []).map((item) => item.firmware));
-  const bladeVersions = summarizeVersions([
-    ...(ethBladesQuery.data ?? []).map((item) => item.firmware),
-    ...(fcBladesQuery.data ?? []).map((item) => item.firmware),
-    ...(mgmtBladesQuery.data ?? []).map((item) => item.firmware),
-  ]);
+  const bladeVersions = summarizeVersions(bladeFirmware.map((item) => item.version));
   const stagedPackage = firmware.uploadedPackages.find((item) => item.name === firmware.stagedPackage);
   const progress = Math.max(0, Math.min(100, status.progress));
+  const activeJobs = jobsQuery.data ?? [];
+  const libraryBusy = activeJobs.length > 0;
 
   const cards = useMemo(
     () => [
-      { label: 'System', value: firmware.currentVersion, detail: firmware.lastActivated ? `Activated ${formatDate(firmware.lastActivated)}` : 'No activation history' },
-      { label: 'Drives', value: driveVersions || 'Unknown', detail: `${drivesQuery.data?.length ?? 0} drives tracked` },
-      {
-        label: 'Blades',
-        value: bladeVersions || 'Unknown',
-        detail: `${(ethBladesQuery.data?.length ?? 0) + (fcBladesQuery.data?.length ?? 0) + (mgmtBladesQuery.data?.length ?? 0)} blades tracked`,
-      },
+      { label: 'Library Firmware', value: firmware.currentVersion, detail: firmware.lastActivated ? `Activated ${formatDate(firmware.lastActivated)}` : 'No activation history' },
+      { label: 'Blade Versions', value: bladeVersions || 'Unknown', detail: `${bladeFirmware.length} controller bundle(s)` },
+      { label: 'Drive Versions', value: driveVersions || 'Unknown', detail: `${drivesQuery.data?.length ?? 0} drives tracked` },
+      { label: 'Library Busy', value: libraryBusy ? 'Yes' : 'No', detail: libraryBusy ? `${activeJobs.length} active job(s)` : 'Safe to stage firmware' },
     ],
-    [bladeVersions, driveVersions, drivesQuery.data?.length, ethBladesQuery.data?.length, fcBladesQuery.data?.length, firmware.currentVersion, firmware.lastActivated, mgmtBladesQuery.data?.length],
+    [activeJobs.length, bladeFirmware.length, bladeVersions, driveVersions, drivesQuery.data?.length, firmware.currentVersion, firmware.lastActivated, libraryBusy],
   );
+
+  const activity = [
+    ...bladeFirmware.map((item) => ({
+      id: `blade-${item.name}`,
+      kind: 'Blade bundle',
+      target: item.target,
+      version: item.version,
+      status: item.status,
+      updatedAt: item.uploadedAt,
+    })),
+    ...(firmware.uploadedPackages ?? []).map((item) => ({
+      id: `system-${item.name}`,
+      kind: 'System package',
+      target: item.name,
+      version: item.version,
+      status: item.active ? 'active' : firmware.stagedPackage === item.name ? 'staged' : 'uploaded',
+      updatedAt: item.uploadedAt,
+    })),
+  ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
   return (
     <div className="space-y-4">
@@ -93,7 +110,9 @@ export default function SystemFirmware() {
           <div>
             <div className="text-xs uppercase tracking-[0.26em] text-slate-500">System</div>
             <h1 className="mt-1 text-2xl font-semibold text-slate-100">Firmware</h1>
-            <p className="mt-2 text-sm text-slate-400">Track current component firmware, staged packages, and update progress from AML firmware routes.</p>
+            <p className="mt-2 text-sm text-slate-400">
+              View mock library firmware, stage uploads, and review recent firmware activity while blocking changes whenever the library is busy.
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <input
@@ -103,18 +122,25 @@ export default function SystemFirmware() {
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) {
+                  setFeedback('');
                   uploadMutation.mutate(file);
                 }
                 event.target.value = '';
               }}
             />
-            <Button variant="secondary" disabled={uploadMutation.isPending} onClick={() => fileInputRef.current?.click()}>{uploadMutation.isPending ? 'Uploading…' : 'Upload Firmware'}</Button>
-            <Button disabled={!firmware.stagedVersion || activateMutation.isPending} onClick={() => activateMutation.mutate()}>{activateMutation.isPending ? 'Activating…' : 'Activate Staged Update'}</Button>
+            <Button variant="secondary" disabled={libraryBusy || uploadMutation.isPending || activateMutation.isPending} onClick={() => fileInputRef.current?.click()}>
+              {uploadMutation.isPending ? 'Uploading…' : 'Upload Firmware'}
+            </Button>
+            <Button disabled={libraryBusy || !firmware.stagedVersion || activateMutation.isPending || uploadMutation.isPending} onClick={() => activateMutation.mutate()}>
+              {activateMutation.isPending ? 'Activating…' : 'Activate Staged Update'}
+            </Button>
           </div>
         </div>
+        {libraryBusy ? <div className="mt-4 rounded-md border border-amber-500/30 bg-amber-900/10 px-4 py-3 text-sm text-amber-200">Firmware changes are blocked while the library has active jobs.</div> : null}
+        {feedback ? <div className="mt-4 rounded-md border border-emerald-700 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-200">{feedback}</div> : null}
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
           <Card key={card.label}>
             <div className="text-xs uppercase tracking-[0.18em] text-slate-500">{card.label}</div>
@@ -127,7 +153,7 @@ export default function SystemFirmware() {
       <Card>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Update Progress</div>
+            <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Update Status</div>
             <div className="mt-1 text-lg font-semibold text-slate-100">{status.message}</div>
           </div>
           <Badge variant={status.state === 'completed' ? 'green' : status.state === 'uploaded' ? 'amber' : 'blue'}>{status.state}</Badge>
@@ -145,7 +171,7 @@ export default function SystemFirmware() {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Staged Update</div>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Staged Package</div>
           <div className="mt-4 space-y-3">
             {stagedPackage ? (
               <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-4 text-sm text-slate-300">
@@ -159,38 +185,40 @@ export default function SystemFirmware() {
                 <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
                   <span>{formatBytes(stagedPackage.size)}</span>
                   <span>{stagedPackage.checksum ?? 'No checksum'}</span>
-                  <span>Status: {firmware.status}</span>
+                  <span>Status: staged</span>
                 </div>
               </div>
-            ) : (
-              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No staged system firmware is ready for activation.</div>
-            )}
+            ) : <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No staged package is waiting for activation.</div>}
           </div>
         </Card>
 
         <Card>
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Uploaded Firmware Packages</div>
-          <div className="mt-4 space-y-3">
-            {(firmware.uploadedPackages ?? []).length === 0 ? (
-              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No system firmware packages have been uploaded.</div>
-            ) : (
-              (firmware.uploadedPackages ?? []).map((item) => (
-                <div key={item.name} className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-4 text-sm text-slate-300">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-slate-100">{item.name}</div>
-                      <div className="mt-1 text-xs text-slate-500">Uploaded {formatDate(item.uploadedAt)}</div>
-                    </div>
-                    <Badge variant={item.active ? 'green' : firmware.stagedPackage === item.name ? 'amber' : 'gray'}>{item.active ? 'Active' : firmware.stagedPackage === item.name ? 'Staged' : 'Available'}</Badge>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                    <span>Version {item.version}</span>
-                    <span>{formatBytes(item.size)}</span>
-                    <span>{item.checksum ?? 'No checksum'}</span>
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Recent Firmware Activity</div>
+          <div className="mt-4 overflow-x-auto rounded-md border border-quantum-border">
+            <table className="min-w-full text-sm">
+              <thead className="bg-quantum-sidebar text-left text-xs uppercase tracking-[0.18em] text-slate-400">
+                <tr>
+                  <th className="px-4 py-3">Kind</th>
+                  <th className="px-4 py-3">Target</th>
+                  <th className="px-4 py-3">Version</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activity.length === 0 ? (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No firmware activity recorded yet.</td></tr>
+                ) : activity.map((item, index) => (
+                  <tr key={item.id} className={index % 2 === 0 ? 'bg-quantum-north' : 'bg-quantum-panel'}>
+                    <td className="px-4 py-3 text-slate-100">{item.kind}</td>
+                    <td className="px-4 py-3 text-slate-300">{item.target}</td>
+                    <td className="px-4 py-3 text-slate-300">{item.version}</td>
+                    <td className="px-4 py-3"><Badge variant={item.status === 'active' ? 'green' : item.status === 'staged' ? 'amber' : 'blue'}>{item.status}</Badge></td>
+                    <td className="px-4 py-3 text-slate-300">{formatDate(item.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Card>
       </div>

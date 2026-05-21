@@ -7,14 +7,12 @@ from pydantic import BaseModel
 
 from openblade.api import aml_state
 from openblade.api.routes_aml_auth import require_auth
-from openblade.simulator.i3_config import scalar_i3_default_config
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
 from openblade.domain.models import CartridgeState, ChangerState, DriveState
 
 router = APIRouter()
 
-_IE_SLOT_COUNT = int(scalar_i3_default_config()["partition"]["ieSlotCount"])
 _FIRMWARE_VERSION = "1.0.0-mock"
 _LIBRARY_MODEL = "Scalar i3"
 _LIBRARY_TYPE = "i3"
@@ -161,6 +159,10 @@ def _mode_status() -> str:
     return aml_state.get_library_mode()
 
 
+def _ie_slot_count() -> int:
+    return sum(len(station.get("slots", [])) for station in aml_state.get_aml_ie_stations().values())
+
+
 def _library_counts(context: AppContext) -> tuple[int, int, int, int, int]:
     inventory = context.library.inventory()
     slots_total = len(inventory.slots)
@@ -190,7 +192,7 @@ def _build_library_resource(context: AppContext) -> LibraryResource:
         slotsTotal=slots_total,
         slotsOccupied=slots_occupied,
         slotsEmpty=slots_total - slots_occupied,
-        ieSlots=_IE_SLOT_COUNT,
+        ieSlots=_ie_slot_count(),
         cleaningSlots=cleaning_slots,
         partitions=1,
     )
@@ -291,7 +293,7 @@ async def get_library_elements(
     )
     elements.extend(
         ElementResource(type="ieSlot", address=index, state="empty", barcode=None)
-        for index in range(1, _IE_SLOT_COUNT + 1)
+        for index in range(1, _ie_slot_count() + 1)
     )
     return ElementListResponse(elementList=ElementListResource(element=elements))
 

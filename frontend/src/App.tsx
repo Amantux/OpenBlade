@@ -102,6 +102,7 @@ function RoutedApp() {
         <Route path="admin/security" element={<AdminSecurityPage />} />
         <Route path="admin/safety" element={<AdminSafetyPage />} />
         <Route path="system" element={<System />} />
+        <Route path="system/info" element={<System />} />
         <Route path="system/health" element={<SystemHealthPage />} />
         <Route path="system/error-codes" element={<ErrorCodesPage />} />
         <Route path="system/library" element={<LibraryStatusPage />} />

@@ -156,8 +156,17 @@ def test_format_endpoint_requires_token(app_context) -> None:
 
     reset_context(app_context)
     client = TestClient(app)
+    login = client.post("/aml/users/login", json={"name": "admin", "password": "password"})
+    assert login.status_code == 200
+    session_id = login.cookies.get("sessionID")
+    assert session_id is not None
     barcode = next(item["barcode"] for item in client.get("/cartridges/").json() if not item["barcode"].startswith("CLN"))
     response = client.post(
-        "/cartridges/format/confirm", json={"barcode": barcode, "token": "bad-token"}
+        "/cartridges/format/confirm",
+        json={"barcode": barcode, "token": "bad-token"},
+        headers={
+            "Cookie": f"sessionID={session_id}",
+            "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose",
+        },
     )
     assert response.status_code == 400

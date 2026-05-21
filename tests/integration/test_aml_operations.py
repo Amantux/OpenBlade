@@ -24,6 +24,10 @@ def authed(client: TestClient) -> TestClient:
     return client
 
 
+def _controller_headers() -> dict[str, str]:
+    return {"X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"}
+
+
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
@@ -63,7 +67,11 @@ def test_operations_queue(authed: TestClient) -> None:
 
 def test_mount_creates_completed_job(authed: TestClient) -> None:
     """Regression: after mount the job must be completed (not stuck as active)."""
-    mount_resp = authed.post("/aml/mount", json={"mount": {"barcode": "VOL001L9", "drive": "DRV-001"}})
+    mount_resp = authed.post(
+        "/aml/mount",
+        json={"mount": {"barcode": "VOL001L9", "drive": "DRV-001"}},
+        headers=_controller_headers(),
+    )
     # Accept 200 (success) or 409 (already mounted from seed data)
     assert mount_resp.status_code in {200, 409}
 
@@ -83,9 +91,17 @@ def test_mount_creates_completed_job(authed: TestClient) -> None:
 
 def test_unmount_returns_success(authed: TestClient) -> None:
     # Mount first
-    authed.post("/aml/mount", json={"mount": {"barcode": "VOL001L9", "drive": "DRV-001"}})
+    authed.post(
+        "/aml/mount",
+        json={"mount": {"barcode": "VOL001L9", "drive": "DRV-001"}},
+        headers=_controller_headers(),
+    )
     # Now unmount
-    resp = authed.post("/aml/unmount", json={"unmount": {"barcode": "VOL001L9", "drive": "DRV-001"}})
+    resp = authed.post(
+        "/aml/unmount",
+        json={"unmount": {"barcode": "VOL001L9", "drive": "DRV-001"}},
+        headers=_controller_headers(),
+    )
     assert resp.status_code in {200, 404, 409}  # accept not-found if mount 409'd above
 
 

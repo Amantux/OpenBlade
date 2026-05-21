@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from openblade.api import aml_state
@@ -291,6 +292,13 @@ def _ws_result(summary: str = "Operation completed") -> WSResultCode:
     return WSResultCode(summary=summary)
 
 
+
+def _job_response(job_type: str, message: str) -> dict[str, str]:
+    job_id = str(uuid4())
+    aml_state.set_aml_job(job_id, {"type": job_type, "status": "queued", "result": message})
+    return {"job_id": job_id, "status": "queued", "message": message}
+
+
 def _validate_identifier(value: str, *, field_name: str) -> str:
     normalized = value.strip()
     if not normalized:
@@ -562,6 +570,71 @@ async def get_robot_status(
 ) -> RobotStatusResponse:
     _ensure_state(context)
     return _robot_status_response(_get_robot_or_404(_validate_identifier(id, field_name="Robot id")))
+
+
+@router.get("/devices/robot/{name}", response_model=RobotResponse)
+async def get_robot_device(
+    name: str,
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> RobotResponse:
+    _ensure_state(context)
+    return RobotResponse(robot=_serialize_robot(_get_robot_or_404(_validate_identifier(name, field_name="Robot name"))))
+
+
+@router.post("/devices/robot/{name}", response_model=RobotResponse)
+async def post_robot_device(
+    name: str,
+    payload: RobotUpdateRequest,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> RobotResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    robot_id = _validate_identifier(name, field_name="Robot name")
+    _get_robot_or_404(robot_id)
+    robot = aml_state.update_aml_robot(robot_id, _validate_patch(payload.robot))
+    return RobotResponse(robot=_serialize_robot(robot or _get_robot_or_404(robot_id)))
+
+
+@router.get("/devices/robot/{name}/state", response_model=RobotStatusResponse)
+async def get_robot_device_state(
+    name: str,
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> RobotStatusResponse:
+    _ensure_state(context)
+    return _robot_status_response(_get_robot_or_404(_validate_identifier(name, field_name="Robot name")))
+
+
+@router.put("/devices/robot/{name}/state", response_model=RobotStatusResponse)
+async def put_robot_device_state(
+    name: str,
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> RobotStatusResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    robot_id = _validate_identifier(name, field_name="Robot name")
+    robot = _get_robot_or_404(robot_id)
+    updates = {key: value for key, value in payload.items() if key in {"state", "status", "location"} and value is not None}
+    updated = aml_state.update_aml_robot(robot_id, {**robot, **updates}) or _get_robot_or_404(robot_id)
+    return _robot_status_response(updated)
+
+
+@router.post("/devices/robot/{name}/park", status_code=status.HTTP_202_ACCEPTED)
+async def park_robot_device(
+    name: str,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, str]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    robot_id = _validate_identifier(name, field_name="Robot name")
+    robot = _get_robot_or_404(robot_id)
+    aml_state.update_aml_robot(robot_id, {"state": "parked", "location": robot.get("homeSlot", "park")})
+    return _job_response("robot-park", f"Robot {robot_id} park queued")
 
 
 @router.get("/towers", response_model=TowerListResponse)

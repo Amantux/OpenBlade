@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -26,6 +28,7 @@ from openblade.api import (
     routes_catalog,
     routes_dashboard,
     routes_health,
+    routes_iblade,
     routes_inventory,
     routes_jobs,
     routes_ltfs,
@@ -37,6 +40,7 @@ from openblade.api import (
     routes_virtual_fs,
     routes_volume_groups,
 )
+from openblade.api.service_auth import ServiceTokenForbiddenError, controller_only_error
 from openblade.bootstrap import get_context
 from openblade.domain.errors import (
     BarcodeMismatchError,
@@ -68,6 +72,7 @@ app.include_router(routes_dashboard.router, prefix="/dashboard", tags=["dashboar
 app.include_router(routes_ltfs.router, prefix="/ltfs", tags=["ltfs"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
+app.include_router(routes_iblade.router, prefix="/iblade", tags=["iblade"])
 app.include_router(routes_virtual_fs.router, prefix="/virtual", tags=["virtual"])
 app.include_router(routes_tape_ops.router)
 app.include_router(nas_config.router)
@@ -96,6 +101,60 @@ async def initialize_aml_state() -> None:
     ensure_initialized(get_context().config.db_url)
 
 
+def _is_aml_compatible_path(path: str) -> bool:
+    return path.startswith("/aml") or path.startswith("/iblade")
+
+
+
+def _aml_error_payload(status_code: int, detail: object) -> dict[str, object]:
+    code_map = {
+        400: "AML_BAD_REQUEST",
+        401: "AML_AUTH_REQUIRED",
+        403: "AML_FORBIDDEN",
+        404: "AML_NOT_FOUND",
+        409: "AML_CONFLICT",
+        422: "AML_VALIDATION_ERROR",
+        503: "AML_UNAVAILABLE",
+    }
+    action_map = {
+        400: "Review the request payload and retry.",
+        401: "Authenticate and retry the request.",
+        403: "Use an account with the required privileges.",
+        404: "Verify the requested resource identifier and retry.",
+        409: "Resolve the conflicting state and retry.",
+        422: "Correct the submitted values and retry.",
+        503: "Retry after the service becomes available.",
+    }
+    if isinstance(detail, dict) and {"code", "summary", "description", "action", "customCode"}.issubset(detail):
+        return detail
+    description = detail if isinstance(detail, str) else str(detail)
+    return {
+        "code": code_map.get(status_code, "AML_ERROR"),
+        "summary": description,
+        "description": description,
+        "action": action_map.get(status_code, "Review the error details and retry."),
+        "customCode": None,
+    }
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(request: Request, exc: HTTPException):
+    if not _is_aml_compatible_path(request.url.path):
+        return await http_exception_handler(request, exc)
+    return JSONResponse(status_code=exc.status_code, content=_aml_error_payload(exc.status_code, exc.detail))
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(request: Request, exc: RequestValidationError):
+    if not _is_aml_compatible_path(request.url.path):
+        return await request_validation_exception_handler(request, exc)
+    description = "; ".join(
+        f"{'.'.join(str(part) for part in err.get('loc', []))}: {err.get('msg', 'Invalid value')}"
+        for err in exc.errors()
+    ) or "Validation error"
+    return JSONResponse(status_code=422, content=_aml_error_payload(422, description))
+
+
 @app.exception_handler(OpenBladeError)
 async def handle_openblade_error(_: Request, exc: OpenBladeError) -> JSONResponse:
     status_code = 400
@@ -114,6 +173,11 @@ async def handle_openblade_error(_: Request, exc: OpenBladeError) -> JSONRespons
         status_code=status_code,
         content=ErrorResponse(error=exc.__class__.__name__, detail=str(exc)).model_dump(),
     )
+
+
+@app.exception_handler(ServiceTokenForbiddenError)
+async def handle_service_token_forbidden(_: Request, __: ServiceTokenForbiddenError) -> JSONResponse:
+    return JSONResponse(status_code=403, content=controller_only_error())
 
 
 @app.get("/health")

@@ -836,6 +836,42 @@ async def get_fan(
     return FanResponse(fan=_serialize_fan(_get_fan_or_404(fan_id)))
 
 
+@router.get("/devices/blades/ethernet", response_model=dict[str, list[dict[str, Any]]])
+async def get_ethernet_blade_info(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, list[dict[str, Any]]]:
+    _ensure_state(context)
+    return {"ethernet": [_serialize_eth_blade(item).model_dump() for item in aml_state.get_eth_blades().values()]}
+
+
+@router.get("/devices/blades/fibreChannel", response_model=dict[str, list[dict[str, Any]]])
+async def get_fibre_channel_blade_info(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, list[dict[str, Any]]]:
+    _ensure_state(context)
+    return {"fibreChannel": [_serialize_fc_blade(item).model_dump() for item in aml_state.get_fc_blades().values()]}
+
+
+@router.get("/devices/blades/library", response_model=dict[str, list[dict[str, Any]]])
+async def get_library_blade_info(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, list[dict[str, Any]]]:
+    _ensure_state(context)
+    return {"library": [_serialize_mgmt_blade(item).model_dump() for item in aml_state.get_mgmt_blades().values()]}
+
+
+@router.get("/devices/blades/windows", response_model=dict[str, list[dict[str, Any]]])
+async def get_windows_blade_info(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, list[dict[str, Any]]]:
+    _ensure_state(context)
+    return {"windows": [{"id": "WIN-1", "hostname": "windows-gateway", "status": "online", "role": "gateway"}]}
+
+
 @router.get("/devices", response_model=DeviceSummaryResponse)
 async def get_devices_summary(
     _: AmlUser = Depends(require_auth),

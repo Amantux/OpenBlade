@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -12,3 +13,9 @@ def app_context(tmp_path: Path):
     context = create_context(config)
     reset_context(context)
     return context
+
+
+@pytest.fixture
+def service_token_headers():
+    token = os.environ.get("OPENBLADE_SERVICE_TOKEN", "openblade-controller-dev-token-do-not-expose")
+    return {"X-Openblade-Service-Token": token}

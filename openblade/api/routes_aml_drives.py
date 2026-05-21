@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from openblade.api import aml_state
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
+from openblade.api.service_auth import require_service_token
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
 
@@ -223,6 +225,13 @@ class TypeListResponse(BaseModel):
 
 def _ws_result(summary: str = "Operation completed") -> WSResultCode:
     return WSResultCode(summary=summary)
+
+
+
+def _job_response(job_type: str, message: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    job_id = str(uuid4())
+    aml_state.set_aml_job(job_id, {"type": job_type, "status": "queued", "result": message, "metadata": metadata or {}})
+    return {"job_id": job_id, "status": "queued", "message": message}
 
 
 def _timestamp() -> str:
@@ -547,7 +556,7 @@ async def get_drive_media(
     return MediaResponse(media=_loaded_media(_get_drive_or_404(serial_number)))
 
 
-@router.post("/drive/{serialNumber}/unload", response_model=WSResultCode)
+@router.post("/drive/{serialNumber}/unload", response_model=WSResultCode, dependencies=[Depends(require_service_token)])
 async def unload_drive_media(
     serialNumber: str,
     current_user: AmlUser = Depends(require_auth),
@@ -685,6 +694,141 @@ async def update_drive_config(
     config.update(_validate_drive_config(payload.driveConfig))
     updated = _update_drive(serial_number, {"config": config})
     return DriveConfigResponse(driveConfig=_drive_config(updated))
+
+
+@router.get("/drives/logs", response_model=dict[str, list[dict[str, Any]]])
+async def get_drive_logs(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, list[dict[str, Any]]]:
+    _ensure_state(context)
+    logs: list[dict[str, Any]] = []
+    for drive in aml_state.list_aml_drives():
+        serial = str(drive.get("serialNumber"))
+        logs.extend({"serialNumber": serial, **item.model_dump()} for item in _drive_history(drive))
+        logs.extend(
+            {
+                "serialNumber": serial,
+                "timestamp": item.timestamp,
+                "type": item.type,
+                "result": "error",
+                "errorCode": item.code,
+                "description": item.description,
+            }
+            for item in _drive_errors(drive)
+        )
+    return {"logs": logs[:100]}
+
+
+@router.get("/drives/ports", response_model=dict[str, list[dict[str, Any]]])
+async def get_drive_ports(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, list[dict[str, Any]]]:
+    _ensure_state(context)
+    ports = [
+        {
+            "serialNumber": str(drive.get("serialNumber")),
+            "hardwareSerialNumber": str(drive.get("hardwareSerialNumber", drive.get("serialNumber"))),
+            "location": str(drive.get("location", "unknown")),
+            "portType": "fibre-channel",
+            "speed": "16G",
+            "status": str(drive.get("status", "online")),
+        }
+        for drive in aml_state.list_aml_drives()
+    ]
+    return {"ports": ports}
+
+
+@router.post("/drives/powerCycle", status_code=status.HTTP_202_ACCEPTED)
+async def power_cycle_drive(
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    serial_number = _validate_identifier(str(payload.get("serialNumber", "")), field_name="serialNumber")
+    drive = _get_drive_or_404(serial_number)
+    _update_drive(serial_number, {"state": "resetting", "history": _append_history(drive, event_type="powerCycle")})
+    return _job_response("drive-power-cycle", f"Power cycle queued for drive {serial_number}", {"serialNumber": serial_number})
+
+
+@router.get("/drives/reports/activity", response_model=dict[str, Any])
+async def get_drive_activity_report(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    items = [
+        {
+            "serialNumber": str(drive.get("serialNumber")),
+            "loadCount": int(drive.get("loadCount", 0)),
+            "errorCount": int(drive.get("errorCount", 0)),
+            "lastCleaned": drive.get("lastCleaned"),
+        }
+        for drive in aml_state.list_aml_drives()
+    ]
+    return {"generatedAt": _timestamp(), "drives": items}
+
+
+@router.get("/drives/reports/utilization", response_model=dict[str, Any])
+async def get_drive_utilization_report(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    items = []
+    for drive in aml_state.list_aml_drives():
+        load_count = int(drive.get("loadCount", 0))
+        items.append(
+            {
+                "serialNumber": str(drive.get("serialNumber")),
+                "utilizationPercent": min(load_count, 100),
+                "cleaningRequired": _drive_needs_cleaning(drive),
+                "active": drive.get("loadedMedia") is not None,
+            }
+        )
+    return {"generatedAt": _timestamp(), "drives": items}
+
+
+@router.get("/drive/{serialNumber}/operations/state", response_model=dict[str, Any])
+async def get_drive_operation_state(
+    serialNumber: str,
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
+    drive = _get_drive_or_404(serial_number)
+    return {"serialNumber": serial_number, "state": str(drive.get("state", "idle")), "status": str(drive.get("status", "online"))}
+
+
+@router.put("/drive/{serialNumber}/operations/state", response_model=dict[str, Any])
+async def put_drive_operation_state(
+    serialNumber: str,
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
+    drive = _get_drive_or_404(serial_number)
+    updates = {key: value for key, value in payload.items() if key in {"state", "status"} and value is not None}
+    updated = _update_drive(serial_number, {**{k: drive.get(k) for k in ()}, **updates})
+    return {"serialNumber": serial_number, "state": str(updated.get("state", "idle")), "status": str(updated.get("status", "online"))}
+
+
+@router.post("/drives/firmware/operations/update", status_code=status.HTTP_202_ACCEPTED)
+async def update_drive_firmware_operation(
+    payload: dict[str, Any] | None = None,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    return _job_response("drive-firmware-update", "Drive firmware update queued", payload or {})
 
 
 @router.get("/drive/{serialNumber}", response_model=DriveResponse)

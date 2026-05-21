@@ -1355,6 +1355,23 @@ async def put_drive_encryption(
     return _ws_result(f"Updated encryption settings for drive {serial}")
 
 
+@router.put("/drive/{serialNumber}/dataPath", response_model=DataPathStatusResponse)
+async def put_drive_data_path(
+    serialNumber: str,
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> DataPathStatusResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    serial = _validate_identifier(serialNumber, field_name="serialNumber")
+    drive = _get_drive_or_404(serial)
+    current = dict(drive.get("dataPath", {"serialNumber": serial, "status": "healthy", "activePaths": 2, "preferredPath": "auto", "lastTest": None, "lastResult": "pass"}))
+    updates = {key: value for key, value in payload.items() if value is not None}
+    updated = aml_state.update_aml_drive(serial, {"dataPath": {**current, **updates, "serialNumber": serial}}) or _get_drive_or_404(serial)
+    return DataPathStatusResponse(dataPath=DataPathStatus.model_validate(updated.get("dataPath", current)))
+
+
 @router.get("/devices/blade/fibreChannel/{serialNumber}/dataPath", response_model=DataPathStatusResponse)
 async def get_fc_data_path(
     serialNumber: str,

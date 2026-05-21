@@ -378,6 +378,30 @@ def _unique_strings(values: list[str]) -> list[str]:
     return result
 
 
+
+def _policy_defaults(name: str) -> dict[str, Any]:
+    defaults = {
+        "activeVault": {"enabled": False, "retentionDays": 0, "mode": "manual"},
+        "autoImport": {"enabled": True, "source": "ieStation", "scanInterval": 300},
+        "autoExport": {"enabled": False, "destination": "mailSlot", "schedule": "manual"},
+        "driveCleaning": {"enabled": True, "threshold": 100, "useScratchCleaning": True},
+        "edlm": {"enabled": True, "mode": "passive", "verifyAfterMove": False},
+        "ekm": {"enabled": False, "server": None, "keyGroup": None},
+    }
+    return dict(defaults[name])
+
+
+
+def _global_policy(name: str) -> dict[str, Any]:
+    global_config = aml_state.get_aml_partitions_global()
+    policy = global_config.get(name)
+    if isinstance(policy, dict):
+        return policy
+    policy = _policy_defaults(name)
+    aml_state.set_aml_partitions_global({name: policy})
+    return policy
+
+
 def _partition_slots(partition: dict[str, Any], context: AppContext) -> list[SlotResource]:
     if partition["name"] != "partition1":
         return []
@@ -516,6 +540,132 @@ def _partition_report(partition: dict[str, Any], context: AppContext) -> dict[st
     }
 
 
+@router.get("/partitions/policy/activeVault", response_model=dict[str, Any])
+async def get_active_vault_policy(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    return _global_policy("activeVault")
+
+
+@router.put("/partitions/policy/activeVault", response_model=dict[str, Any])
+async def put_active_vault_policy(
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    aml_state.set_aml_partitions_global({"activeVault": {**_global_policy("activeVault"), **payload}})
+    return _global_policy("activeVault")
+
+
+@router.get("/partitions/policy/autoImport", response_model=dict[str, Any])
+async def get_auto_import_policy(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    return _global_policy("autoImport")
+
+
+@router.put("/partitions/policy/autoImport", response_model=dict[str, Any])
+async def put_auto_import_policy(
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    aml_state.set_aml_partitions_global({"autoImport": {**_global_policy("autoImport"), **payload}})
+    return _global_policy("autoImport")
+
+
+@router.get("/partitions/policy/autoExport", response_model=dict[str, Any])
+async def get_auto_export_policy(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    return _global_policy("autoExport")
+
+
+@router.put("/partitions/policy/autoExport", response_model=dict[str, Any])
+async def put_auto_export_policy(
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    aml_state.set_aml_partitions_global({"autoExport": {**_global_policy("autoExport"), **payload}})
+    return _global_policy("autoExport")
+
+
+@router.get("/partitions/policy/driveCleaning", response_model=dict[str, Any])
+async def get_drive_cleaning_policy(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    return _global_policy("driveCleaning")
+
+
+@router.put("/partitions/policy/driveCleaning", response_model=dict[str, Any])
+async def put_drive_cleaning_policy(
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    aml_state.set_aml_partitions_global({"driveCleaning": {**_global_policy("driveCleaning"), **payload}})
+    return _global_policy("driveCleaning")
+
+
+@router.get("/partitions/policy/edlm", response_model=dict[str, Any])
+async def get_edlm_policy(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    return _global_policy("edlm")
+
+
+@router.put("/partitions/policy/edlm", response_model=dict[str, Any])
+async def put_edlm_policy(
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    aml_state.set_aml_partitions_global({"edlm": {**_global_policy("edlm"), **payload}})
+    return _global_policy("edlm")
+
+
+@router.get("/partitions/policy/ekm", response_model=dict[str, Any])
+async def get_ekm_policy(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    return _global_policy("ekm")
+
+
+@router.put("/partitions/policy/ekm", response_model=dict[str, Any])
+async def put_ekm_policy(
+    payload: dict[str, Any],
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    _require_admin(current_user)
+    aml_state.set_aml_partitions_global({"ekm": {**_global_policy("ekm"), **payload}})
+    return _global_policy("ekm")
+
+
 @router.get("/partitions/global", response_model=GlobalConfigResponse)
 async def get_global_partition_config(
     _: AmlUser = Depends(require_auth),
@@ -545,6 +695,29 @@ async def get_all_partition_reports(
     _ensure_state(context)
     partitions = [_partition_report(item, context) for item in aml_state.list_aml_partitions()]
     return ReportListResponse(report=partitions)
+
+
+@router.get("/partitions/reports/utilization", response_model=dict[str, Any])
+async def get_partition_utilization_report(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    items = []
+    for partition in aml_state.list_aml_partitions():
+        quota = _partition_quota_dict(partition, context)
+        total_slots = max(int(quota.get("totalSlots", 0)), 1)
+        items.append(
+            {
+                "name": str(partition.get("name")),
+                "usedSlots": int(quota.get("usedSlots", 0)),
+                "totalSlots": int(quota.get("totalSlots", 0)),
+                "utilizationPercent": round((int(quota.get("usedSlots", 0)) / total_slots) * 100, 2),
+                "usedDrives": int(quota.get("usedDrives", 0)),
+                "totalDrives": int(quota.get("totalDrives", 0)),
+            }
+        )
+    return {"generatedAt": _timestamp(), "partitions": items}
 
 
 @router.get("/partitions", response_model=PartitionListResponse)

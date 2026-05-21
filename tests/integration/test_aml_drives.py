@@ -24,6 +24,10 @@ def authed(client: TestClient) -> TestClient:
     return client
 
 
+def _controller_headers() -> dict[str, str]:
+    return {"X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"}
+
+
 # ---------------------------------------------------------------------------
 # List / Get drives
 # ---------------------------------------------------------------------------
@@ -80,7 +84,11 @@ def test_drive_media_returns_empty_when_nothing_loaded(authed: TestClient) -> No
 def test_drive_media_after_mount_does_not_crash(authed: TestClient) -> None:
     """Regression: GET /aml/drive/{sn}/media must not 500 after a mount."""
     # Mount a known cartridge onto DRV-001
-    mount_resp = authed.post("/aml/mount", json={"mount": {"barcode": "VOL001L9", "drive": "DRV-001"}})
+    mount_resp = authed.post(
+        "/aml/mount",
+        json={"mount": {"barcode": "VOL001L9", "drive": "DRV-001"}},
+        headers=_controller_headers(),
+    )
     # Mount may 409 if already mounted in seeded state; that's OK — we just verify no 500 on GET
     assert mount_resp.status_code in {200, 409}
     media_resp = authed.get("/aml/drive/DRV-001/media")
@@ -94,10 +102,14 @@ def test_drive_media_after_mount_does_not_crash(authed: TestClient) -> None:
 def test_unload_clears_drive_and_updates_media(authed: TestClient) -> None:
     """After unload, drive must be empty and cartridge must not remain in loaded state."""
     # Mount first
-    authed.post("/aml/mount", json={"mount": {"barcode": "VOL002L9", "drive": "DRV-002"}})
+    authed.post(
+        "/aml/mount",
+        json={"mount": {"barcode": "VOL002L9", "drive": "DRV-002"}},
+        headers=_controller_headers(),
+    )
 
     # Unload
-    resp = authed.post("/aml/drive/DRV-002/unload")
+    resp = authed.post("/aml/drive/DRV-002/unload", headers=_controller_headers())
     assert resp.status_code == 200
     assert resp.json().get("code") == 0
 

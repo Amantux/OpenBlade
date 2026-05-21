@@ -1,4 +1,5 @@
 import { apiRequest, rootApiRequest } from './client';
+import { listCartridges } from './media';
 
 export interface LtfsVolume {
   barcode: string;
@@ -9,6 +10,8 @@ export interface LtfsVolume {
   usedGB: number;
   fileCount?: number;
   lastModified?: string;
+  shardCount?: number;
+  hasCatalog?: boolean;
 }
 
 export interface LtfsFile {
@@ -84,6 +87,7 @@ interface VolumeCatalogSummary {
   fileCount: number;
   usedGB: number;
   lastModified?: string;
+  shardCount: number;
 }
 
 interface AmlVolumeMetadata {
@@ -166,6 +170,7 @@ async function getVolumeCatalogSummary(barcode: string): Promise<VolumeCatalogSu
     fileCount: entries.length,
     usedGB: Number((totalBytes / 1024 ** 3).toFixed(2)),
     lastModified,
+    shardCount: entries.reduce((sum, entry) => sum + Math.max(entry.shard_count, 1), 0),
   };
 }
 
@@ -202,28 +207,49 @@ async function getAmlVolumeMetadata(): Promise<Map<string, AmlVolumeMetadata>> {
 }
 
 export async function getLtfsVolumes(): Promise<LtfsVolume[]> {
-  const barcodes = await getCatalogTapeBarcodes();
+  const [catalogBarcodes, amlVolumes, cartridges] = await Promise.all([
+    getCatalogTapeBarcodes().catch(() => [] as string[]),
+    getAmlVolumeMetadata().catch(() => new Map<string, AmlVolumeMetadata>()),
+    listCartridges().catch(() => []),
+  ]);
+
+  const ltfsCartridgeBarcodes = cartridges
+    .filter((cartridge) => String(cartridge.type ?? '').toUpperCase().startsWith('LTO-'))
+    .map((cartridge) => cartridge.barcode);
+  const barcodes = Array.from(new Set([...catalogBarcodes, ...amlVolumes.keys(), ...ltfsCartridgeBarcodes]))
+    .sort((left, right) => left.localeCompare(right));
+
   if (barcodes.length === 0) {
     return [];
   }
 
-  const [catalogSummaries, amlVolumes] = await Promise.all([
-    Promise.all(barcodes.map(async (barcode) => [barcode, await getVolumeCatalogSummary(barcode)] as const)),
-    getAmlVolumeMetadata().catch(() => new Map<string, AmlVolumeMetadata>()),
-  ]);
+  const catalogSummaries = new Map(
+    await Promise.all(
+      barcodes.map(async (barcode) => {
+        try {
+          return [barcode, await getVolumeCatalogSummary(barcode)] as const;
+        } catch {
+          return [barcode, { fileCount: 0, usedGB: 0, shardCount: 0 }] as const;
+        }
+      }),
+    ),
+  );
 
-  return catalogSummaries
-    .map(([barcode, summary]) => {
+  return barcodes
+    .map((barcode) => {
       const amlVolume = amlVolumes.get(barcode);
+      const summary = catalogSummaries.get(barcode);
       return {
         barcode,
         label: amlVolume?.label ?? barcode,
         mountPoint: amlVolume?.mountPoint,
         mounted: amlVolume?.mounted ?? false,
         capacityGB: amlVolume?.capacityGB ?? 0,
-        usedGB: summary.usedGB,
-        fileCount: summary.fileCount,
-        lastModified: summary.lastModified,
+        usedGB: summary?.usedGB ?? 0,
+        fileCount: summary?.fileCount ?? 0,
+        lastModified: summary?.lastModified,
+        shardCount: summary?.shardCount ?? 0,
+        hasCatalog: Boolean(summary?.fileCount),
       } satisfies LtfsVolume;
     })
     .sort((left, right) => left.barcode.localeCompare(right.barcode));

@@ -6,15 +6,20 @@ import hashlib
 import re
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from openblade.api import aml_state
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
+from openblade.api.service_auth import require_service_token
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
+from openblade.nas.tape_orchestrator import TapeOperationOrchestrator
+from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 _MEDIA_TYPE_CATALOG: dict[str, dict[str, Any]] = {
     "LTO-9": {
@@ -376,6 +381,57 @@ def _get_pool_or_404(pool_id: str) -> dict[str, Any]:
     return pool
 
 
+def _parse_drive_address(address: str) -> int | None:
+    match = re.fullmatch(r"DRV-(\d+)", address.strip().upper())
+    if match is None:
+        return None
+    drive_number = int(match.group(1))
+    if drive_number < 1:
+        raise HTTPException(status_code=400, detail="Invalid destination drive")
+    return drive_number - 1
+
+
+def _parse_slot_address(address: str) -> int | None:
+    parts = [part.strip() for part in address.split(",")]
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    slot_id = int(parts[-1])
+    if slot_id < 1:
+        raise HTTPException(status_code=400, detail="Invalid destination slot")
+    return slot_id
+
+
+def _drive_address(drive_id: int) -> str:
+    return f"DRV-{drive_id + 1:03d}"
+
+
+def _slot_address(slot_id: int) -> str:
+    return f"1,1,{slot_id}"
+
+
+def _record_media_move_audit(
+    current_user: AmlUser,
+    *,
+    barcode: str,
+    source: str | None,
+    destination: str,
+    result: str,
+) -> None:
+    audit_log = aml_state.get_aml_audit_log()
+    audit_log.append(
+        {
+            "timestamp": aml_state._isoformat(aml_state._utcnow()),
+            "user": current_user.name,
+            "action": "move_media",
+            "resource": f"media/{barcode} {source or 'unknown'}->{destination}",
+            "result": result,
+            "ip": None,
+        }
+    )
+    if len(audit_log) > 1000:
+        del audit_log[:-1000]
+
+
 def _media_history(media: dict[str, Any]) -> list[HistoryEvent]:
     history = media.get("history")
     if isinstance(history, list):
@@ -673,7 +729,7 @@ async def export_media(
     return _ws_result("Exported media")
 
 
-@router.post("/media/move", response_model=WSResultCode)
+@router.post("/media/move", response_model=WSResultCode, dependencies=[Depends(require_service_token)])
 async def move_media(
     payload: MoveRequest,
     current_user: AmlUser = Depends(require_auth),
@@ -683,10 +739,140 @@ async def move_media(
     _require_admin(current_user)
     barcode = _validate_identifier(payload.move.barcode, field_name="barcode")
     destination = _validate_identifier(payload.move.destination, field_name="destination")
-    moved = aml_state.move_aml_media(barcode, destination)
-    if moved is None:
+    media = aml_state.get_aml_media(barcode)
+    if media is None:
         raise HTTPException(status_code=404, detail="Media not found")
+
+    orchestrator = TapeOperationOrchestrator(context.catalog, context.library, context.ltfs)
+    source = _validate_identifier(str(media.get("slotAddress") or ""), field_name="source")
+    source_drive = _parse_drive_address(source)
+    source_slot = None if source_drive is not None else _parse_slot_address(source)
+    if source_drive is None and source_slot is None:
+        raise HTTPException(status_code=400, detail="Source media must be in a slot or drive")
+
+    try:
+        drive_id = _parse_drive_address(destination)
+        if drive_id is not None:
+            if source_slot is None:
+                raise HTTPException(status_code=400, detail="Source media must be in a slot before loading")
+            request = TapeOpRequest(
+                op_type=TapeOpType.LOAD,
+                barcode=barcode,
+                drive_id=drive_id,
+                slot_id=source_slot,
+                requested_by=current_user.name,
+                extras={"source_slot_id": source_slot},
+            )
+        else:
+            destination_slot = _parse_slot_address(destination)
+            if destination_slot is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Destination must be a slot address like 1,1,11 or a drive like DRV-001",
+                )
+            if source_drive is not None:
+                request = TapeOpRequest(
+                    op_type=TapeOpType.UNLOAD,
+                    barcode=barcode,
+                    drive_id=source_drive,
+                    slot_id=destination_slot,
+                    requested_by=current_user.name,
+                )
+            else:
+                request = TapeOpRequest(
+                    op_type=TapeOpType.MOVE,
+                    barcode=barcode,
+                    slot_id=destination_slot,
+                    requested_by=current_user.name,
+                    extras={"source_slot_id": source_slot},
+                )
+
+        record = orchestrator.execute(request)
+    except HTTPException as exc:
+        _record_media_move_audit(
+            current_user,
+            barcode=barcode,
+            source=source,
+            destination=destination,
+            result=f"failed: {exc.detail}",
+        )
+        raise
+    except ValueError as exc:
+        _record_media_move_audit(
+            current_user,
+            barcode=barcode,
+            source=source,
+            destination=destination,
+            result=f"failed: {exc}",
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if record.status is TapeOpStatus.FAILED:
+        result = record.error or "Tape move operation failed"
+        _record_media_move_audit(
+            current_user,
+            barcode=barcode,
+            source=source,
+            destination=destination,
+            result=f"failed: {result}",
+        )
+        logger.warning(
+            "controller media move failed",
+            barcode=barcode,
+            source=source,
+            destination=destination,
+            requested_by=current_user.name,
+            error=result,
+        )
+        raise HTTPException(status_code=409, detail=result)
+
+    aml_state.move_aml_media(barcode, destination)
+    _record_media_move_audit(
+        current_user,
+        barcode=barcode,
+        source=source,
+        destination=destination,
+        result="success",
+    )
+    logger.info(
+        "controller media move executed",
+        barcode=barcode,
+        source=source,
+        destination=destination,
+        requested_by=current_user.name,
+    )
     return _ws_result(f"Moved media {barcode} to {destination}")
+
+
+@router.get("/media/operations/moveMedium/maxAllowed", response_model=dict[str, int])
+async def get_max_allowed_medium_moves(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, int]:
+    _ensure_state(context)
+    return {"maxAllowed": 4}
+
+
+@router.get("/media/reports/usage", response_model=dict[str, Any])
+async def get_media_usage_report(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    items = []
+    for media in aml_state.list_aml_media():
+        enriched = _enrich_media(media)
+        items.append(
+            {
+                "barcode": str(enriched.get("barcode")),
+                "type": str(enriched.get("type")),
+                "usedGB": int(enriched.get("usedGB", 0) or 0),
+                "capacityGB": int(enriched.get("capacityGB", 0) or 0),
+                "percentUsed": int(enriched.get("percentUsed", 0) or 0),
+                "state": str(enriched.get("state", "unknown")),
+            }
+        )
+    return {"generatedAt": "2024-01-15T10:10:00Z", "media": items}
 
 
 @router.get("/media/search", response_model=MediaListResponse)
