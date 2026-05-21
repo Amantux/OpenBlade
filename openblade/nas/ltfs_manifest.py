@@ -260,6 +260,17 @@ class TapeMetadataWriter:
         except TypeError:
             return self.backend.read_bytes(path)
 
+    def list_metadata_files(self, barcode: str, prefix: str) -> list[str]:
+        """Return all /.openblade/ paths whose key starts with the given prefix."""
+        files: dict[str, bytes] = {}
+        backend_files = getattr(self.backend, "files", None)
+        if isinstance(backend_files, dict):
+            files = backend_files
+        elif hasattr(self.backend, "ensure_tape"):
+            # MockLTFSBackend per-tape storage
+            files = getattr(self.backend.ensure_tape(barcode), "files", {})
+        return sorted(k for k in files if k.startswith(prefix))
+
     def _ensure_dir(self, barcode: str, directory: str) -> None:
         dirs = getattr(self.backend, "dirs", None)
         if isinstance(dirs, set):
