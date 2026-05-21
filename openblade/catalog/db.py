@@ -62,6 +62,14 @@ def _migrate_schema(engine: Engine) -> None:
         if restore_job_columns and "partial_success" not in restore_job_columns
         else {}
     )
+    cartridge_columns: set[str] = set()
+    if "cartridges" in inspector.get_table_names():
+        cartridge_columns = {column["name"] for column in inspector.get_columns("cartridges")}
+    missing_cartridge_columns = (
+        {"library_id": "INTEGER REFERENCES library_instances(id)"}
+        if cartridge_columns and "library_id" not in cartridge_columns
+        else {}
+    )
     with engine.begin() as connection:
         if missing_columns:
             for name, column_type in missing_columns.items():
@@ -73,6 +81,27 @@ def _migrate_schema(engine: Engine) -> None:
         if missing_restore_job_columns:
             for name, column_type in missing_restore_job_columns.items():
                 connection.execute(text(f"ALTER TABLE nas_restore_jobs ADD COLUMN {name} {column_type}"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS library_instances (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL UNIQUE,
+                    emulator_url VARCHAR NOT NULL,
+                    serial_number VARCHAR,
+                    model VARCHAR NOT NULL DEFAULT 'Scalar i3',
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+                """
+            )
+        )
+        if missing_cartridge_columns:
+            for name, column_type in missing_cartridge_columns.items():
+                connection.execute(text(f"ALTER TABLE cartridges ADD COLUMN {name} {column_type}"))
+        if cartridge_columns:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_cartridges_library_id ON cartridges (library_id)"))
         connection.execute(
             text(
                 """

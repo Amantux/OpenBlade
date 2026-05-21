@@ -15,6 +15,21 @@ class Base(DeclarativeBase):
     """Base class for catalog ORM models."""
 
 
+class LibraryInstance(Base):
+    __tablename__ = "library_instances"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    emulator_url: Mapped[str] = mapped_column(String, nullable=False)
+    serial_number: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str] = mapped_column(String, default="Scalar i3")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class VolumeGroup(Base):
     __tablename__ = "volume_groups"
 
@@ -41,6 +56,9 @@ class Cartridge(Base):
     barcode: Mapped[str] = mapped_column(String(8), unique=True, nullable=False, index=True)
     volume_group_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("volume_groups.id"), nullable=True
+    )
+    library_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("library_instances.id"), nullable=True, index=True
     )
     capacity_bytes: Mapped[int] = mapped_column(Integer, default=12_000_000_000)
     used_bytes: Mapped[int] = mapped_column(Integer, default=0)

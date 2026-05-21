@@ -101,6 +101,7 @@ const sections: NavSection[] = [
       { label: 'Virtual Pools', to: '/storage/virtual-pools' },
       { label: 'Restore Queue', to: '/storage/restore-queue' },
       { label: 'Dataset Details', to: '/storage/dataset-details' },
+      { label: 'File Station', to: '/file-station' },
       { label: 'File Browser', to: '/files/browse' },
     ],
   },

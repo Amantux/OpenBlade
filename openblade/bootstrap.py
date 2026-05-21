@@ -68,6 +68,16 @@ def _seed_nas_defaults(catalog: CatalogRepository) -> None:
             service.upsert_share(share)
 
 
+def _seed_library_defaults(catalog: CatalogRepository) -> None:
+    if catalog.list_library_instances():
+        return
+    catalog.create_library_instance(
+        name="primary",
+        emulator_url="http://localhost:8010",
+        model="Scalar i3",
+    )
+
+
 @dataclass
 class AppContext:
     config: OpenBladeConfig
@@ -107,6 +117,7 @@ def get_catalog() -> CatalogRepository:
     if _catalog is None:
         _catalog = CatalogRepository(get_session())
         _seed_nas_defaults(_catalog)
+        _seed_library_defaults(_catalog)
     return _catalog
 
 
@@ -118,6 +129,7 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     library, ltfs = scalar_i3_default()
     catalog = CatalogRepository(get_session())
     _seed_nas_defaults(catalog)
+    _seed_library_defaults(catalog)
     run_inventory_job(library, catalog)
     queue = JobQueue()
     worker = Worker(queue)

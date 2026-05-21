@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -31,15 +31,18 @@ from openblade.api import (
     routes_iblade,
     routes_inventory,
     routes_jobs,
+    routes_libraries,
     routes_ltfs,
     routes_proxy,
     routes_rbac,
     routes_restore,
     routes_tape_ops,
     routes_tapes,
+    routes_upload,
     routes_virtual_fs,
     routes_volume_groups,
 )
+from openblade.api.routes_gateway import router as gateway_router
 from openblade.api.service_auth import ServiceTokenForbiddenError, controller_only_error
 from openblade.bootstrap import get_context
 from openblade.domain.errors import (
@@ -72,7 +75,9 @@ app.include_router(routes_dashboard.router, prefix="/dashboard", tags=["dashboar
 app.include_router(routes_ltfs.router, prefix="/ltfs", tags=["ltfs"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
+app.include_router(routes_libraries.router)
 app.include_router(routes_iblade.router, prefix="/iblade", tags=["iblade"])
+app.include_router(gateway_router)
 app.include_router(routes_virtual_fs.router, prefix="/virtual", tags=["virtual"])
 app.include_router(routes_tape_ops.router)
 app.include_router(nas_config.router)
@@ -92,6 +97,7 @@ app.include_router(routes_aml_media.router, prefix="/aml", tags=["aml-media"])
 app.include_router(routes_aml_operations.router, prefix="/aml", tags=["aml-operations"])
 app.include_router(routes_aml_system.router, prefix="/aml", tags=["aml-system"])
 app.include_router(routes_proxy.router)
+app.include_router(routes_upload.router)
 
 
 @app.on_event("startup")

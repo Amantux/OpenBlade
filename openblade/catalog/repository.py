@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import threading
-from uuid import uuid4
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
+from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -18,6 +18,7 @@ from openblade.catalog.models import (
     FileInstance,
     FileRecord,
     Job,
+    LibraryInstance,
     ManifestVersion,
     NasCacheDrive,
     NasConfig,
@@ -336,6 +337,55 @@ class CatalogRepository:
                 return attr(*args, **kwargs)
 
         return _locked
+
+    def create_library_instance(
+        self,
+        name: str,
+        emulator_url: str,
+        serial_number: str | None = None,
+        model: str = "Scalar i3",
+    ) -> LibraryInstance:
+        library = LibraryInstance(
+            name=name,
+            emulator_url=emulator_url,
+            serial_number=serial_number,
+            model=model,
+        )
+        self.session.add(library)
+        self.session.commit()
+        self.session.refresh(library)
+        return library
+
+    def get_library_instance(self, library_id: int) -> LibraryInstance | None:
+        stmt = select(LibraryInstance).where(LibraryInstance.id == library_id)
+        return self.session.execute(stmt).scalar_one_or_none()
+
+    def get_library_instance_by_name(self, name: str) -> LibraryInstance | None:
+        stmt = select(LibraryInstance).where(LibraryInstance.name == name)
+        return self.session.execute(stmt).scalar_one_or_none()
+
+    def list_library_instances(self) -> list[LibraryInstance]:
+        stmt = select(LibraryInstance).order_by(LibraryInstance.name)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def update_library_instance(self, library_id: int, **kwargs) -> LibraryInstance | None:
+        library = self.get_library_instance(library_id)
+        if library is None:
+            return None
+        for field in {"name", "emulator_url", "serial_number", "model", "enabled"}:
+            if field in kwargs:
+                setattr(library, field, kwargs[field])
+        self.session.commit()
+        self.session.refresh(library)
+        return library
+
+    def delete_library_instance(self, library_id: int) -> bool:
+        library = self.get_library_instance(library_id)
+        if library is None:
+            return False
+        self.session.delete(library)
+        self.session.commit()
+        return True
 
     def create_volume_group(self, name: str) -> VolumeGroup:
         existing = self.get_volume_group(name)
@@ -868,6 +918,15 @@ class CatalogRepository:
         if row is None:
             return None
         return self._nas_file_record_to_dict(row)
+
+    def delete_nas_file_record(self, file_id: str) -> dict[str, object] | None:
+        row = self.session.get(NasFileRecord, file_id)
+        if row is None:
+            return None
+        payload = self._nas_file_record_to_dict(row)
+        self.session.delete(row)
+        self.session.commit()
+        return payload
 
     def upsert_nas_file_record(self, config: dict[str, object]) -> dict[str, object]:
         parsed = NasFileRecordModel.model_validate(config)
