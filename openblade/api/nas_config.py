@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
+from openblade.api.routes_aml_auth import AmlUser, require_auth
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
 from openblade.nas.fuse_hook import FuseHook
@@ -24,6 +25,7 @@ from openblade.nas.ingest import (
     run_ingest_job,
     start_ingest_job,
 )
+from openblade.nas.path_mapping import PathMappingService
 from openblade.nas.planner import ArchivePlanner
 from openblade.nas.restore_planner import RestorePlan, RestorePlanner
 from openblade.nas.service import NasService
@@ -40,6 +42,10 @@ from openblade.nas.types import (
     NasPool,
     NasRestoreJob,
     NasShareDefinition,
+    PathLookupResult,
+    PathMappingBulkUpsertRequest,
+    PathMappingRecord,
+    PathMappingSearchRequest,
     RestoreJobStatus,
     RestorePlanRequest,
     SidecarValidationError,
@@ -53,6 +59,10 @@ _FUSE_HOOKS: dict[int, FuseHook] = {}
 
 def get_nas_service(repo=Depends(get_catalog_repository)) -> NasService:
     return NasService(repo)
+
+
+def get_path_mapping_service(repo=Depends(get_catalog_repository)) -> PathMappingService:
+    return PathMappingService(repo)
 
 
 def _bad_request(exc: ValueError | ValidationError | SidecarValidationError) -> HTTPException:
@@ -246,6 +256,72 @@ async def open_virtual_file(
 @router.get("/fuse/log")
 async def get_fuse_log(service: NasService = Depends(get_nas_service)) -> list[dict[str, object]]:
     return _get_fuse_hook(service).get_access_log()
+
+
+@router.post("/path-mappings", response_model=PathMappingRecord)
+async def upsert_path_mapping(
+    record: PathMappingRecord,
+    service: PathMappingService = Depends(get_path_mapping_service),
+    _: AmlUser = Depends(require_auth),
+) -> PathMappingRecord:
+    try:
+        return service.record_file(record)
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.get("/path-mappings/lookup", response_model=PathLookupResult)
+async def lookup_path_mapping(
+    path: str = Query(...),
+    pool_id: str = Query(default=""),
+    service: PathMappingService = Depends(get_path_mapping_service),
+    _: AmlUser = Depends(require_auth),
+) -> PathLookupResult:
+    return service.lookup(path, pool_id)
+
+
+@router.post("/path-mappings/search", response_model=list[PathMappingRecord])
+async def search_path_mappings(
+    request: PathMappingSearchRequest,
+    service: PathMappingService = Depends(get_path_mapping_service),
+    _: AmlUser = Depends(require_auth),
+) -> list[PathMappingRecord]:
+    return service.search(request)
+
+
+@router.post("/path-mappings/bulk")
+async def bulk_upsert_path_mappings(
+    request: PathMappingBulkUpsertRequest,
+    service: PathMappingService = Depends(get_path_mapping_service),
+    _: AmlUser = Depends(require_auth),
+) -> dict[str, int]:
+    try:
+        return {"upserted": service.bulk_record_files(request)}
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.delete("/path-mappings")
+async def delete_path_mapping(
+    path: str = Query(...),
+    pool_id: str = Query(default=""),
+    service: PathMappingService = Depends(get_path_mapping_service),
+    _: AmlUser = Depends(require_auth),
+) -> dict[str, bool]:
+    deleted = service.remove(path, pool_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="path mapping not found")
+    return {"deleted": True}
+
+
+@router.get("/path-mappings/stats")
+async def get_path_mapping_stats(
+    pool_id: str = Query(default=""),
+    dataset_id: str = Query(default=""),
+    service: PathMappingService = Depends(get_path_mapping_service),
+    _: AmlUser = Depends(require_auth),
+) -> dict[str, object]:
+    return service.get_stats(pool_id=pool_id, dataset_id=dataset_id)
 
 
 @router.get("/policies", response_model=list[StoragePolicy])

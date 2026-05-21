@@ -24,6 +24,7 @@ from openblade.catalog.models import (
     NasRestoreJob,
     NasShare,
     NasStoragePolicy,
+    PathMapping,
     SafetyTokenRecord,
     VolumeGroup,
 )
@@ -33,6 +34,8 @@ from openblade.domain.policies import SafetyToken
 from openblade.nas.types import (
     CacheDriveConfig,
     NasShareDefinition,
+    PathMappingRecord,
+    PathMappingSearchRequest,
     RestoreJobStatus,
     StoragePolicy,
 )
@@ -183,6 +186,24 @@ class CatalogRepository:
             "created_at": row.created_at,
             "updated_at": row.updated_at,
             "completed_at": row.completed_at,
+        }
+
+    def _path_mapping_to_dict(self, row: PathMapping) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "logical_path": row.logical_path,
+            "pool_id": row.pool_id or "",
+            "dataset_id": row.dataset_id or "",
+            "primary_barcode": row.primary_barcode or "",
+            "all_barcodes": _load_json_value(row.all_barcodes, []),
+            "file_record_id": row.file_record_id or "",
+            "file_state": row.file_state,
+            "restore_strategy": row.restore_strategy,
+            "size": row.size or 0,
+            "checksum": row.checksum or "",
+            "last_seen_at": row.last_seen_at or "",
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
         }
 
     def __getattribute__(self, name: str):
@@ -856,6 +877,111 @@ class CatalogRepository:
         self.session.delete(row)
         self.session.commit()
         return True
+
+    def upsert_path_mapping(self, record: PathMappingRecord) -> PathMappingRecord:
+        """Insert or update a PathMapping row. Validates through Pydantic before persisting."""
+        parsed = PathMappingRecord.model_validate(record.model_dump(mode="json"))
+        row = (
+            self.session.execute(
+                select(PathMapping).where(
+                    PathMapping.logical_path == parsed.logical_path,
+                    PathMapping.pool_id == parsed.pool_id,
+                )
+            )
+            .scalar_one_or_none()
+        )
+        if row is None:
+            row = PathMapping(
+                id=parsed.id,
+                logical_path=parsed.logical_path,
+                pool_id=parsed.pool_id,
+                created_at=parsed.created_at,
+            )
+            self.session.add(row)
+        row.id = row.id or parsed.id
+        row.logical_path = parsed.logical_path
+        row.pool_id = parsed.pool_id
+        row.dataset_id = parsed.dataset_id
+        row.primary_barcode = parsed.primary_barcode
+        row.all_barcodes = json.dumps(parsed.all_barcodes)
+        row.file_record_id = parsed.file_record_id
+        row.file_state = parsed.file_state.value
+        row.restore_strategy = parsed.restore_strategy
+        row.size = parsed.size
+        row.checksum = parsed.checksum
+        row.last_seen_at = parsed.last_seen_at
+        row.created_at = row.created_at or parsed.created_at or _utcnow_iso() + "Z"
+        row.updated_at = _utcnow_iso() + "Z"
+        self.session.commit()
+        self.session.refresh(row)
+        return PathMappingRecord.model_validate(self._path_mapping_to_dict(row))
+
+    def get_path_mapping(self, logical_path: str, pool_id: str = "") -> PathMappingRecord | None:
+        """Lookup a single path mapping by (logical_path, pool_id). Returns None if not found."""
+        row = (
+            self.session.execute(
+                select(PathMapping).where(
+                    PathMapping.logical_path == logical_path,
+                    PathMapping.pool_id == pool_id,
+                )
+            )
+            .scalar_one_or_none()
+        )
+        if row is None:
+            return None
+        return PathMappingRecord.model_validate(self._path_mapping_to_dict(row))
+
+    def search_path_mappings(self, req: PathMappingSearchRequest) -> list[PathMappingRecord]:
+        """Filter path mappings. Supports prefix, pool_id, dataset_id, barcode, file_state."""
+        stmt = select(PathMapping)
+        if req.prefix:
+            stmt = stmt.where(PathMapping.logical_path.startswith(req.prefix))
+        if req.pool_id:
+            stmt = stmt.where(PathMapping.pool_id == req.pool_id)
+        if req.dataset_id:
+            stmt = stmt.where(PathMapping.dataset_id == req.dataset_id)
+        if req.barcode:
+            stmt = stmt.where(
+                (PathMapping.primary_barcode == req.barcode)
+                | (PathMapping.all_barcodes.like(f'%"{req.barcode}"%'))
+            )
+        if req.file_state is not None:
+            stmt = stmt.where(PathMapping.file_state == req.file_state.value)
+        stmt = stmt.order_by(PathMapping.logical_path).offset(req.offset).limit(req.limit)
+        rows = self.session.execute(stmt).scalars().all()
+        return [PathMappingRecord.model_validate(self._path_mapping_to_dict(row)) for row in rows]
+
+    def delete_path_mapping(self, logical_path: str, pool_id: str = "") -> bool:
+        """Delete a path mapping. Returns True if a row was deleted."""
+        row = (
+            self.session.execute(
+                select(PathMapping).where(
+                    PathMapping.logical_path == logical_path,
+                    PathMapping.pool_id == pool_id,
+                )
+            )
+            .scalar_one_or_none()
+        )
+        if row is None:
+            return False
+        self.session.delete(row)
+        self.session.commit()
+        return True
+
+    def bulk_upsert_path_mappings(self, entries: list[PathMappingRecord]) -> int:
+        """Bulk upsert. Returns count of rows upserted."""
+        for entry in entries:
+            self.upsert_path_mapping(entry)
+        return len(entries)
+
+    def count_path_mappings(self, pool_id: str = "", dataset_id: str = "") -> int:
+        """Count path mappings, optionally filtered by pool_id or dataset_id."""
+        stmt = select(func.count()).select_from(PathMapping)
+        if pool_id:
+            stmt = stmt.where(PathMapping.pool_id == pool_id)
+        if dataset_id:
+            stmt = stmt.where(PathMapping.dataset_id == dataset_id)
+        return int(self.session.execute(stmt).scalar_one())
 
     def save_safety_token(self, token: SafetyToken) -> None:
         row = SafetyTokenRecord(

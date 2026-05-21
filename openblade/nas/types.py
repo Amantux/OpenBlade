@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Literal
+import uuid
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
@@ -428,3 +430,64 @@ class NasShareDefinition(BaseModel):
         if value is None:
             return None
         return _strip_required_string(value, field_name="default_policy_id")
+
+
+class PathMappingRecord(BaseModel):
+    """Logical-path → tape(s) mapping entry."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    logical_path: str = Field(..., min_length=1)
+    pool_id: str = ""
+    dataset_id: str = ""
+    primary_barcode: str = ""
+    all_barcodes: list[str] = Field(default_factory=list)
+    file_record_id: str = ""
+    file_state: NasFileState = NasFileState.OFFLINE_ON_TAPE
+    restore_strategy: str = "single_tape"
+    size: int = 0
+    checksum: str = ""
+    last_seen_at: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+
+    @field_validator("logical_path", mode="before")
+    @classmethod
+    def validate_logical_path(cls, v: object) -> str:
+        """Reject empty paths and obvious traversal attempts."""
+        s = str(v).strip()
+        if not s:
+            raise ValueError("logical_path must not be empty")
+        if ".." in s.split("/"):
+            raise ValueError("logical_path must not contain '..' components")
+        return s
+
+
+class PathLookupResult(BaseModel):
+    """Result of a logical-path lookup."""
+
+    logical_path: str
+    found: bool
+    pool_id: str = ""
+    dataset_id: str = ""
+    primary_barcode: str = ""
+    all_barcodes: list[str] = Field(default_factory=list)
+    file_state: NasFileState = NasFileState.OFFLINE_ON_TAPE
+    restore_strategy: str = "single_tape"
+    size: int = 0
+    checksum: str = ""
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PathMappingBulkUpsertRequest(BaseModel):
+    entries: list[PathMappingRecord] = Field(..., max_length=1000)
+    overwrite_existing: bool = True
+
+
+class PathMappingSearchRequest(BaseModel):
+    prefix: str = ""
+    pool_id: str = ""
+    dataset_id: str = ""
+    barcode: str = ""
+    file_state: NasFileState | None = None
+    limit: int = 200
+    offset: int = 0

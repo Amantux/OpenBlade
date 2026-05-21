@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -235,6 +235,29 @@ class NasFileRecord(Base):
     cache_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PathMapping(Base):
+    """Maps a logical path to the tape(s) and dataset that hold it."""
+
+    __tablename__ = "path_mappings"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    logical_path = Column(String, nullable=False, index=True)
+    pool_id = Column(String, nullable=True, index=True)
+    dataset_id = Column(String, nullable=True, index=True)
+    primary_barcode = Column(String, nullable=True)
+    all_barcodes = Column(String, nullable=False, default="[]")
+    file_record_id = Column(String, nullable=True)
+    file_state = Column(String, nullable=False, default="offline_on_tape")
+    restore_strategy = Column(String, nullable=False, default="single_tape")
+    size = Column(Integer, nullable=True)
+    checksum = Column(String, nullable=True)
+    last_seen_at = Column(String, nullable=True)
+    created_at = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z")
+    updated_at = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z")
+
+    __table_args__ = (UniqueConstraint("logical_path", "pool_id", name="uq_path_pool"),)
 
 
 class NasRestoreJob(Base):
