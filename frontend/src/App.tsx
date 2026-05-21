@@ -13,6 +13,7 @@ import DriveOperations from './pages/DriveOperations';
 import Drives from './pages/Drives';
 import ErrorCodesPage from './pages/ErrorCodesPage';
 import FileStation from './pages/FileStation';
+import GatewayPage from './pages/Gateway';
 import Health from './pages/Health';
 import ImportExport from './pages/ImportExport';
 import InventoryScan from './pages/InventoryScan';
@@ -100,6 +101,7 @@ function RoutedApp() {
         <Route path="storage/restore-queue" element={<RestoreQueue />} />
         <Route path="storage/dataset-details" element={<DatasetDetails />} />
         <Route path="file-station" element={<FileStation />} />
+        <Route path="gateway" element={<GatewayPage />} />
         <Route path="files/browse" element={<VirtualFileBrowserPage />} />
         <Route path="admin/security" element={<AdminSecurityPage />} />
         <Route path="admin/safety" element={<AdminSafetyPage />} />

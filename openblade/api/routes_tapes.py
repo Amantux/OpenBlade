@@ -41,7 +41,7 @@ class OperationResponse(BaseModel):
     details: dict[str, str | int | float]
 
 
-@router.get("/", response_model=list[CartridgeResponse])
+@router.get("/", response_model=list[CartridgeResponse], dependencies=[Depends(require_auth)])
 async def list_cartridges(context: AppContext = Depends(get_context)) -> list[CartridgeResponse]:
     return [
         CartridgeResponse(

@@ -6,6 +6,7 @@ import {
   Gauge,
   HardDrive,
   Layers3,
+  Network,
   ServerCog,
   Shield,
   Workflow,
@@ -103,6 +104,7 @@ const sections: NavSection[] = [
       { label: 'Dataset Details', to: '/storage/dataset-details' },
       { label: 'File Station', to: '/file-station' },
       { label: 'File Browser', to: '/files/browse' },
+      { label: 'Protocol Gateway', to: '/gateway' },
     ],
   },
   {
@@ -117,7 +119,7 @@ const sections: NavSection[] = [
   {
     id: 'system',
     label: 'System',
-    icon: Shield,
+    icon: Network,
     items: [
       { label: 'System Info', to: '/system' },
       { label: 'Health', to: '/system/health' },
@@ -154,6 +156,7 @@ export default function Sidebar() {
     admin: true,
     system: true,
     reports: true,
+    gateway: true,
   });
 
   return (

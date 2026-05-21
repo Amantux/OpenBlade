@@ -16,7 +16,7 @@ import Spinner from '../components/ui/Spinner';
 import { useInventory } from '../hooks/useInventory';
 import { useJobs } from '../hooks/useJobs';
 import { getJobState, getJobTypeLabel, getSlotTone, normalizeDrive, normalizeSlot, type NormalizedSlot } from '../lib/lmc';
-import { formatBytes, formatDate, getDriveStateVariant } from '../lib/utils';
+import { formatBytes, formatDate, getDriveStateVariant, toTitleCase } from '../lib/utils';
 
 interface PartitionRow {
   id: string;

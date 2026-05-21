@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getLtfsVolumes, listFiles, mountVolume, type LtfsFile, type LtfsVolume, unmountVolume } from '../api/ltfs';
+import { getLtfsVolumes, listFiles, mountVolume, type LtfsFile, unmountVolume } from '../api/ltfs';
 import { getVolumeGroups } from '../api/volumeGroups';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';

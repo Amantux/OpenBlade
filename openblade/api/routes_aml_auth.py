@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import collections
+import os
 import string
+import time
 from typing import Any, Callable, TypeVar
 
 import pyotp
@@ -23,6 +26,35 @@ _PASSWORD_ALLOWED = {
     if char not in {"`", "~"} and (char == " " or char not in string.whitespace)
 }
 _RESERVED_NAMES = {"admin", "service"}
+
+# ---------------------------------------------------------------------------
+# Login rate limiting (in-memory, per remote IP)
+# ---------------------------------------------------------------------------
+_LOGIN_MAX_ATTEMPTS = int(os.environ.get("OPENBLADE_LOGIN_MAX_ATTEMPTS", "10"))
+_LOGIN_WINDOW_SECONDS = int(os.environ.get("OPENBLADE_LOGIN_WINDOW_SECONDS", "300"))
+_login_attempts: dict[str, collections.deque[float]] = {}
+
+
+def _check_rate_limit(remote_ip: str) -> None:
+    """Raise HTTP 429 if the IP has exceeded the login attempt limit."""
+    now = time.monotonic()
+    window_start = now - _LOGIN_WINDOW_SECONDS
+    deque = _login_attempts.setdefault(remote_ip, collections.deque())
+    # Evict timestamps outside the window
+    while deque and deque[0] < window_start:
+        deque.popleft()
+    if len(deque) >= _LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many login attempts. Try again in {_LOGIN_WINDOW_SECONDS // 60} minutes.",
+        )
+    deque.append(now)
+
+
+def _clear_rate_limit(remote_ip: str) -> None:
+    """Clear the attempt counter for an IP after a successful login."""
+    _login_attempts.pop(remote_ip, None)
+
 F = TypeVar("F", bound=Callable[..., Any])
 
 
@@ -446,7 +478,9 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     _ensure_state(context)
     payload = await _parse_login_request(request)
     user_name = _validate_user_name(payload.name)
-    remote_address = _remote_address(request)
+    remote_address = _remote_address(request) or "unknown"
+
+    _check_rate_limit(remote_address)
 
     if aml_state.get_login_mode() == 2:
         if not aml_state.is_ldap_user(user_name):
@@ -462,12 +496,21 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
             aml_state.record_login_activity(user_name, success=False, remote_address=remote_address)
             return _ws_error(401, "Invalid credentials")
 
+    _clear_rate_limit(remote_address)
     if user.role == 2 and not aml_state.get_service_access().get("enabled", True):
         raise HTTPException(status_code=503, detail="Service access is disabled")
     session_record = aml_state.create_session(user)
     aml_state.record_login_activity(user.name, success=True, remote_address=remote_address)
     response = JSONResponse(content=_ws_result("Login successful").model_dump())
-    response.set_cookie("sessionID", session_record.token, httponly=True, samesite="lax")
+    _is_production = os.environ.get("OPENBLADE_ENV", "development").lower() == "production"
+    response.set_cookie(
+        "sessionID",
+        session_record.token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_production,
+        max_age=86400,
+    )
     if user.require_password_change:
         response.headers["Warning"] = "Default Password Supplied"
     return response

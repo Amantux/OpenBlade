@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Request
+import os
+
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -65,6 +68,36 @@ class ErrorResponse(BaseModel):
 
 
 app = FastAPI(title="OpenBlade", version=OPENBLADE_VERSION)
+
+# ---------------------------------------------------------------------------
+# Security middleware
+# ---------------------------------------------------------------------------
+_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("OPENBLADE_CORS_ORIGINS", "http://localhost:5173,http://localhost:80").split(",")
+    if o.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Openblade-Service-Token"],
+)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next: object) -> Response:
+    response: Response = await call_next(request)  # type: ignore[operator]
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    if os.environ.get("OPENBLADE_ENV", "development").lower() == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    return response
+
 app.include_router(routes_health.router, tags=["health"])
 app.include_router(routes_inventory.router, prefix="/inventory", tags=["inventory"])
 app.include_router(routes_tapes.router, prefix="/cartridges", tags=["cartridges"])

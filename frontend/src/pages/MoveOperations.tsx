@@ -155,7 +155,7 @@ export default function MoveOperations() {
       {submittedJobId ? (
         <Card className="border-emerald-500/30 bg-emerald-500/10 text-emerald-200">
           Move job queued as <Link className="font-mono underline" to="/jobs">{submittedJobId}</Link>
-          {submittedJob ? ` · status ${'state' in submittedJob ? submittedJob.state : submittedJob.state}` : ''}
+          {submittedJob && 'state' in submittedJob ? ` · status ${(submittedJob as { state: string }).state}` : ''}
         </Card>
       ) : null}
       {moveMutation.isError ? <ErrorMessage error={moveMutation.error} /> : null}

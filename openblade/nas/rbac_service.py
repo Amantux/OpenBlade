@@ -81,13 +81,17 @@ class RbacService:
         return user
 
     def create_user(self, request: CreateUserRequest) -> UserSummary:
-        """Hash password with bcrypt (or sha256 if bcrypt unavailable), create user record, emit audit event."""
+        """Hash password with PBKDF2-HMAC-SHA256, create user record, emit audit event."""
         if self.repo.get_role(request.role_id) is None:
             raise ValueError("Role not found")
+        salt = secrets.token_hex(16)
+        hashed = hashlib.pbkdf2_hmac(
+            "sha256", request.password.encode(), salt.encode(), 260_000
+        ).hex()
         created = self.repo.create_user(
             {
                 "username": request.username,
-                "hashed_password": hashlib.sha256(request.password.encode()).hexdigest(),
+                "hashed_password": f"pbkdf2$260000${salt}${hashed}",
                 "role_id": request.role_id,
                 "email": request.email,
                 "full_name": request.full_name,

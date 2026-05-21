@@ -14,6 +14,9 @@ _UUID4_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Maximum upload size: 10 GiB by default, overridable via env
+_MAX_UPLOAD_BYTES = int(os.environ.get("OPENBLADE_MAX_UPLOAD_BYTES", str(10 * 1024 ** 3)))
+
 
 def _validate_file_id(file_id: str) -> str:
     """Reject anything that is not a valid UUID4. Prevents path traversal."""
@@ -191,9 +194,15 @@ async def upload_file_to_pool(
     try:
         with destination.open("wb") as handle:
             while chunk := await file.read(65_536):
+                size_bytes += len(chunk)
+                if size_bytes > _MAX_UPLOAD_BYTES:
+                    destination.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024 ** 2)} MiB",
+                    )
                 handle.write(chunk)
                 sha256.update(chunk)
-                size_bytes += len(chunk)
     finally:
         await file.close()
 

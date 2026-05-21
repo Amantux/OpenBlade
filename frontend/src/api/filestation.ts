@@ -2,6 +2,15 @@ import { rootApiRequest } from './client';
 
 const API = '/api';
 
+export class ChecksumMismatchError extends Error {
+  fileId: string | undefined;
+  constructor(fileId?: string) {
+    super('Checksum verification failed: server-side checksum did not match the expected value.');
+    this.name = 'ChecksumMismatchError';
+    this.fileId = fileId;
+  }
+}
+
 export interface UploadedFile {
   file_id: string;
   filename: string;
@@ -58,14 +67,22 @@ export async function uploadToPool(poolId: string, file: File, onProgress?: (pct
         if (xhr.status >= 200 && xhr.status < 300) {
           const uploaded = payload as UploadedFile;
           if (expectedChecksum && uploaded.checksum_sha256 !== expectedChecksum) {
-            reject(new Error('Checksum verification failed after upload.'));
+            reject(new ChecksumMismatchError(uploaded.file_id));
             return;
           }
           resolve(uploaded);
           return;
         }
 
-        reject(new Error(typeof payload === 'object' && payload && 'detail' in payload && payload.detail ? payload.detail : `HTTP ${xhr.status}`));
+        const detail =
+          typeof payload === 'object' && payload && 'detail' in payload && payload.detail
+            ? String(payload.detail)
+            : `HTTP ${xhr.status}`;
+        if (xhr.status === 400 && detail.toLowerCase().includes('checksum')) {
+          reject(new ChecksumMismatchError());
+        } else {
+          reject(new Error(detail));
+        }
       } catch (error) {
         reject(error instanceof Error ? error : new Error('Upload failed'));
       }

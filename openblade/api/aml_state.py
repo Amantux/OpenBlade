@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
+import os
 import re
 import secrets
 import time
@@ -20,8 +22,32 @@ from openblade.catalog.db import get_session, init_db
 from openblade.catalog.models import AmlUser
 from openblade.simulator.i3_config import scalar_i3_default_config
 
-DEFAULT_ADMIN_PASSWORD = "password"
-DEFAULT_SERVICE_PASSWORD = "service123"
+_DEFAULT_ADMIN_PASSWORD = "password"
+_DEFAULT_SERVICE_PASSWORD = "service123"
+
+_aml_log = logging.getLogger(__name__)
+
+def _get_admin_password() -> str:
+    pw = os.environ.get("OPENBLADE_ADMIN_PASSWORD", _DEFAULT_ADMIN_PASSWORD)
+    if pw == _DEFAULT_ADMIN_PASSWORD:
+        _aml_log.warning(
+            "Using default admin password 'password'. "
+            "Set OPENBLADE_ADMIN_PASSWORD env var before deploying to production."
+        )
+    return pw
+
+def _get_service_password() -> str:
+    pw = os.environ.get("OPENBLADE_SERVICE_PASSWORD", _DEFAULT_SERVICE_PASSWORD)
+    if pw == _DEFAULT_SERVICE_PASSWORD:
+        _aml_log.warning(
+            "Using default service password. "
+            "Set OPENBLADE_SERVICE_PASSWORD env var before deploying to production."
+        )
+    return pw
+
+# Keep module-level names for backward compat (test code may reference these)
+DEFAULT_ADMIN_PASSWORD = _DEFAULT_ADMIN_PASSWORD
+DEFAULT_SERVICE_PASSWORD = _DEFAULT_SERVICE_PASSWORD
 _PASSWORD_SALT_BYTES = 16
 _PASSWORD_KEY_BYTES = 32
 _PASSWORD_ITERATIONS = 390_000
@@ -1657,7 +1683,7 @@ def _seed_default_users() -> None:
             session.add(
                 AmlUser(
                     name="admin",
-                    password=hash_password(DEFAULT_ADMIN_PASSWORD),
+                    password=hash_password(_get_admin_password()),
                     role=0,
                     require_password_change=True,
                 )
@@ -1667,7 +1693,7 @@ def _seed_default_users() -> None:
             session.add(
                 AmlUser(
                     name="service",
-                    password=hash_password(DEFAULT_SERVICE_PASSWORD),
+                    password=hash_password(_get_service_password()),
                     role=2,
                     require_password_change=False,
                 )
@@ -1759,13 +1785,13 @@ def reset_admin_password() -> AmlUser:
         if admin is None:
             admin = AmlUser(
                 name="admin",
-                password=hash_password(DEFAULT_ADMIN_PASSWORD),
+                password=hash_password(_get_admin_password()),
                 role=0,
                 require_password_change=True,
             )
             session.add(admin)
         else:
-            admin.password = hash_password(DEFAULT_ADMIN_PASSWORD)
+            admin.password = hash_password(_get_admin_password())
             admin.role = 0
             admin.require_password_change = True
         session.commit()

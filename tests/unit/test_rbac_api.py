@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-
 from fastapi.testclient import TestClient
 
 from openblade.api.main import app
@@ -105,7 +103,8 @@ def test_create_user_endpoint_creates_user(tmp_path) -> None:
     service = service_for(client)
     stored = service.repo.get_user_by_username("alice")
     assert stored is not None
-    assert stored["hashed_password"] == hashlib.sha256(b"secret-password").hexdigest()
+    # Passwords are now stored as PBKDF2-HMAC-SHA256, not plain SHA-256
+    assert stored["hashed_password"].startswith("pbkdf2$")
 
 
 def test_list_roles_returns_seeded_roles(tmp_path) -> None:
