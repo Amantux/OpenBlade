@@ -269,8 +269,28 @@ class MockLTFSBackend:
 
     def write_bytes(
         self,
+        handle_or_barcode: MountHandle | str,
+        dest: PurePosixPath | str,
+        content: bytes,
+        *,
+        size_bytes: int | None = None,
+        checksum_sha256: str | None = None,
+    ) -> FileInstance | None:
+        if isinstance(handle_or_barcode, MountHandle):
+            return self._write_mounted_bytes(
+                handle_or_barcode,
+                dest,
+                content,
+                size_bytes=size_bytes,
+                checksum_sha256=checksum_sha256,
+            )
+        self._write_metadata_bytes(str(handle_or_barcode), str(dest), content)
+        return None
+
+    def _write_mounted_bytes(
+        self,
         handle: MountHandle,
-        dest: PurePosixPath,
+        dest: PurePosixPath | str,
         content: bytes,
         *,
         size_bytes: int | None = None,
@@ -319,10 +339,42 @@ class MockLTFSBackend:
         return FileInstance(
             file_record_id=checksum,
             barcode=Barcode(str(handle.barcode)),
-            tape_path=dest,
+            tape_path=PurePosixPath(path_key),
             state=FileInstanceState.ARCHIVED,
             archived_at=datetime.now(timezone.utc),
         )
+
+    def _write_metadata_bytes(self, barcode: str, dest: str, content: bytes) -> None:
+        tape = self.ensure_tape(barcode)
+        path_key = str(dest)
+        stored_size = len(content)
+        with self._lock:
+            existing = tape.files.get(path_key)
+            previous_size = existing.size_bytes if existing is not None else 0
+            projected_used_bytes = tape.used_bytes - previous_size + stored_size
+            if projected_used_bytes > tape.capacity_bytes:
+                raise TapeFullError(f"Tape {tape.barcode} is out of space")
+            tape.files[path_key] = MockFileRecord(
+                tape_path=path_key,
+                size_bytes=stored_size,
+                checksum_sha256=hashlib.sha256(content).hexdigest(),
+                content=content,
+            )
+            tape.used_bytes = projected_used_bytes
+
+    def read_bytes(self, barcode_or_path: str, path: PurePosixPath | str | None = None) -> bytes | None:
+        if path is None:
+            target_path = str(barcode_or_path)
+            with self._lock:
+                for tape in self._tapes.values():
+                    record = tape.files.get(target_path)
+                    if record is not None:
+                        return record.content
+            return None
+        tape = self.ensure_tape(str(barcode_or_path))
+        with self._lock:
+            record = tape.files.get(str(path))
+            return None if record is None else record.content
 
     def read_file(self, handle: MountHandle, source: PurePosixPath, dest: Path) -> OperationResult:
         self._require_active_mount(handle)
