@@ -410,6 +410,24 @@ class RebuildPlanResult(BaseModel):
     safe_to_enqueue: bool
 
 
+class RebuildActivationRequest(BaseModel):
+    barcodes: list[str] = Field(default_factory=list, max_length=500)
+    triggered_by: str = "operator"
+    dry_run_first: bool = True
+
+
+class RebuildActivationResult(BaseModel):
+    run_id: str
+    status: RebuildRunStatus
+    files_recovered: int
+    datasets_recovered: int
+    path_mappings_recovered: int
+    barcodes_completed: list[str]
+    barcodes_failed: list[str]
+    warnings: list[str]
+    safe_to_enqueue: bool
+
+
 class RestorePlanRequest(BaseModel):
     pool_id: str | None = None
     paths: list[str] = Field(default_factory=list)

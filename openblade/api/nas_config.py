@@ -14,6 +14,7 @@ from openblade.api.routes_aml_auth import AmlUser, require_auth
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
+from openblade.nas.catalog_rebuild_worker import CatalogRebuildWorker, SAFE_REBUILD_PREFLIGHT_ERROR
 from openblade.nas.catalog_shard import CatalogShardWriter
 from openblade.nas.fuse_hook import FuseHook
 from openblade.nas.ltfs_manifest import TapeMetadataWriter
@@ -52,6 +53,8 @@ from openblade.nas.types import (
     PathMappingBulkUpsertRequest,
     PathMappingRecord,
     PathMappingSearchRequest,
+    RebuildActivationRequest,
+    RebuildActivationResult,
     RebuildPlanRequest,
     RebuildPlanResult,
     RestoreJobStatus,
@@ -85,6 +88,53 @@ def get_catalog_rebuild_planner(
         shard_writer=shard_writer,
         manifest_validator=validator,
         path_mapping_service=PathMappingService(repo),
+    )
+
+
+def get_catalog_rebuild_worker(
+    repo=Depends(get_catalog_repository),
+    planner: CatalogRebuildPlanner = Depends(get_catalog_rebuild_planner),
+) -> CatalogRebuildWorker:
+    return CatalogRebuildWorker(repo=repo, planner=planner)
+
+
+def _loaded_tape_barcodes(repo) -> list[str]:
+    seen: set[str] = set()
+    barcodes: list[str] = []
+    for cartridge in repo.list_cartridges():
+        barcode = cartridge.get("barcode") if isinstance(cartridge, dict) else getattr(cartridge, "barcode", None)
+        value = str(barcode or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        barcodes.append(value)
+    return barcodes
+
+
+def _safe_rebuild_activation_detail() -> dict[str, object]:
+    return {
+        "message": SAFE_REBUILD_PREFLIGHT_ERROR,
+        "safe_to_enqueue": False,
+        "warnings": ["catalog rebuild preflight found validation problems"],
+    }
+
+
+def _activation_result_from_run(
+    run: CatalogRebuildRunRecord,
+    *,
+    warnings: list[str],
+    safe_to_enqueue: bool,
+) -> RebuildActivationResult:
+    return RebuildActivationResult(
+        run_id=run.id,
+        status=run.status,
+        files_recovered=run.files_recovered,
+        datasets_recovered=run.datasets_recovered,
+        path_mappings_recovered=run.path_mappings_recovered,
+        barcodes_completed=run.barcodes_completed,
+        barcodes_failed=run.barcodes_failed,
+        warnings=warnings,
+        safe_to_enqueue=safe_to_enqueue,
     )
 
 
@@ -354,6 +404,62 @@ async def plan_catalog_rebuild(
     _: AmlUser = Depends(require_auth),
 ) -> RebuildPlanResult:
     return planner.plan_rebuild(request)
+
+
+@router.post("/catalog/rebuild/activate", response_model=RebuildActivationResult)
+async def activate_catalog_rebuild(
+    request: RebuildActivationRequest,
+    repo=Depends(get_catalog_repository),
+    planner: CatalogRebuildPlanner = Depends(get_catalog_rebuild_planner),
+    worker: CatalogRebuildWorker = Depends(get_catalog_rebuild_worker),
+    _: AmlUser = Depends(require_auth),
+) -> RebuildActivationResult:
+    target_barcodes = request.barcodes or _loaded_tape_barcodes(repo)
+    if not target_barcodes:
+        run = worker.recover_from_loaded_tapes(triggered_by=request.triggered_by)
+        return _activation_result_from_run(
+            run,
+            warnings=["no loaded tapes available for rebuild"],
+            safe_to_enqueue=True,
+        )
+
+    preflight = planner.plan_rebuild(
+        RebuildPlanRequest(
+            barcodes=target_barcodes,
+            triggered_by=request.triggered_by,
+            dry_run=True,
+        )
+    )
+    if request.dry_run_first and not preflight.safe_to_enqueue:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=_safe_rebuild_activation_detail())
+
+    try:
+        if request.barcodes:
+            run = worker.auto_plan_and_execute(
+                request.barcodes,
+                triggered_by=request.triggered_by,
+                dry_run_first=False,
+            )
+        else:
+            run = worker.recover_from_loaded_tapes(triggered_by=request.triggered_by)
+    except ValueError as exc:
+        if str(exc) == SAFE_REBUILD_PREFLIGHT_ERROR:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=_safe_rebuild_activation_detail(),
+            ) from exc
+        raise _bad_request(exc) from exc
+
+    warnings = list(dict.fromkeys(preflight.warnings + run.error_summary))
+    return _activation_result_from_run(run, warnings=warnings, safe_to_enqueue=preflight.safe_to_enqueue)
+
+
+@router.get("/catalog/rebuild/loaded-tapes", response_model=list[str])
+async def list_catalog_rebuild_loaded_tapes(
+    repo=Depends(get_catalog_repository),
+    _: AmlUser = Depends(require_auth),
+) -> list[str]:
+    return _loaded_tape_barcodes(repo)
 
 
 @router.post("/catalog/rebuild/{run_id}/execute", response_model=CatalogRebuildRunRecord)
