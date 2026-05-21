@@ -21,6 +21,8 @@ from openblade.jobs.shard import (
     plan_block_stripe,
     write_shard_to_tempfile,
 )
+from openblade.nas.tape_orchestrator import execute_tape_request
+from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 
@@ -120,6 +122,7 @@ def run_sharded_archive(
                         scratch_dir,
                         volume_group.id,
                         shard_group_ids,
+                        job_id,
                     )
                     bytes_archived += source_file.stat().st_size
                     files_archived += 1
@@ -137,6 +140,7 @@ def run_sharded_archive(
                 volume_group.id,
                 shard_group_ids,
                 errors,
+                job_id,
             )
     finally:
         shutil.rmtree(scratch_dir, ignore_errors=True)
@@ -163,6 +167,7 @@ def _archive_stripe(
     vg_id: str,
     shard_group_ids: list[str],
     errors: list[str],
+    job_id: str,
 ) -> tuple[int, int]:
     lane_count = len(request.lane_barcodes)
     batches: list[list[tuple[Path, str]]] = []
@@ -186,7 +191,7 @@ def _archive_stripe(
         loaded_slots: dict[int, int | None] = {}
         try:
             for handle in handles:
-                drive_id, slot_id = _load_barcode(library, handle)
+                drive_id, slot_id = _load_barcode(catalog, library, ltfs, handle, job_id)
                 loaded_slots[drive_id] = slot_id
                 mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_WRITE)
 
@@ -257,7 +262,19 @@ def _archive_stripe(
                 slot_id = loaded_slots.get(handle.drive_id)
                 if slot_id is not None:
                     with suppress(Exception):
-                        library.unload(handle.drive_id, slot_id)
+                        execute_tape_request(
+                            catalog,
+                            library,
+                            ltfs,
+                            TapeOpRequest(
+                                op_type=TapeOpType.UNLOAD,
+                                barcode=handle.barcode,
+                                drive_id=handle.drive_id,
+                                slot_id=slot_id,
+                                requested_by="sharded-archive",
+                                job_id=job_id,
+                            ),
+                        )
             scheduler.release_drives(handles)
 
     return files_archived, bytes_archived
@@ -273,6 +290,7 @@ def _archive_block_stripe(
     scratch_dir: Path,
     vg_id: str,
     shard_group_ids: list[str],
+    job_id: str,
 ) -> None:
     plan = plan_block_stripe(
         source_file,
@@ -289,7 +307,7 @@ def _archive_block_stripe(
 
     try:
         for handle in handles:
-            drive_id, slot_id = _load_barcode(library, handle)
+            drive_id, slot_id = _load_barcode(catalog, library, ltfs, handle, job_id)
             loaded_slots[drive_id] = slot_id
             mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_WRITE)
 
@@ -374,14 +392,29 @@ def _archive_block_stripe(
             slot_id = loaded_slots.get(handle.drive_id)
             if slot_id is not None:
                 with suppress(Exception):
-                    library.unload(handle.drive_id, slot_id)
+                    execute_tape_request(
+                        catalog,
+                        library,
+                        ltfs,
+                        TapeOpRequest(
+                            op_type=TapeOpType.UNLOAD,
+                            barcode=handle.barcode,
+                            drive_id=handle.drive_id,
+                            slot_id=slot_id,
+                            requested_by="sharded-archive",
+                            job_id=job_id,
+                        ),
+                    )
         scheduler.release_drives(handles)
         shutil.rmtree(shard_dir, ignore_errors=True)
 
 
 def _load_barcode(
+    catalog: CatalogRepository,
     library: MockLibraryBackend,
+    ltfs: MockLTFSBackend,
     handle: DriveHandle,
+    job_id: str,
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
@@ -400,7 +433,20 @@ def _load_barcode(
     )
     if slot_id is None:
         raise ValueError(f"Barcode {handle.barcode} not found in any slot")
-    library.load(slot_id, handle.drive_id)
+    execute_tape_request(
+        catalog,
+        library,
+        ltfs,
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode=handle.barcode,
+            drive_id=handle.drive_id,
+            slot_id=slot_id,
+            requested_by="sharded-archive",
+            job_id=job_id,
+        ),
+        raise_on_failed=True,
+    )
     return handle.drive_id, slot_id
 
 

@@ -9,10 +9,12 @@ from pathlib import Path, PurePosixPath
 
 from openblade.api import aml_state
 from openblade.catalog.repository import CatalogRepository
-from openblade.domain.errors import ChecksumMismatchError, DriveOccupiedError, NoScratchMediaError
+from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.verify import sha256sum
+from openblade.nas.tape_orchestrator import TapeOperationFailedError, execute_tape_request
+from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 
@@ -136,7 +138,13 @@ def _mark_aml_drive_idle(barcode: str, drive_id: int, slot_id: int | None) -> No
         aml_state.update_aml_media(barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"})
 
 
-def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int | None]:
+def _load_if_needed(
+    catalog: CatalogRepository,
+    library: MockLibraryBackend,
+    ltfs: MockLTFSBackend,
+    barcode: str,
+    job_id: str,
+) -> tuple[int, int | None]:
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
         return drive_id, None
@@ -147,9 +155,22 @@ def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int
         if drive.barcode is not None:
             continue
         try:
-            library.load(slot_id, drive.drive_id)
+            execute_tape_request(
+                catalog,
+                library,
+                ltfs,
+                TapeOpRequest(
+                    op_type=TapeOpType.LOAD,
+                    barcode=barcode,
+                    drive_id=drive.drive_id,
+                    slot_id=slot_id,
+                    requested_by="archive-job",
+                    job_id=job_id,
+                ),
+                raise_on_failed=True,
+            )
             return drive.drive_id, slot_id
-        except DriveOccupiedError:
+        except TapeOperationFailedError:
             continue
     raise NoScratchMediaError("No available drives for archive load")
 
@@ -201,7 +222,19 @@ def run_archive_job(
             catalog.mark_instance_archived(instance_id, checksum_verified=True)
         pending_instance_ids = []
         if current_slot_id is not None:
-            library.unload(current_drive_id, current_slot_id)
+            execute_tape_request(
+                catalog,
+                library,
+                ltfs,
+                TapeOpRequest(
+                    op_type=TapeOpType.UNLOAD,
+                    barcode=current_barcode,
+                    drive_id=current_drive_id,
+                    slot_id=current_slot_id,
+                    requested_by="archive-job",
+                    job_id=job_id,
+                ),
+            )
         _mark_aml_drive_idle(current_barcode, current_drive_id, current_slot_id)
         cartridge = catalog.add_cartridge(current_barcode, volume_group.id)
         tape = ltfs.ensure_tape(current_barcode)
@@ -229,7 +262,13 @@ def run_archive_job(
             selected_barcode = _choose_tape(catalog, library, ltfs, volume_group.id, size_bytes)
             if selected_barcode != current_barcode:
                 finalize_current_mount()
-                current_drive_id, current_slot_id = _load_if_needed(library, selected_barcode)
+                current_drive_id, current_slot_id = _load_if_needed(
+                    catalog,
+                    library,
+                    ltfs,
+                    selected_barcode,
+                    job_id,
+                )
                 _mark_aml_drive_busy(selected_barcode, current_drive_id)
                 current_handle = ltfs.mount(selected_barcode, MountMode.READ_WRITE)
                 current_barcode = selected_barcode
@@ -264,7 +303,19 @@ def run_archive_job(
         if current_barcode is not None and current_drive_id is not None:
             if current_slot_id is not None:
                 try:
-                    library.unload(current_drive_id, current_slot_id)
+                    execute_tape_request(
+                        catalog,
+                        library,
+                        ltfs,
+                        TapeOpRequest(
+                            op_type=TapeOpType.UNLOAD,
+                            barcode=current_barcode,
+                            drive_id=current_drive_id,
+                            slot_id=current_slot_id,
+                            requested_by="archive-job",
+                            job_id=job_id,
+                        ),
+                    )
                 except Exception:
                     logger.exception("failed to unload archive drive for job %s", job_id)
             try:

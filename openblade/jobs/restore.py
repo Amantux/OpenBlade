@@ -12,6 +12,8 @@ from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.verify import sha256sum
+from openblade.nas.tape_orchestrator import execute_tape_request
+from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 
@@ -81,7 +83,13 @@ def _mark_aml_drive_idle(barcode: str, drive_id: int, slot_id: int | None) -> No
         aml_state.update_aml_media(barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"})
 
 
-def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int | None]:
+def _load_if_needed(
+    catalog: CatalogRepository,
+    library: MockLibraryBackend,
+    ltfs: MockLTFSBackend,
+    barcode: str,
+    job_id: str,
+) -> tuple[int, int | None]:
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
         return drive_id, None
@@ -89,7 +97,20 @@ def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int
     if slot_id is None:
         raise CartridgeOfflineError(f"Cartridge {barcode} is offline")
     drive_id = 0
-    library.load(slot_id, drive_id)
+    execute_tape_request(
+        catalog,
+        library,
+        ltfs,
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode=barcode,
+            drive_id=drive_id,
+            slot_id=slot_id,
+            requested_by="restore-job",
+            job_id=job_id,
+        ),
+        raise_on_failed=True,
+    )
     return drive_id, slot_id
 
 
@@ -112,7 +133,7 @@ def run_restore_job(
         return RestoreResult(
             job_id=job_id, source_barcode=instance.barcode, checksum_verified=False
         )
-    drive_id, slot_id = _load_if_needed(library, instance.barcode)
+    drive_id, slot_id = _load_if_needed(catalog, library, ltfs, instance.barcode, job_id)
     _mark_aml_drive_busy(instance.barcode, drive_id)
     final_dest = (
         request.dest_path / PurePosixPath(request.catalog_path).name
@@ -127,7 +148,19 @@ def run_restore_job(
             ltfs.unmount(handle)
     finally:
         if slot_id is not None:
-            library.unload(drive_id, slot_id)
+            execute_tape_request(
+                catalog,
+                library,
+                ltfs,
+                TapeOpRequest(
+                    op_type=TapeOpType.UNLOAD,
+                    barcode=instance.barcode,
+                    drive_id=drive_id,
+                    slot_id=slot_id,
+                    requested_by="restore-job",
+                    job_id=job_id,
+                ),
+            )
         _mark_aml_drive_idle(instance.barcode, drive_id, slot_id)
     actual_checksum = sha256sum(final_dest)
     if actual_checksum != record.checksum_sha256:

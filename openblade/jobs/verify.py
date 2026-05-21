@@ -8,6 +8,8 @@ from pathlib import Path, PurePosixPath
 from openblade.catalog.models import FileRecord
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.models import MountMode
+from openblade.nas.tape_orchestrator import execute_tape_request
+from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 
@@ -20,7 +22,12 @@ def sha256sum(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int | None]:
+def _load_if_needed(
+    catalog: CatalogRepository,
+    library: MockLibraryBackend,
+    ltfs: MockLTFSBackend,
+    barcode: str,
+) -> tuple[int, int | None]:
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
         return drive_id, None
@@ -28,7 +35,19 @@ def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int
     if slot_id is None:
         raise FileNotFoundError(barcode)
     drive_id = 0
-    library.load(slot_id, drive_id)
+    execute_tape_request(
+        catalog,
+        library,
+        ltfs,
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode=barcode,
+            drive_id=drive_id,
+            slot_id=slot_id,
+            requested_by="verify-job",
+        ),
+        raise_on_failed=True,
+    )
     return drive_id, slot_id
 
 
@@ -39,7 +58,7 @@ def run_verify_job(
     ltfs: MockLTFSBackend,
 ) -> dict[str, object]:
     """Mount a tape read-only and verify its archived catalog entries."""
-    _, slot_id = _load_if_needed(library, barcode)
+    _, slot_id = _load_if_needed(catalog, library, ltfs, barcode)
     checked = 0
     try:
         handle = ltfs.mount(barcode, MountMode.READ_ONLY)
@@ -56,5 +75,16 @@ def run_verify_job(
             ltfs.unmount(handle)
     finally:
         if slot_id is not None:
-            library.unload(0, slot_id)
+            execute_tape_request(
+                catalog,
+                library,
+                ltfs,
+                TapeOpRequest(
+                    op_type=TapeOpType.UNLOAD,
+                    barcode=barcode,
+                    drive_id=0,
+                    slot_id=slot_id,
+                    requested_by="verify-job",
+                ),
+            )
     return {"barcode": barcode, "files_verified": checked}

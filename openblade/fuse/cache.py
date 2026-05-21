@@ -20,14 +20,16 @@ class HydrationCache:
     def store(self, checksum: str, data: bytes) -> Path:
         path = self.cache_key(checksum)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        with path.open("wb") as handle:
+            handle.write(data)
         return path
 
     def retrieve(self, checksum: str) -> bytes:
         path = self.cache_key(checksum)
         if not path.exists():
             raise FileNotFoundError(f"Not in cache: {checksum}")
-        data = path.read_bytes()
+        with path.open("rb") as handle:
+            data = handle.read()
         actual = hashlib.sha256(data).hexdigest()
         if actual != checksum:
             path.unlink()

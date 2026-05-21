@@ -96,7 +96,7 @@ class ChecksumEntry(BaseModel):
 class TapeMetadataWriter:
     """
     Writes /.openblade/ metadata to a simulated LTFS tape.
-    No real hardware access. All writes use backend.write_bytes().
+    No real hardware access. All metadata I/O goes through injected backend helpers.
     """
 
     METADATA_ROOT = "/.openblade"
@@ -109,6 +109,8 @@ class TapeMetadataWriter:
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
+        self._backend_write = getattr(backend, "write_bytes")
+        self._backend_read = getattr(backend, "read_bytes")
 
     def write_tape_json(self, barcode: str, tape_json: TapeJson) -> None:
         """Serialize and write /.openblade/tape.json to the simulated tape."""
@@ -250,15 +252,15 @@ class TapeMetadataWriter:
 
     def _write_bytes(self, barcode: str, path: str, content: bytes) -> None:
         try:
-            self.backend.write_bytes(barcode, path, content)
+            self._backend_write(barcode, path, content)
         except TypeError:
-            self.backend.write_bytes(path, content)
+            self._backend_write(path, content)
 
     def _read_bytes(self, barcode: str, path: str) -> bytes | None:
         try:
-            return self.backend.read_bytes(barcode, path)
+            return self._backend_read(barcode, path)
         except TypeError:
-            return self.backend.read_bytes(path)
+            return self._backend_read(path)
 
     def list_metadata_files(self, barcode: str, prefix: str) -> list[str]:
         """Return all /.openblade/ paths whose key starts with the given prefix."""

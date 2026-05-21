@@ -16,6 +16,8 @@ from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError
 from openblade.domain.models import MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import DEFAULT_BLOCK_SIZE, compute_checksum, reassemble_block_stripe
+from openblade.nas.tape_orchestrator import execute_tape_request
+from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 
@@ -157,7 +159,7 @@ def _restore_single(
     slot_id: int | None = None
 
     try:
-        drive_id, slot_id = _ensure_loaded(library, handle)
+        drive_id, slot_id = _ensure_loaded(catalog, library, ltfs, handle, job_id)
         mount = ltfs.mount(instance.barcode, MountMode.READ_ONLY)
         try:
             tmp_dest = scratch_dir / Path(instance.tape_path).name
@@ -178,7 +180,19 @@ def _restore_single(
     finally:
         if slot_id is not None:
             with suppress(Exception):
-                library.unload(drive_id, slot_id)
+                execute_tape_request(
+                    catalog,
+                    library,
+                    ltfs,
+                    TapeOpRequest(
+                        op_type=TapeOpType.UNLOAD,
+                        barcode=instance.barcode,
+                        drive_id=drive_id,
+                        slot_id=slot_id,
+                        requested_by="sharded-restore",
+                        job_id=job_id,
+                    ),
+                )
         scheduler.release_drives(handles)
 
     catalog.update_job_state(job_id, "completed")
@@ -217,7 +231,7 @@ def _restore_sharded(
 
     try:
         for handle in handles:
-            drive_id, slot_id = _ensure_loaded(library, handle)
+            drive_id, slot_id = _ensure_loaded(catalog, library, ltfs, handle, job_id)
             loaded_slots[drive_id] = slot_id
             mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_ONLY)
 
@@ -256,7 +270,19 @@ def _restore_sharded(
             slot_id = loaded_slots.get(handle.drive_id)
             if slot_id is not None:
                 with suppress(Exception):
-                    library.unload(handle.drive_id, slot_id)
+                    execute_tape_request(
+                        catalog,
+                        library,
+                        ltfs,
+                        TapeOpRequest(
+                            op_type=TapeOpType.UNLOAD,
+                            barcode=handle.barcode,
+                            drive_id=handle.drive_id,
+                            slot_id=slot_id,
+                            requested_by="sharded-restore",
+                            job_id=job_id,
+                        ),
+                    )
         scheduler.release_drives(handles)
 
     catalog.update_job_state(job_id, "completed")
@@ -269,8 +295,11 @@ def _restore_sharded(
 
 
 def _ensure_loaded(
+    catalog: CatalogRepository,
     library: MockLibraryBackend,
+    ltfs: MockLTFSBackend,
     handle: DriveHandle,
+    job_id: str,
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
@@ -281,7 +310,20 @@ def _ensure_loaded(
     slot_id = library.find_slot_by_barcode(handle.barcode)
     if slot_id is None:
         raise CartridgeOfflineError(f"Barcode {handle.barcode} not found in library")
-    library.load(slot_id, handle.drive_id)
+    execute_tape_request(
+        catalog,
+        library,
+        ltfs,
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode=handle.barcode,
+            drive_id=handle.drive_id,
+            slot_id=slot_id,
+            requested_by="sharded-restore",
+            job_id=job_id,
+        ),
+        raise_on_failed=True,
+    )
     return handle.drive_id, slot_id
 
 

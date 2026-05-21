@@ -85,7 +85,8 @@ class CatalogFilesystem:
         data = self.cache.retrieve(record.checksum_sha256)
         destination = Path(dest)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(data)
+        with destination.open("wb") as handle:
+            handle.write(data)
         return data
 
     def write(self, path: str, data: bytes) -> None:

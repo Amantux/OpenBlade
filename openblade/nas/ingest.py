@@ -93,6 +93,10 @@ class _BaseIngest:
         self.service = service
         self.library = library
         self.ltfs = ltfs
+        self._load_tape = library.load
+        self._unload_tape = library.unload
+        self._format_tape = ltfs.format
+        self._write_tape_bytes = ltfs.write_bytes
         self._file_record_ids = {
             record.relative_path: record.id for record in service.list_file_records(dataset.id)
         }
@@ -191,7 +195,7 @@ class _BaseIngest:
         finally:
             self.ltfs.unmount(handle)
             if slot_id is not None:
-                self.library.unload(drive_id, slot_id)
+                self._unload_tape(drive_id, slot_id)
 
     def _prepare_single_file(self, relative_path: str, assignment: TapeAssignment) -> _PreparedFile:
         source_path = self._resolve_source_path(relative_path)
@@ -231,7 +235,7 @@ class _BaseIngest:
         tape = self.ltfs.ensure_tape(barcode)
         if tape.formatted:
             return
-        self.ltfs.format(
+        self._format_tape(
             barcode,
             FormatConfirmation(
                 expected_barcode=barcode,
@@ -268,7 +272,7 @@ class _BaseIngest:
                 "operation_checksum": operation_checksum,
             },
         )
-        self.ltfs.write_bytes(
+        self._write_tape_bytes(
             handle,
             tape_path,
             b"simulated:" + prepared.source_path.encode(),
@@ -604,7 +608,8 @@ def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int
     for drive in library.inventory().drives:
         if drive.barcode is not None:
             continue
-        library.load(slot_id, drive.drive_id)
+        load_tape = library.load
+        load_tape(slot_id, drive.drive_id)
         return drive.drive_id, slot_id
     raise ValueError("No free simulator tape drive is available")
 

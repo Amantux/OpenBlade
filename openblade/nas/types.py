@@ -112,6 +112,73 @@ class TapeOpStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class HealthStatus(str, Enum):
+    OK = "ok"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+
+
+class ComponentHealth(BaseModel):
+    name: str
+    status: HealthStatus
+    message: str = ""
+    latency_ms: float | None = None
+    last_checked_at: str = ""
+
+
+class HealthResponse(BaseModel):
+    status: HealthStatus
+    components: list[ComponentHealth]
+    checked_at: str
+    version: str
+
+
+class ReadyResponse(BaseModel):
+    ready: bool
+    reason: str = ""
+    checked_at: str
+
+
+class VersionResponse(BaseModel):
+    version: str
+    git_commit: str = "unknown"
+    build_date: str = "unknown"
+    python_version: str = ""       # omitted from unauthenticated /version endpoint
+    environment: str = ""          # omitted from unauthenticated /version endpoint
+
+
+class ErrorCodeEntry(BaseModel):
+    code: str
+    severity: Literal["error", "warning", "info"]
+    title: str
+    description: str
+    action: str
+
+
+class ErrorCodesResponse(BaseModel):
+    error_codes: list[ErrorCodeEntry]
+
+
+class LibraryStatusResponse(BaseModel):
+    library_connected: bool
+    drives: list[dict[str, Any]]
+    slots_total: int
+    slots_occupied: int
+    cartridges_loaded: int
+    last_updated_at: str
+
+
+class CatalogStatusResponse(BaseModel):
+    db_reachable: bool
+    total_datasets: int
+    total_file_records: int
+    total_path_mappings: int
+    total_cartridges: int
+    last_rebuild_run_id: str | None
+    last_rebuild_status: str | None
+    checked_at: str
+
+
 class TapeOpRequest(BaseModel):
     op_type: TapeOpType
     barcode: str

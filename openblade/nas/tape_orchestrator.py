@@ -24,6 +24,10 @@ class OperationNotConfirmedError(Exception):
     """Raised when a destructive tape operation lacks explicit confirmation."""
 
 
+class TapeOperationFailedError(RuntimeError):
+    """Raised when a tape operation is recorded as failed."""
+
+
 class TapeOperationOrchestrator:
     """Single choke point for tape hardware operations."""
 
@@ -190,11 +194,13 @@ class TapeOperationOrchestrator:
         return self._operation_result(result, {"barcode": request.barcode, "drive_id": drive_id, "slot_id": slot_id})
 
     def _format(self, request: TapeOpRequest) -> dict[str, Any]:
-        confirmation = FormatConfirmation(
-            expected_barcode=request.barcode,
-            safety_token=SafetyToken.generate("format", request.barcode),
-            operator_note=str(request.extras.get("operator_note", "")),
-        )
+        confirmation = request.extras.get("format_confirmation")
+        if not isinstance(confirmation, FormatConfirmation):
+            confirmation = FormatConfirmation(
+                expected_barcode=request.barcode,
+                safety_token=SafetyToken.generate("format", request.barcode),
+                operator_note=str(request.extras.get("operator_note", "")),
+            )
         result = self.ltfs.format(request.barcode, confirmation)
         return self._operation_result(result, {"barcode": request.barcode, "formatted": True})
 
@@ -340,6 +346,38 @@ class TapeOperationOrchestrator:
             TapeOpType.EJECT: "Tape eject operation failed",
         }
         return safe_messages[op_type]
+
+
+class _TransientTapeOpRepository:
+    def __init__(self) -> None:
+        self._records: dict[str, dict[str, Any]] = {}
+
+    def create_tape_op(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._records[str(payload["op_id"])] = dict(payload)
+        return dict(payload)
+
+    def update_tape_op(self, op_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        record = self._records.get(op_id)
+        if record is None:
+            return None
+        record.update(updates)
+        return dict(record)
+
+
+def execute_tape_request(
+    repo: CatalogRepository | None,
+    library: Any,
+    ltfs: Any,
+    request: TapeOpRequest,
+    *,
+    raise_on_failed: bool = False,
+) -> TapeOpRecord:
+    """Execute a tape operation through the orchestrator."""
+    active_repo: CatalogRepository | _TransientTapeOpRepository = repo or _TransientTapeOpRepository()
+    record = TapeOperationOrchestrator(active_repo, library, ltfs).execute(request)
+    if raise_on_failed and record.status is TapeOpStatus.FAILED:
+        raise TapeOperationFailedError(record.error or f"Tape {request.op_type.value} operation failed")
+    return record
 
 
 def _utcnow_iso() -> str:

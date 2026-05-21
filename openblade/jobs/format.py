@@ -6,6 +6,8 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import BarcodeMismatchError, FormatRequiresConfirmationError
 from openblade.domain.models import OperationResult
 from openblade.domain.policies import DryRunPlan, FormatConfirmation, SafetyToken
+from openblade.nas.tape_orchestrator import execute_tape_request
+from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 
@@ -51,6 +53,7 @@ class FormatService:
             FormatConfirmation(expected_barcode=barcode, safety_token=token),
             self.library,
             self.ltfs,
+            self.catalog,
         )
         self.catalog.delete_safety_token(token_value)
         cartridge = self.catalog.add_cartridge(barcode)
@@ -65,7 +68,24 @@ def run_format_job(
     confirmation: FormatConfirmation,
     library: MockLibraryBackend,
     ltfs: MockLTFSBackend,
+    catalog: CatalogRepository | None = None,
 ) -> OperationResult:
     """Format tape. Requires FormatConfirmation with correct barcode."""
-    del library
-    return ltfs.format(barcode, confirmation)
+    confirmation.validate(barcode)
+    record = execute_tape_request(
+        catalog,
+        library,
+        ltfs,
+        TapeOpRequest(
+            op_type=TapeOpType.FORMAT,
+            barcode=barcode,
+            requested_by="format-service",
+            extras={"confirmed_format": True, "format_confirmation": confirmation},
+        ),
+        raise_on_failed=True,
+    )
+    return OperationResult(
+        success=bool(record.result.get("success", True)),
+        message=str(record.result.get("message", "Tape formatted")),
+        details=record.result,
+    )

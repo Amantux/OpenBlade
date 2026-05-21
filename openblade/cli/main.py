@@ -15,6 +15,8 @@ from openblade.bootstrap import AppContext, create_context, reset_context
 from openblade.config import OpenBladeConfig
 from openblade.domain.models import Barcode, DriveState, MountState
 from openblade.fuse.filesystem import CatalogFilesystem
+from openblade.nas.tape_orchestrator import execute_tape_request
+from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockFileRecord, MockLTFSBackend, MockTapeContents
 
@@ -230,18 +232,60 @@ def mock_inventory() -> None:
 def mock_load(slot: int = typer.Option(...), drive: int = typer.Option(0)) -> None:
     """Load cartridge from slot into drive."""
     context = _get_context()
-    result = context.library.load(slot, drive)
+    inventory = context.library.inventory()
+    barcode = next(
+        (
+            slot_state.barcode.value
+            for slot_state in inventory.slots
+            if slot_state.slot_id == slot and slot_state.barcode is not None
+        ),
+        "",
+    )
+    record = execute_tape_request(
+        context.catalog,
+        context.library,
+        context.ltfs,
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode=barcode,
+            drive_id=drive,
+            slot_id=slot,
+            requested_by="cli",
+        ),
+        raise_on_failed=True,
+    )
     _save_state(context)
-    console.print(result.message)
+    console.print(record.result.get("message", "Loaded cartridge"))
 
 
 @mock_app.command("unload")
 def mock_unload(drive: int = typer.Option(0), slot: int = typer.Option(...)) -> None:
     """Unload cartridge from drive to slot."""
     context = _get_context()
-    result = context.library.unload(drive, slot)
+    inventory = context.library.inventory()
+    barcode = next(
+        (
+            drive_state.barcode.value
+            for drive_state in inventory.drives
+            if drive_state.drive_id == drive and drive_state.barcode is not None
+        ),
+        "",
+    )
+    record = execute_tape_request(
+        context.catalog,
+        context.library,
+        context.ltfs,
+        TapeOpRequest(
+            op_type=TapeOpType.UNLOAD,
+            barcode=barcode,
+            drive_id=drive,
+            slot_id=slot,
+            requested_by="cli",
+        ),
+        raise_on_failed=True,
+    )
     _save_state(context)
-    console.print(result.message)
+    console.print(record.result.get("message", "Unloaded cartridge"))
 
 
 @app.command("volume-group")
