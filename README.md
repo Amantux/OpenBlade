@@ -17,6 +17,12 @@ openblade inventory
 uvicorn openblade.api.main:app --reload
 ```
 
+## Multi-Library Setup
+- Start the API, frontend, and three emulator-backed library instances with `make up`
+- Seed catalog records for `library-1`, `library-2`, and `library-3` with `make seed-libraries`
+- Emulator ports map as `8010=library-1`, `8011=library-2`, and `8012=library-3`
+- Add a fourth or fifth library later by calling `POST /api/libraries` with a new `name` and `emulator_url`
+
 ## Safety defaults
 - Mock backend is the default
 - Real hardware requires `OPENBLADE_BACKEND=real` and `OPENBLADE_REAL_HARDWARE_ENABLED=true`

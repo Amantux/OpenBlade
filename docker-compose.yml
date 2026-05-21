@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      OPENBLADE_BACKEND: simulator
-      OPENBLADE_DB_PATH: /data/openblade.db
+      OPENBLADE_BACKEND: mock
+      OPENBLADE_DB_URL: sqlite:////data/openblade.db
     volumes:
       - openblade-data:/data
     ports:
@@ -15,6 +15,72 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  emulator-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn openblade.api.main:app --host 0.0.0.0 --port 8010
+    container_name: openblade-emulator-1
+    environment:
+      OPENBLADE_BACKEND: mock
+      OPENBLADE_DB_URL: sqlite:////data/openblade.db
+      LIBRARY_ID: "1"
+      LIBRARY_NAME: library-1
+    volumes:
+      - emulator-1-data:/data
+    ports:
+      - "8010:8010"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  emulator-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn openblade.api.main:app --host 0.0.0.0 --port 8010
+    container_name: openblade-emulator-2
+    environment:
+      OPENBLADE_BACKEND: mock
+      OPENBLADE_DB_URL: sqlite:////data/openblade.db
+      LIBRARY_ID: "2"
+      LIBRARY_NAME: library-2
+    volumes:
+      - emulator-2-data:/data
+    ports:
+      - "8011:8010"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  emulator-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn openblade.api.main:app --host 0.0.0.0 --port 8010
+    container_name: openblade-emulator-3
+    environment:
+      OPENBLADE_BACKEND: mock
+      OPENBLADE_DB_URL: sqlite:////data/openblade.db
+      LIBRARY_ID: "3"
+      LIBRARY_NAME: library-3
+    volumes:
+      - emulator-3-data:/data
+    ports:
+      - "8012:8010"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   web:
     build:
@@ -28,3 +94,6 @@ services:
 
 volumes:
   openblade-data:
+  emulator-1-data:
+  emulator-2-data:
+  emulator-3-data:
