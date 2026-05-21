@@ -343,10 +343,13 @@ class _BaseIngest:
             return
         if self.job.files_failed:
             self.job.partial_success = True
-            self._mark_dataset_failed(
+            message = (
                 f"Archived with partial success: {self.job.files_processed} succeeded, "
                 f"{self.job.files_failed} failed"
             )
+            if message not in self.job.errors:
+                self.job.errors.append(message)
+            self._mark_dataset_archived()
             return
         if self._dataset_archive_result is None or not self._dataset_archive_result.dataset_marked_archived:
             self._mark_dataset_failed("Dataset archive lifecycle did not complete")
