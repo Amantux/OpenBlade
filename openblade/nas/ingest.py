@@ -14,6 +14,11 @@ from pydantic import BaseModel, Field
 
 from openblade.domain.models import MountMode
 from openblade.domain.policies import FormatConfirmation, SafetyToken
+from openblade.nas.archive_lifecycle import ArchiveLifecycleManager, ArchiveLifecycleResult, DatasetArchiveResult
+from openblade.nas.catalog_shard import CatalogShardWriter
+from openblade.nas.ltfs_manifest import TapeMetadataWriter
+from openblade.nas.manifest_validator import ManifestValidator, VersionedManifestWriter
+from openblade.nas.path_mapping import PathMappingService
 from openblade.nas.service import NasService
 from openblade.nas.types import (
     ArchivePlan,
@@ -92,6 +97,8 @@ class _BaseIngest:
             record.relative_path: record.id for record in service.list_file_records(dataset.id)
         }
         self._prepared_files: dict[str, _PreparedFile] = {}
+        self._tape_paths: dict[str, str] = {}
+        self._dataset_archive_result: DatasetArchiveResult | None = None
 
     @staticmethod
     def _prepared_file_key(relative_path: str, barcode: str) -> str:
@@ -104,6 +111,7 @@ class _BaseIngest:
             for assignment in self.job.plan.tape_assignments:
                 self._check_cancelled()
                 self._write_assignment(assignment)
+            self._complete_dataset_archive()
             self._finalize_job()
         except IngestCancelledError as exc:
             self._mark_dataset_cancelled(str(exc))
@@ -151,11 +159,25 @@ class _BaseIngest:
                         prepared=prepared,
                     )
                     self._verify_tape_copy(handle, tape_path, prepared)
-                    self._upsert_file_record(
+                    file_record = self._upsert_file_record(
                         prepared,
                         tape_barcode=assignment.barcode,
-                        status=NasFileState.OFFLINE_ON_TAPE,
+                        status=self._initial_file_status(),
                     )
+                    lifecycle_result = _run_lifecycle_for_file(
+                        file_record,
+                        assignment.barcode,
+                        str(tape_path),
+                        self.job.plan.policy_name or "",
+                        self.service.repository,
+                        self.ltfs,
+                    )
+                    if not lifecycle_result.success:
+                        raise RuntimeError(
+                            "; ".join(lifecycle_result.errors)
+                            or f"archive lifecycle failed for {prepared.relative_path}"
+                        )
+                    self._tape_paths[file_record.id] = str(tape_path)
                     self.job.files_processed += 1
                     self.job.bytes_written += prepared.size_bytes
                 except Exception as exc:
@@ -200,10 +222,10 @@ class _BaseIngest:
         return 1024
 
     def _checksum_for_file(self, relative_path: str, barcode: str) -> str:
+        """Return sha256 of the bytes that _simulate_tape_write will write for this file."""
+        del barcode
         source_path = self._resolve_source_path(relative_path)
-        return hashlib.sha256(
-            f"{source_path}:{barcode}:{self.dataset.id}".encode()
-        ).hexdigest()
+        return hashlib.sha256(b"simulated:" + source_path.encode()).hexdigest()
 
     def _ensure_formatted(self, barcode: str) -> None:
         tape = self.ltfs.ensure_tape(barcode)
@@ -300,17 +322,35 @@ class _BaseIngest:
         self._file_record_ids[prepared.relative_path] = saved.id
         return saved
 
+    def _complete_dataset_archive(self) -> None:
+        manager = _build_archive_lifecycle_manager(self.service.repository, self.ltfs)
+        self._dataset_archive_result = manager.complete_dataset_archive(
+            self.dataset.id,
+            self.service.list_file_records(self.dataset.id),
+            "",
+            self._tape_paths,
+            self.job.plan.policy_name or "",
+        )
+        self.job.errors.extend(self._dataset_archive_result.errors)
+
     def _finalize_job(self) -> None:
         if self.job.files_failed and self.job.files_processed == 0:
             self._mark_dataset_failed("All files failed during ingest")
             return
         if self.job.files_failed:
             self.job.partial_success = True
-            self.job.errors.append(
+            self._mark_dataset_failed(
                 f"Archived with partial success: {self.job.files_processed} succeeded, "
                 f"{self.job.files_failed} failed"
             )
-        self._mark_dataset_archived()
+            return
+        if self._dataset_archive_result is None or not self._dataset_archive_result.dataset_marked_archived:
+            self._mark_dataset_failed("Dataset archive lifecycle did not complete")
+            return
+        dataset = self.service.get_dataset(self.dataset.id)
+        assert dataset is not None
+        self.dataset = dataset
+        self.job.status = DatasetStatus.ARCHIVED
 
     def _mark_dataset_archived(self) -> None:
         dataset = self.service.get_dataset(self.dataset.id)
@@ -520,6 +560,38 @@ def run_ingest_job(
             config=nas_service.get_source_stream_config(),
         )
     return executor.run()
+
+
+def _build_archive_lifecycle_manager(
+    repo,
+    backend: MockLTFSBackend,
+) -> ArchiveLifecycleManager:
+    metadata_writer = TapeMetadataWriter(backend)
+    shard_writer = CatalogShardWriter(metadata_writer)
+    versioned_manifest_writer = VersionedManifestWriter(metadata_writer)
+    manifest_validator = ManifestValidator(metadata_writer, shard_writer)
+    path_mapping_service = PathMappingService(repo)
+    return ArchiveLifecycleManager(
+        repo=repo,
+        metadata_writer=metadata_writer,
+        shard_writer=shard_writer,
+        versioned_manifest_writer=versioned_manifest_writer,
+        manifest_validator=manifest_validator,
+        path_mapping_service=path_mapping_service,
+    )
+
+
+def _run_lifecycle_for_file(
+    file_record: NasFileRecord,
+    barcode: str,
+    tape_path: str,
+    policy_name: str,
+    repo,
+    backend: MockLTFSBackend,
+) -> ArchiveLifecycleResult:
+    """Construct lifecycle manager and complete one file archive."""
+    manager = _build_archive_lifecycle_manager(repo, backend)
+    return manager.complete_file_archive(file_record, barcode, tape_path, policy_name)
 
 
 def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int | None]:
