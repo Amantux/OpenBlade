@@ -334,7 +334,11 @@ export default function VirtualFileBrowserPage() {
                         <Button
                           variant="danger"
                           disabled={cancelMutation.isPending}
-                          onClick={() => cancelMutation.mutate(job.job_id)}
+                          onClick={() => {
+                            if (window.confirm('Cancel this hydration job?')) {
+                              cancelMutation.mutate(job.job_id);
+                            }
+                          }}
                         >
                           {cancelMutation.isPending && cancelMutation.variables === job.job_id ? 'Cancelling…' : 'Cancel Job'}
                         </Button>

@@ -338,8 +338,8 @@ export default function AdminSecurityPage() {
                           variant="danger"
                           disabled={deleteUserMutation.isPending}
                           onClick={() => {
-                            if (window.confirm(`Delete ${user.username}?`)) {
-                              deleteUserMutation.mutate(user.id);
+                            if (window.confirm(`Delete user "${user.username}"? This cannot be undone.`)) {
+                              deleteUserMutation.mutate(user.username);
                             }
                           }}
                         >
@@ -475,7 +475,11 @@ export default function AdminSecurityPage() {
                       <td className="px-4 py-3 text-slate-300">{formatDate(token.last_used_at ?? '')}</td>
                       <td className="px-4 py-3 text-slate-300">{formatDate(token.expires_at ?? '')}</td>
                       <td className="px-4 py-3 text-right">
-                        <Button variant="danger" disabled={revokeTokenMutation.isPending || token.revoked} onClick={() => revokeTokenMutation.mutate(token.id)}>
+                        <Button variant="danger" disabled={revokeTokenMutation.isPending || token.revoked} onClick={() => {
+                            if (window.confirm('Revoke this API token? This cannot be undone.')) {
+                              revokeTokenMutation.mutate(token.id);
+                            }
+                          }}>
                           {token.revoked ? 'Revoked' : 'Revoke'}
                         </Button>
                       </td>
