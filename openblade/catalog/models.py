@@ -123,6 +123,28 @@ class SafetyTokenRecord(Base):
     expires_at: Mapped[float] = mapped_column()
 
 
+class TapeOpLog(Base):
+    __tablename__ = "tape_op_log"
+
+    op_id: Mapped[str] = mapped_column(String, primary_key=True)
+    op_type: Mapped[str] = mapped_column(String, nullable=False)
+    barcode: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    drive_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    slot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tape_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    requested_by: Mapped[str] = mapped_column(String, nullable=False)
+    job_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=5)
+    status: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    result: Mapped[str] = mapped_column(Text, default="{}")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    started_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class AmlUser(Base):
     __tablename__ = "aml_users"
 

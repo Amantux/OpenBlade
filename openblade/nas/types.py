@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 import uuid
 from uuid import uuid4
 
@@ -90,6 +90,61 @@ class RbacPermission(str, Enum):
     TOKEN_MANAGE = "token:manage"
     AUDIT_READ = "audit:read"
     SYSTEM_ADMIN = "system:admin"
+
+
+class TapeOpType(str, Enum):
+    LOAD = "load"
+    UNLOAD = "unload"
+    FORMAT = "format"
+    WRITE = "write"
+    READ = "read"
+    MOVE = "move"
+    VERIFY = "verify"
+    EJECT = "eject"
+
+
+class TapeOpStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    SKIPPED = "skipped"
+
+
+class TapeOpRequest(BaseModel):
+    op_type: TapeOpType
+    barcode: str
+    drive_id: int | None = None
+    slot_id: int | None = None
+    tape_path: str | None = None
+    content: bytes | None = None
+    size_bytes: int | None = None
+    checksum_sha256: str | None = None
+    requested_by: str = "system"
+    job_id: str | None = None
+    priority: int = Field(default=5, ge=1, le=10)
+    extras: dict[str, Any] = Field(default_factory=dict)
+
+
+class TapeOpRecord(BaseModel):
+    op_id: str
+    op_type: TapeOpType
+    barcode: str
+    drive_id: int | None = None
+    slot_id: int | None = None
+    tape_path: str | None = None
+    size_bytes: int | None = None
+    checksum_sha256: str | None = None
+    requested_by: str
+    job_id: str | None = None
+    priority: int
+    status: TapeOpStatus
+    result: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
 
 
 class RbacRoleRecord(BaseModel):

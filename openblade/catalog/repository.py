@@ -33,6 +33,7 @@ from openblade.catalog.models import (
     RbacRole,
     RbacUser,
     SafetyTokenRecord,
+    TapeOpLog,
     VolumeGroup,
 )
 from openblade.domain.errors import FileNotFoundError
@@ -52,6 +53,7 @@ from openblade.nas.types import (
     RbacUserRecord,
     RestoreJobStatus,
     StoragePolicy,
+    TapeOpRecord,
 )
 from openblade.nas.types import (
     NasDataset as NasDatasetModel,
@@ -301,6 +303,27 @@ class CatalogRepository:
             "details": _load_json_value(row.details, {}),
             "created_at": row.created_at,
             "ip_address": row.ip_address,
+        }
+
+    def _tape_op_to_dict(self, row: TapeOpLog) -> dict[str, object]:
+        return {
+            "op_id": row.op_id,
+            "op_type": row.op_type,
+            "barcode": row.barcode,
+            "drive_id": row.drive_id,
+            "slot_id": row.slot_id,
+            "tape_path": row.tape_path,
+            "size_bytes": row.size_bytes,
+            "checksum_sha256": row.checksum_sha256,
+            "requested_by": row.requested_by,
+            "job_id": row.job_id,
+            "priority": row.priority,
+            "status": row.status,
+            "result": _load_json_value(row.result, {}),
+            "error": row.error,
+            "created_at": row.created_at,
+            "started_at": row.started_at,
+            "completed_at": row.completed_at,
         }
 
     def __getattribute__(self, name: str):
@@ -1464,6 +1487,95 @@ class CatalogRepository:
             stmt = stmt.where(RbacAuditEvent.event_type == event_type)
         stmt = stmt.order_by(RbacAuditEvent.created_at.desc()).limit(limit)
         return [self._rbac_audit_event_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+
+    def create_tape_op(self, op: dict[str, object]) -> dict[str, object]:
+        """Create a tape operation audit log entry."""
+        now = _utcnow_iso()
+        parsed = TapeOpRecord.model_validate(
+            {
+                "result": {},
+                "error": None,
+                "created_at": now,
+                "started_at": None,
+                "completed_at": None,
+                **op,
+            }
+        )
+        row = self.session.get(TapeOpLog, parsed.op_id)
+        if row is None:
+            row = TapeOpLog(op_id=parsed.op_id)
+            self.session.add(row)
+        payload = parsed.model_dump(mode="json")
+        row.op_type = parsed.op_type.value
+        row.barcode = parsed.barcode
+        row.drive_id = parsed.drive_id
+        row.slot_id = parsed.slot_id
+        row.tape_path = parsed.tape_path
+        row.size_bytes = parsed.size_bytes
+        row.checksum_sha256 = parsed.checksum_sha256
+        row.requested_by = parsed.requested_by
+        row.job_id = parsed.job_id
+        row.priority = parsed.priority
+        row.status = parsed.status.value
+        row.result = json.dumps(payload["result"])
+        row.error = parsed.error
+        row.created_at = parsed.created_at
+        row.started_at = parsed.started_at
+        row.completed_at = parsed.completed_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._tape_op_to_dict(row)
+
+    def get_tape_op(self, op_id: str) -> dict[str, object] | None:
+        """Return a tape operation audit log entry by id."""
+        row = self.session.get(TapeOpLog, op_id)
+        if row is None:
+            return None
+        return self._tape_op_to_dict(row)
+
+    def update_tape_op(self, op_id: str, updates: dict[str, object]) -> dict[str, object] | None:
+        """Update a tape operation audit log entry and return the persisted record."""
+        existing = self.get_tape_op(op_id)
+        if existing is None:
+            return None
+        parsed = TapeOpRecord.model_validate({**existing, **updates, "op_id": op_id})
+        row = self.session.get(TapeOpLog, op_id)
+        assert row is not None
+        payload = parsed.model_dump(mode="json")
+        row.op_type = parsed.op_type.value
+        row.barcode = parsed.barcode
+        row.drive_id = parsed.drive_id
+        row.slot_id = parsed.slot_id
+        row.tape_path = parsed.tape_path
+        row.size_bytes = parsed.size_bytes
+        row.checksum_sha256 = parsed.checksum_sha256
+        row.requested_by = parsed.requested_by
+        row.job_id = parsed.job_id
+        row.priority = parsed.priority
+        row.status = parsed.status.value
+        row.result = json.dumps(payload["result"])
+        row.error = parsed.error
+        row.created_at = parsed.created_at
+        row.started_at = parsed.started_at
+        row.completed_at = parsed.completed_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._tape_op_to_dict(row)
+
+    def list_tape_ops(
+        self,
+        barcode: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """List tape operation audit log entries filtered by barcode and/or status."""
+        stmt = select(TapeOpLog)
+        if barcode is not None:
+            stmt = stmt.where(TapeOpLog.barcode == barcode)
+        if status is not None:
+            stmt = stmt.where(TapeOpLog.status == status)
+        stmt = stmt.order_by(TapeOpLog.created_at.desc()).limit(limit)
+        return [self._tape_op_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
 
     def seed_default_roles(self) -> None:
         """Create built-in roles if they don't exist: admin, operator, readonly."""
