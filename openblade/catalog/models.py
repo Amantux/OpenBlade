@@ -260,6 +260,38 @@ class PathMapping(Base):
     __table_args__ = (UniqueConstraint("logical_path", "pool_id", name="uq_path_pool"),)
 
 
+class CatalogRebuildRun(Base):
+    __tablename__ = "catalog_rebuild_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    status: Mapped[str] = mapped_column(String, default="planned")
+    triggered_by: Mapped[str] = mapped_column(String, default="system")
+    barcodes_planned: Mapped[str] = mapped_column(Text, default="[]")
+    barcodes_completed: Mapped[str] = mapped_column(Text, default="[]")
+    barcodes_failed: Mapped[str] = mapped_column(Text, default="[]")
+    barcodes_skipped: Mapped[str] = mapped_column(Text, default="[]")
+    files_recovered: Mapped[int] = mapped_column(Integer, default=0)
+    datasets_recovered: Mapped[int] = mapped_column(Integer, default=0)
+    path_mappings_recovered: Mapped[int] = mapped_column(Integer, default=0)
+    error_summary: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat() + "Z")
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat() + "Z")
+    completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ManifestVersion(Base):
+    __tablename__ = "manifest_versions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    barcode: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    version_ts: Mapped[str] = mapped_column(String, nullable=False)
+    manifest_path: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False)
+    recorded_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat() + "Z")
+
+
 class NasRestoreJob(Base):
     __tablename__ = "nas_restore_jobs"
 

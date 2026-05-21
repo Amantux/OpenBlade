@@ -13,7 +13,11 @@ from pydantic import BaseModel, ValidationError
 from openblade.api.routes_aml_auth import AmlUser, require_auth
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
+from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
+from openblade.nas.catalog_shard import CatalogShardWriter
 from openblade.nas.fuse_hook import FuseHook
+from openblade.nas.ltfs_manifest import TapeMetadataWriter
+from openblade.nas.manifest_validator import ManifestValidator
 from openblade.nas.hydration import HydrationExecutor
 from openblade.nas.ingest import (
     IngestJob,
@@ -34,9 +38,11 @@ from openblade.nas.types import (
     ArchivePlan,
     ArchivePlanRequest,
     CacheDriveConfig,
+    CatalogRebuildRunRecord,
     DatasetStatus,
     EffectivePolicy,
     IngestMode,
+    ManifestVersionRecord,
     NasFileRecord,
     NasFileState,
     NasPool,
@@ -46,6 +52,8 @@ from openblade.nas.types import (
     PathMappingBulkUpsertRequest,
     PathMappingRecord,
     PathMappingSearchRequest,
+    RebuildPlanRequest,
+    RebuildPlanResult,
     RestoreJobStatus,
     RestorePlanRequest,
     SidecarValidationError,
@@ -63,6 +71,21 @@ def get_nas_service(repo=Depends(get_catalog_repository)) -> NasService:
 
 def get_path_mapping_service(repo=Depends(get_catalog_repository)) -> PathMappingService:
     return PathMappingService(repo)
+
+
+def get_catalog_rebuild_planner(
+    repo=Depends(get_catalog_repository),
+) -> CatalogRebuildPlanner:
+    metadata_writer = TapeMetadataWriter(get_context().ltfs)
+    shard_writer = CatalogShardWriter(metadata_writer)
+    validator = ManifestValidator(metadata_writer, shard_writer)
+    return CatalogRebuildPlanner(
+        repo=repo,
+        metadata_writer=metadata_writer,
+        shard_writer=shard_writer,
+        manifest_validator=validator,
+        path_mapping_service=PathMappingService(repo),
+    )
 
 
 def _bad_request(exc: ValueError | ValidationError | SidecarValidationError) -> HTTPException:
@@ -322,6 +345,59 @@ async def get_path_mapping_stats(
     _: AmlUser = Depends(require_auth),
 ) -> dict[str, object]:
     return service.get_stats(pool_id=pool_id, dataset_id=dataset_id)
+
+
+@router.post("/catalog/rebuild/plan", response_model=RebuildPlanResult)
+async def plan_catalog_rebuild(
+    request: RebuildPlanRequest,
+    planner: CatalogRebuildPlanner = Depends(get_catalog_rebuild_planner),
+    _: AmlUser = Depends(require_auth),
+) -> RebuildPlanResult:
+    return planner.plan_rebuild(request)
+
+
+@router.post("/catalog/rebuild/{run_id}/execute", response_model=CatalogRebuildRunRecord)
+async def execute_catalog_rebuild(
+    run_id: str,
+    planner: CatalogRebuildPlanner = Depends(get_catalog_rebuild_planner),
+    _: AmlUser = Depends(require_auth),
+) -> CatalogRebuildRunRecord:
+    try:
+        return planner.execute_rebuild_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="rebuild run not found") from exc
+    except ValueError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.get("/catalog/rebuild/runs", response_model=list[CatalogRebuildRunRecord])
+async def list_catalog_rebuild_runs(
+    limit: int = Query(default=50, ge=1, le=500),
+    repo=Depends(get_catalog_repository),
+    _: AmlUser = Depends(require_auth),
+) -> list[CatalogRebuildRunRecord]:
+    return [CatalogRebuildRunRecord.model_validate(run) for run in repo.list_rebuild_runs(limit)]
+
+
+@router.get("/catalog/rebuild/{run_id}", response_model=CatalogRebuildRunRecord)
+async def get_catalog_rebuild_run(
+    run_id: str,
+    repo=Depends(get_catalog_repository),
+    _: AmlUser = Depends(require_auth),
+) -> CatalogRebuildRunRecord:
+    run = repo.get_rebuild_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="rebuild run not found")
+    return CatalogRebuildRunRecord.model_validate(run)
+
+
+@router.get("/catalog/manifest-versions/{barcode}", response_model=list[ManifestVersionRecord])
+async def list_catalog_manifest_versions(
+    barcode: str,
+    repo=Depends(get_catalog_repository),
+    _: AmlUser = Depends(require_auth),
+) -> list[ManifestVersionRecord]:
+    return [ManifestVersionRecord.model_validate(item) for item in repo.list_manifest_versions(barcode)]
 
 
 @router.get("/policies", response_model=list[StoragePolicy])

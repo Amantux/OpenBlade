@@ -354,6 +354,62 @@ class NasFileRecord(BaseModel):
     updated_at: str | None = None
 
 
+class RebuildRunStatus(str, Enum):
+    PLANNED = "planned"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class CatalogRebuildRunRecord(BaseModel):
+    id: str
+    status: RebuildRunStatus
+    triggered_by: str
+    barcodes_planned: list[str]
+    barcodes_completed: list[str]
+    barcodes_failed: list[str]
+    barcodes_skipped: list[str]
+    files_recovered: int = 0
+    datasets_recovered: int = 0
+    path_mappings_recovered: int = 0
+    error_summary: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    completed_at: str | None = None
+
+
+class ManifestVersionRecord(BaseModel):
+    id: str
+    barcode: str
+    version_ts: str
+    manifest_path: str
+    sha256: str
+    file_count: int = 0
+    is_current: bool = False
+    recorded_at: str
+
+
+class RebuildPlanRequest(BaseModel):
+    barcodes: list[str] = Field(default_factory=list, max_length=500)
+    triggered_by: str = "system"
+    dry_run: bool = False
+
+
+class RebuildPlanResult(BaseModel):
+    run_id: str
+    dry_run: bool
+    barcodes_to_scan: list[str] = Field(default_factory=list)
+    barcodes_missing_manifest: list[str] = Field(default_factory=list)
+    barcodes_missing_shard: list[str] = Field(default_factory=list)
+    barcodes_invalid: list[str] = Field(default_factory=list)
+    estimated_files: int = 0
+    estimated_datasets: int = 0
+    estimated_path_mappings: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    safe_to_enqueue: bool
+
+
 class RestorePlanRequest(BaseModel):
     pool_id: str | None = None
     paths: list[str] = Field(default_factory=list)

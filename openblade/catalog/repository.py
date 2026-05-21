@@ -13,9 +13,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from openblade.catalog.models import (
     Cartridge,
+    CatalogRebuildRun,
     FileInstance,
     FileRecord,
     Job,
+    ManifestVersion,
     NasCacheDrive,
     NasConfig,
     NasDataset,
@@ -33,6 +35,8 @@ from openblade.domain.models import FileInstanceState
 from openblade.domain.policies import SafetyToken
 from openblade.nas.types import (
     CacheDriveConfig,
+    CatalogRebuildRunRecord,
+    ManifestVersionRecord,
     NasShareDefinition,
     PathMappingRecord,
     PathMappingSearchRequest,
@@ -204,6 +208,36 @@ class CatalogRepository:
             "last_seen_at": row.last_seen_at or "",
             "created_at": row.created_at,
             "updated_at": row.updated_at,
+        }
+
+    def _catalog_rebuild_run_to_dict(self, row: CatalogRebuildRun) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "status": row.status,
+            "triggered_by": row.triggered_by,
+            "barcodes_planned": _load_json_value(row.barcodes_planned, []),
+            "barcodes_completed": _load_json_value(row.barcodes_completed, []),
+            "barcodes_failed": _load_json_value(row.barcodes_failed, []),
+            "barcodes_skipped": _load_json_value(row.barcodes_skipped, []),
+            "files_recovered": row.files_recovered,
+            "datasets_recovered": row.datasets_recovered,
+            "path_mappings_recovered": row.path_mappings_recovered,
+            "error_summary": _load_json_value(row.error_summary, []),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "completed_at": row.completed_at,
+        }
+
+    def _manifest_version_to_dict(self, row: ManifestVersion) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "barcode": row.barcode,
+            "version_ts": row.version_ts,
+            "manifest_path": row.manifest_path,
+            "sha256": row.sha256,
+            "file_count": row.file_count,
+            "is_current": row.is_current,
+            "recorded_at": row.recorded_at,
         }
 
     def __getattribute__(self, name: str):
@@ -877,6 +911,90 @@ class CatalogRepository:
         self.session.delete(row)
         self.session.commit()
         return True
+
+    def create_rebuild_run(self, run: dict[str, object]) -> dict[str, object]:
+        parsed = CatalogRebuildRunRecord.model_validate(run)
+        row = self.session.get(CatalogRebuildRun, parsed.id)
+        if row is None:
+            row = CatalogRebuildRun(id=parsed.id)
+            self.session.add(row)
+        row.status = parsed.status.value
+        row.triggered_by = parsed.triggered_by
+        row.barcodes_planned = json.dumps(parsed.barcodes_planned)
+        row.barcodes_completed = json.dumps(parsed.barcodes_completed)
+        row.barcodes_failed = json.dumps(parsed.barcodes_failed)
+        row.barcodes_skipped = json.dumps(parsed.barcodes_skipped)
+        row.files_recovered = parsed.files_recovered
+        row.datasets_recovered = parsed.datasets_recovered
+        row.path_mappings_recovered = parsed.path_mappings_recovered
+        row.error_summary = json.dumps(parsed.error_summary)
+        row.created_at = parsed.created_at
+        row.updated_at = parsed.updated_at
+        row.completed_at = parsed.completed_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._catalog_rebuild_run_to_dict(row)
+
+    def get_rebuild_run(self, run_id: str) -> dict[str, object] | None:
+        row = self.session.get(CatalogRebuildRun, run_id)
+        if row is None:
+            return None
+        return self._catalog_rebuild_run_to_dict(row)
+
+    def update_rebuild_run(self, run_id: str, updates: dict[str, object]) -> dict[str, object] | None:
+        existing = self.get_rebuild_run(run_id)
+        if existing is None:
+            return None
+        parsed = CatalogRebuildRunRecord.model_validate({**existing, **updates})
+        row = self.session.get(CatalogRebuildRun, run_id)
+        assert row is not None
+        row.status = parsed.status.value
+        row.triggered_by = parsed.triggered_by
+        row.barcodes_planned = json.dumps(parsed.barcodes_planned)
+        row.barcodes_completed = json.dumps(parsed.barcodes_completed)
+        row.barcodes_failed = json.dumps(parsed.barcodes_failed)
+        row.barcodes_skipped = json.dumps(parsed.barcodes_skipped)
+        row.files_recovered = parsed.files_recovered
+        row.datasets_recovered = parsed.datasets_recovered
+        row.path_mappings_recovered = parsed.path_mappings_recovered
+        row.error_summary = json.dumps(parsed.error_summary)
+        row.created_at = parsed.created_at
+        row.updated_at = parsed.updated_at
+        row.completed_at = parsed.completed_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._catalog_rebuild_run_to_dict(row)
+
+    def list_rebuild_runs(self, limit: int = 50) -> list[dict[str, object]]:
+        stmt = select(CatalogRebuildRun).order_by(CatalogRebuildRun.created_at.desc()).limit(limit)
+        rows = self.session.execute(stmt).scalars().all()
+        return [self._catalog_rebuild_run_to_dict(row) for row in rows]
+
+    def create_manifest_version(self, version: dict[str, object]) -> dict[str, object]:
+        parsed = ManifestVersionRecord.model_validate(version)
+        row = self.session.get(ManifestVersion, parsed.id)
+        if row is None:
+            row = ManifestVersion(id=parsed.id)
+            self.session.add(row)
+        row.barcode = parsed.barcode
+        row.version_ts = parsed.version_ts
+        row.manifest_path = parsed.manifest_path
+        row.sha256 = parsed.sha256
+        row.file_count = parsed.file_count
+        row.is_current = parsed.is_current
+        row.recorded_at = parsed.recorded_at
+        self.session.commit()
+        self.session.refresh(row)
+        return self._manifest_version_to_dict(row)
+
+    def list_manifest_versions(self, barcode: str) -> list[dict[str, object]]:
+        stmt = (
+            select(ManifestVersion)
+            .where(ManifestVersion.barcode == barcode)
+            .order_by(ManifestVersion.version_ts.desc(), ManifestVersion.recorded_at.desc())
+        )
+        rows = self.session.execute(stmt).scalars().all()
+        return [self._manifest_version_to_dict(row) for row in rows]
 
     def upsert_path_mapping(self, record: PathMappingRecord) -> PathMappingRecord:
         """Insert or update a PathMapping row. Validates through Pydantic before persisting."""

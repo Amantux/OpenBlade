@@ -234,7 +234,7 @@ class VersionedManifestWriter:
     def commit_write(self, barcode: str, temp_path: str) -> str:
         """
         Phase 2: Promote temp manifest to /.openblade/manifest.json.
-        Also writes /.openblade/manifest.sha256.
+        Also writes /.openblade/manifest.sha256 and a committed versioned manifest.
         Returns the final checksum.
         Raises ValueError if temp_path not found or not a valid temp path.
         """
@@ -247,7 +247,10 @@ class VersionedManifestWriter:
         except json.JSONDecodeError as exc:
             raise ValueError(f"temp manifest at {temp_path} contains invalid JSON") from exc
         checksum = self.writer.compute_json_checksum(payload)
+        version_path = temp_path.removesuffix(".tmp") + ".json"
         self.writer.ensure_openblade_dirs(barcode)
+        self.writer._ensure_dir(barcode, self.VERSIONS_DIR)
+        self.writer._write_text(barcode, version_path, content)
         self.writer._write_text(barcode, self.MANIFEST_PATH, content)
         self.writer._write_text(barcode, self.MANIFEST_CHECKSUM_PATH, checksum)
         return checksum
