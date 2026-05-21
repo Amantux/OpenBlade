@@ -135,6 +135,10 @@ class AmlUser(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
+    @property
+    def is_admin(self) -> bool:
+        return self.role == 0
+
 
 class RbacRole(Base):
     __tablename__ = "rbac_roles"

@@ -17,18 +17,19 @@ from openblade.api import (
     routes_aml_events,
     routes_aml_firmware,
     routes_aml_library,
-    routes_aml_system,
     routes_aml_media,
     routes_aml_operations,
     routes_aml_partitions,
     routes_aml_physical,
+    routes_aml_system,
     routes_archive,
     routes_catalog,
     routes_dashboard,
-    routes_proxy,
     routes_inventory,
     routes_jobs,
     routes_ltfs,
+    routes_proxy,
+    routes_rbac,
     routes_restore,
     routes_tapes,
     routes_volume_groups,
@@ -64,6 +65,7 @@ app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(nas_config.router)
 app.include_router(routes_aml_auth.router, prefix="/aml", tags=["aml-auth"])
+app.include_router(routes_rbac.router, prefix="/aml", tags=["rbac"])
 app.include_router(routes_aml_access.router, prefix="/aml", tags=["aml-access"])
 app.include_router(routes_aml_advanced.router, prefix="/aml", tags=["aml-advanced"])
 app.include_router(routes_aml_events.router, prefix="/aml", tags=["aml-events"])
