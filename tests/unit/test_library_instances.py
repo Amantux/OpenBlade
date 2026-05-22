@@ -51,7 +51,9 @@ def test_list_libraries(client: TestClient, admin_auth_headers: dict[str, str]) 
     assert response.status_code == 200
     payload = response.json()
     assert isinstance(payload, list)
-    assert any(item["name"] == "primary" for item in payload)
+    primary = next(item for item in payload if item["name"] == "Primary Tape Library")
+    assert primary["role"] == "primary"
+    assert primary["sort_order"] == 0
 
 
 def test_get_library(client: TestClient, admin_auth_headers: dict[str, str]) -> None:

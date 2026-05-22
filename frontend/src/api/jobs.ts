@@ -39,6 +39,7 @@ function normalizeJob(job: AmlJobResource): JobResponse {
     result: job.result ?? null,
     error: status === 'FAILED' ? job.result ?? 'Job failed' : null,
     metadata: {},
+    library_id: 1,
   };
 }
 

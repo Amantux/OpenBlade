@@ -38,11 +38,17 @@ def admin_auth_headers(client: TestClient) -> dict[str, str]:
 
 class TestLibraryCRUD:
     def test_default_library_exists(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
-        """Default 'primary' library should be seeded at startup."""
+        """Default descriptive libraries should be seeded at startup."""
         resp = client.get("/api/libraries", headers=admin_auth_headers)
         assert resp.status_code == 200
-        names = [lib["name"] for lib in resp.json()]
-        assert "primary" in names
+        libraries = resp.json()
+        names = [lib["name"] for lib in libraries]
+        assert "Primary Tape Library" in names
+        assert "Secondary Archive" in names
+        assert "Cold Storage Vault" in names
+        primary = next(lib for lib in libraries if lib["name"] == "Primary Tape Library")
+        assert primary["role"] == "primary"
+        assert primary["sort_order"] == 0
 
     def test_create_multiple_libraries(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
         """Should be able to create multiple library instances."""
@@ -60,6 +66,7 @@ class TestLibraryCRUD:
             data = resp.json()
             assert data["name"] == f"test-multi-lib-{i}"
             assert data["enabled"] is True
+            assert data["role"] == "primary"
 
     def test_list_all_libraries(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
         """List endpoint returns all created libraries."""
@@ -91,9 +98,15 @@ class TestLibraryCRUD:
         assert create.status_code == 200
         lib_id = create.json()["id"]
 
-        resp = client.put(f"/api/libraries/{lib_id}", json={"enabled": False}, headers=admin_auth_headers)
+        resp = client.put(
+            f"/api/libraries/{lib_id}",
+            json={"enabled": False, "role": "archive", "sort_order": 9},
+            headers=admin_auth_headers,
+        )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is False
+        assert resp.json()["role"] == "archive"
+        assert resp.json()["sort_order"] == 9
 
     def test_delete_library(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
         """Deleted library should return 404."""
@@ -114,6 +127,26 @@ class TestLibraryCRUD:
         resp = client.get(f"/api/libraries/{lib_id}", headers=admin_auth_headers)
         assert resp.status_code == 404
 
+    def test_cannot_disable_last_enabled_library(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+        libraries = client.get("/api/libraries", headers=admin_auth_headers)
+        assert libraries.status_code == 200
+
+        for library in libraries.json()[1:]:
+            disable = client.put(
+                f"/api/libraries/{library['id']}",
+                json={"enabled": False},
+                headers=admin_auth_headers,
+            )
+            assert disable.status_code == 200
+
+        primary_id = libraries.json()[0]["id"]
+        response = client.put(
+            f"/api/libraries/{primary_id}",
+            json={"enabled": False},
+            headers=admin_auth_headers,
+        )
+        assert response.status_code == 400
+
     def test_library_not_found(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
         resp = client.get("/api/libraries/99999", headers=admin_auth_headers)
         assert resp.status_code == 404
@@ -125,6 +158,20 @@ class TestLibraryCRUD:
             "/api/libraries",
             json={"name": "noauth", "emulator_url": "http://x"},
         ).status_code in (401, 403)
+
+    def test_library_header_is_accepted_by_aml_routes(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+        libraries = client.get("/api/libraries", headers=admin_auth_headers)
+        assert libraries.status_code == 200
+        selected = libraries.json()[1]
+
+        response = client.get(
+            "/aml/system",
+            headers={
+                **admin_auth_headers,
+                "X-OpenBlade-Library-Id": str(selected["id"]),
+            },
+        )
+        assert response.status_code == 200
 
 
 class TestCartridgeLibraryScoping:

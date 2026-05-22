@@ -13,8 +13,12 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { getActiveLibraryName, subscribeActiveLibrary } from '../../lib/activeLibrary';
-import { cn } from '../../lib/utils';
+import {
+  getActiveLibraryName,
+  getActiveLibraryRole,
+  subscribeActiveLibrary,
+} from '../../lib/activeLibrary';
+import { cn, toTitleCase } from '../../lib/utils';
 
 interface NavItem {
   label: string;
@@ -149,6 +153,7 @@ const sections: NavSection[] = [
 
 export default function Sidebar() {
   const [activeLibraryName, setActiveLibraryName] = useState(() => getActiveLibraryName());
+  const [activeLibraryRole, setActiveLibraryRole] = useState(() => getActiveLibraryRole());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     overview: true,
     library: true,
@@ -164,9 +169,16 @@ export default function Sidebar() {
   });
 
   useEffect(
-    () => subscribeActiveLibrary(() => setActiveLibraryName(getActiveLibraryName())),
+    () => subscribeActiveLibrary(() => {
+      setActiveLibraryName(getActiveLibraryName());
+      setActiveLibraryRole(getActiveLibraryRole());
+    }),
     [],
   );
+
+  const activeLibraryLabel = activeLibraryName
+    ? `⬡ ${activeLibraryName}${activeLibraryRole ? ` · ${toTitleCase(activeLibraryRole)}` : ''}`
+    : 'No library selected';
 
   return (
     <aside className="flex min-h-screen w-[280px] flex-col border-r border-quantum-border bg-quantum-sidebar">
@@ -204,6 +216,20 @@ export default function Sidebar() {
 
               {isExpanded ? (
                 <div className="mt-1 space-y-1 pl-2">
+                  {section.id === 'library' ? (
+                    <NavLink
+                      to="/libraries"
+                      className={({ isActive }) =>
+                        cn(
+                          'mx-3 mb-2 block truncate rounded border border-quantum-border bg-quantum-panel px-2 py-1 text-xs text-slate-300 transition hover:border-quantum-red/40 hover:text-white',
+                          isActive && 'border-quantum-red/60 text-white',
+                          !activeLibraryName && 'text-slate-500',
+                        )
+                      }
+                    >
+                      {activeLibraryLabel}
+                    </NavLink>
+                  ) : null}
                   {section.items.map((item) => (
                     <NavLink
                       key={item.to}

@@ -15,6 +15,7 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
+import { useLibraryScope } from '../lib/useLibraryScope';
 import { formatDate } from '../lib/utils';
 
 function jobVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
@@ -32,10 +33,11 @@ function driveState(drive?: Drive): string {
 
 export default function DriveOperations() {
   const queryClient = useQueryClient();
+  const { libraryId, libraryName } = useLibraryScope();
   const [selectedSerialNumber, setSelectedSerialNumber] = useState<string>();
   const [lastReceipt, setLastReceipt] = useState<OperationJobReceipt | null>(null);
-  const drivesQuery = useQuery({ queryKey: ['drives'], queryFn: listDrives, refetchInterval: 30_000 });
-  const jobsQuery = useQuery({ queryKey: ['operations', 'jobs', 'active'], queryFn: listActiveJobs, refetchInterval: 5_000 });
+  const drivesQuery = useQuery({ queryKey: ['drives', libraryId], queryFn: listDrives, refetchInterval: 30_000 });
+  const jobsQuery = useQuery({ queryKey: ['operations', 'jobs', 'active', libraryId], queryFn: listActiveJobs, refetchInterval: 5_000 });
 
   const drives = drivesQuery.data ?? [];
   useEffect(() => {
@@ -49,9 +51,9 @@ export default function DriveOperations() {
 
   const refreshQueries = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['drives'] }),
-      queryClient.invalidateQueries({ queryKey: ['operations', 'jobs', 'active'] }),
-      queryClient.invalidateQueries({ queryKey: ['jobs'] }),
+      queryClient.invalidateQueries({ queryKey: ['drives', libraryId] }),
+      queryClient.invalidateQueries({ queryKey: ['operations', 'jobs', 'active', libraryId] }),
+      queryClient.invalidateQueries({ queryKey: ['jobs', libraryId] }),
     ]);
   };
 
@@ -92,6 +94,12 @@ export default function DriveOperations() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 text-xs text-slate-400">
+        <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">
+          Library: <span className="font-medium text-slate-200">{libraryName || 'Primary Tape Library'}</span>
+        </span>
+        <Link to="/libraries" className="text-blue-400 hover:underline">Switch</Link>
+      </div>
       <Card className="bg-quantum-north">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

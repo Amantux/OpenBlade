@@ -1,25 +1,42 @@
 import { useEffect, useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useHealth } from '../../hooks/useHealth';
 import { useInventory } from '../../hooks/useInventory';
-import { getActiveLibraryId, getActiveLibraryName, subscribeActiveLibrary } from '../../lib/activeLibrary';
+import {
+  getActiveLibraryId,
+  getActiveLibraryName,
+  getActiveLibraryRole,
+  subscribeActiveLibrary,
+} from '../../lib/activeLibrary';
 import { deriveSystemHealth } from '../../lib/utils';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import TopBar from './TopBar';
 
+function isGlobalLibraryScopePath(pathname: string): boolean {
+  return pathname === '/archive'
+    || pathname === '/media/pools'
+    || pathname.startsWith('/storage/')
+    || pathname === '/file-station'
+    || pathname === '/files/browse'
+    || pathname === '/gateway';
+}
+
 export default function Layout() {
+  const location = useLocation();
   const { health } = useHealth();
-  const inventoryQuery = useInventory();
-  const inventory = inventoryQuery.data;
-  const [activeLibraryId, setActiveLibraryId] = useState(() => getActiveLibraryId());
+  const [activeLibraryId, setActiveLibraryIdState] = useState(() => getActiveLibraryId());
   const [activeLibraryName, setActiveLibraryName] = useState(() => getActiveLibraryName());
+  const [activeLibraryRole, setActiveLibraryRole] = useState(() => getActiveLibraryRole());
+  const inventoryQuery = useInventory(activeLibraryId);
+  const inventory = inventoryQuery.data;
   const systemHealth = deriveSystemHealth(health, inventory?.drives ?? [], inventory?.changer?.state ?? inventory?.changer_state);
 
   useEffect(
     () => subscribeActiveLibrary((id) => {
-      setActiveLibraryId(id);
+      setActiveLibraryIdState(id);
       setActiveLibraryName(getActiveLibraryName());
+      setActiveLibraryRole(getActiveLibraryRole());
     }),
     [],
   );
@@ -35,8 +52,17 @@ export default function Layout() {
           health={systemHealth}
           backend={health?.backend ?? 'backend'}
           activeLibraryName={activeLibraryId ? activeLibraryName || undefined : undefined}
+          activeLibraryRole={activeLibraryRole || undefined}
         />
         <main className="overflow-y-auto bg-quantum-panel p-4">
+          {isGlobalLibraryScopePath(location.pathname) ? (
+            <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
+              <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">Scope: All Libraries</span>
+              <Link to="/libraries" className="text-blue-400 hover:underline">
+                Manage libraries
+              </Link>
+            </div>
+          ) : null}
           <Outlet />
         </main>
         <StatusBar health={health} inventory={inventory} />

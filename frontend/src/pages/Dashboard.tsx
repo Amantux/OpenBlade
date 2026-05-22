@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { getCatalogStatus, getLibraryStatus, getPublicHealth } from '../api/catalogAdmin';
 import { getAmlSummary, getDashboardStats } from '../api/dashboard';
 import { getEvents, getRasTickets } from '../api/health';
@@ -16,6 +16,7 @@ import Spinner from '../components/ui/Spinner';
 import { useInventory } from '../hooks/useInventory';
 import { useJobs } from '../hooks/useJobs';
 import { getJobState, getJobTypeLabel, getSlotTone, normalizeDrive, normalizeSlot, type NormalizedSlot } from '../lib/lmc';
+import { useLibraryScope } from '../lib/useLibraryScope';
 import { formatBytes, formatDate, getDriveStateVariant, toTitleCase } from '../lib/utils';
 
 interface PartitionRow {
@@ -80,15 +81,16 @@ function tapeOpVariant(status: string): 'green' | 'blue' | 'red' | 'gray' {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const inventoryQuery = useInventory();
-  const jobsQuery = useJobs();
-  const summaryQuery = useQuery({ queryKey: ['dashboard', 'summary'], queryFn: getAmlSummary, refetchInterval: 10_000 });
+  const { libraryId, libraryName } = useLibraryScope();
+  const inventoryQuery = useInventory(libraryId);
+  const jobsQuery = useJobs(libraryId);
+  const summaryQuery = useQuery({ queryKey: ['dashboard', 'summary', libraryId], queryFn: getAmlSummary, refetchInterval: 10_000 });
   const statsQuery = useQuery({ queryKey: ['dashboard', 'stats'], queryFn: getDashboardStats, refetchInterval: 30_000 });
-  const ticketsQuery = useQuery({ queryKey: ['dashboard', 'tickets'], queryFn: getRasTickets, refetchInterval: 10_000 });
-  const eventsQuery = useQuery({ queryKey: ['dashboard', 'events'], queryFn: () => getEvents(6), refetchInterval: 10_000 });
+  const ticketsQuery = useQuery({ queryKey: ['dashboard', 'tickets', libraryId], queryFn: getRasTickets, refetchInterval: 10_000 });
+  const eventsQuery = useQuery({ queryKey: ['dashboard', 'events', libraryId], queryFn: () => getEvents(6), refetchInterval: 10_000 });
   const publicHealthQuery = useQuery({ queryKey: ['dashboard', 'public-health'], queryFn: getPublicHealth, refetchInterval: 30_000 });
   const catalogStatusQuery = useQuery({ queryKey: ['dashboard', 'catalog-status'], queryFn: getCatalogStatus, refetchInterval: 30_000 });
-  const libraryStatusQuery = useQuery({ queryKey: ['dashboard', 'library-status'], queryFn: getLibraryStatus, refetchInterval: 30_000 });
+  const libraryStatusQuery = useQuery({ queryKey: ['dashboard', 'library-status', libraryId], queryFn: getLibraryStatus, refetchInterval: 30_000 });
   const recentTapeOpsQuery = useQuery({ queryKey: ['dashboard', 'recent-tape-ops'], queryFn: () => listTapeOperations(5), refetchInterval: 30_000 });
   const hydrationJobsQuery = useQuery({ queryKey: ['dashboard', 'hydration-jobs'], queryFn: listHydrationJobs, refetchInterval: 30_000 });
   const [selectedPartitionId, setSelectedPartitionId] = useState<string>();
@@ -169,6 +171,12 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 text-xs text-slate-400">
+        <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">
+          Library: <span className="font-medium text-slate-200">{libraryName || 'Primary Tape Library'}</span>
+        </span>
+        <Link to="/libraries" className="text-blue-400 hover:underline">Switch</Link>
+      </div>
       <div className="grid gap-4 xl:grid-cols-4">
         <Card>
           <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Health Status</div>

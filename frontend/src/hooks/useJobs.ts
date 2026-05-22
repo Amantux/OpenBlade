@@ -1,27 +1,27 @@
 import { useQuery } from '@tanstack/react-query';
 import { cancelJob, getJob, getJobHistory, getJobs } from '../api/jobs';
 
-export function useJobs(refetchInterval = 10_000) {
+export function useJobs(libraryId = '', refetchInterval = 10_000) {
   return useQuery({
-    queryKey: ['jobs'],
+    queryKey: ['jobs', libraryId],
     queryFn: getJobs,
     refetchInterval,
     refetchIntervalInBackground: false,
   });
 }
 
-export function useJobHistory(refetchInterval = 30_000) {
+export function useJobHistory(libraryId = '', refetchInterval = 30_000) {
   return useQuery({
-    queryKey: ['jobs', 'history'],
+    queryKey: ['jobs', 'history', libraryId],
     queryFn: getJobHistory,
     refetchInterval,
     refetchIntervalInBackground: false,
   });
 }
 
-export function useJob(jobId?: string, isActive = false) {
+export function useJob(jobId?: string, libraryId = '', isActive = false) {
   return useQuery({
-    queryKey: ['jobs', jobId],
+    queryKey: ['jobs', libraryId, jobId],
     queryFn: () => getJob(jobId ?? ''),
     enabled: Boolean(jobId),
     refetchInterval: isActive ? 2_000 : 10_000,

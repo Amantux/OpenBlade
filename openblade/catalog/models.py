@@ -7,7 +7,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -23,6 +32,8 @@ class LibraryInstance(Base):
     emulator_url: Mapped[str] = mapped_column(String, nullable=False)
     serial_number: Mapped[str | None] = mapped_column(String, nullable=True)
     model: Mapped[str] = mapped_column(String, default="Scalar i3")
+    role: Mapped[str] = mapped_column(String, default="primary")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

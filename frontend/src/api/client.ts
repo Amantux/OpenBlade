@@ -27,6 +27,11 @@ export class ApiError extends Error {
 }
 
 const API_PREFIX = '/aml';
+const INITIAL_ACTIVE_LIBRARY_ID = typeof window !== 'undefined'
+  ? window.localStorage.getItem('openblade.active-library-id') ?? ''
+  : '';
+
+export const activeLibraryIdRef: { current: string } = { current: INITIAL_ACTIVE_LIBRARY_ID };
 
 function isBodyInitLike(value: unknown): value is BodyInitLike {
   return (
@@ -89,6 +94,10 @@ export async function apiRequest<T>(
   }
 
   const namespace = init.namespace ?? 'aml';
+  if (namespace === 'aml' && activeLibraryIdRef.current && activeLibraryIdRef.current !== 'all') {
+    headers.set('X-OpenBlade-Library-Id', activeLibraryIdRef.current);
+  }
+
   const response = await fetch(buildUrl(path, namespace), {
     ...init,
     headers,

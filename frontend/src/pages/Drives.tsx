@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getDrive, getDriveStatistics, getDriveStatus, listDriveCleaningReports, listDrives, listDrivesNeedingCleaning, type Drive } from '../api/drives';
 import InformationPanel from '../components/panels/InformationPanel';
@@ -8,6 +9,7 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
+import { useLibraryScope } from '../lib/useLibraryScope';
 import { formatDate } from '../lib/utils';
 
 function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
@@ -30,11 +32,12 @@ function getOperationalState(drive?: Drive): string {
 
 export default function Drives() {
   const queryClient = useQueryClient();
+  const { libraryId, libraryName } = useLibraryScope();
   const [selectedSerialNumber, setSelectedSerialNumber] = useState<string>();
 
-  const drivesQuery = useQuery({ queryKey: ['drives'], queryFn: listDrives, refetchInterval: 30_000 });
-  const cleaningNeedsQuery = useQuery({ queryKey: ['drive-cleaning-needs'], queryFn: listDrivesNeedingCleaning, refetchInterval: 30_000 });
-  const cleaningReportsQuery = useQuery({ queryKey: ['drive-cleaning-report'], queryFn: listDriveCleaningReports, refetchInterval: 30_000 });
+  const drivesQuery = useQuery({ queryKey: ['drives', libraryId], queryFn: listDrives, refetchInterval: 30_000 });
+  const cleaningNeedsQuery = useQuery({ queryKey: ['drive-cleaning-needs', libraryId], queryFn: listDrivesNeedingCleaning, refetchInterval: 30_000 });
+  const cleaningReportsQuery = useQuery({ queryKey: ['drive-cleaning-report', libraryId], queryFn: listDriveCleaningReports, refetchInterval: 30_000 });
 
   const drives = drivesQuery.data ?? [];
   useEffect(() => {
@@ -51,17 +54,17 @@ export default function Drives() {
   const activeSerialNumber = selectedDriveFromList?.serialNumber;
 
   const driveDetailQuery = useQuery({
-    queryKey: ['drive', activeSerialNumber],
+    queryKey: ['drive', libraryId, activeSerialNumber],
     queryFn: () => getDrive(activeSerialNumber!),
     enabled: Boolean(activeSerialNumber),
   });
   const driveStatusQuery = useQuery({
-    queryKey: ['drive-status', activeSerialNumber],
+    queryKey: ['drive-status', libraryId, activeSerialNumber],
     queryFn: () => getDriveStatus(activeSerialNumber!),
     enabled: Boolean(activeSerialNumber),
   });
   const driveStatisticsQuery = useQuery({
-    queryKey: ['drive-statistics', activeSerialNumber],
+    queryKey: ['drive-statistics', libraryId, activeSerialNumber],
     queryFn: () => getDriveStatistics(activeSerialNumber!),
     enabled: Boolean(activeSerialNumber),
   });
@@ -80,12 +83,12 @@ export default function Drives() {
 
   async function refresh() {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['drives'] }),
-      queryClient.invalidateQueries({ queryKey: ['drive-cleaning-needs'] }),
-      queryClient.invalidateQueries({ queryKey: ['drive-cleaning-report'] }),
-      activeSerialNumber ? queryClient.invalidateQueries({ queryKey: ['drive', activeSerialNumber] }) : Promise.resolve(),
-      activeSerialNumber ? queryClient.invalidateQueries({ queryKey: ['drive-status', activeSerialNumber] }) : Promise.resolve(),
-      activeSerialNumber ? queryClient.invalidateQueries({ queryKey: ['drive-statistics', activeSerialNumber] }) : Promise.resolve(),
+      queryClient.invalidateQueries({ queryKey: ['drives', libraryId] }),
+      queryClient.invalidateQueries({ queryKey: ['drive-cleaning-needs', libraryId] }),
+      queryClient.invalidateQueries({ queryKey: ['drive-cleaning-report', libraryId] }),
+      activeSerialNumber ? queryClient.invalidateQueries({ queryKey: ['drive', libraryId, activeSerialNumber] }) : Promise.resolve(),
+      activeSerialNumber ? queryClient.invalidateQueries({ queryKey: ['drive-status', libraryId, activeSerialNumber] }) : Promise.resolve(),
+      activeSerialNumber ? queryClient.invalidateQueries({ queryKey: ['drive-statistics', libraryId, activeSerialNumber] }) : Promise.resolve(),
     ]);
   }
 
@@ -98,6 +101,12 @@ export default function Drives() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 text-xs text-slate-400">
+        <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">
+          Library: <span className="font-medium text-slate-200">{libraryName || 'Primary Tape Library'}</span>
+        </span>
+        <Link to="/libraries" className="text-blue-400 hover:underline">Switch</Link>
+      </div>
       <Card className="bg-quantum-north">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

@@ -158,6 +158,7 @@ function mapJob(job: JobResource, movesById: Map<string, Move>): Job {
           : state === 'CANCELLED'
             ? 'CANCELLED'
             : job.result ?? null,
+    library_id: 1,
   };
 }
 

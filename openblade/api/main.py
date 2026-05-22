@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from openblade.api import (
+    library_context,
     nas_config,
     routes_aml_access,
     routes_aml_advanced,
@@ -84,7 +85,7 @@ app.add_middleware(
     allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Openblade-Service-Token"],
+    allow_headers=["Content-Type", "Authorization", "X-Openblade-Service-Token", "X-OpenBlade-Library-Id"],
 )
 
 
@@ -98,6 +99,15 @@ async def add_security_headers(request: Request, call_next: object) -> Response:
     if os.environ.get("OPENBLADE_ENV", "development").lower() == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
+
+
+@app.middleware("http")
+async def bind_active_library_context(request: Request, call_next: object) -> Response:
+    token = library_context.set_active_library_id(request.headers.get("X-OpenBlade-Library-Id", ""))
+    try:
+        return await call_next(request)  # type: ignore[operator]
+    finally:
+        library_context.reset_active_library_id(token)
 
 app.include_router(routes_health.router, tags=["health"])
 app.include_router(routes_inventory.router, prefix="/inventory", tags=["inventory"])

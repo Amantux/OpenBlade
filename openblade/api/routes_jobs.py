@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from openblade.bootstrap import AppContext, get_context
@@ -18,11 +18,15 @@ class JobResponse(BaseModel):
     metadata: dict[str, object]
     created_at: str
     updated_at: str
+    library_id: int | None = 1
 
 
 @router.get("/", response_model=list[JobResponse])
-async def list_jobs(context: AppContext = Depends(get_context)) -> list[JobResponse]:
-    return [
+async def list_jobs(
+    library_id: int | None = Query(None),
+    context: AppContext = Depends(get_context),
+) -> list[JobResponse]:
+    jobs = [
         JobResponse(
             id=job.id,
             state=job.state,
@@ -31,9 +35,13 @@ async def list_jobs(context: AppContext = Depends(get_context)) -> list[JobRespo
             metadata=job.metadata_dict,
             created_at=job.created_at.isoformat(),
             updated_at=job.updated_at.isoformat(),
+            library_id=1,
         )
         for job in context.catalog.list_jobs()
     ]
+    if library_id is None:
+        return jobs
+    return [job for job in jobs if job.library_id == library_id]
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -49,4 +57,5 @@ async def get_job(job_id: str, context: AppContext = Depends(get_context)) -> Jo
         metadata=job.metadata_dict,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
+        library_id=1,
     )

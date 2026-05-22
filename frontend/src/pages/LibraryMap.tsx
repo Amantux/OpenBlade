@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import InformationPanel from '../components/panels/InformationPanel';
 import NorthPanel from '../components/panels/NorthPanel';
 import OperationsPanel from '../components/panels/OperationsPanel';
@@ -9,6 +9,7 @@ import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
 import { useInventory } from '../hooks/useInventory';
 import { getSlotTone, normalizeDrive, normalizeSlot, type NormalizedDrive, type NormalizedSlot } from '../lib/lmc';
+import { useLibraryScope } from '../lib/useLibraryScope';
 
 interface PartitionRow {
   id: string;
@@ -40,7 +41,8 @@ function driveBadge(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' 
 
 export default function LibraryMap() {
   const navigate = useNavigate();
-  const inventoryQuery = useInventory();
+  const { libraryId, libraryName } = useLibraryScope();
+  const inventoryQuery = useInventory(libraryId);
   const [selectedPartitionId, setSelectedPartitionId] = useState<string>();
 
   const inventory = inventoryQuery.data ?? { library_id: 'LIBRARY-01', slots: [], drives: [], changer_state: 'UNKNOWN' };
@@ -105,6 +107,12 @@ export default function LibraryMap() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 text-xs text-slate-400">
+        <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">
+          Library: <span className="font-medium text-slate-200">{libraryName || 'Primary Tape Library'}</span>
+        </span>
+        <Link to="/libraries" className="text-blue-400 hover:underline">Switch</Link>
+      </div>
       <div className="grid gap-4 xl:grid-cols-[1.3fr,0.9fr]">
         <Card className="bg-quantum-north">
           <div className="flex items-center justify-between">

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import InformationPanel from '../components/panels/InformationPanel';
 import NorthPanel from '../components/panels/NorthPanel';
 import OperationsPanel from '../components/panels/OperationsPanel';
@@ -6,6 +7,7 @@ import Badge from '../components/ui/Badge';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
 import { useInventory } from '../hooks/useInventory';
+import { useLibraryScope } from '../lib/useLibraryScope';
 import { getSlotTone, normalizeSlot, type NormalizedSlot } from '../lib/lmc';
 
 function toneToBadge(slot: NormalizedSlot): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
@@ -22,7 +24,8 @@ function toneToBadge(slot: NormalizedSlot): 'gray' | 'green' | 'blue' | 'amber' 
 }
 
 export default function Library() {
-  const inventoryQuery = useInventory();
+  const { libraryId, libraryName } = useLibraryScope();
+  const inventoryQuery = useInventory(libraryId);
   const [selectedElement, setSelectedElement] = useState<string>();
 
   const inventory = inventoryQuery.data ?? { library_id: 'LIBRARY-01', slots: [], drives: [], changer_state: 'UNKNOWN' };
@@ -48,6 +51,12 @@ export default function Library() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 text-xs text-slate-400">
+        <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">
+          Library: <span className="font-medium text-slate-200">{libraryName || 'Primary Tape Library'}</span>
+        </span>
+        <Link to="/libraries" className="text-blue-400 hover:underline">Switch</Link>
+      </div>
       <NorthPanel
         title="Library Inventory"
         subtitle="Element inventory with IE Area and cleaning media annotations."

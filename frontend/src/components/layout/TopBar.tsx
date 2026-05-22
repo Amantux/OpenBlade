@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { SystemHealthLevel } from '../../types/api';
 import { useAuth } from '../../lib/auth-context';
+import { toTitleCase } from '../../lib/utils';
 import StatusPill from '../ui/StatusPill';
 
 interface TopBarProps {
@@ -9,6 +10,7 @@ interface TopBarProps {
   health: SystemHealthLevel;
   backend: string;
   activeLibraryName?: string;
+  activeLibraryRole?: string;
 }
 
 const statusCopy: Record<SystemHealthLevel, string> = {
@@ -17,13 +19,16 @@ const statusCopy: Record<SystemHealthLevel, string> = {
   Critical: 'Operator Required',
 };
 
-export default function TopBar({ libraryName, health, backend, activeLibraryName }: TopBarProps) {
+export default function TopBar({ libraryName, health, backend, activeLibraryName, activeLibraryRole }: TopBarProps) {
   const navigate = useNavigate();
   const auth = useAuth();
   const [now, setNow] = useState(() => new Date());
   const [announcement, setAnnouncement] = useState<string | null>(null);
   const previousActiveLibraryName = useRef(activeLibraryName);
   const username = auth.username ?? 'operator';
+  const activeLibraryLabel = activeLibraryName
+    ? `${activeLibraryName}${activeLibraryRole ? ` · ${toTitleCase(activeLibraryRole)}` : ''}`
+    : 'No library selected';
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1_000);
@@ -68,9 +73,13 @@ export default function TopBar({ libraryName, health, backend, activeLibraryName
               className="mt-2 inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200 transition hover:bg-amber-500/20"
               onClick={() => navigate('/libraries')}
             >
-              Active Remote: {activeLibraryName}
+              {activeLibraryLabel}
             </button>
-          ) : null}
+          ) : (
+            <Link to="/libraries" className="mt-2 inline-block text-xs text-slate-400 hover:text-slate-200 hover:underline">
+              {activeLibraryLabel}
+            </Link>
+          )}
           {announcement ? <div className="mt-2 text-sm font-medium text-emerald-200">{announcement}</div> : null}
         </div>
 

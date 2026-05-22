@@ -344,12 +344,16 @@ class CatalogRepository:
         emulator_url: str,
         serial_number: str | None = None,
         model: str = "Scalar i3",
+        role: str = "primary",
+        sort_order: int = 0,
     ) -> LibraryInstance:
         library = LibraryInstance(
             name=name,
             emulator_url=emulator_url,
             serial_number=serial_number,
             model=model,
+            role=role,
+            sort_order=sort_order,
         )
         self.session.add(library)
         self.session.commit()
@@ -365,14 +369,14 @@ class CatalogRepository:
         return self.session.execute(stmt).scalar_one_or_none()
 
     def list_library_instances(self) -> list[LibraryInstance]:
-        stmt = select(LibraryInstance).order_by(LibraryInstance.name)
+        stmt = select(LibraryInstance).order_by(LibraryInstance.sort_order, LibraryInstance.name)
         return list(self.session.execute(stmt).scalars().all())
 
     def update_library_instance(self, library_id: int, **kwargs) -> LibraryInstance | None:
         library = self.get_library_instance(library_id)
         if library is None:
             return None
-        for field in {"name", "emulator_url", "serial_number", "model", "enabled"}:
+        for field in {"name", "emulator_url", "serial_number", "model", "enabled", "role", "sort_order"}:
             if field in kwargs:
                 setattr(library, field, kwargs[field])
         self.session.commit()

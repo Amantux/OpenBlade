@@ -72,6 +72,7 @@ export interface JobResponse {
   barcode?: string | null;
   shard_index?: number | null;
   total_shards?: number | null;
+  library_id?: number | null;
 }
 
 export interface VolumeGroup {
@@ -310,6 +311,7 @@ export interface Job {
   completedAt: string | null;
   durationSeconds: number;
   result: string | null;
+  library_id?: number | null;
 }
 
 export interface Move {

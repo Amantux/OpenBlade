@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { listLibraries } from '../api/libraries';
 import { listCartridges, type Cartridge } from '../api/media';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -70,13 +71,16 @@ function CapacityBar({ usedGB, totalGB }: { usedGB: number; totalGB: number }) {
 export default function Media() {
   const mediaQuery = useQuery({ queryKey: ['media', 'cartridges'], queryFn: listCartridges, refetchInterval: 30_000 });
   const poolsQuery = useQuery({ queryKey: ['media', 'pools'], queryFn: listPools, refetchInterval: 30_000 });
+  const librariesQuery = useQuery({ queryKey: ['libraries'], queryFn: listLibraries, refetchInterval: 30_000 });
   const [search, setSearch] = useState('');
   const [poolFilter, setPoolFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
   const [selectedBarcode, setSelectedBarcode] = useState<string | null>(null);
+  const [libraryFilter, setLibraryFilter] = useState('all');
 
   const media = mediaQuery.data ?? EMPTY_CARTRIDGES;
   const pools = poolsQuery.data ?? [];
+  const libraries = librariesQuery.data ?? [];
   const states = useMemo(() => Array.from(new Set(media.map((cartridge) => cartridge.state))).sort(), [media]);
   const poolNames = useMemo(
     () => Array.from(new Set(media.map((cartridge) => cartridge.poolName).filter((value): value is string => Boolean(value)).concat(pools.map((pool) => pool.name)))).sort(),
@@ -116,7 +120,7 @@ export default function Media() {
     ? filteredRows.find(({ cartridge }) => cartridge.barcode === activeSelectedBarcode) ?? null
     : null;
 
-  if (mediaQuery.isLoading || poolsQuery.isLoading) {
+  if (mediaQuery.isLoading || poolsQuery.isLoading || librariesQuery.isLoading) {
     return <Spinner />;
   }
 
@@ -128,6 +132,14 @@ export default function Media() {
     return <ErrorMessage error={poolsQuery.error} onRetry={() => poolsQuery.refetch()} />;
   }
 
+  if (librariesQuery.isError) {
+    return <ErrorMessage error={librariesQuery.error} onRetry={() => librariesQuery.refetch()} />;
+  }
+
+  const selectedLibraryName = libraryFilter === 'all'
+    ? 'All Libraries'
+    : libraries.find((library) => String(library.id) === libraryFilter)?.name ?? 'Selected Library';
+
   return (
     <div className="space-y-4">
       <div>
@@ -137,6 +149,29 @@ export default function Media() {
       </div>
 
       <Card className="bg-quantum-panel p-5">
+        <div className="flex flex-wrap items-center gap-2 pb-4 text-xs text-slate-400">
+          <span className="rounded border border-quantum-border bg-quantum-sidebar px-2 py-1">Scope: {selectedLibraryName}</span>
+          <button
+            type="button"
+            onClick={() => setLibraryFilter('all')}
+            className={`rounded-full border px-2.5 py-1 transition ${libraryFilter === 'all' ? 'border-blue-500/40 bg-blue-500/15 text-blue-300' : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:text-white'}`}
+          >
+            All Libraries
+          </button>
+          {libraries.map((library) => {
+            const selected = libraryFilter === String(library.id);
+            return (
+              <button
+                key={library.id}
+                type="button"
+                onClick={() => setLibraryFilter(String(library.id))}
+                className={`rounded-full border px-2.5 py-1 transition ${selected ? 'border-blue-500/40 bg-blue-500/15 text-blue-300' : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:text-white'}`}
+              >
+                {library.name}
+              </button>
+            );
+          })}
+        </div>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr),220px,220px]">
           <label className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />

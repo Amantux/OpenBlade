@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
@@ -90,6 +91,8 @@ def _migrate_schema(engine: Engine) -> None:
                     emulator_url VARCHAR NOT NULL,
                     serial_number VARCHAR,
                     model VARCHAR NOT NULL DEFAULT 'Scalar i3',
+                    role TEXT DEFAULT 'primary',
+                    sort_order INTEGER DEFAULT 0,
                     enabled BOOLEAN NOT NULL DEFAULT 1,
                     created_at DATETIME,
                     updated_at DATETIME
@@ -97,6 +100,15 @@ def _migrate_schema(engine: Engine) -> None:
                 """
             )
         )
+        library_columns: set[str] = set()
+        if "library_instances" in inspector.get_table_names():
+            library_columns = {column["name"] for column in inspector.get_columns("library_instances")}
+        if library_columns and "role" not in library_columns:
+            with suppress(Exception):
+                connection.execute(text("ALTER TABLE library_instances ADD COLUMN role TEXT DEFAULT 'primary'"))
+        if library_columns and "sort_order" not in library_columns:
+            with suppress(Exception):
+                connection.execute(text("ALTER TABLE library_instances ADD COLUMN sort_order INTEGER DEFAULT 0"))
         if missing_cartridge_columns:
             for name, column_type in missing_cartridge_columns.items():
                 connection.execute(text(f"ALTER TABLE cartridges ADD COLUMN {name} {column_type}"))

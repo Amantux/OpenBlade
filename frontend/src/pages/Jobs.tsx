@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { listLibraries } from '../api/libraries';
 import { cancelJob, listActiveJobs, listJobHistory } from '../api/operations';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
@@ -40,7 +41,19 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
-function JobsTable({ jobs, history, onCancel, cancellingId }: { jobs: Job[]; history?: boolean; onCancel?: (jobId: string) => void; cancellingId?: string; }) {
+function JobsTable({
+  jobs,
+  history,
+  onCancel,
+  cancellingId,
+  librariesById,
+}: {
+  jobs: Job[];
+  history?: boolean;
+  onCancel?: (jobId: string) => void;
+  cancellingId?: string;
+  librariesById: Map<number, string>;
+}) {
   return (
     <div className="overflow-x-auto rounded-md border border-quantum-border">
       <table className="min-w-full text-sm">
@@ -48,6 +61,7 @@ function JobsTable({ jobs, history, onCancel, cancellingId }: { jobs: Job[]; his
           <tr>
             <th className="px-4 py-3 font-medium">Job ID</th>
             <th className="px-4 py-3 font-medium">Type</th>
+            <th className="px-4 py-3 font-medium">Library</th>
             <th className="px-4 py-3 font-medium">State</th>
             <th className="px-4 py-3 font-medium">Source</th>
             <th className="px-4 py-3 font-medium">Dest</th>
@@ -62,17 +76,19 @@ function JobsTable({ jobs, history, onCancel, cancellingId }: { jobs: Job[]; his
         <tbody>
           {jobs.length === 0 ? (
             <tr>
-              <td colSpan={history ? 10 : 9} className="px-4 py-6 text-center text-slate-400">
+              <td colSpan={history ? 11 : 10} className="px-4 py-6 text-center text-slate-400">
                 No {history ? 'historical' : 'active'} jobs available.
               </td>
             </tr>
           ) : (
             jobs.map((job, index) => {
               const cancelable = ['PENDING', 'RUNNING'].includes(job.state);
+              const libraryLabel = job.library_id ? (librariesById.get(job.library_id) ?? `Library ${job.library_id}`) : 'Unassigned';
               return (
                 <tr key={job.id} className={index % 2 === 0 ? 'bg-quantum-north' : 'bg-quantum-panel'}>
                   <td className="px-4 py-3 font-mono text-xs text-slate-200">{job.id}</td>
                   <td className="px-4 py-3 text-slate-300">{job.type}</td>
+                  <td className="px-4 py-3 text-slate-300">{libraryLabel}</td>
                   <td className="px-4 py-3"><StateBadge value={job.state} /></td>
                   <td className="px-4 py-3 text-slate-300">{job.source ?? '—'}</td>
                   <td className="px-4 py-3 text-slate-300">{job.destination ?? '—'}</td>
@@ -107,6 +123,7 @@ export default function Jobs() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [libraryFilter, setLibraryFilter] = useState('all');
 
   const activeJobsQuery = useQuery({
     queryKey: ['operations', 'jobs', 'active'],
@@ -117,6 +134,11 @@ export default function Jobs() {
     queryKey: ['operations', 'jobs', 'history'],
     queryFn: listJobHistory,
     refetchInterval: activeTab === 'history' && autoRefresh ? 5_000 : false,
+  });
+  const librariesQuery = useQuery({
+    queryKey: ['libraries'],
+    queryFn: listLibraries,
+    refetchInterval: 30_000,
   });
 
   const cancelMutation = useMutation({
@@ -129,15 +151,18 @@ export default function Jobs() {
     },
   });
 
-  const activeSummary = useMemo(() => {
-    const jobs = activeJobsQuery.data ?? [];
-    return {
-      running: jobs.filter((job) => job.state === 'RUNNING').length,
-      pending: jobs.filter((job) => job.state === 'PENDING').length,
-    };
-  }, [activeJobsQuery.data]);
+  const libraries = librariesQuery.data ?? [];
+  const librariesById = useMemo(() => new Map(libraries.map((library) => [library.id, library.name])), [libraries]);
+  const filterJobs = (jobs: Job[]) => jobs.filter((job) => libraryFilter === 'all' || String(job.library_id ?? 1) === libraryFilter);
+  const filteredActiveJobs = filterJobs(activeJobsQuery.data ?? []);
+  const filteredHistoryJobs = filterJobs(historyQuery.data ?? []);
 
-  if (activeJobsQuery.isLoading || historyQuery.isLoading) {
+  const activeSummary = useMemo(() => ({
+    running: filteredActiveJobs.filter((job) => job.state === 'RUNNING').length,
+    pending: filteredActiveJobs.filter((job) => job.state === 'PENDING').length,
+  }), [filteredActiveJobs]);
+
+  if (activeJobsQuery.isLoading || historyQuery.isLoading || librariesQuery.isLoading) {
     return <Spinner />;
   }
   if (activeJobsQuery.isError) {
@@ -145,6 +170,9 @@ export default function Jobs() {
   }
   if (historyQuery.isError) {
     return <ErrorMessage error={historyQuery.error} onRetry={() => historyQuery.refetch()} />;
+  }
+  if (librariesQuery.isError) {
+    return <ErrorMessage error={librariesQuery.error} onRetry={() => librariesQuery.refetch()} />;
   }
 
   return (
@@ -180,11 +208,21 @@ export default function Jobs() {
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+            <select
+              value={libraryFilter}
+              onChange={(event) => setLibraryFilter(event.target.value)}
+              className="rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-sm text-white"
+            >
+              <option value="all">All Libraries</option>
+              {libraries.map((library) => (
+                <option key={library.id} value={String(library.id)}>{library.name}</option>
+              ))}
+            </select>
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} />
               Auto-refresh every 5s
             </label>
-            <Button variant="secondary" onClick={() => void Promise.all([activeJobsQuery.refetch(), historyQuery.refetch()])}>
+            <Button variant="secondary" onClick={() => void Promise.all([activeJobsQuery.refetch(), historyQuery.refetch(), librariesQuery.refetch()])}>
               Refresh now
             </Button>
           </div>
@@ -194,9 +232,14 @@ export default function Jobs() {
 
         <div className="mt-4">
           {activeTab === 'active' ? (
-            <JobsTable jobs={activeJobsQuery.data ?? []} onCancel={(jobId) => cancelMutation.mutate(jobId)} cancellingId={cancelMutation.variables} />
+            <JobsTable
+              jobs={filteredActiveJobs}
+              onCancel={(jobId) => cancelMutation.mutate(jobId)}
+              cancellingId={cancelMutation.variables}
+              librariesById={librariesById}
+            />
           ) : (
-            <JobsTable jobs={historyQuery.data ?? []} history />
+            <JobsTable jobs={filteredHistoryJobs} history librariesById={librariesById} />
           )}
         </div>
       </Card>

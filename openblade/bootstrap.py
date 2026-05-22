@@ -72,30 +72,66 @@ def _seed_nas_defaults(catalog: CatalogRepository) -> None:
 
 def _seed_library_defaults(catalog: CatalogRepository) -> None:
     desired = [
-        ("primary", "http://localhost:8010", "OB-SCALAR-I3-001"),
-        ("Library 2", "http://localhost:8011", "OB-SCALAR-I3-002"),
-        ("Library 3", "http://localhost:8012", "OB-SCALAR-I3-003"),
+        {
+            "name": "Primary Tape Library",
+            "emulator_url": "http://localhost:8010",
+            "serial_number": "OB-SCALAR-I3-001",
+            "model": "Scalar i3",
+            "role": "primary",
+            "sort_order": 0,
+            "legacy_names": {"primary"},
+        },
+        {
+            "name": "Secondary Archive",
+            "emulator_url": "http://localhost:8011",
+            "serial_number": "OB-SCALAR-I3-002",
+            "model": "Scalar i3",
+            "role": "archive",
+            "sort_order": 1,
+            "legacy_names": {"Library 2"},
+        },
+        {
+            "name": "Cold Storage Vault",
+            "emulator_url": "http://localhost:8012",
+            "serial_number": "OB-SCALAR-I3-003",
+            "model": "Scalar i3",
+            "role": "cold_storage",
+            "sort_order": 2,
+            "legacy_names": {"Library 3"},
+        },
     ]
-    existing = {library.name: library for library in catalog.list_library_instances()}
-    for name, emulator_url, serial_number in desired:
-        if name in existing:
-            library = existing[name]
-            updates: dict[str, object] = {}
-            if library.emulator_url != emulator_url:
-                updates["emulator_url"] = emulator_url
-            if library.serial_number != serial_number:
-                updates["serial_number"] = serial_number
-            if library.model != "Scalar i3":
-                updates["model"] = "Scalar i3"
-            if updates:
-                catalog.update_library_instance(library.id, **updates)
-            continue
-        catalog.create_library_instance(
-            name=name,
-            emulator_url=emulator_url,
-            serial_number=serial_number,
-            model="Scalar i3",
+
+    existing_libraries = catalog.list_library_instances()
+    for spec in desired:
+        matching_library = next(
+            (
+                library
+                for library in existing_libraries
+                if library.serial_number == spec["serial_number"]
+                or library.name == spec["name"]
+                or library.name in spec["legacy_names"]
+            ),
+            None,
         )
+        if matching_library is None:
+            catalog.create_library_instance(
+                name=spec["name"],
+                emulator_url=spec["emulator_url"],
+                serial_number=spec["serial_number"],
+                model=spec["model"],
+                role=spec["role"],
+                sort_order=spec["sort_order"],
+            )
+            continue
+
+        updates: dict[str, object] = {}
+        for key in ("name", "emulator_url", "serial_number", "model", "role", "sort_order"):
+            if getattr(matching_library, key) != spec[key]:
+                updates[key] = spec[key]
+        if not matching_library.enabled:
+            updates["enabled"] = True
+        if updates:
+            catalog.update_library_instance(matching_library.id, **updates)
 
 
 def _seed_demo_catalog(catalog: CatalogRepository) -> None:
@@ -189,7 +225,7 @@ def _seed_demo_catalog(catalog: CatalogRepository) -> None:
             ).model_dump(mode="json")
         )
         for relative_path, size_bytes, barcode in spec["files"]:
-            checksum = hashlib.sha256(f"{spec['dataset_id']}:{relative_path}:{size_bytes}".encode("utf-8")).hexdigest()
+            checksum = hashlib.sha256(f"{spec['dataset_id']}:{relative_path}:{size_bytes}".encode()).hexdigest()
             catalog_path = f"/{spec['volume_group']}/{relative_path}"
             record = catalog.create_file_record(
                 catalog_path,
