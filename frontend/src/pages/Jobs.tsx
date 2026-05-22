@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listLibraries } from '../api/libraries';
 import { cancelJob, listActiveJobs, listJobHistory } from '../api/operations';
@@ -7,6 +7,7 @@ import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
 import type { Job } from '../types/api';
+import { useLibraryScope } from '../lib/useLibraryScope';
 import { formatDate, formatDuration } from '../lib/utils';
 
 function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
@@ -121,9 +122,14 @@ function JobsTable({
 
 export default function Jobs() {
   const queryClient = useQueryClient();
+  const { libraryId } = useLibraryScope();
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [libraryFilter, setLibraryFilter] = useState('all');
+  const [libraryFilter, setLibraryFilter] = useState(() => libraryId || 'all');
+
+  useEffect(() => {
+    setLibraryFilter(libraryId || 'all');
+  }, [libraryId]);
 
   const activeJobsQuery = useQuery({
     queryKey: ['operations', 'jobs', 'active'],

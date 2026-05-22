@@ -34,7 +34,14 @@ function getActiveLibraryState(): ActiveLibraryState {
 export function useLibraryScope(): LibraryScope {
   const [activeLibrary, setActiveLibrary] = useState<ActiveLibraryState>(() => getActiveLibraryState());
 
-  useEffect(() => subscribeActiveLibrary(() => setActiveLibrary(getActiveLibraryState())), []);
+  useEffect(
+    () =>
+      subscribeActiveLibrary((id) => {
+        activeLibraryIdRef.current = id;
+        setActiveLibrary(getActiveLibraryState());
+      }),
+    [],
+  );
 
   // Keep the mutable ref in sync so apiRequest attaches the right header
   useEffect(() => {

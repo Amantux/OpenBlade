@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpDown, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import {
@@ -86,15 +86,16 @@ function compareLibraries(left: LibrarySummary, right: LibrarySummary, sortBy: L
   }
 
   if (sortBy === 'name') {
-    return left.name.localeCompare(right.name) || left.sort_order - right.sort_order;
+    return left.name.localeCompare(right.name) || left.sort_order - right.sort_order || left.id - right.id;
   }
   if (sortBy === 'sort_order') {
-    return left.sort_order - right.sort_order || left.name.localeCompare(right.name);
+    return left.sort_order - right.sort_order || left.name.localeCompare(right.name) || left.id - right.id;
   }
 
   return statusPriority(left) - statusPriority(right)
     || left.sort_order - right.sort_order
-    || left.name.localeCompare(right.name);
+    || left.name.localeCompare(right.name)
+    || left.id - right.id;
 }
 
 function emptyForm(sortOrder: number): LibraryFormValues {
@@ -138,7 +139,7 @@ function LibraryFormModal({ mode, initialValues, onClose, onSubmit, isPending }:
 
   useEffect(() => {
     setValues(initialValues);
-  }, [initialValues]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-6">
@@ -355,6 +356,7 @@ function Section({
 
 export default function Libraries() {
   const queryClient = useQueryClient();
+  const hasUserSelectedLibrary = useRef(false);
   const [activeLibraryId, setActiveLibraryIdState] = useState(() => getActiveLibraryId());
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<LibrarySort>('status');
@@ -365,8 +367,14 @@ export default function Libraries() {
   useEffect(() => subscribeActiveLibrary(setActiveLibraryIdState), []);
 
   useEffect(() => {
+    if (activeLibraryId) {
+      hasUserSelectedLibrary.current = true;
+    }
+  }, [activeLibraryId]);
+
+  useEffect(() => {
     const firstEnabledLibrary = (librariesQuery.data ?? []).find((library) => library.enabled) ?? librariesQuery.data?.[0];
-    if (!activeLibraryId && firstEnabledLibrary) {
+    if (!activeLibraryId && firstEnabledLibrary && !hasUserSelectedLibrary.current) {
       setActiveLibraryId(String(firstEnabledLibrary.id), firstEnabledLibrary.name, firstEnabledLibrary.role);
     }
   }, [activeLibraryId, librariesQuery.data]);
@@ -450,7 +458,13 @@ export default function Libraries() {
   const nextSortOrder = (libraries.reduce((highest, library) => Math.max(highest, library.sort_order), -1)) + 1;
 
   const handleSelect = (library: LibrarySummary) => {
+    hasUserSelectedLibrary.current = true;
     setActiveLibraryId(String(library.id), library.name, library.role);
+  };
+
+  const handleClearSelection = () => {
+    hasUserSelectedLibrary.current = true;
+    setActiveLibraryId('', '', '');
   };
 
   const handleDelete = (library: LibrarySummary) => {
@@ -497,7 +511,7 @@ export default function Libraries() {
                 <Badge variant={statusVariant(activeLibrary.status)}>{toTitleCase(activeLibrary.status)}</Badge>
               </div>
             </div>
-            <Button type="button" variant="secondary" onClick={() => setActiveLibraryId('', '', '')}>
+            <Button type="button" variant="secondary" onClick={handleClearSelection}>
               Clear Selection
             </Button>
           </div>
