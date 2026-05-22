@@ -18,7 +18,7 @@ class JobResponse(BaseModel):
     metadata: dict[str, object]
     created_at: str
     updated_at: str
-    library_id: int | None = 1
+    library_id: int | None = None
 
 
 @router.get("/", response_model=list[JobResponse])
@@ -35,13 +35,14 @@ async def list_jobs(
             metadata=job.metadata_dict,
             created_at=job.created_at.isoformat(),
             updated_at=job.updated_at.isoformat(),
-            library_id=1,
+            library_id=None,
         )
         for job in context.catalog.list_jobs()
     ]
     if library_id is None:
         return jobs
-    return [job for job in jobs if job.library_id == library_id]
+    # null library_id jobs are installation-wide — include in every per-library view
+    return [job for job in jobs if job.library_id is None or job.library_id == library_id]
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -57,5 +58,5 @@ async def get_job(job_id: str, context: AppContext = Depends(get_context)) -> Jo
         metadata=job.metadata_dict,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
-        library_id=1,
+        library_id=None,
     )

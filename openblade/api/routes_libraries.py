@@ -20,9 +20,18 @@ from openblade.catalog.repository import CatalogRepository
 router = APIRouter(prefix="/api/libraries", tags=["libraries"])
 
 _LIBRARY_PROFILES: dict[int, dict[str, int]] = {
-    8010: {"drive_count": 3, "slot_count": 24, "occupied_slot_count": 24, "active_job_count": 2, "alerts_count": 0},
-    8011: {"drive_count": 2, "slot_count": 18, "occupied_slot_count": 18, "active_job_count": 1, "alerts_count": 1},
-    8012: {"drive_count": 1, "slot_count": 12, "occupied_slot_count": 12, "active_job_count": 0, "alerts_count": 0},
+    8010: {
+        "drive_count": 3, "slot_count": 24, "occupied_slot_count": 21,
+        "active_job_count": 2, "alerts_count": 0,
+    },
+    8011: {
+        "drive_count": 2, "slot_count": 18, "occupied_slot_count": 14,
+        "active_job_count": 1, "alerts_count": 1,
+    },
+    8012: {
+        "drive_count": 1, "slot_count": 12, "occupied_slot_count": 8,
+        "active_job_count": 0, "alerts_count": 0,
+    },
 }
 _DEFAULT_LIBRARY_PROFILE = {"drive_count": 1, "slot_count": 12, "occupied_slot_count": 12, "active_job_count": 0, "alerts_count": 0}
 
@@ -125,7 +134,7 @@ async def _probe_library(library: LibraryInstance) -> dict[str, object]:
         defaults["last_seen_at"] = last_seen_at
         defaults["alerts_count"] = max(profile["alerts_count"], 1)
         return defaults
-    except httpx.HTTPError:
+    except Exception:  # noqa: BLE001 — network/DNS/OS errors must not fail the listing
         defaults["status"] = "offline"
         defaults["alerts_count"] = max(profile["alerts_count"], 1)
         return defaults

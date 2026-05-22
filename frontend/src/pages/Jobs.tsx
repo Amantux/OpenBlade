@@ -83,7 +83,7 @@ function JobsTable({
           ) : (
             jobs.map((job, index) => {
               const cancelable = ['PENDING', 'RUNNING'].includes(job.state);
-              const libraryLabel = job.library_id ? (librariesById.get(job.library_id) ?? `Library ${job.library_id}`) : 'Unassigned';
+              const libraryLabel = job.library_id ? (librariesById.get(job.library_id) ?? `Library ${job.library_id}`) : 'Global';
               return (
                 <tr key={job.id} className={index % 2 === 0 ? 'bg-quantum-north' : 'bg-quantum-panel'}>
                   <td className="px-4 py-3 font-mono text-xs text-slate-200">{job.id}</td>
@@ -153,7 +153,10 @@ export default function Jobs() {
 
   const libraries = librariesQuery.data ?? [];
   const librariesById = useMemo(() => new Map(libraries.map((library) => [library.id, library.name])), [libraries]);
-  const filterJobs = (jobs: Job[]) => jobs.filter((job) => libraryFilter === 'all' || String(job.library_id ?? 1) === libraryFilter);
+  const filterJobs = (jobs: Job[]) =>
+    libraryFilter === 'all'
+      ? jobs
+      : jobs.filter((job) => job.library_id === null || String(job.library_id) === libraryFilter);
   const filteredActiveJobs = filterJobs(activeJobsQuery.data ?? []);
   const filteredHistoryJobs = filterJobs(historyQuery.data ?? []);
 

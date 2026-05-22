@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { activeLibraryIdRef } from '../api/client';
 import {
   getActiveLibraryId,
@@ -27,26 +26,25 @@ function getActiveLibraryState(): ActiveLibraryState {
   };
 }
 
+/**
+ * Returns the current active library scope derived from localStorage.
+ * Always kept in sync via the custom event bus in activeLibrary.ts.
+ * Updating activeLibraryIdRef ensures AML fetch headers stay current.
+ */
 export function useLibraryScope(): LibraryScope {
-  const [searchParams] = useSearchParams();
   const [activeLibrary, setActiveLibrary] = useState<ActiveLibraryState>(() => getActiveLibraryState());
-  const urlLibraryId = (searchParams.get('library') ?? '').trim();
-  const libraryId = urlLibraryId || activeLibrary.id;
-  const libraryName = urlLibraryId && urlLibraryId !== activeLibrary.id ? '' : activeLibrary.name;
 
   useEffect(() => subscribeActiveLibrary(() => setActiveLibrary(getActiveLibraryState())), []);
 
+  // Keep the mutable ref in sync so apiRequest attaches the right header
   useEffect(() => {
-    activeLibraryIdRef.current = libraryId === 'all' ? '' : libraryId;
-    return () => {
-      activeLibraryIdRef.current = getActiveLibraryId();
-    };
-  }, [libraryId]);
+    activeLibraryIdRef.current = activeLibrary.id;
+  }, [activeLibrary.id]);
 
   return {
-    libraryId,
-    libraryName,
-    isAll: libraryId === '' || libraryId === 'all',
+    libraryId: activeLibrary.id,
+    libraryName: activeLibrary.name,
+    isAll: activeLibrary.id === '' || activeLibrary.id === 'all',
     setLibrary: (id: string, name: string) => setActiveLibraryId(id, name),
   };
 }

@@ -8,6 +8,7 @@ import Badge from '../components/ui/Badge';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
 import { listPools, type MediaPool } from '../lib/mediaPoolStore';
+import { useLibraryScope } from '../lib/useLibraryScope';
 import { formatDate } from '../lib/utils';
 
 const EMPTY_CARTRIDGES: Cartridge[] = [];
@@ -69,14 +70,14 @@ function CapacityBar({ usedGB, totalGB }: { usedGB: number; totalGB: number }) {
 }
 
 export default function Media() {
-  const mediaQuery = useQuery({ queryKey: ['media', 'cartridges'], queryFn: listCartridges, refetchInterval: 30_000 });
-  const poolsQuery = useQuery({ queryKey: ['media', 'pools'], queryFn: listPools, refetchInterval: 30_000 });
+  const { libraryId, libraryName: activeLibraryName, isAll, setLibrary } = useLibraryScope();
+  const mediaQuery = useQuery({ queryKey: ['media', 'cartridges', libraryId], queryFn: listCartridges, refetchInterval: 30_000 });
+  const poolsQuery = useQuery({ queryKey: ['media', 'pools', libraryId], queryFn: listPools, refetchInterval: 30_000 });
   const librariesQuery = useQuery({ queryKey: ['libraries'], queryFn: listLibraries, refetchInterval: 30_000 });
   const [search, setSearch] = useState('');
   const [poolFilter, setPoolFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
   const [selectedBarcode, setSelectedBarcode] = useState<string | null>(null);
-  const [libraryFilter, setLibraryFilter] = useState('all');
 
   const media = mediaQuery.data ?? EMPTY_CARTRIDGES;
   const pools = poolsQuery.data ?? [];
@@ -136,9 +137,9 @@ export default function Media() {
     return <ErrorMessage error={librariesQuery.error} onRetry={() => librariesQuery.refetch()} />;
   }
 
-  const selectedLibraryName = libraryFilter === 'all'
+  const selectedLibraryName = isAll
     ? 'All Libraries'
-    : libraries.find((library) => String(library.id) === libraryFilter)?.name ?? 'Selected Library';
+    : activeLibraryName || (libraries.find((library) => String(library.id) === libraryId)?.name ?? 'Selected Library');
 
   return (
     <div className="space-y-4">
@@ -153,19 +154,19 @@ export default function Media() {
           <span className="rounded border border-quantum-border bg-quantum-sidebar px-2 py-1">Scope: {selectedLibraryName}</span>
           <button
             type="button"
-            onClick={() => setLibraryFilter('all')}
-            className={`rounded-full border px-2.5 py-1 transition ${libraryFilter === 'all' ? 'border-blue-500/40 bg-blue-500/15 text-blue-300' : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:text-white'}`}
+            onClick={() => setLibrary('', '')}
+            className={`rounded-full border px-2.5 py-1 transition ${isAll ? 'border-blue-500/40 bg-blue-500/15 text-blue-300' : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:text-white'}`}
           >
             All Libraries
           </button>
           {libraries.map((library) => {
-            const selected = libraryFilter === String(library.id);
+            const isSelected = libraryId === String(library.id);
             return (
               <button
                 key={library.id}
                 type="button"
-                onClick={() => setLibraryFilter(String(library.id))}
-                className={`rounded-full border px-2.5 py-1 transition ${selected ? 'border-blue-500/40 bg-blue-500/15 text-blue-300' : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:text-white'}`}
+                onClick={() => setLibrary(String(library.id), library.name)}
+                className={`rounded-full border px-2.5 py-1 transition ${isSelected ? 'border-blue-500/40 bg-blue-500/15 text-blue-300' : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:text-white'}`}
               >
                 {library.name}
               </button>

@@ -387,7 +387,18 @@ export default function Libraries() {
       setEditingLibrary(null);
       await queryClient.invalidateQueries({ queryKey: ['libraries'] });
       if (String(library.id) === activeLibraryId) {
-        setActiveLibraryId(String(library.id), library.name, library.role);
+        if (!library.enabled) {
+          // Active library was disabled — auto-switch to the next enabled library
+          const allLibraries = librariesQuery.data ?? [];
+          const next = allLibraries.find((l) => String(l.id) !== activeLibraryId && l.enabled);
+          if (next) {
+            setActiveLibraryId(String(next.id), next.name, next.role);
+          } else {
+            setActiveLibraryId('', '', '');
+          }
+        } else {
+          setActiveLibraryId(String(library.id), library.name, library.role);
+        }
       }
     },
   });
@@ -573,6 +584,7 @@ export default function Libraries() {
 
       {modalMode === 'create' ? (
         <LibraryFormModal
+          key="create"
           mode="create"
           initialValues={emptyForm(nextSortOrder)}
           isPending={createMutation.isPending}
@@ -583,6 +595,7 @@ export default function Libraries() {
 
       {modalMode === 'edit' && editingLibrary ? (
         <LibraryFormModal
+          key={`edit-${editingLibrary.id}`}
           mode="edit"
           initialValues={toFormValues(editingLibrary)}
           isPending={updateMutation.isPending}
