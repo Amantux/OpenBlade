@@ -41,6 +41,8 @@ interface LibraryFormModalProps {
 
 type LibrarySort = 'status' | 'name' | 'sort_order';
 
+const USER_CLEARED_LIBRARY_STORAGE_KEY = 'openblade_user_cleared_library';
+
 function roleVariant(role: string): BadgeVariant {
   switch (role) {
     case 'primary':
@@ -356,7 +358,9 @@ function Section({
 
 export default function Libraries() {
   const queryClient = useQueryClient();
-  const hasUserSelectedLibrary = useRef(false);
+  const hasUserSelectedLibrary = useRef(
+    typeof window !== 'undefined' && window.localStorage.getItem(USER_CLEARED_LIBRARY_STORAGE_KEY) === '1',
+  );
   const [activeLibraryId, setActiveLibraryIdState] = useState(() => getActiveLibraryId());
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<LibrarySort>('status');
@@ -366,16 +370,16 @@ export default function Libraries() {
 
   useEffect(() => subscribeActiveLibrary(setActiveLibraryIdState), []);
 
-  useEffect(() => {
-    if (activeLibraryId) {
-      hasUserSelectedLibrary.current = true;
-    }
-  }, [activeLibraryId]);
+  const activateLibrary = (library: Pick<LibrarySummary, 'id' | 'name' | 'role'>) => {
+    hasUserSelectedLibrary.current = false;
+    window.localStorage.removeItem(USER_CLEARED_LIBRARY_STORAGE_KEY);
+    setActiveLibraryId(String(library.id), library.name, library.role);
+  };
 
   useEffect(() => {
     const firstEnabledLibrary = (librariesQuery.data ?? []).find((library) => library.enabled) ?? librariesQuery.data?.[0];
     if (!activeLibraryId && firstEnabledLibrary && !hasUserSelectedLibrary.current) {
-      setActiveLibraryId(String(firstEnabledLibrary.id), firstEnabledLibrary.name, firstEnabledLibrary.role);
+      activateLibrary(firstEnabledLibrary);
     }
   }, [activeLibraryId, librariesQuery.data]);
 
@@ -384,7 +388,7 @@ export default function Libraries() {
     onSuccess: async (library) => {
       setModalMode(null);
       await queryClient.invalidateQueries({ queryKey: ['libraries'] });
-      setActiveLibraryId(String(library.id), library.name, library.role);
+      activateLibrary(library);
     },
   });
 
@@ -400,12 +404,12 @@ export default function Libraries() {
           const allLibraries = librariesQuery.data ?? [];
           const next = allLibraries.find((l) => String(l.id) !== activeLibraryId && l.enabled);
           if (next) {
-            setActiveLibraryId(String(next.id), next.name, next.role);
+            activateLibrary(next);
           } else {
             setActiveLibraryId('', '', '');
           }
         } else {
-          setActiveLibraryId(String(library.id), library.name, library.role);
+          activateLibrary(library);
         }
       }
     },
@@ -418,7 +422,7 @@ export default function Libraries() {
       const nextActiveLibrary = remainingLibraries.find((library) => library.enabled) ?? remainingLibraries[0];
       if (String(deletedId) === activeLibraryId) {
         if (nextActiveLibrary) {
-          setActiveLibraryId(String(nextActiveLibrary.id), nextActiveLibrary.name, nextActiveLibrary.role);
+          activateLibrary(nextActiveLibrary);
         } else {
           setActiveLibraryId('', '', '');
         }
@@ -458,12 +462,12 @@ export default function Libraries() {
   const nextSortOrder = (libraries.reduce((highest, library) => Math.max(highest, library.sort_order), -1)) + 1;
 
   const handleSelect = (library: LibrarySummary) => {
-    hasUserSelectedLibrary.current = true;
-    setActiveLibraryId(String(library.id), library.name, library.role);
+    activateLibrary(library);
   };
 
   const handleClearSelection = () => {
     hasUserSelectedLibrary.current = true;
+    window.localStorage.setItem(USER_CLEARED_LIBRARY_STORAGE_KEY, '1');
     setActiveLibraryId('', '', '');
   };
 

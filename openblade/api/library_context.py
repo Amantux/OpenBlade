@@ -29,15 +29,22 @@ def get_active_library_id() -> str:
 
 
 def get_active_library(repo: CatalogRepository) -> LibraryInstance | None:
+    # Returns None when no library header is present.
+    # Callers should treat None as "use system default" — NOT as "all libraries".
+    # True multi-library aggregation is a v2 feature.
     active_library_id = get_active_library_id()
-    if active_library_id:
-        try:
-            library = repo.get_library_instance(int(active_library_id))
-        except ValueError:
-            library = None
-        if library is not None and library.enabled:
-            return library
+    if not active_library_id:
+        return None
+    try:
+        library = repo.get_library_instance(int(active_library_id))
+    except ValueError:
+        return None
+    if library is not None and library.enabled:
+        return library
+    return None
 
+
+def _get_default_library(repo: CatalogRepository) -> LibraryInstance | None:
     enabled_libraries = [library for library in repo.list_library_instances() if library.enabled]
     if enabled_libraries:
         return enabled_libraries[0]
@@ -52,7 +59,7 @@ def resolve_emulator_url(emulator_url: str) -> str:
 
 
 def get_active_emulator_url(repo: CatalogRepository) -> str:
-    library = get_active_library(repo)
+    library = get_active_library(repo) or _get_default_library(repo)
     if library is not None:
         return resolve_emulator_url(library.emulator_url)
     return resolve_emulator_url("http://localhost:8010")

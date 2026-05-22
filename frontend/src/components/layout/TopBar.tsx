@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { SystemHealthLevel } from '../../types/api';
 import { useAuth } from '../../lib/auth-context';
-import { toTitleCase } from '../../lib/utils';
+import { cn, toTitleCase } from '../../lib/utils';
 import StatusPill from '../ui/StatusPill';
 
 interface TopBarProps {
@@ -28,7 +28,13 @@ export default function TopBar({ libraryName, health, backend, activeLibraryName
   const username = auth.username ?? 'operator';
   const activeLibraryLabel = activeLibraryName
     ? `${activeLibraryName}${activeLibraryRole ? ` · ${toTitleCase(activeLibraryRole)}` : ''}`
-    : 'No library selected';
+    : 'No Library';
+  const activeLibraryChipClassName = cn(
+    'mt-2 inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] transition',
+    activeLibraryName
+      ? 'border-blue-500/40 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20'
+      : 'border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20',
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1_000);
@@ -70,13 +76,13 @@ export default function TopBar({ libraryName, health, backend, activeLibraryName
           {activeLibraryName ? (
             <button
               type="button"
-              className="mt-2 inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200 transition hover:bg-amber-500/20"
+              className={activeLibraryChipClassName}
               onClick={() => navigate('/libraries')}
             >
               {activeLibraryLabel}
             </button>
           ) : (
-            <Link to="/libraries" className="mt-2 inline-block text-xs text-slate-400 hover:text-slate-200 hover:underline">
+            <Link to="/libraries" className={activeLibraryChipClassName}>
               {activeLibraryLabel}
             </Link>
           )}

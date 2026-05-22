@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listLibraries } from '../api/libraries';
 import { cancelJob, listActiveJobs, listJobHistory } from '../api/operations';
@@ -126,18 +126,22 @@ export default function Jobs() {
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [libraryFilter, setLibraryFilter] = useState(() => libraryId || 'all');
+  const previousLibraryId = useRef(libraryId);
 
-  useEffect(() => {
-    setLibraryFilter(libraryId || 'all');
-  }, [libraryId]);
+  if (previousLibraryId.current !== libraryId) {
+    previousLibraryId.current = libraryId;
+    if (libraryId) {
+      setLibraryFilter(libraryId);
+    }
+  }
 
   const activeJobsQuery = useQuery({
-    queryKey: ['operations', 'jobs', 'active'],
+    queryKey: ['operations', 'jobs', 'active', libraryId],
     queryFn: listActiveJobs,
     refetchInterval: activeTab === 'active' && autoRefresh ? 5_000 : false,
   });
   const historyQuery = useQuery({
-    queryKey: ['operations', 'jobs', 'history'],
+    queryKey: ['operations', 'jobs', 'history', libraryId],
     queryFn: listJobHistory,
     refetchInterval: activeTab === 'history' && autoRefresh ? 5_000 : false,
   });
@@ -150,10 +154,7 @@ export default function Jobs() {
   const cancelMutation = useMutation({
     mutationFn: cancelJob,
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['operations', 'jobs', 'active'] }),
-        queryClient.invalidateQueries({ queryKey: ['operations', 'jobs', 'history'] }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: ['operations', 'jobs'] });
     },
   });
 
@@ -205,6 +206,11 @@ export default function Jobs() {
           </div>
         </div>
       </Card>
+
+      <div className="rounded-md border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-sm text-slate-300">
+        <span className="font-medium text-blue-200">ℹ Demo mode:</span>{' '}
+        Jobs labeled &quot;Global&quot; apply to all libraries. Library-specific jobs will appear once real library connections are established.
+      </div>
 
       <Card>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

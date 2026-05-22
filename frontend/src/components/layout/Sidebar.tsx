@@ -178,7 +178,7 @@ export default function Sidebar() {
 
   const activeLibraryLabel = activeLibraryName
     ? `⬡ ${activeLibraryName}${activeLibraryRole ? ` · ${toTitleCase(activeLibraryRole)}` : ''}`
-    : 'No library selected';
+    : 'No Library';
 
   return (
     <aside className="flex min-h-screen w-[280px] flex-col border-r border-quantum-border bg-quantum-sidebar">
@@ -221,9 +221,11 @@ export default function Sidebar() {
                       to="/libraries"
                       className={({ isActive }) =>
                         cn(
-                          'mx-3 mb-2 block truncate rounded border border-quantum-border bg-quantum-panel px-2 py-1 text-xs text-slate-300 transition hover:border-quantum-red/40 hover:text-white',
-                          isActive && 'border-quantum-red/60 text-white',
-                          !activeLibraryName && 'text-slate-500',
+                          'mx-3 mb-2 block truncate rounded border px-2 py-1 text-xs transition',
+                          activeLibraryName
+                            ? 'border-quantum-border bg-quantum-panel text-slate-300 hover:border-quantum-red/40 hover:text-white'
+                            : 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20',
+                          isActive && activeLibraryName && 'border-quantum-red/60 text-white',
                         )
                       }
                     >

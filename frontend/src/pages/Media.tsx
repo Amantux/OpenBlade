@@ -138,7 +138,7 @@ export default function Media() {
   }
 
   const selectedLibraryName = isAll
-    ? 'All Libraries'
+    ? 'No library selected'
     : activeLibraryName || (libraries.find((library) => String(library.id) === libraryId)?.name ?? 'Selected Library');
 
   return (
@@ -149,15 +149,20 @@ export default function Media() {
         <p className="mt-2 text-sm text-slate-400">Live AML cartridge inventory with backend pool assignments, slot telemetry, and operational counters.</p>
       </div>
 
+      <div className="rounded-md border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-sm text-slate-300">
+        <span className="font-medium text-blue-200">ℹ Demo mode:</span>{' '}
+        Cartridge data is simulated. In production, each library serves its own tape inventory.
+      </div>
+
       <Card className="bg-quantum-panel p-5">
         <div className="flex flex-wrap items-center gap-2 pb-4 text-xs text-slate-400">
           <span className="rounded border border-quantum-border bg-quantum-sidebar px-2 py-1">Scope: {selectedLibraryName}</span>
           <button
             type="button"
             onClick={() => setLibrary('', '')}
-            className={`rounded-full border px-2.5 py-1 transition ${isAll ? 'border-blue-500/40 bg-blue-500/15 text-blue-300' : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:text-white'}`}
+            className={`rounded-full border px-2.5 py-1 transition ${isAll ? 'border-amber-500/40 bg-amber-500/15 text-amber-300' : 'border-quantum-border bg-quantum-sidebar text-slate-300 hover:text-white'}`}
           >
-            All Libraries
+            No Library
           </button>
           {libraries.map((library) => {
             const isSelected = libraryId === String(library.id);
