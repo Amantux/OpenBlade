@@ -319,9 +319,16 @@ class ProtocolGateway:
             raise
 
     def stop(self) -> None:
-        """Mark gateway as stopped."""
+        """Mark gateway as stopped, closing any active sessions."""
         if self._status is GatewayStatus.DISABLED:
             return
+        now = datetime.utcnow()
+        for session in self._sessions:
+            if session.disconnected_at is None:
+                try:
+                    session.disconnected_at = now
+                except Exception:  # noqa: BLE001
+                    pass
         self._status = GatewayStatus.STOPPED
 
     def disable(self) -> None:

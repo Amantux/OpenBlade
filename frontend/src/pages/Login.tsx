@@ -64,7 +64,7 @@ export default function Login() {
             {[
               ['Modern SaaS dashboard', 'Operational posture, jobs, and library telemetry.'],
               ['Physical library map', 'Partition, drive, and IE station visibility.'],
-              ['Credential store', 'Cookie-backed AML auth for secure workflows.'],
+              ['Credential store', 'Cookie-backed OpenBlade auth for secure workflows.'],
             ].map(([title, copy]) => (
               <div key={title} className="rounded-md border border-quantum-border bg-quantum-info px-4 py-4">
                 <div className="text-sm font-semibold text-slate-100">{title}</div>

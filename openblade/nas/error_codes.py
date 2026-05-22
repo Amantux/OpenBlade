@@ -62,13 +62,6 @@ KNOWN_ERROR_CODES: list[ErrorCodeEntry] = [
         action="Wait for an existing session to disconnect or raise the configured session limit.",
     ),
     ErrorCodeEntry(
-        code="CAT_001",
-        severity="warning",
-        title="Manifest missing",
-        description="Tape content exists but the expected manifest metadata could not be found.",
-        action="Run catalog rebuild to regenerate metadata or re-archive the affected content.",
-    ),
-    ErrorCodeEntry(
         code="CATALOG_001",
         severity="warning",
         title="Manifest missing",

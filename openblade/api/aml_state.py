@@ -653,8 +653,8 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
             color="#6B7280",
             assigned_barcodes=[],
         ),
-        "pool-critical": _build_aml_media_pool(
-            pool_id="pool-critical",
+        "critical-backups": _build_aml_media_pool(
+            pool_id="critical-backups",
             name="Critical Backups",
             policy="critical",
             max_drives=2,
@@ -663,8 +663,8 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
             color="#EF4444",
             assigned_barcodes=[],
         ),
-        "pool-general": _build_aml_media_pool(
-            pool_id="pool-general",
+        "general-archive": _build_aml_media_pool(
+            pool_id="general-archive",
             name="General Archive",
             policy="standard",
             max_drives=3,
@@ -673,8 +673,8 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
             color="#2563EB",
             assigned_barcodes=[],
         ),
-        "pool-cold": _build_aml_media_pool(
-            pool_id="pool-cold",
+        "cold-storage": _build_aml_media_pool(
+            pool_id="cold-storage",
             name="Cold Storage",
             policy="archive",
             max_drives=1,
