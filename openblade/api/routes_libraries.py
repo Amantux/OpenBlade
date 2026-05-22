@@ -41,6 +41,7 @@ class LibraryCreate(BaseModel):
     emulator_url: str
     serial_number: str | None = None
     model: str = "Scalar i3"
+    enabled: bool = True
     role: str = "primary"
     sort_order: int = 0
 

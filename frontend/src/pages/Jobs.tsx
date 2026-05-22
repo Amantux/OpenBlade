@@ -130,9 +130,7 @@ export default function Jobs() {
 
   if (previousLibraryId.current !== libraryId) {
     previousLibraryId.current = libraryId;
-    if (libraryId) {
-      setLibraryFilter(libraryId);
-    }
+    setLibraryFilter(libraryId || 'all');
   }
 
   const activeJobsQuery = useQuery({

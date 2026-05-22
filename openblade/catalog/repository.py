@@ -344,6 +344,7 @@ class CatalogRepository:
         emulator_url: str,
         serial_number: str | None = None,
         model: str = "Scalar i3",
+        enabled: bool = True,
         role: str = "primary",
         sort_order: int = 0,
     ) -> LibraryInstance:
@@ -352,6 +353,7 @@ class CatalogRepository:
             emulator_url=emulator_url,
             serial_number=serial_number,
             model=model,
+            enabled=enabled,
             role=role,
             sort_order=sort_order,
         )
