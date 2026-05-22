@@ -6,6 +6,7 @@ export interface GatewayConfig {
   max_sessions: number;
   inbox_root: string;
   status: string;
+  last_error: string | null;
 }
 
 export interface GatewayStats {
@@ -15,6 +16,13 @@ export interface GatewayStats {
   total_bytes_uploaded: number;
   total_files_uploaded: number;
   credentials_count: number;
+  last_error: string | null;
+}
+
+export interface GatewayCommandResponse {
+  status: string;
+  message: string;
+  last_error: string | null;
 }
 
 export interface GatewayCredential {
@@ -65,10 +73,10 @@ export const getGatewayStatus = () =>
   rootApiRequest<GatewayStats>('/api/gateway/status');
 
 export const startGateway = () =>
-  rootApiRequest<{ status: string }>('/api/gateway/start', { method: 'POST' });
+  rootApiRequest<GatewayCommandResponse>('/api/gateway/start', { method: 'POST' });
 
 export const stopGateway = () =>
-  rootApiRequest<{ status: string }>('/api/gateway/stop', { method: 'POST' });
+  rootApiRequest<GatewayCommandResponse>('/api/gateway/stop', { method: 'POST' });
 
 export const listCredentials = () =>
   rootApiRequest<GatewayCredential[]>('/api/gateway/credentials');

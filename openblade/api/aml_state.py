@@ -426,8 +426,9 @@ def _default_aml_partitions() -> dict[str, dict[str, Any]]:
     config = scalar_i3_default_config()
     partition = config["partition"]
     drives = [str(drive["id"]) for drive in config["drives"]]
-    media_count = len(config["media"])
+    data_media = [media for media in config["media"] if media.get("role") != "cleaning"]
     cleaning_barcodes = [str(media["barcode"]) for media in config["media"] if media.get("role") == "cleaning"]
+    data_slot_addresses = [str(media["slotAddress"]) for media in data_media]
     return {
         str(partition["name"]): {
             "name": str(partition["name"]),
@@ -438,8 +439,9 @@ def _default_aml_partitions() -> dict[str, dict[str, Any]]:
             "slotCount": int(partition["slotCount"]),
             "ieSlotCount": int(partition["ieSlotCount"]),
             "cleaningSlots": int(partition["cleaningSlots"]),
-            "mediaCount": media_count,
+            "mediaCount": len(data_media),
             "drives": drives,
+            "slotAddresses": data_slot_addresses,
             "policy": {
                 "autoClean": True,
                 "cleaningThreshold": 100,
@@ -454,7 +456,7 @@ def _default_aml_partitions() -> dict[str, dict[str, Any]]:
                 "autoClean": True,
                 "threshold": 100,
                 "cleaningTapeBarcode": cleaning_barcodes[0] if cleaning_barcodes else None,
-                "lastCleaned": None,
+                "lastCleaned": "2024-01-20T03:15:00Z",
             },
             "worm": {"enabled": False, "mode": "none"},
             "encryption": {"enabled": False, "type": "none", "keyManager": None},
@@ -464,16 +466,16 @@ def _default_aml_partitions() -> dict[str, dict[str, Any]]:
             "moveQueue": [],
             "quota": {
                 "totalSlots": int(partition["slotCount"]),
-                "usedSlots": media_count,
+                "usedSlots": len(data_media),
                 "totalDrives": len(drives),
                 "usedDrives": len(drives),
             },
             "statistics": {
-                "mountCount": 0,
-                "unmountCount": 0,
-                "errorCount": 0,
-                "lastMount": None,
-                "lastUnmount": None,
+                "mountCount": sum(int(drive.get("loadCount", 0)) for drive in config["drives"]),
+                "unmountCount": sum(int(drive.get("loadCount", 0)) for drive in config["drives"]),
+                "errorCount": sum(int(drive.get("errorCount", 0)) for drive in config["drives"]),
+                "lastMount": max((str(media.get("lastLoaded")) for media in data_media if media.get("lastLoaded")), default=None),
+                "lastUnmount": max((str(media.get("lastLoaded")) for media in data_media if media.get("lastLoaded")), default=None),
                 "mediaUsage": [],
             },
         }
@@ -553,21 +555,33 @@ def _default_aml_log_level() -> dict[str, Any]:
 
 def _default_aml_media() -> dict[str, dict[str, Any]]:
     media: dict[str, dict[str, Any]] = {}
-    for index, item in enumerate(scalar_i3_default_config()["media"], start=1):
+    for item in scalar_i3_default_config()["media"]:
         barcode = str(item["barcode"])
         is_cleaning = str(item.get("role", "data")) == "cleaning"
+        capacity_bytes = int(item.get("capacityBytes", 18_000_000_000 if not is_cleaning else 0))
+        used_bytes = int(item.get("usedBytes", 0))
+        capacity_gb = round(capacity_bytes / (1024**3), 1) if capacity_bytes > 0 else 0.0
+        used_gb = round(used_bytes / (1024**3), 1) if used_bytes > 0 else 0.0
+        percent_used = round((used_bytes / capacity_bytes) * 100) if capacity_bytes > 0 else 0
         media[barcode] = {
             "barcode": barcode,
             "type": str(item["type"]),
-            "partition": str(item["partition"]),
+            "partition": None if item.get("partition") is None else str(item["partition"]),
             "slotAddress": str(item["slotAddress"]),
             "state": "home",
-            "writeProtected": is_cleaning,
-            "worm": False,
-            "generations": 0 if is_cleaning else 1,
-            "loadCount": 0 if is_cleaning else index - 1,
-            "errorCount": 0,
-            "lastLoaded": None,
+            "writeProtected": bool(item.get("writeProtected", is_cleaning)),
+            "worm": bool(item.get("worm", False)),
+            "generations": int(item.get("generations", 0 if is_cleaning else 1)),
+            "loadCount": int(item.get("loadCount", 0)),
+            "errorCount": int(item.get("errorCount", 0)),
+            "lastLoaded": item.get("lastLoaded"),
+            "usedBytes": used_bytes,
+            "capacityBytes": capacity_bytes,
+            "usedGB": used_gb,
+            "capacityGB": capacity_gb,
+            "percentUsed": percent_used,
+            "poolName": str(item["poolName"]) if is_cleaning and item.get("poolName") else None,
+            "metadata": deepcopy(item.get("metadata", {})),
             "history": [],
         }
     return media
@@ -621,21 +635,23 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
     return {
         "default": _build_aml_media_pool(
             pool_id="default",
-            name="default",
-            policy="scratch",
-            max_drives=4,
+            name="Default",
+            policy="standard",
+            max_drives=2,
             target_lto_generation="LTO-9",
-            quota_gb=None,
+            quota_gb=100000,
             color="#2563EB",
+            assigned_barcodes=[],
         ),
         "cleaning": _build_aml_media_pool(
             pool_id="cleaning",
-            name="cleaning",
+            name="Cleaning",
             policy="cleaning",
             max_drives=1,
             target_lto_generation="LTO-9-CLN",
             quota_gb=None,
             color="#6B7280",
+            assigned_barcodes=[],
         ),
         "pool-critical": _build_aml_media_pool(
             pool_id="pool-critical",
@@ -645,24 +661,27 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
             target_lto_generation="LTO-9",
             quota_gb=50000,
             color="#EF4444",
+            assigned_barcodes=[],
         ),
         "pool-general": _build_aml_media_pool(
             pool_id="pool-general",
             name="General Archive",
             policy="standard",
-            max_drives=4,
-            target_lto_generation="LTO-8",
+            max_drives=3,
+            target_lto_generation="LTO-9",
             quota_gb=120000,
             color="#2563EB",
+            assigned_barcodes=[],
         ),
         "pool-cold": _build_aml_media_pool(
             pool_id="pool-cold",
             name="Cold Storage",
             policy="archive",
-            max_drives=2,
+            max_drives=1,
             target_lto_generation="LTO-9",
-            quota_gb=250000,
-            color="#6B7280",
+            quota_gb=180000,
+            color="#64748B",
+            assigned_barcodes=[],
         ),
     }
 
@@ -670,22 +689,22 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
 
 def _default_aml_drives() -> dict[str, dict[str, Any]]:
     drives: dict[str, dict[str, Any]] = {}
-    for index, item in enumerate(scalar_i3_default_config()["drives"], start=1):
+    for item in scalar_i3_default_config()["drives"]:
         drive_id = str(item["id"])
         drives[drive_id] = {
-            "serialNumber": drive_id,
+            "serialNumber": str(item["serial"]),
             "hardwareSerialNumber": str(item["serial"]),
             "model": str(item["model"]),
             "type": str(item["type"]),
-            "status": "online",
-            "state": "idle",
+            "status": str(item.get("status", "online")),
+            "state": str(item.get("state", "idle")),
             "partition": "partition1",
             "location": str(item["location"]),
-            "firmware": "H3J4",
-            "loadCount": 60 - (index * 5),
-            "errorCount": 0,
-            "cleaningCount": index,
-            "lastCleaned": None,
+            "firmware": str(item.get("firmware", "H9A3")),
+            "loadCount": int(item.get("loadCount", 80)),
+            "errorCount": int(item.get("errorCount", 0)),
+            "cleaningCount": int(item.get("cleaningCount", 1)),
+            "lastCleaned": item.get("lastCleaned"),
             "loadedMedia": None,
             "config": {"compression": True, "encryption": False, "speed": "400MB/s", "bufferSize": "256MB"},
             "encryptionState": {

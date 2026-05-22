@@ -55,10 +55,10 @@ export default function Login() {
       <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[1.2fr,0.8fr]">
         <Card className="bg-quantum-north p-8">
           <div className="text-xs uppercase tracking-[0.32em] text-slate-500">Quantum operator console</div>
-          <h1 className="mt-3 text-4xl font-semibold text-slate-100">OpenBlade AML Login</h1>
+          <h1 className="mt-3 text-4xl font-semibold text-slate-100">OpenBlade Sign In</h1>
           <p className="mt-3 max-w-2xl text-sm text-slate-400">
-            Sign in to access the Quantum-style dashboard, physical library operator views, and credential-aware
-            remote management features.
+            Sign in to OpenBlade to access the dashboard, physical map views, and credential-aware
+            operator workflows.
           </p>
           <div className="mt-6 grid gap-3 sm:grid-cols-3">
             {[
@@ -76,8 +76,8 @@ export default function Login() {
 
         <Card className="bg-quantum-info p-8">
           <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Authentication</div>
-          <h2 className="mt-1 text-2xl font-semibold text-slate-100">Operator sign-in</h2>
-          <p className="mt-2 text-sm text-slate-400">Default AML credentials are prefilled for local development.</p>
+          <h2 className="mt-1 text-2xl font-semibold text-slate-100">Sign in to OpenBlade</h2>
+          <p className="mt-2 text-sm text-slate-400">Default OpenBlade development credentials are prefilled for local use.</p>
 
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <div>

@@ -9,12 +9,13 @@ import {
   getSystemHealthDashboard,
 } from '../api/catalogAdmin';
 import { listActiveJobs } from '../api/operations';
+import { getSystemConfigSummary } from '../api/system';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Spinner from '../components/ui/Spinner';
-import { formatDate } from '../lib/utils';
+import { formatBytes, formatDate } from '../lib/utils';
 
 function statusVariant(status: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
   switch (status.toLowerCase()) {
@@ -41,8 +42,9 @@ export default function System() {
   const errorCodesQuery = useQuery({ queryKey: ['system', 'error-codes'], queryFn: getErrorCodes, refetchInterval: 60_000 });
   const jobsQuery = useQuery({ queryKey: ['operations', 'jobs', 'active'], queryFn: listActiveJobs, refetchInterval: 5_000 });
   const archiveJobsQuery = useQuery({ queryKey: ['archive', 'jobs'], queryFn: getArchiveJobs, refetchInterval: 10_000 });
+  const configSummaryQuery = useQuery({ queryKey: ['system', 'config-summary'], queryFn: getSystemConfigSummary, refetchInterval: 60_000 });
 
-  const queryError = dashboardQuery.error ?? libraryQuery.error ?? catalogQuery.error ?? errorCodesQuery.error ?? jobsQuery.error ?? archiveJobsQuery.error;
+  const queryError = dashboardQuery.error ?? libraryQuery.error ?? catalogQuery.error ?? errorCodesQuery.error ?? jobsQuery.error ?? archiveJobsQuery.error ?? configSummaryQuery.error;
   const errorCodeSummary = useMemo(() => {
     const codes = errorCodesQuery.data ?? [];
     return {
@@ -53,7 +55,7 @@ export default function System() {
     };
   }, [errorCodesQuery.data]);
 
-  if ([dashboardQuery, libraryQuery, catalogQuery, errorCodesQuery, jobsQuery, archiveJobsQuery].some((query) => query.isLoading)) {
+  if ([dashboardQuery, libraryQuery, catalogQuery, errorCodesQuery, jobsQuery, archiveJobsQuery, configSummaryQuery].some((query) => query.isLoading)) {
     return <Spinner />;
   }
   if (queryError) {
@@ -64,6 +66,7 @@ export default function System() {
       void errorCodesQuery.refetch();
       void jobsQuery.refetch();
       void archiveJobsQuery.refetch();
+      void configSummaryQuery.refetch();
     }} />;
   }
 
@@ -72,6 +75,7 @@ export default function System() {
   const catalog = catalogQuery.data!;
   const activeJobs = jobsQuery.data ?? [];
   const archiveJobs = archiveJobsQuery.data ?? [];
+  const configSummary = configSummaryQuery.data!;
   const components = dashboard.health.components ?? [];
 
   return (
@@ -195,6 +199,30 @@ export default function System() {
                 <div className="mt-1 text-xs text-slate-400">{entry.action}</div>
               </div>
             ))}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+        <Card>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Configuration summary</div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 text-sm text-slate-300">
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3"><div className="text-xs uppercase tracking-[0.16em] text-slate-500">Backend</div><div className="mt-1 text-slate-100">{configSummary.backend}</div></div>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3"><div className="text-xs uppercase tracking-[0.16em] text-slate-500">OpenBlade Version</div><div className="mt-1 text-slate-100">{configSummary.version}</div></div>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3"><div className="text-xs uppercase tracking-[0.16em] text-slate-500">Max Upload</div><div className="mt-1 text-slate-100">{formatBytes(configSummary.max_upload_bytes)}</div></div>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3"><div className="text-xs uppercase tracking-[0.16em] text-slate-500">Libraries</div><div className="mt-1 text-slate-100">{configSummary.library_count}</div></div>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3"><div className="text-xs uppercase tracking-[0.16em] text-slate-500">Gateway</div><div className="mt-1 text-slate-100">{configSummary.gateway_enabled ? 'Enabled' : 'Disabled'}</div></div>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3"><div className="text-xs uppercase tracking-[0.16em] text-slate-500">Catalog DB</div><div className="mt-1 break-all text-slate-100">{configSummary.catalog_db_path}</div></div>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Quick links</div>
+          <div className="mt-4 grid gap-3 text-sm text-slate-300">
+            <Link to="/gateway" className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-slate-100 hover:bg-quantum-north">Protocol Gateway</Link>
+            <Link to="/storage/shares" className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-slate-100 hover:bg-quantum-north">File Sharing</Link>
+            <Link to="/admin/safety" className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-slate-100 hover:bg-quantum-north">Safety Checks</Link>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-xs text-slate-400">CORS origins: {configSummary.cors_origins.join(', ')}</div>
           </div>
         </Card>
       </div>

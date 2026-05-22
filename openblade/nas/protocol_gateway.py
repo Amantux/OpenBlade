@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib.util
 import os
 import posixpath
 import secrets
+import socket
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -295,11 +297,26 @@ class ProtocolGateway:
         ]
 
     def start(self) -> None:
-        """Mark gateway as started (real daemon would launch here)."""
+        """Validate the SFTP runtime and mark the gateway as started."""
         if self._status is GatewayStatus.DISABLED:
             return
-        self._last_error = None
-        self._status = GatewayStatus.RUNNING
+        if self._status is GatewayStatus.RUNNING:
+            return
+        try:
+            if importlib.util.find_spec("asyncssh") is None:
+                raise RuntimeError("SFTP gateway backend is unavailable because asyncssh is not installed")
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((self._bind_host, self._bind_port))
+            self._last_error = None
+            self._status = GatewayStatus.RUNNING
+        except OSError as exc:
+            message = f"Unable to start SFTP gateway on {self._bind_host}:{self._bind_port}: {exc}"
+            self.set_error(message)
+            raise RuntimeError(message) from exc
+        except RuntimeError as exc:
+            self.set_error(str(exc))
+            raise
 
     def stop(self) -> None:
         """Mark gateway as stopped."""
@@ -318,12 +335,12 @@ class ProtocolGateway:
         sessions = self._sessions
         active = [s for s in sessions if s.disconnected_at is None]
         return {
-            "status": self._status,
+            "status": self._status.value,
             "total_sessions": len(sessions),
             "active_sessions": len(active),
             "total_files_uploaded": sum(s.files_uploaded for s in sessions),
             "total_bytes_uploaded": sum(s.bytes_uploaded for s in sessions),
-            "credentials": len(self._credentials),
+            "credentials_count": len(self._credentials),
             "last_error": self._last_error,
         }
 

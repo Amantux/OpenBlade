@@ -30,6 +30,28 @@ class GatewayConfigResponse(BaseModel):
     max_sessions: int
     inbox_root: str
     status: str
+    last_error: str | None = None
+
+
+class GatewayStatusResponse(BaseModel):
+    status: str
+    active_sessions: int
+    total_sessions: int
+    total_bytes_uploaded: int
+    total_files_uploaded: int
+    credentials_count: int
+    last_error: str | None = None
+
+
+class GatewayCommandResponse(BaseModel):
+    status: str
+    message: str
+    last_error: str | None = None
+
+
+class InboxPathOption(BaseModel):
+    path: str
+    description: str
 
 
 @router.get("/config", response_model=GatewayConfigResponse, dependencies=[Depends(require_auth)])
@@ -37,23 +59,26 @@ def get_gateway_config():
     return get_gateway().config
 
 
-@router.get("/status", dependencies=[Depends(require_auth)])
-def get_gateway_status():
-    return get_gateway().get_stats()
+@router.get("/status", response_model=GatewayStatusResponse, dependencies=[Depends(require_auth)])
+def get_gateway_status() -> GatewayStatusResponse:
+    return GatewayStatusResponse.model_validate(get_gateway().get_stats())
 
 
-@router.post("/start", dependencies=[Depends(require_auth)])
-def start_gateway():
+@router.post("/start", response_model=GatewayCommandResponse, dependencies=[Depends(require_auth)])
+def start_gateway() -> GatewayCommandResponse:
     gw = get_gateway()
-    gw.start()
-    return {"status": gw.status}
+    try:
+        gw.start()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return GatewayCommandResponse(status=gw.status.value, message="SFTP gateway started", last_error=gw.config.get("last_error"))
 
 
-@router.post("/stop", dependencies=[Depends(require_auth)])
-def stop_gateway():
+@router.post("/stop", response_model=GatewayCommandResponse, dependencies=[Depends(require_auth)])
+def stop_gateway() -> GatewayCommandResponse:
     gw = get_gateway()
     gw.stop()
-    return {"status": gw.status}
+    return GatewayCommandResponse(status=gw.status.value, message="SFTP gateway stopped", last_error=gw.config.get("last_error"))
 
 
 @router.get("/credentials", dependencies=[Depends(require_auth)])
@@ -128,7 +153,13 @@ def list_sessions(active_only: bool = False):
     ]
 
 
-@router.get("/inbox-paths", dependencies=[Depends(require_auth)])
-def list_inbox_paths():
+@router.get("/inbox-paths", response_model=list[InboxPathOption], dependencies=[Depends(require_auth)])
+def list_inbox_paths() -> list[InboxPathOption]:
     """List available inbox path options for credential configuration."""
-    return [{"path": path.value, "description": path.name.lower().replace("_", " ")} for path in InboxPath]
+    descriptions = {
+        InboxPath.GENERAL: "general ingest inbox",
+        InboxPath.CRITICAL: "critical projects inbox",
+        InboxPath.SHARDED: "sharded ingest inbox",
+        InboxPath.RESTORE: "restore workspace",
+    }
+    return [InboxPathOption(path=path.value, description=descriptions[path]) for path in InboxPath]

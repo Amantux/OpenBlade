@@ -8,13 +8,24 @@ import type {
   SystemVersionResponse,
   UptimeResponse,
 } from '../types/api';
-import { apiRequest } from './client';
+import { apiRequest, rootApiRequest } from './client';
 
 export interface SystemTimeResponse {
   utc: string;
   local: string;
   timezone: string;
   ntp: boolean;
+}
+
+export interface SystemConfigSummaryResponse {
+  backend: string;
+  cors_origins: string[];
+  max_upload_bytes: number;
+  version: string;
+  nas_enabled: boolean;
+  gateway_enabled: boolean;
+  catalog_db_path: string;
+  library_count: number;
 }
 
 export interface NetworkInterfaceResponse {
@@ -238,6 +249,10 @@ export async function getSystemStatus(): Promise<SystemStatusResponse> {
 export async function getSystemVersion(): Promise<SystemVersionResponse> {
   const response = await apiRequest<{ versionInfo: SystemVersionResponse }>('/system/version');
   return response.versionInfo;
+}
+
+export function getSystemConfigSummary(): Promise<SystemConfigSummaryResponse> {
+  return rootApiRequest<SystemConfigSummaryResponse>('/system/config-summary');
 }
 
 export async function getSystemUptime(): Promise<UptimeResponse> {

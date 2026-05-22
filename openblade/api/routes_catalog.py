@@ -8,7 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel
 
-from openblade.bootstrap import AppContext, get_context
+from openblade.bootstrap import AppContext, get_context, seed_demo_environment
 from openblade.catalog.models import FileInstance, FileRecord
 from openblade.domain.errors import FileNotFoundError
 
@@ -45,6 +45,12 @@ class CatalogFileDetailResponse(CatalogFileSummaryResponse):
 class CatalogListResponse(BaseModel):
     files: list[CatalogFileSummaryResponse]
     total: int
+
+
+class CatalogSeedDemoResponse(BaseModel):
+    status: str
+    datasets: int
+    files: int
 
 
 def _get_shard_index(instance: FileInstance) -> int:
@@ -135,6 +141,19 @@ async def list_catalog_file_shards(
             )
         )
     return responses
+
+
+@router.get("/seed-demo", response_model=CatalogSeedDemoResponse)
+async def seed_demo_catalog(
+    context: AppContext = Depends(get_context),
+) -> CatalogSeedDemoResponse:
+    seed_demo_environment(context.catalog)
+    files, total = context.catalog.list_catalog_files(limit=500, offset=0)
+    return CatalogSeedDemoResponse(
+        status="ok",
+        datasets=len(context.catalog.list_nas_datasets()),
+        files=total or len(files),
+    )
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -20,12 +20,15 @@ export interface TapeOperation {
   completed_at: string | null;
 }
 
-export interface SafetyStatus {
-  code: 'SAFETY_003';
+export interface SafetyCheckItem {
+  name: string;
   status: 'ok' | 'warning' | 'failed';
-  summary: string;
-  guidance: string;
-  checked_at: string;
+  message: string;
+}
+
+export interface SafetyStatus {
+  status: 'ok' | 'warning' | 'failed';
+  checks: SafetyCheckItem[];
 }
 
 export async function listTapeOperations(limit = 100): Promise<TapeOperation[]> {
@@ -33,15 +36,9 @@ export async function listTapeOperations(limit = 100): Promise<TapeOperation[]> 
 }
 
 export async function getSafetyStatus(): Promise<SafetyStatus> {
-  return Promise.resolve({
-    code: 'SAFETY_003',
-    status: 'warning',
-    summary: 'Last safety review requires operator confirmation before destructive tape actions.',
-    guidance: 'Verify media ownership, mounted tape selection, and destination paths before proceeding.',
-    checked_at: new Date().toISOString(),
-  });
+  return rootApiRequest<SafetyStatus>('/safety/check');
 }
 
 export async function runSafetyCheck(): Promise<SafetyStatus> {
-  return getSafetyStatus();
+  return rootApiRequest<SafetyStatus>('/safety/check', { method: 'POST' });
 }

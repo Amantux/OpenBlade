@@ -20,17 +20,25 @@ function severityVariant(severity: string): 'red' | 'amber' | 'blue' {
 
 export default function ErrorCodesPage() {
   const [severityFilter, setSeverityFilter] = useState<'all' | 'error' | 'warning' | 'info'>('all');
+  const [search, setSearch] = useState('');
   const errorCodesQuery = useQuery({
     queryKey: ['error-codes'],
     queryFn: getErrorCodes,
   });
 
   const rows = useMemo(() => {
-    if (severityFilter === 'all') {
-      return errorCodesQuery.data ?? [];
-    }
-    return (errorCodesQuery.data ?? []).filter((entry) => entry.severity === severityFilter);
-  }, [errorCodesQuery.data, severityFilter]);
+    const normalizedSearch = search.trim().toLowerCase();
+    return (errorCodesQuery.data ?? []).filter((entry) => {
+      const matchesSeverity = severityFilter === 'all' || entry.severity === severityFilter;
+      const matchesSearch =
+        !normalizedSearch ||
+        entry.code.toLowerCase().includes(normalizedSearch) ||
+        entry.title.toLowerCase().includes(normalizedSearch) ||
+        entry.description.toLowerCase().includes(normalizedSearch) ||
+        entry.action.toLowerCase().includes(normalizedSearch);
+      return matchesSeverity && matchesSearch;
+    });
+  }, [errorCodesQuery.data, search, severityFilter]);
 
   return (
     <div className="space-y-4">
@@ -41,7 +49,13 @@ export default function ErrorCodesPage() {
             <h1 className="mt-1 text-2xl font-semibold text-white">Error codes</h1>
             <p className="mt-2 text-sm text-slate-400">Reference registry for backend error codes and recommended operator action.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search code, title, description"
+              className="rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-sm text-white"
+            />
             <select
               value={severityFilter}
               onChange={(event) => setSeverityFilter(event.target.value as 'all' | 'error' | 'warning' | 'info')}
@@ -65,7 +79,7 @@ export default function ErrorCodesPage() {
         {!errorCodesQuery.isLoading && !errorCodesQuery.isError ? (
           rows.length === 0 ? (
             <div className="rounded-md border border-dashed border-quantum-border bg-quantum-panel px-6 py-10 text-center text-sm text-slate-400">
-              No error codes match the selected severity.
+              No error codes match the current filter.
             </div>
           ) : (
             <div className="overflow-x-auto rounded-md border border-quantum-border">

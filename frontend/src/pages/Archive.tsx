@@ -10,6 +10,7 @@ import Spinner from '../components/ui/Spinner';
 import { getArchiveJobs, postArchive } from '../api/archive';
 import { getMediaPools } from '../api/cartridges';
 import { listCartridges } from '../api/media';
+import { listPolicies, listPools as listNasPools } from '../api/nas';
 import {
   assignVolumeGroupCartridge,
   createVolumeGroup,
@@ -42,10 +43,13 @@ export default function Archive() {
   const volumeGroupsQuery = useQuery({ queryKey: ['volume-groups'], queryFn: getVolumeGroups, refetchInterval: 30_000 });
   const cartridgesQuery = useQuery({ queryKey: ['archive', 'cartridges'], queryFn: listCartridges, refetchInterval: 30_000 });
   const poolsQuery = useQuery({ queryKey: ['archive', 'pools'], queryFn: getMediaPools, refetchInterval: 30_000 });
+  const policiesQuery = useQuery({ queryKey: ['nas', 'policies'], queryFn: listPolicies, refetchInterval: 30_000 });
+  const nasPoolsQuery = useQuery({ queryKey: ['nas', 'pools'], queryFn: listNasPools, refetchInterval: 30_000 });
 
   const [sourceDraft, setSourceDraft] = useState('');
   const [sourcePaths, setSourcePaths] = useState<string[]>([]);
   const [volumeGroup, setVolumeGroup] = useState('');
+  const [selectedPolicyId, setSelectedPolicyId] = useState('');
   const [selectedPoolId, setSelectedPoolId] = useState('');
   const [preferredTape, setPreferredTape] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
@@ -56,6 +60,8 @@ export default function Archive() {
   const volumeGroups = volumeGroupsQuery.data ?? [];
   const recentJobs = archiveJobsQuery.data ?? [];
   const pools = poolsQuery.data ?? [];
+  const policies = policiesQuery.data ?? [];
+  const nasPools = nasPoolsQuery.data ?? [];
   const archiveCartridges = useMemo(
     () => (cartridgesQuery.data ?? []).filter((cartridge) => String(cartridge.type ?? '').toUpperCase().startsWith('LTO-')),
     [cartridgesQuery.data],
@@ -73,10 +79,24 @@ export default function Archive() {
     }
   }, [recentJobs, selectedJobId]);
 
+  useEffect(() => {
+    if (!selectedPolicyId && policies.length > 0) {
+      setSelectedPolicyId(policies[0].id);
+    }
+  }, [policies, selectedPolicyId]);
+
   const selectedGroup = volumeGroups.find((group) => group.name === volumeGroup) ?? volumeGroups[0];
-  const selectedPool = pools.find((pool) => pool.id === selectedPoolId);
+  const poolOptions = useMemo(
+    () => [
+      ...pools.map((pool) => ({ id: `aml:${pool.id}`, name: `${pool.name} · Media Pool`, assignedBarcodes: pool.assignedBarcodes })),
+      ...nasPools.map((pool) => ({ id: `nas:${pool.pool_id}`, name: `${pool.name} · Virtual Pool`, assignedBarcodes: [] as string[] })),
+    ],
+    [nasPools, pools],
+  );
+  const selectedPool = poolOptions.find((pool) => pool.id === selectedPoolId);
+  const selectedPolicy = policies.find((policy) => policy.id === selectedPolicyId) ?? policies[0];
   const candidateTapes = useMemo(() => {
-    const poolBarcodes = selectedPool ? new Set(selectedPool.assignedBarcodes) : null;
+    const poolBarcodes = selectedPool && selectedPool.assignedBarcodes.length > 0 ? new Set(selectedPool.assignedBarcodes) : null;
     return archiveCartridges
       .filter((cartridge) => (poolBarcodes ? poolBarcodes.has(cartridge.barcode) : true))
       .sort((left, right) => left.barcode.localeCompare(right.barcode));
@@ -111,15 +131,17 @@ export default function Archive() {
         queryClient.invalidateQueries({ queryKey: ['archive', 'jobs'] }),
         queryClient.invalidateQueries({ queryKey: ['volume-groups'] }),
       ]);
-      setSubmissionSummary(`${jobIds.length} archive job${jobIds.length === 1 ? '' : 's'} queued.`);
+      setSubmissionSummary(
+        `${jobIds.length} archive job${jobIds.length === 1 ? '' : 's'} queued using ${selectedPolicy?.name ?? 'default policy'}${selectedPool ? ` into ${selectedPool.name}` : ''}.`,
+      );
       setSourcePaths([]);
       setSourceDraft('');
       setSelectedJobId(jobIds[0] ?? selectedJobId);
     },
   });
 
-  const queryError = archiveJobsQuery.error ?? volumeGroupsQuery.error ?? cartridgesQuery.error ?? poolsQuery.error;
-  if ([archiveJobsQuery, volumeGroupsQuery, cartridgesQuery, poolsQuery].some((query) => query.isLoading)) {
+  const queryError = archiveJobsQuery.error ?? volumeGroupsQuery.error ?? cartridgesQuery.error ?? poolsQuery.error ?? policiesQuery.error ?? nasPoolsQuery.error;
+  if ([archiveJobsQuery, volumeGroupsQuery, cartridgesQuery, poolsQuery, policiesQuery, nasPoolsQuery].some((query) => query.isLoading)) {
     return <Spinner />;
   }
   if (queryError) {
@@ -128,6 +150,8 @@ export default function Archive() {
       void volumeGroupsQuery.refetch();
       void cartridgesQuery.refetch();
       void poolsQuery.refetch();
+      void policiesQuery.refetch();
+      void nasPoolsQuery.refetch();
     }} />;
   }
 
@@ -145,7 +169,8 @@ export default function Archive() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge variant="blue">{volumeGroups.length} groups</Badge>
-            <Badge variant="gray">{pools.length} pools</Badge>
+            <Badge variant="purple">{policies.length} policies</Badge>
+            <Badge variant="gray">{poolOptions.length} pools</Badge>
             <Badge variant="green">{archiveCartridges.length} tapes</Badge>
           </div>
         </div>
@@ -222,7 +247,7 @@ export default function Archive() {
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <label className="block text-sm text-slate-300">
                 <span className="text-xs uppercase tracking-[0.16em] text-slate-500">Volume Group</span>
                 <select
@@ -232,6 +257,19 @@ export default function Archive() {
                 >
                   {volumeGroups.map((group) => (
                     <option key={group.id} value={group.name}>{group.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm text-slate-300">
+                <span className="text-xs uppercase tracking-[0.16em] text-slate-500">Storage Policy</span>
+                <select
+                  value={selectedPolicyId}
+                  onChange={(event) => setSelectedPolicyId(event.target.value)}
+                  className="mt-2 w-full rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-sm text-slate-100 outline-none focus:border-quantum-red"
+                >
+                  {policies.map((policy) => (
+                    <option key={policy.id} value={policy.id}>{policy.name}</option>
                   ))}
                 </select>
               </label>
@@ -247,7 +285,7 @@ export default function Archive() {
                   className="mt-2 w-full rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-sm text-slate-100 outline-none focus:border-quantum-red"
                 >
                   <option value="">Any pool</option>
-                  {pools.map((pool) => (
+                  {poolOptions.map((pool) => (
                     <option key={pool.id} value={pool.id}>{pool.name}</option>
                   ))}
                 </select>
@@ -290,6 +328,11 @@ export default function Archive() {
               <div className="mt-2 text-xs text-slate-400">
                 {(selectedGroup?.barcodes ?? []).length > 0 ? (selectedGroup?.barcodes ?? []).join(', ') : 'No tapes assigned yet'}
               </div>
+            </div>
+            <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3">
+              <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Storage Policy</div>
+              <div className="mt-1 text-slate-100">{selectedPolicy?.name ?? 'Default policy'}</div>
+              <div className="mt-2 text-xs text-slate-400">NAS policies are shared with Storage pages.</div>
             </div>
             <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3">
               <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Pool Filter</div>
@@ -338,6 +381,7 @@ export default function Archive() {
           { label: 'Progress', value: `${progressForJob(selectedJob)}%` },
           { label: 'Source', value: selectedJob ? String(selectedJob.metadata?.source_path ?? '—') : sourcePaths.join(', ') || '—' },
           { label: 'Volume Group', value: selectedJob ? String(selectedJob.metadata?.volume_group ?? '—') : selectedGroup?.name ?? '—' },
+          { label: 'Storage Policy', value: selectedPolicy?.name ?? 'Default' },
           { label: 'Preferred Tape', value: preferredTape || 'Automatic' },
           { label: 'Updated', value: selectedJob ? formatDate(selectedJob.updated_at) : 'Waiting for submission' },
         ]}

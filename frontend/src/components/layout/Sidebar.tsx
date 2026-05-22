@@ -11,13 +11,15 @@ import {
   Shield,
   Workflow,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { getActiveLibraryName, subscribeActiveLibrary } from '../../lib/activeLibrary';
 import { cn } from '../../lib/utils';
 
 interface NavItem {
   label: string;
   to: string;
+  end?: boolean;
 }
 
 interface NavSection {
@@ -33,7 +35,7 @@ const sections: NavSection[] = [
     label: 'Overview',
     icon: Gauge,
     items: [
-      { label: 'Dashboard', to: '/' },
+      { label: 'Dashboard', to: '/', end: true },
       { label: 'Multi-Library Grid', to: '/libraries' },
       { label: 'Health & Alerts', to: '/health' },
     ],
@@ -43,7 +45,7 @@ const sections: NavSection[] = [
     label: 'Library',
     icon: Layers3,
     items: [
-      { label: 'Physical Map', to: '/library' },
+      { label: 'Physical Map', to: '/library', end: true },
       { label: 'Inventory', to: '/library/inventory' },
       { label: 'Partitions', to: '/partitions' },
       { label: 'IE Station', to: '/library/ie' },
@@ -54,7 +56,7 @@ const sections: NavSection[] = [
     label: 'Media',
     icon: Database,
     items: [
-      { label: 'Cartridges', to: '/media' },
+      { label: 'Cartridges', to: '/media', end: true },
       { label: 'Archive', to: '/archive' },
       { label: 'Media Pools', to: '/media/pools' },
       { label: 'LTFS Browse', to: '/media/ltfs' },
@@ -65,7 +67,7 @@ const sections: NavSection[] = [
     label: 'Catalog',
     icon: Database,
     items: [
-      { label: 'Catalog Records', to: '/catalog' },
+      { label: 'Catalog Records', to: '/catalog', end: true },
       { label: 'Rebuild', to: '/catalog/rebuild' },
       { label: 'Manifest Versions', to: '/catalog/manifests' },
     ],
@@ -75,7 +77,7 @@ const sections: NavSection[] = [
     label: 'Drives',
     icon: HardDrive,
     items: [
-      { label: 'Drive Overview', to: '/drives' },
+      { label: 'Drive Overview', to: '/drives', end: true },
       { label: 'Drive Operations', to: '/drives/ops' },
     ],
   },
@@ -102,6 +104,7 @@ const sections: NavSection[] = [
       { label: 'Virtual Pools', to: '/storage/virtual-pools' },
       { label: 'Restore Queue', to: '/storage/restore-queue' },
       { label: 'Dataset Details', to: '/storage/dataset-details' },
+      { label: 'File Sharing', to: '/storage/shares' },
       { label: 'File Station', to: '/file-station' },
       { label: 'File Browser', to: '/files/browse' },
       { label: 'Protocol Gateway', to: '/gateway' },
@@ -121,7 +124,7 @@ const sections: NavSection[] = [
     label: 'System',
     icon: Network,
     items: [
-      { label: 'System Info', to: '/system' },
+      { label: 'System Info', to: '/system', end: true },
       { label: 'Health', to: '/system/health' },
       { label: 'Error Codes', to: '/system/error-codes' },
       { label: 'Library Status', to: '/system/library' },
@@ -145,6 +148,7 @@ const sections: NavSection[] = [
 ];
 
 export default function Sidebar() {
+  const [activeLibraryName, setActiveLibraryName] = useState(() => getActiveLibraryName());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     overview: true,
     library: true,
@@ -159,11 +163,18 @@ export default function Sidebar() {
     gateway: true,
   });
 
+  useEffect(
+    () => subscribeActiveLibrary(() => setActiveLibraryName(getActiveLibraryName())),
+    [],
+  );
+
   return (
     <aside className="flex min-h-screen w-[280px] flex-col border-r border-quantum-border bg-quantum-sidebar">
       <div className="border-b border-quantum-border px-4 py-4">
         <div className="text-xs uppercase tracking-[0.32em] text-slate-500">Quantum Scalar i3</div>
-        <div className="mt-2 text-lg font-semibold text-slate-100">OpenBlade Control Plane</div>
+        <div className="mt-2 text-lg font-semibold text-slate-100">
+          {activeLibraryName ? `OpenBlade · ${activeLibraryName}` : 'OpenBlade Control Plane'}
+        </div>
         <div className="mt-1 text-xs text-slate-400">Modern SaaS telemetry + operator workflows</div>
       </div>
 
@@ -197,7 +208,7 @@ export default function Sidebar() {
                     <NavLink
                       key={item.to}
                       to={item.to}
-                      end={item.to === '/'}
+                      end={item.end ?? false}
                       className={({ isActive }) =>
                         cn(
                           'flex items-center rounded-md border-l-2 border-transparent px-3 py-2 text-sm text-slate-300 transition hover:bg-quantum-north hover:text-white',

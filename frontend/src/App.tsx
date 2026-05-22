@@ -28,6 +28,7 @@ import LtfsBrowse from './pages/LtfsBrowse';
 import ManifestVersionsPage from './pages/ManifestVersionsPage';
 import Media from './pages/Media';
 import MediaPools from './pages/MediaPools';
+import Mounts from './pages/Mounts';
 import MoveOperations from './pages/MoveOperations';
 import Partitions from './pages/Partitions';
 import ReportsActivity from './pages/ReportsActivity';
@@ -100,6 +101,7 @@ function RoutedApp() {
         <Route path="storage/virtual-pools" element={<VirtualPools />} />
         <Route path="storage/restore-queue" element={<RestoreQueue />} />
         <Route path="storage/dataset-details" element={<DatasetDetails />} />
+        <Route path="storage/shares" element={<Mounts />} />
         <Route path="file-station" element={<FileStation />} />
         <Route path="gateway" element={<GatewayPage />} />
         <Route path="files/browse" element={<VirtualFileBrowserPage />} />

@@ -117,6 +117,7 @@ export default function GatewayPage() {
   const qc = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [activeOnly, setActiveOnly] = useState(false);
+  const [commandError, setCommandError] = useState<unknown>(null);
 
   const configQuery = useQuery({ queryKey: ['gateway', 'config'], queryFn: getGatewayConfig });
   const statusQuery = useQuery({ queryKey: ['gateway', 'status'], queryFn: getGatewayStatus, refetchInterval: 10_000 });
@@ -127,8 +128,22 @@ export default function GatewayPage() {
     refetchInterval: 10_000,
   });
 
-  const startMut = useMutation({ mutationFn: startGateway, onSuccess: () => void qc.invalidateQueries({ queryKey: ['gateway'] }) });
-  const stopMut = useMutation({ mutationFn: stopGateway, onSuccess: () => void qc.invalidateQueries({ queryKey: ['gateway'] }) });
+  const startMut = useMutation({
+    mutationFn: startGateway,
+    onSuccess: async () => {
+      setCommandError(null);
+      await qc.invalidateQueries({ queryKey: ['gateway'] });
+    },
+    onError: (error) => setCommandError(error),
+  });
+  const stopMut = useMutation({
+    mutationFn: stopGateway,
+    onSuccess: async () => {
+      setCommandError(null);
+      await qc.invalidateQueries({ queryKey: ['gateway'] });
+    },
+    onError: (error) => setCommandError(error),
+  });
   const removeMut = useMutation({
     mutationFn: removeCredential,
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['gateway', 'credentials'] }),
@@ -178,13 +193,17 @@ export default function GatewayPage() {
         </div>
       </div>
 
+      {commandError ? <ErrorMessage error={commandError} /> : null}
+      {stats?.last_error ? <Card className="border-amber-500/30 bg-amber-950/20 text-sm text-amber-100">{stats.last_error}</Card> : null}
+
       {/* Status Cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         {[
           { label: 'Status', value: stats?.status ?? '—' },
           { label: 'Active Sessions', value: stats?.active_sessions ?? 0 },
           { label: 'Total Uploaded', value: formatBytes(stats?.total_bytes_uploaded ?? 0) },
           { label: 'Files Uploaded', value: stats?.total_files_uploaded ?? 0 },
+          { label: 'Credentials', value: stats?.credentials_count ?? 0 },
         ].map(({ label, value }) => (
           <Card key={label}>
             <div className="text-xs text-slate-400">{label}</div>

@@ -102,17 +102,27 @@ export default function AdminSafetyPage() {
 
       {safetyStatus ? (
         <Card className="border-amber-500/20 bg-amber-950/10">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Safety Status</div>
               <div className="mt-2 flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-white">{safetyStatus.code}</h2>
+                <h2 className="text-lg font-semibold text-white">Run Safety Check</h2>
                 <Badge variant={safetyVariant(safetyStatus.status)}>{safetyStatus.status.toUpperCase()}</Badge>
               </div>
-              <p className="mt-2 text-sm text-slate-300">{safetyStatus.summary}</p>
-              <p className="mt-1 text-sm text-slate-400">{safetyStatus.guidance}</p>
+              <p className="mt-2 text-sm text-slate-300">Structured safety verification for orchestrator routing, import guard coverage, and destructive action confirmation.</p>
             </div>
-            <div className="text-sm text-slate-400">Last checked {formatDate(safetyStatus.checked_at)}</div>
+            <Badge variant="blue">{safetyStatus.checks.length} checks</Badge>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {safetyStatus.checks.map((check) => (
+              <div key={check.name} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3 text-sm text-slate-300">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-semibold text-white">{check.name}</div>
+                  <Badge variant={safetyVariant(check.status)}>{check.status.toUpperCase()}</Badge>
+                </div>
+                <div className="mt-2 text-slate-400">{check.message}</div>
+              </div>
+            ))}
           </div>
         </Card>
       ) : null}

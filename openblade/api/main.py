@@ -39,6 +39,7 @@ from openblade.api import (
     routes_proxy,
     routes_rbac,
     routes_restore,
+    routes_safety,
     routes_tape_ops,
     routes_tapes,
     routes_upload,
@@ -109,6 +110,7 @@ app.include_router(routes_ltfs.router, prefix="/ltfs", tags=["ltfs"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_libraries.router)
+app.include_router(routes_safety.router)
 app.include_router(routes_iblade.router, prefix="/iblade", tags=["iblade"])
 app.include_router(gateway_router)
 app.include_router(routes_virtual_fs.router, prefix="/virtual", tags=["virtual"])
