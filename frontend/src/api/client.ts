@@ -46,11 +46,16 @@ function safeJsonParse(text: string): unknown {
 }
 
 function buildUrl(path: string, namespace: ApiNamespace): string {
-  if (/^https?:\/\//.test(path) || path.startsWith('/aml')) {
+  if (/^https?:\/\//.test(path)) {
     return path;
   }
 
-  return namespace === 'root' ? path : `${API_PREFIX}${path}`;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  if (normalizedPath.startsWith('/aml') || normalizedPath.startsWith('/api')) {
+    return normalizedPath;
+  }
+
+  return namespace === 'root' ? `/api${normalizedPath}` : `${API_PREFIX}${normalizedPath}`;
 }
 
 function redirectToLogin(): void {

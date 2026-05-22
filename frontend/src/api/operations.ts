@@ -71,11 +71,10 @@ interface OperationStateEnvelope {
 interface PhysicalElementsEnvelope {
   elementList: {
     element: Array<{
-      address: string;
-      elementType: string;
-      status: string;
+      address: number | string;
+      type: string;
+      state: string;
       barcode?: string | null;
-      full: boolean;
     }>;
   };
 }
@@ -204,19 +203,24 @@ export async function cancelJob(jobId: string): Promise<void> {
 
 export async function listPhysicalSlots(): Promise<PhysicalSlot[]> {
   const response = await apiRequest<PhysicalElementsEnvelope>('/physicalLibrary/elements');
-  return response.elementList.element.map((element) => ({
-    address: element.address,
-    elementType: element.elementType,
-    state: element.status,
-    barcode: element.barcode ?? null,
-    full: element.full,
-  }));
+  return response.elementList.element.map((element) => {
+    const normalizedState = String(element.state).toLowerCase();
+    return {
+      address: element.address,
+      elementType: element.type,
+      state: element.state,
+      barcode: element.barcode ?? null,
+      full: Boolean(element.barcode) || ['occupied', 'loaded', 'full', 'mounted', 'in_drive'].includes(normalizedState),
+    };
+  });
 }
 
-export async function createMove(sourceSlot: string, destSlot: string, barcode?: string): Promise<OperationJobReceipt> {
-  const resolvedBarcode = barcode ?? (await listPhysicalSlots()).find((slot) => slot.address === sourceSlot)?.barcode;
+export async function createMove(sourceSlot: string | number, destSlot: string | number, barcode?: string): Promise<OperationJobReceipt> {
+  const normalizedSourceSlot = String(sourceSlot);
+  const normalizedDestSlot = String(destSlot);
+  const resolvedBarcode = barcode ?? (await listPhysicalSlots()).find((slot) => String(slot.address) === normalizedSourceSlot)?.barcode;
   if (!resolvedBarcode) {
-    throw new Error(`No barcode found in source slot ${sourceSlot}.`);
+    throw new Error(`No barcode found in source slot ${normalizedSourceSlot}.`);
   }
 
   const beforeMoves = await listMoves().catch(() => [] as Move[]);
@@ -224,8 +228,8 @@ export async function createMove(sourceSlot: string, destSlot: string, barcode?:
     '/move',
     {
       move: {
-        source: sourceSlot,
-        destination: destSlot,
+        source: normalizedSourceSlot,
+        destination: normalizedDestSlot,
         barcode: resolvedBarcode,
       },
     },

@@ -341,7 +341,7 @@ export interface InventoryResult {
 }
 
 export interface PhysicalSlot {
-  address: string;
+  address: number | string;
   elementType: string;
   state: string;
   barcode: string | null;

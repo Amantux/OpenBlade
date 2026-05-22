@@ -23,6 +23,6 @@ export function postShardedArchive(
 }
 
 export async function getArchiveJobs(): Promise<JobResponse[]> {
-  const jobs = await rootApiRequest<JobResponse[]>('/jobs');
-  return jobs.filter((job) => String(job.job_type ?? job.type ?? '').toLowerCase() === 'archive');
+  const jobs = await rootApiRequest<JobResponse[]>('/jobs/');
+  return jobs.filter((job) => String(job.job_type ?? job.type ?? '').toLowerCase().includes('archive'));
 }

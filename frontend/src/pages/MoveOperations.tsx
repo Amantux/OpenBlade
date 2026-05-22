@@ -22,7 +22,7 @@ function StepChip({ step, current, label }: { step: number; current: number; lab
 
 function elementLabel(slot: PhysicalSlot): string {
   const normalized = String(slot.elementType).toUpperCase();
-  if (normalized === 'IE' || normalized === 'IESTATION') return 'IE';
+  if (normalized === 'IE' || normalized === 'IESTATION' || normalized === 'IESLOT') return 'IE';
   if (normalized === 'DRIVE') return 'Drive';
   return 'Slot';
 }
@@ -35,7 +35,7 @@ function CoordinateTable({
   onSelect,
 }: {
   slots: PhysicalSlot[];
-  selected?: string;
+  selected?: string | number;
   title: string;
   subtitle: string;
   onSelect: (slot: PhysicalSlot) => void;
@@ -62,7 +62,7 @@ function CoordinateTable({
           </thead>
           <tbody>
             {slots.map((slot, index) => {
-              const isSelected = selected === slot.address;
+              const isSelected = selected !== undefined && String(selected) === String(slot.address);
               return (
                 <tr key={slot.address} className={isSelected ? 'bg-quantum-red/10' : index % 2 === 0 ? 'bg-quantum-north' : 'bg-quantum-panel'}>
                   <td className="px-4 py-3 text-slate-300">{elementLabel(slot)}</td>
@@ -100,7 +100,7 @@ export default function MoveOperations() {
     [slotsQuery.data],
   );
   const destinationCandidates = useMemo(
-    () => (slotsQuery.data ?? []).filter((slot) => !slot.full && slot.address !== source?.address),
+    () => (slotsQuery.data ?? []).filter((slot) => !slot.full && String(slot.address) !== String(source?.address ?? '')),
     [slotsQuery.data, source?.address],
   );
 
@@ -132,7 +132,7 @@ export default function MoveOperations() {
     return <ErrorMessage error={jobsQuery.error} onRetry={() => void jobsQuery.refetch()} />;
   }
 
-  const previewValid = Boolean(source && destination && !destination.full && source.address !== destination.address);
+  const previewValid = Boolean(source && destination && !destination.full && String(source.address) !== String(destination.address));
   const submittedJob = (jobsQuery.data ?? []).find((job) => job.id === submittedJobId) ?? (movesQuery.data ?? []).find((move) => move.id === submittedJobId);
 
   return (

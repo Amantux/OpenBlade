@@ -75,6 +75,11 @@ export default function DriveOperations() {
   });
 
   const queryError = drivesQuery.error ?? jobsQuery.error;
+  const recentDriveJobs = useMemo(
+    () => (jobsQuery.data ?? []).filter((job) => ['clean', 'audit', 'calibrate', 'verify'].includes(job.type)),
+    [jobsQuery.data],
+  );
+
   if (drivesQuery.isLoading || jobsQuery.isLoading) {
     return <Spinner />;
   }
@@ -84,11 +89,6 @@ export default function DriveOperations() {
       void jobsQuery.refetch();
     }} />;
   }
-
-  const recentDriveJobs = useMemo(
-    () => (jobsQuery.data ?? []).filter((job) => ['clean', 'audit', 'calibrate', 'verify'].includes(job.type)),
-    [jobsQuery.data],
-  );
 
   return (
     <div className="space-y-4">

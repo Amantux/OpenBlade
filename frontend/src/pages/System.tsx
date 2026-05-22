@@ -43,6 +43,16 @@ export default function System() {
   const archiveJobsQuery = useQuery({ queryKey: ['archive', 'jobs'], queryFn: getArchiveJobs, refetchInterval: 10_000 });
 
   const queryError = dashboardQuery.error ?? libraryQuery.error ?? catalogQuery.error ?? errorCodesQuery.error ?? jobsQuery.error ?? archiveJobsQuery.error;
+  const errorCodeSummary = useMemo(() => {
+    const codes = errorCodesQuery.data ?? [];
+    return {
+      total: codes.length,
+      errors: codes.filter((entry) => entry.severity === 'error').length,
+      warnings: codes.filter((entry) => entry.severity === 'warning').length,
+      infos: codes.filter((entry) => entry.severity === 'info').length,
+    };
+  }, [errorCodesQuery.data]);
+
   if ([dashboardQuery, libraryQuery, catalogQuery, errorCodesQuery, jobsQuery, archiveJobsQuery].some((query) => query.isLoading)) {
     return <Spinner />;
   }
@@ -63,15 +73,6 @@ export default function System() {
   const activeJobs = jobsQuery.data ?? [];
   const archiveJobs = archiveJobsQuery.data ?? [];
   const components = dashboard.health.components ?? [];
-  const errorCodeSummary = useMemo(() => {
-    const codes = errorCodesQuery.data ?? [];
-    return {
-      total: codes.length,
-      errors: codes.filter((entry) => entry.severity === 'error').length,
-      warnings: codes.filter((entry) => entry.severity === 'warning').length,
-      infos: codes.filter((entry) => entry.severity === 'info').length,
-    };
-  }, [errorCodesQuery.data]);
 
   return (
     <div className="space-y-4">
