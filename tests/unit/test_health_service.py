@@ -259,7 +259,7 @@ def test_known_error_codes_minimum_count() -> None:
     assert "SAFETY_003" in codes
     assert "AUTH_001" in codes
     assert "NAS_001" in codes
-    assert "CAT_001" in codes
+    assert "CATALOG_001" in codes
     assert "SYS_001" in codes
 
 

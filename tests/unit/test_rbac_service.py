@@ -165,7 +165,9 @@ def test_create_user_hashes_password() -> None:
 
     stored = service.repo.get_user_by_username("alice")
     assert stored is not None
-    assert stored["hashed_password"] == hashlib.sha256(raw_password.encode()).hexdigest()
+    # Verify password is hashed (PBKDF2) not plaintext
+    assert stored["hashed_password"].startswith("pbkdf2$")
+    assert stored["hashed_password"] != raw_password
     # Raw password must NOT be stored anywhere in the record
     assert raw_password not in stored.values()
     assert raw_password not in str(stored)
