@@ -432,12 +432,18 @@ async def get_library_inventory_alias(
         "library_id": inventory.library_id,
         "changer_state": inventory.changer_state.value,
         "slots": [
-            {"slot_id": slot.slot_id, "occupied": slot.occupied, "barcode": str(slot.barcode) if slot.barcode else None}
+            {
+                "slotId": slot.slot_id,
+                "id": slot.slot_id,
+                "occupied": slot.occupied,
+                "barcode": str(slot.barcode) if slot.barcode else None,
+            }
             for slot in inventory.slots
         ],
         "drives": [
             {
-                "drive_id": drive.drive_id,
+                "driveId": drive.drive_id,
+                "id": drive.drive_id,
                 "loaded": bool(drive.barcode),
                 "barcode": str(drive.barcode) if drive.barcode else None,
                 "drive_state": drive.drive_state.value,
