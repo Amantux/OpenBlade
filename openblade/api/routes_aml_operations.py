@@ -629,6 +629,16 @@ async def create_move(
                         break
             if found and getattr(found, "barcode", None):
                 barcode_raw = str(found.barcode)
+            else:
+                # Fallback: scan aml_state media entries for a matching slotAddress
+                try:
+                    for media in aml_state.list_aml_media().values():
+                        slot_addr = str(media.get("slotAddress", ""))
+                        if slot_addr and (slot_addr == str(source_raw) or slot_addr.endswith("," + str(source_raw))):
+                            barcode_raw = str(media.get("barcode"))
+                            break
+                except Exception:
+                    pass
         except Exception:
             # If inventory lookup fails, continue and let validation handle it
             barcode_raw = barcode_raw
