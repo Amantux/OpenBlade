@@ -420,9 +420,29 @@ async def get_library_physical_alias(
     return await get_physical_library(user, context)
 
 
-@router.get("/library/inventory", response_model=ElementListResponse)
+@router.get("/library/inventory")
 async def get_library_inventory_alias(
     user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
-) -> ElementListResponse:
-    return await get_library_elements(user, context)
+) -> dict:
+    """Backwards-compatible inventory response shape expected by UI/tests."""
+    _ensure_state(context)
+    inventory = context.library.inventory()
+    return {
+        "library_id": inventory.library_id,
+        "changer_state": inventory.changer_state.value,
+        "slots": [
+            {"slot_id": slot.slot_id, "occupied": slot.occupied, "barcode": str(slot.barcode) if slot.barcode else None}
+            for slot in inventory.slots
+        ],
+        "drives": [
+            {
+                "drive_id": drive.drive_id,
+                "loaded": bool(drive.barcode),
+                "barcode": str(drive.barcode) if drive.barcode else None,
+                "drive_state": drive.drive_state.value,
+                "mount_state": drive.mount_state.value,
+            }
+            for drive in inventory.drives
+        ],
+    }
