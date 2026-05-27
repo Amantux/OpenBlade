@@ -589,6 +589,7 @@ def _robotics_status() -> RoboticsStatus:
     )
 
 
+@router.post("/operations/move", response_model=WSResultCode)
 @router.post("/move", response_model=WSResultCode)
 async def create_move(
     payload: MoveRequest,
