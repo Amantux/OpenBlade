@@ -137,6 +137,14 @@ def _sorted_open_messages() -> list[IBladeMessage]:
     return sorted(messages, key=lambda item: item.created_at, reverse=True)
 
 
+def _code_description_or_404(items: list[dict[str, str]], code: str, *, field_name: str = "code") -> CodeDescription:
+    normalized = _validate_identifier(code, field_name=field_name).upper()
+    for item in items:
+        if str(item.get("code", "")).upper() == normalized:
+            return CodeDescription.model_validate(item)
+    raise HTTPException(status_code=404, detail=f"{field_name} {code} not found")
+
+
 
 def _serialize_hosts() -> list[IBladeHost]:
     return [IBladeHost.model_validate(item) for item in aml_state.list_iblade_hosts()]
@@ -222,9 +230,19 @@ async def get_states() -> list[CodeDescription]:
     return [CodeDescription.model_validate(item) for item in _STATE_CODES]
 
 
+@router.get("/states/{code}", response_model=CodeDescription)
+async def get_state_by_code(code: str) -> CodeDescription:
+    return _code_description_or_404(_STATE_CODES, code)
+
+
 @router.get("/volstates", response_model=list[CodeDescription])
 async def get_volume_states() -> list[CodeDescription]:
     return [CodeDescription.model_validate(item) for item in _VOLUME_STATES]
+
+
+@router.get("/volstates/{code}", response_model=CodeDescription)
+async def get_volume_state_by_code(code: str) -> CodeDescription:
+    return _code_description_or_404(_VOLUME_STATES, code)
 
 
 @router.get("/vgstates", response_model=list[CodeDescription])
@@ -232,9 +250,24 @@ async def get_volume_group_states() -> list[CodeDescription]:
     return [CodeDescription.model_validate(item) for item in _VG_STATES]
 
 
+@router.get("/vgstates/{code}", response_model=CodeDescription)
+async def get_volume_group_state_by_code(code: str) -> CodeDescription:
+    return _code_description_or_404(_VG_STATES, code)
+
+
 @router.get("/jobstates", response_model=list[CodeDescription])
 async def get_job_states() -> list[CodeDescription]:
     return [CodeDescription.model_validate(item) for item in _JOB_STATES]
+
+
+@router.get("/opstates", response_model=list[CodeDescription])
+async def get_operation_states() -> list[CodeDescription]:
+    return [CodeDescription.model_validate(item) for item in _JOB_STATES]
+
+
+@router.get("/opstates/{code}", response_model=CodeDescription)
+async def get_operation_state_by_code(code: str) -> CodeDescription:
+    return _code_description_or_404(_JOB_STATES, code)
 
 
 @router.get("/reasons", response_model=list[CodeDescription])
@@ -242,9 +275,19 @@ async def get_reasons() -> list[CodeDescription]:
     return [CodeDescription.model_validate(item) for item in _REASON_CODES]
 
 
+@router.get("/reasons/{code}", response_model=CodeDescription)
+async def get_reason_by_code(code: str) -> CodeDescription:
+    return _code_description_or_404(_REASON_CODES, code)
+
+
 @router.get("/vgreasons", response_model=list[CodeDescription])
 async def get_volume_group_reasons() -> list[CodeDescription]:
     return [CodeDescription.model_validate(item) for item in _VG_REASON_CODES]
+
+
+@router.get("/vgreasons/{code}", response_model=CodeDescription)
+async def get_volume_group_reason_by_code(code: str) -> CodeDescription:
+    return _code_description_or_404(_VG_REASON_CODES, code)
 
 
 @router.get("/messages", response_model=list[IBladeMessage])
@@ -276,6 +319,71 @@ async def delete_message(
     message = _message_or_404(_validate_identifier(message_id, field_name="message id"))
     updated = aml_state.update_iblade_message(str(message["id"]), {"acknowledged": True}) or {**message, "acknowledged": True}
     return IBladeMessage.model_validate(updated)
+
+
+@router.get("/nas-drives", response_model=list[dict[str, Any]])
+async def list_nas_drives(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> list[dict[str, Any]]:
+    _ensure_state(context)
+    return aml_state.list_aml_drives()
+
+
+@router.get("/lto-media", response_model=list[dict[str, Any]])
+async def list_lto_media(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> list[dict[str, Any]]:
+    _ensure_state(context)
+    return aml_state.list_aml_media()
+
+
+@router.get("/lto_media/{barcode}", response_model=dict[str, Any])
+async def get_lto_medium(
+    barcode: str,
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    medium = aml_state.get_aml_media(_validate_identifier(barcode, field_name="barcode"))
+    if medium is None:
+        raise HTTPException(status_code=404, detail="Media not found")
+    return medium
+
+
+@router.put("/lto-media", response_model=list[dict[str, Any]])
+async def update_lto_media(
+    payload: list[dict[str, Any]] | dict[str, Any] = Body(default_factory=list),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> list[dict[str, Any]]:
+    _ensure_state(context)
+    items = payload if isinstance(payload, list) else list(payload.get("lto_media", []))
+    updated: list[dict[str, Any]] = []
+    for item in items:
+        barcode = str(item.get("barcode", "")).strip().upper()
+        if not barcode:
+            raise HTTPException(status_code=400, detail="barcode is required")
+        candidate = aml_state.update_aml_media(barcode, item)
+        if candidate is None:
+            raise HTTPException(status_code=404, detail=f"Media {barcode} not found")
+        updated.append(candidate)
+    return updated
+
+
+@router.put("/lto-media/{barcode}", response_model=dict[str, Any])
+async def update_lto_medium(
+    barcode: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> dict[str, Any]:
+    _ensure_state(context)
+    updated = aml_state.update_aml_media(_validate_identifier(barcode, field_name="barcode"), payload)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Media {barcode} not found")
+    return updated
 
 
 @router.get("/hosts", response_model=list[IBladeHost])
@@ -345,6 +453,16 @@ async def get_configuration_report(
     return _configuration_report()
 
 
+@router.post("/reports/configuration/email", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def email_configuration_report(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    _ensure_state(context)
+    return _queue_job("iblade-report-configuration-email", "Configuration report email queued", payload or {})
+
+
 @router.get("/reports/media", response_model=IBladeReport)
 async def get_media_report(
     _: AmlUser = Depends(require_auth),
@@ -352,6 +470,16 @@ async def get_media_report(
 ) -> IBladeReport:
     _ensure_state(context)
     return _media_report()
+
+
+@router.post("/reports/media/email", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def email_media_report(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    _ensure_state(context)
+    return _queue_job("iblade-report-media-email", "Media report email queued", payload or {})
 
 
 @router.get("/reports/media-count", response_model=IBladeReport)
@@ -363,6 +491,16 @@ async def get_media_count_report(
     return _media_count_report()
 
 
+@router.post("/reports/media-count/email", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def email_media_count_report(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    _ensure_state(context)
+    return _queue_job("iblade-report-media-count-email", "Media-count report email queued", payload or {})
+
+
 @router.get("/reports/volume-groups", response_model=IBladeReport)
 async def get_volume_groups_report(
     _: AmlUser = Depends(require_auth),
@@ -370,6 +508,16 @@ async def get_volume_groups_report(
 ) -> IBladeReport:
     _ensure_state(context)
     return _volume_group_report()
+
+
+@router.post("/reports/volume-groups/email", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def email_volume_groups_report(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    _ensure_state(context)
+    return _queue_job("iblade-report-volume-groups-email", "Volume-groups report email queued", payload or {})
 
 
 @router.get("/status/io", response_model=IBladeIoStatus)
@@ -383,6 +531,15 @@ async def get_io_status(
 
 @router.get("/status/open-messages", response_model=list[IBladeMessage])
 async def get_open_messages(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> list[IBladeMessage]:
+    _ensure_state(context)
+    return _sorted_open_messages()
+
+
+@router.get("/status/system/open-messages", response_model=list[IBladeMessage])
+async def get_system_open_messages(
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> list[IBladeMessage]:
@@ -435,6 +592,39 @@ async def put_system_setting(
     value = payload.get("value") if isinstance(payload, dict) and "value" in payload else payload
     settings = aml_state.set_iblade_system_settings({key: value})
     return IBladeSetting(name=key, value=settings[key])
+
+
+@router.post("/system/clear-to-ship", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def clear_to_ship(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    _ensure_state(context)
+    return _queue_job("iblade-clear-to-ship", "Clear-to-ship workflow queued", payload or {})
+
+
+@router.get("/system/extended-snapshot", response_model=IBladeReport)
+async def get_extended_snapshot(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeReport:
+    _ensure_state(context)
+    payload = _configuration_report().model_dump(mode="json")
+    open_messages = [item.model_dump(mode="json") for item in _sorted_open_messages()]
+    payload["items"].append({"section": "open-messages", "data": open_messages})
+    payload["summary"]["openMessages"] = len(open_messages)
+    return IBladeReport.model_validate(payload)
+
+
+@router.post("/system/factory-defaults", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def factory_defaults(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    _ensure_state(context)
+    return _queue_job("iblade-factory-defaults", "Factory defaults workflow queued", payload or {})
 
 
 @router.post("/system/snapshot", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -501,6 +691,15 @@ async def assignment_operation(
     return _queue_job("iblade-assignment", f"Tape assignment queued for volume group {index}", data)
 
 
+@router.post("/operations/volume-groups/assign", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def assignment_operation_compat(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    return await assignment_operation(payload=payload, _=_, context=context)
+
+
 @router.post("/operations/merge", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def merge_operation(
     payload: dict[str, Any] | None = Body(default=None),
@@ -523,6 +722,15 @@ async def merge_operation(
     return _queue_job("iblade-merge", "Volume group merge queued", data)
 
 
+@router.post("/operations/volume-groups/merge", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def merge_operation_compat(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    return await merge_operation(payload=payload, _=_, context=context)
+
+
 @router.post("/operations/prepare-export", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def prepare_export_operation(
     payload: dict[str, Any] | None = Body(default=None),
@@ -531,6 +739,15 @@ async def prepare_export_operation(
 ) -> IBladeJobResponse:
     _ensure_state(context)
     return _queue_job("iblade-prepare-export", "Prepare export job queued", payload or {})
+
+
+@router.post("/operations/volume-groups/prepare-export", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def prepare_export_operation_compat(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    return await prepare_export_operation(payload=payload, _=_, context=context)
 
 
 @router.post("/operations/volume-groups/repair", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -556,6 +773,15 @@ async def replicate_operation(
     return _queue_job("iblade-replicate", "Replication queued", payload or {})
 
 
+@router.post("/operations/volume-groups/replicate", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def replicate_operation_compat(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    return await replicate_operation(payload=payload, _=_, context=context)
+
+
 @router.post("/operations/safe-repair", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def safe_repair_operation(
     payload: dict[str, Any] | None = Body(default=None),
@@ -567,6 +793,75 @@ async def safe_repair_operation(
     index = int(data.get("index", 1))
     aml_state.update_iblade_volume_group(index, {"state": "READY", "reason": "NONE"})
     return _queue_job("iblade-safe-repair", f"Safe repair queued for volume group {index}", data)
+
+
+@router.post("/operations/volume-groups/safe-repair", response_model=IBladeJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def safe_repair_operation_compat(
+    payload: dict[str, Any] | None = Body(default=None),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeJobResponse:
+    return await safe_repair_operation(payload=payload, _=_, context=context)
+
+
+@router.get("/volume-groups", response_model=list[IBladeVolumeGroup])
+async def list_volume_groups(
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> list[IBladeVolumeGroup]:
+    _ensure_state(context)
+    return _serialize_volume_groups()
+
+
+@router.post("/volume_groups", response_model=IBladeVolumeGroup, status_code=status.HTTP_201_CREATED)
+async def create_volume_group(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeVolumeGroup:
+    _ensure_state(context)
+    groups = [item.model_dump(mode="json") for item in _serialize_volume_groups()]
+    next_index = max((int(item["index"]) for item in groups), default=0) + 1
+    tapes = [str(value).strip() for value in payload.get("tapes", []) if str(value).strip()]
+    groups.append(
+        {
+            "index": next_index,
+            "name": str(payload.get("name", f"Volume Group {next_index}")).strip() or f"Volume Group {next_index}",
+            "state": str(payload.get("state", "READY")),
+            "reason": str(payload.get("reason", "NONE")),
+            "policy": str(payload.get("policy", "balanced")),
+            "tapes": tapes,
+            "mediaCount": len(tapes),
+        }
+    )
+    aml_state.replace_iblade_volume_groups(groups)
+    return IBladeVolumeGroup.model_validate(_volume_group_or_404(next_index))
+
+
+@router.put("/volume-groups", response_model=list[IBladeVolumeGroup])
+async def put_volume_groups(
+    payload: list[dict[str, Any]] | dict[str, Any] = Body(default_factory=list),
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> list[IBladeVolumeGroup]:
+    _ensure_state(context)
+    items = payload if isinstance(payload, list) else list(payload.get("volume_groups", []))
+    normalized: list[dict[str, Any]] = []
+    for offset, item in enumerate(items, start=1):
+        tapes = [str(value).strip() for value in item.get("tapes", []) if str(value).strip()]
+        normalized.append(
+            {
+                "index": int(item.get("index", offset)),
+                "name": str(item.get("name", f"Volume Group {offset}")).strip() or f"Volume Group {offset}",
+                "state": str(item.get("state", "READY")),
+                "reason": str(item.get("reason", "NONE")),
+                "policy": str(item.get("policy", "balanced")),
+                "tapes": tapes,
+                "mediaCount": len(tapes),
+            }
+        )
+    aml_state.replace_iblade_volume_groups(normalized)
+    return _serialize_volume_groups()
 
 
 @router.get("/volume-groups/{index}", response_model=IBladeVolumeGroup)
@@ -590,3 +885,16 @@ async def put_volume_group(
     _volume_group_or_404(index)
     updated = aml_state.update_iblade_volume_group(index, payload)
     return IBladeVolumeGroup.model_validate(updated or _volume_group_or_404(index))
+
+
+@router.delete("/volume-groups/{index}", response_model=IBladeVolumeGroup)
+async def delete_volume_group(
+    index: int,
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> IBladeVolumeGroup:
+    _ensure_state(context)
+    removed = _volume_group_or_404(index)
+    groups = [item.model_dump(mode="json") for item in _serialize_volume_groups() if item.index != index]
+    aml_state.replace_iblade_volume_groups(groups)
+    return IBladeVolumeGroup.model_validate(removed)

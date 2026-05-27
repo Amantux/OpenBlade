@@ -12,6 +12,7 @@ license = {text = "MIT"}
 authors = [{name = "OpenBlade contributors"}]
 dependencies = [
   "fastapi>=0.115",
+  "a2wsgi>=1.10",
   "uvicorn[standard]>=0.30",
   "sqlalchemy[asyncio]>=2.0",
   "alembic>=1.13",

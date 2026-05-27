@@ -16,6 +16,8 @@ pytest -m 'not real_hardware'
 cd frontend && npm install && npm run test && npm run build
 openblade inventory
 uvicorn openblade.api.main:app --reload
+# Flask-style WSGI deployment option (same API behavior):
+gunicorn openblade.api.wsgi:application
 ```
 
 ## Multi-Library Setup
