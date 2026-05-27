@@ -600,6 +600,31 @@ async def create_move(
     _require_admin(current_user)
     # Support both new shape {"move": {"source":..., "destination":..., "barcode":...}}
     # and legacy UI shape {"sourceSlot": X, "targetDrive": Y, "barcode": Z}
+    # Early fast-path: if the root payload contains slot/drive numeric identifiers, call the library backend directly.
+    if isinstance(payload, dict) and ("sourceSlot" in payload or "source" in payload) and ("targetDrive" in payload or "destination" in payload):
+        try:
+            s_raw = payload.get("sourceSlot") if "sourceSlot" in payload else payload.get("source")
+            d_raw = payload.get("targetDrive") if "targetDrive" in payload else payload.get("destination")
+            s = int(s_raw)
+            d = int(d_raw)
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers")
+        try:
+            result = context.library.load(s, d)
+            if getattr(result, "success", False):
+                barcode_val = None
+                try:
+                    barcode_val = result.data.get("barcode") if getattr(result, "data", None) else None
+                except Exception:
+                    barcode_val = None
+                return _ws_result(f"Queued move for {barcode_val or str(s)}")
+            else:
+                raise HTTPException(status_code=400, detail=getattr(result, "message", "Move failed"))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     if isinstance(payload, dict) and "move" in payload and isinstance(payload["move"], dict):
         data = payload["move"]
     else:
@@ -615,17 +640,33 @@ async def create_move(
     dest_raw = _first_present(data, ["destination", "targetDrive", "drive", "target"])
     barcode_raw = _first_present(data, ["barcode", "label", "volumeLabel"]) or ""
 
-    # Debug logging to help diagnose legacy payload handling (temporary)
-    try:
-        print(f"DEBUG create_move payload={payload} source_raw={source_raw} dest_raw={dest_raw} barcode_raw={barcode_raw}")
-    except Exception:
-        pass
-
-    # Debug logging to help diagnose legacy payload handling (temporary)
-    try:
-        print(f"DEBUG create_move payload={payload} source_raw={source_raw} dest_raw={dest_raw} barcode_raw={barcode_raw}")
-    except Exception:
-        pass
+    # Fast-path legacy move: if explicit sourceSlot/targetDrive provided, call library.load()
+    # This avoids strict barcode requirements and mirrors operator UI workflows.
+    # Prefer a value-based fast-path: if both source_raw and dest_raw are present treat as legacy slot/drive move
+    if source_raw is not None and dest_raw is not None:
+        try:
+            s = int(source_raw)
+            d = int(dest_raw)
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers")
+        # Call the simulated library backend to perform the load/unload
+        try:
+            result = context.library.load(s, d)
+            if getattr(result, "success", False):
+                # If result includes barcode in data, return a helpful message
+                barcode_val = None
+                try:
+                    barcode_val = result.data.get("barcode") if getattr(result, "data", None) else None
+                except Exception:
+                    barcode_val = None
+                return _ws_result(f"Queued move for {barcode_val or str(s)}")
+            else:
+                # Map failure to AML error
+                raise HTTPException(status_code=400, detail=getattr(result, "message", "Move failed"))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     # If barcode is missing, try to infer it from the source slot in the current inventory
     if not barcode_raw and source_raw:
