@@ -609,6 +609,12 @@ async def create_move(
     dest_raw = data.get("destination") or data.get("targetDrive") or data.get("drive") or data.get("target")
     barcode_raw = data.get("barcode") or data.get("label") or data.get("volumeLabel") or ""
 
+    # Debug logging to help diagnose legacy payload handling (temporary)
+    try:
+        print(f"DEBUG create_move payload={payload} source_raw={source_raw} dest_raw={dest_raw} barcode_raw={barcode_raw}")
+    except Exception:
+        pass
+
     # If barcode is missing, try to infer it from the source slot in the current inventory
     if not barcode_raw and source_raw:
         try:
