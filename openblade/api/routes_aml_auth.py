@@ -550,6 +550,16 @@ async def logout(
     return response
 
 
+# Backwards-compatible alias for clients/tests expecting /aml/auth/logout
+@router.post("/auth/logout", response_model=WSResultCode)
+async def auth_logout(
+    request: Request,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> Response:
+    return await logout(request, current_user, context)
+
+
 @router.post("/users/login/mfa", response_model=WSResultCode)
 async def validate_mfa(
     payload: MFAAuthentication,
