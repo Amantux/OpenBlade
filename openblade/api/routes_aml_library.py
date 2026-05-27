@@ -398,3 +398,31 @@ async def get_library_status(
             power=power,
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatible aliases for tests/UI that expect /aml/library paths
+# ---------------------------------------------------------------------------
+
+@router.get("/library", response_model=LibraryResponse)
+async def get_library_alias(
+    user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> LibraryResponse:
+    return await get_library_root(user, context)
+
+
+@router.get("/library/physical", response_model=PhysicalLibraryResponse)
+async def get_library_physical_alias(
+    user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> PhysicalLibraryResponse:
+    return await get_physical_library(user, context)
+
+
+@router.get("/library/inventory", response_model=ElementListResponse)
+async def get_library_inventory_alias(
+    user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> ElementListResponse:
+    return await get_library_elements(user, context)
