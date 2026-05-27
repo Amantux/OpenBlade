@@ -592,15 +592,27 @@ def _robotics_status() -> RoboticsStatus:
 @router.post("/operations/move", response_model=WSResultCode)
 @router.post("/move", response_model=WSResultCode)
 async def create_move(
-    payload: MoveRequest,
+    payload: dict,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    source = _normalize_move_address(_validate_identifier(payload.move.source, field_name="source"))
-    destination = _normalize_move_address(_validate_identifier(payload.move.destination, field_name="destination"))
-    barcode = _validate_identifier(payload.move.barcode, field_name="barcode")
+    # Support both new shape {"move": {"source":..., "destination":..., "barcode":...}}
+    # and legacy UI shape {"sourceSlot": X, "targetDrive": Y, "barcode": Z}
+    if isinstance(payload, dict) and "move" in payload and isinstance(payload["move"], dict):
+        data = payload["move"]
+    else:
+        data = payload
+
+    source_raw = data.get("source") or data.get("sourceSlot") or data.get("sourceAddress") or data.get("slot")
+    dest_raw = data.get("destination") or data.get("targetDrive") or data.get("drive") or data.get("target")
+    barcode_raw = data.get("barcode") or data.get("label") or data.get("volumeLabel") or ""
+
+    source = _normalize_move_address(_validate_identifier(str(source_raw or ""), field_name="source"))
+    destination = _normalize_move_address(_validate_identifier(str(dest_raw or ""), field_name="destination"))
+    barcode = _validate_identifier(str(barcode_raw or ""), field_name="barcode")
+
     media = _get_media_or_404(barcode)
     media_source = _normalize_move_address(str(media.get("slotAddress") or ""))
     if media_source not in {source, _slot_suffix(source)} and _slot_suffix(media_source) != _slot_suffix(source):
