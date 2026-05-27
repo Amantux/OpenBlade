@@ -14,7 +14,6 @@ common direct-call patterns and provides a first line of defense.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -47,6 +46,12 @@ FORBIDDEN_PATTERNS: list[str] = [
 ALLOWED_FILES: set[str] = {
     # --- Authorized hardware access points ---
     "openblade/nas/tape_orchestrator.py",      # the orchestrator — owns all tape ops
+    "openblade/hardware/discovery.py",         # guarded real-hardware discovery
+    "openblade/hardware/library.py",           # guarded real-library adapter
+    "openblade/hardware/ltfs.py",              # guarded LTFS command backend
+    "openblade/hardware/mtx.py",               # guarded changer wrapper
+    "openblade/hardware/sg.py",                # guarded sg inquiry wrapper
+    "openblade/hardware/validation.py",        # guarded hardware validation workflows
     # --- Simulator (not real hardware) ---
     "openblade/simulator/ltfs_volume.py",
     "openblade/simulator/library.py",
@@ -185,6 +190,4 @@ def _should_skip(relative_path: str) -> bool:
         return True
     if "/tests/" in normalized:
         return True
-    if name.endswith("_test.py") or name.startswith("test_"):
-        return True
-    return False
+    return name.endswith("_test.py") or name.startswith("test_")

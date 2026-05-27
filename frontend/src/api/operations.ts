@@ -302,8 +302,8 @@ async function getPrimaryIeStationId(): Promise<string> {
   return station.id;
 }
 
-export async function startImport(): Promise<void> {
-  const [partition, ieStation] = await Promise.all([getFirstPartitionName(), getPrimaryIeStationId()]);
+export async function startImport(stationId?: string): Promise<void> {
+  const [partition, ieStation] = await Promise.all([getFirstPartitionName(), stationId ? Promise.resolve(stationId) : getPrimaryIeStationId()]);
   await apiRequest('/import', {
     method: 'POST',
     body: {
@@ -315,9 +315,9 @@ export async function startImport(): Promise<void> {
   });
 }
 
-export async function startExport(): Promise<void> {
-  const [ieStation, slots] = await Promise.all([getPrimaryIeStationId(), listPhysicalSlots()]);
-  const barcode = slots.find((slot) => slot.elementType === 'slot' && slot.full && slot.barcode)?.barcode;
+export async function startExport(stationId?: string, requestedBarcode?: string): Promise<void> {
+  const [ieStation, slots] = await Promise.all([stationId ? Promise.resolve(stationId) : getPrimaryIeStationId(), listPhysicalSlots()]);
+  const barcode = requestedBarcode ?? slots.find((slot) => slot.elementType === 'slot' && slot.full && slot.barcode)?.barcode;
   if (!barcode) {
     throw new Error('No cartridge is available to export.');
   }

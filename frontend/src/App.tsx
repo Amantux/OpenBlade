@@ -48,6 +48,7 @@ import RestoreQueue from './pages/nas/RestoreQueue';
 import SourceStreaming from './pages/nas/SourceStreaming';
 import StoragePolicies from './pages/nas/StoragePolicies';
 import VirtualPools from './pages/nas/VirtualPools';
+import TestRunner from './pages/TestRunner';
 
 function ProtectedLayout() {
   const location = useLocation();
@@ -117,6 +118,7 @@ function RoutedApp() {
         <Route path="system/config" element={<SystemConfiguration />} />
         <Route path="system/firmware" element={<SystemFirmware />} />
         <Route path="system/diagnostics" element={<SystemDiagnostics />} />
+        <Route path="system/test-runner" element={<TestRunner />} />
         <Route path="reports/ras" element={<ReportsRas />} />
         <Route path="reports/events" element={<ReportsEvents />} />
         <Route path="reports/activity" element={<ReportsActivity />} />

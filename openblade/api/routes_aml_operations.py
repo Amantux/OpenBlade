@@ -18,6 +18,29 @@ from openblade.catalog.models import AmlUser
 router = APIRouter()
 
 
+def _normalize_move_address(address: str) -> str:
+    value = address.strip()
+    if not value:
+        return value
+    upper = value.upper()
+    if upper.startswith("DRV-") or upper.startswith("IE-"):
+        return upper
+    if value.isdigit():
+        return f"1,1,{int(value)}"
+    parts = [part.strip() for part in value.split(",")]
+    if len(parts) == 3 and all(part.isdigit() for part in parts):
+        return f"{int(parts[0])},{int(parts[1])},{int(parts[2])}"
+    return value
+
+
+def _slot_suffix(address: str) -> str:
+    normalized = _normalize_move_address(address)
+    parts = normalized.split(",")
+    if len(parts) == 3 and all(part.isdigit() for part in parts):
+        return str(int(parts[-1]))
+    return normalized
+
+
 class MoveOperation(BaseModel):
     id: str
     source: str
@@ -574,11 +597,12 @@ async def create_move(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    source = _validate_identifier(payload.move.source, field_name="source")
-    destination = _validate_identifier(payload.move.destination, field_name="destination")
+    source = _normalize_move_address(_validate_identifier(payload.move.source, field_name="source"))
+    destination = _normalize_move_address(_validate_identifier(payload.move.destination, field_name="destination"))
     barcode = _validate_identifier(payload.move.barcode, field_name="barcode")
     media = _get_media_or_404(barcode)
-    if media.get("slotAddress") != source:
+    media_source = _normalize_move_address(str(media.get("slotAddress") or ""))
+    if media_source not in {source, _slot_suffix(source)} and _slot_suffix(media_source) != _slot_suffix(source):
         raise HTTPException(status_code=409, detail="Media is not at the requested source")
     job = _create_job("move")
     aml_state.set_aml_move(
@@ -608,24 +632,24 @@ async def list_moves(
 
 @router.get("/move/{id}", response_model=MoveResponse)
 async def get_move(
-    id: str,
+    resource_id: str,
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> MoveResponse:
     _ensure_state(context)
-    move_id = _validate_identifier(id, field_name="id")
+    move_id = _validate_identifier(resource_id, field_name="id")
     return MoveResponse(move=_serialize_move(_get_move_or_404(move_id)))
 
 
 @router.delete("/move/{id}", response_model=WSResultCode)
 async def cancel_move(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    move_id = _validate_identifier(id, field_name="id")
+    move_id = _validate_identifier(resource_id, field_name="id")
     move = _get_move_or_404(move_id)
     if move.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Only pending moves can be cancelled")
@@ -748,12 +772,12 @@ async def list_mounts(
 
 @router.get("/mount/{id}", response_model=MountResponse)
 async def get_mount(
-    id: str,
+    resource_id: str,
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> MountResponse:
     _ensure_state(context)
-    mount_id = _validate_identifier(id, field_name="id")
+    mount_id = _validate_identifier(resource_id, field_name="id")
     return MountResponse(mount=_serialize_mount(_get_mount_or_404(mount_id)))
 
 
@@ -1200,24 +1224,24 @@ async def get_queue_status(
 
 @router.get("/job/{id}", response_model=JobResponse)
 async def get_job(
-    id: str,
+    resource_id: str,
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> JobResponse:
     _ensure_state(context)
-    job_id = _validate_identifier(id, field_name="id")
+    job_id = _validate_identifier(resource_id, field_name="id")
     return JobResponse(job=_serialize_job(_get_job_or_404(job_id)))
 
 
 @router.delete("/job/{id}", response_model=WSResultCode)
 async def cancel_job(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    job_id = _validate_identifier(id, field_name="id")
+    job_id = _validate_identifier(resource_id, field_name="id")
     job = aml_state.get_aml_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1231,13 +1255,13 @@ async def cancel_job(
 
 @router.post("/job/{id}/pause", response_model=WSResultCode)
 async def pause_job(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    job_id = _validate_identifier(id, field_name="id")
+    job_id = _validate_identifier(resource_id, field_name="id")
     job = aml_state.get_aml_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1249,13 +1273,13 @@ async def pause_job(
 
 @router.post("/job/{id}/resume", response_model=WSResultCode)
 async def resume_job(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    job_id = _validate_identifier(id, field_name="id")
+    job_id = _validate_identifier(resource_id, field_name="id")
     job = aml_state.get_aml_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")

@@ -39,6 +39,7 @@ from pydantic import BaseModel
 from openblade.api.routes_aml_auth import require_auth
 from openblade.bootstrap import get_catalog
 from openblade.catalog.repository import CatalogRepository
+from openblade.nas.service import NasService
 from openblade.nas.types import DatasetStatus, IngestMode, NasFileRecord, NasFileState
 
 router = APIRouter(prefix="/api", tags=["upload-download"])
@@ -280,13 +281,15 @@ async def list_pool_files(
     pool_id: str,
     repo: CatalogRepository = Depends(get_catalog),
 ) -> PoolFileListResponse:
-    """List staged files for a pool."""
+    """List staged or archived files known for a pool."""
     dataset = repo.get_nas_dataset(_dataset_id(pool_id))
-    if dataset is None:
-        return PoolFileListResponse(pool_id=pool_id, files=[])
+    if dataset is not None:
+        records = repo.list_nas_file_records(str(dataset["id"]))
+    else:
+        records = [record.model_dump(mode="json") for record in NasService(repo).list_pool_file_records(pool_id)]
 
     files = sorted(
-        (_serialize_record(record) for record in repo.list_nas_file_records(str(dataset["id"]))),
+        (_serialize_record(record) for record in records),
         key=lambda record: (record.created_at or "", record.filename),
         reverse=True,
     )

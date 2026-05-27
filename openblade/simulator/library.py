@@ -1,12 +1,33 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any
 
 import structlog
+
+# ---------------------------------------------------------------------------
+# Timing profiles — read once at module import so all instances share the same
+# profile unless explicitly overridden in the constructor.
+# ---------------------------------------------------------------------------
+_TIMING_PROFILES: dict[str, dict[str, float]] = {
+    "instant": {"load": 0.0, "unload": 0.0, "move": 0.0},
+    "realistic": {"load": 3.0, "unload": 2.0, "move": 1.5},
+    "hardware": {"load": 35.0, "unload": 25.0, "move": 8.0},
+}
+
+
+def _resolve_load_delay(explicit_delay: float | None) -> float:
+    """Return load delay from env-var timing profile or the explicit override."""
+    if explicit_delay is not None:
+        return explicit_delay
+    profile_name = os.environ.get("I3_TIMING_PROFILE", "instant").strip().lower()
+    profile = _TIMING_PROFILES.get(profile_name, _TIMING_PROFILES["instant"])
+    return profile["load"]
+
 
 from openblade.domain.errors import (
     ChangerBusyError,
@@ -59,12 +80,12 @@ class MockLibraryBackend:
         library_id: str = "mock-i3-001",
         num_slots: int = 20,
         num_drives: int = 1,
-        load_delay: float = 0.0,
+        load_delay: float | None = None,
         fault_config: FaultConfig | None = None,
         fault_injector: FaultInjector | None = None,
     ) -> None:
         self.library_id = library_id
-        self.load_delay = load_delay
+        self.load_delay = _resolve_load_delay(load_delay)
         self.fault_config = fault_config or FaultConfig.no_faults()
         self._fault_injector = fault_injector
         self._lock = threading.RLock()

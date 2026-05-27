@@ -653,8 +653,8 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
             color="#6B7280",
             assigned_barcodes=[],
         ),
-        "critical-backups": _build_aml_media_pool(
-            pool_id="critical-backups",
+        "pool-critical": _build_aml_media_pool(
+            pool_id="pool-critical",
             name="Critical Backups",
             policy="critical",
             max_drives=2,
@@ -663,8 +663,8 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
             color="#EF4444",
             assigned_barcodes=[],
         ),
-        "general-archive": _build_aml_media_pool(
-            pool_id="general-archive",
+        "pool-general": _build_aml_media_pool(
+            pool_id="pool-general",
             name="General Archive",
             policy="standard",
             max_drives=3,
@@ -673,8 +673,8 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
             color="#2563EB",
             assigned_barcodes=[],
         ),
-        "cold-storage": _build_aml_media_pool(
-            pool_id="cold-storage",
+        "pool-cold": _build_aml_media_pool(
+            pool_id="pool-cold",
             name="Cold Storage",
             policy="archive",
             max_drives=1,
@@ -2538,10 +2538,10 @@ def update_iblade_volume_group(index: int | str, updates: dict[str, Any]) -> dic
     group = _STATE.iblade_volume_groups.get(key)
     if group is None:
         return None
-    for field, value in deepcopy(updates).items():
-        if field == "index" or value is None:
+    for field_name, value in deepcopy(updates).items():
+        if field_name == "index" or value is None:
             continue
-        group[field] = value
+        group[field_name] = value
     group["mediaCount"] = len(group.get("tapes", []))
     return deepcopy(group)
 

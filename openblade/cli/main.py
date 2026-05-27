@@ -12,9 +12,10 @@ from rich.console import Console
 from rich.table import Table
 
 from openblade.bootstrap import AppContext, create_context, reset_context
-from openblade.config import OpenBladeConfig
+from openblade.config import OpenBladeConfig, load_config
 from openblade.domain.models import Barcode, DriveState, MountState
 from openblade.fuse.filesystem import CatalogFilesystem
+from openblade.hardware.validation import connect_quantum_i3, validate_ltfs_capabilities
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
@@ -25,6 +26,8 @@ mock_app = typer.Typer(help="Mock library commands")
 app.add_typer(mock_app, name="mock")
 format_app = typer.Typer(help="Format commands")
 app.add_typer(format_app, name="format")
+hardware_app = typer.Typer(help="Real hardware validation commands")
+app.add_typer(hardware_app, name="hardware")
 
 console = Console()
 _STATE_DIR = Path.home() / ".openblade"
@@ -396,3 +399,31 @@ def catalog_ls(path: str = typer.Argument("/")) -> None:
             entry.name, "dir" if entry.is_dir else "file", str(entry.size_bytes), str(entry.path)
         )
     console.print(table)
+
+
+@hardware_app.command("connect-i3")
+def hardware_connect_i3() -> None:
+    """Validate guarded Quantum i3 discovery and inventory wiring."""
+    report = connect_quantum_i3(load_config())
+    console.print_json(data=report.to_dict())
+
+
+@hardware_app.command("validate-ltfs")
+def hardware_validate_ltfs(
+    device: str = typer.Option(..., help="Tape device path such as /dev/st0"),
+    barcode: str = typer.Option(..., help="Barcode used for LTFS format planning"),
+    mount_point: str | None = typer.Option(None, help="Mount point for optional mount checks"),
+    exercise_mounts: bool = typer.Option(
+        False,
+        help="Attempt readonly and readwrite mount/unmount checks in addition to device discovery",
+    ),
+) -> None:
+    """Validate LTFS discovery, planning, and optional mount capability."""
+    report = validate_ltfs_capabilities(
+        load_config(),
+        device=device,
+        barcode=barcode,
+        mount_point=None if mount_point is None else Path(mount_point),
+        exercise_mounts=exercise_mounts,
+    )
+    console.print_json(data=report.to_dict())

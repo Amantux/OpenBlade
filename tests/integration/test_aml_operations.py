@@ -119,6 +119,35 @@ def test_move_returns_result(authed: TestClient) -> None:
     assert resp.status_code in {200, 404, 422}
 
 
+def test_move_accepts_numeric_slot_addresses(authed: TestClient) -> None:
+    media_resp = authed.get("/aml/media")
+    assert media_resp.status_code == 200
+    media_items = (media_resp.json().get("mediaList") or {}).get("media") or []
+    source_media = next(
+        item for item in media_items if str(item.get("slotAddress", "")).startswith("1,1,")
+    )
+    source_slot = str(source_media["slotAddress"]).split(",")[-1]
+    occupied_slots = {str(item.get("slotAddress", "")) for item in media_items}
+    dest_slot = next(
+        str(index)
+        for index in range(1, 31)
+        if f"1,1,{index}" not in occupied_slots
+    )
+
+    resp = authed.post(
+        "/aml/move",
+        json={
+            "move": {
+                "source": source_slot,
+                "destination": dest_slot,
+                "barcode": source_media["barcode"],
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # Inventory
 # ---------------------------------------------------------------------------

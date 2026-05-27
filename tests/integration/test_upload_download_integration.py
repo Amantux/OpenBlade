@@ -10,8 +10,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from openblade.api.main import app
-from openblade.bootstrap import create_context, reset_context
+from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
+from openblade.nas.service import NasService
+from openblade.nas.types import (
+    DatasetStatus,
+    IngestMode,
+    NasDataset,
+    NasFileRecord,
+    NasFileState,
+    NasPool,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +112,47 @@ class TestUploadRoundTrip:
         assert listing.status_code == 200
         ids = [f["file_id"] for f in listing.json()["files"]]
         assert file_id in ids
+
+    def test_demo_pool_listing_falls_back_to_archived_records(
+        self,
+        client: TestClient,
+        admin_auth_headers: dict[str, str],
+    ) -> None:
+        """Archive pools should list seeded NAS records even when no staging inbox dataset exists."""
+        service = NasService(get_context().catalog)
+        service.upsert_pool(NasPool(id="critical-projects", name="Critical Projects"))
+        dataset = service.upsert_dataset(
+            NasDataset(
+                id="dataset-critical",
+                pool_id="critical-projects",
+                name="Critical Projects Dataset",
+                source_path="/demo/project-alpha",
+                ingest_mode=IngestMode.CACHE_DRIVE,
+                status=DatasetStatus.ARCHIVED,
+            )
+        )
+        service.upsert_file_record(
+            NasFileRecord(
+                id="file-critical",
+                dataset_id=dataset.id,
+                pool_id="critical-projects",
+                relative_path="alpha/design-spec-v3.pdf",
+                source_path="/demo/project-alpha/alpha/design-spec-v3.pdf",
+                size_bytes=512_000_000,
+                checksum_sha256="abc123",
+                tape_barcode="VOL001L9",
+                status=NasFileState.OFFLINE_ON_TAPE,
+            )
+        )
+
+        listing = client.get("/api/pools/critical-projects/files", headers=admin_auth_headers)
+
+        assert listing.status_code == 200
+        payload = listing.json()
+        assert payload["pool_id"] == "critical-projects"
+        filenames = {item["filename"] for item in payload["files"]}
+        assert "design-spec-v3.pdf" in filenames
+        assert any(item["status"] == "archived" for item in payload["files"])
 
     def test_delete_removes_from_listing(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
         """Deleted file should not appear in listing."""

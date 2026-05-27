@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from openblade.api import aml_state
+from openblade.api.library_context import get_active_library, get_library_profile
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
@@ -526,10 +527,12 @@ def _component_status(*statuses: str) -> str:
     return max(statuses, key=lambda item: _HEALTH_ORDER.get(item, 0))
 
 
-def _health_summary() -> HealthSummary:
+def _health_summary(context: AppContext) -> HealthSummary:
+    active_library = get_active_library(context.catalog)
+    profile = get_library_profile(active_library)
     library = "critical" if aml_state.get_library_mode() == "offline" else "good"
     robots = list(aml_state.get_aml_robots().values())
-    drives = aml_state.list_aml_drives()
+    drives = aml_state.list_aml_drives()[: profile["drive_count"]]
     eth_blades = list(aml_state.get_eth_blades().values())
     tickets = aml_state.list_aml_ras_tickets()
     alerts = aml_state.list_aml_alerts()
@@ -572,14 +575,16 @@ def _health_summary() -> HealthSummary:
             network=network,
             system=system,
         ),
-        activeAlerts=len(alerts),
+        activeAlerts=min(len(alerts), profile["alerts_count"]) if active_library is not None else len(alerts),
         openTickets=open_tickets,
     )
 
 
-def _dashboard_summary() -> DashboardSummary:
-    health = _health_summary()
-    drives = aml_state.list_aml_drives()
+def _dashboard_summary(context: AppContext) -> DashboardSummary:
+    active_library = get_active_library(context.catalog)
+    profile = get_library_profile(active_library)
+    health = _health_summary(context)
+    drives = aml_state.list_aml_drives()[: profile["drive_count"]]
     partitions = aml_state.list_aml_partitions()
     active_jobs = aml_state.list_aml_jobs()
     history_jobs = aml_state.list_aml_job_history()
@@ -595,8 +600,10 @@ def _dashboard_summary() -> DashboardSummary:
         or str(drive.get("state", "")).lower() in {"faulted", "failed", "offline", "error"}
     )
 
-    slot_total = sum(int(partition.get("slotCount", 0)) + int(partition.get("ieSlotCount", 0)) for partition in partitions)
-    slot_used = len(aml_state.list_aml_media())
+    slot_total = profile["slot_count"] if active_library is not None else sum(
+        int(partition.get("slotCount", 0)) + int(partition.get("ieSlotCount", 0)) for partition in partitions
+    )
+    slot_used = profile["occupied_slot_count"] if active_library is not None else len(aml_state.list_aml_media())
     slot_utilization_percent = round((slot_used / slot_total) * 100) if slot_total else 0
 
     job_statuses = [str(job.get("status", "unknown")).lower() for job in all_jobs]
@@ -612,8 +619,8 @@ def _dashboard_summary() -> DashboardSummary:
         drives=DriveSummary(total=drive_total, online=drive_online, attention=drive_attention),
         slots=SlotSummary(total=slot_total, used=slot_used, utilizationPercent=slot_utilization_percent),
         jobs=JobSummary(
-            total=len(all_jobs),
-            active=sum(1 for status in job_statuses if status in active_statuses),
+            total=profile["active_job_count"] if active_library is not None else len(all_jobs),
+            active=profile["active_job_count"] if active_library is not None else sum(1 for status in job_statuses if status in active_statuses),
             pending=sum(1 for status in job_statuses if status in pending_statuses),
             completed=sum(1 for status in job_statuses if status in completed_statuses),
             failed=sum(1 for status in job_statuses if status in failed_statuses),
@@ -722,12 +729,12 @@ async def unsubscribe_events(
 
 @router.get("/event/{id}", response_model=EventResponse)
 async def get_event(
-    id: str,
+    resource_id: str,
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> EventResponse:
     _ensure_state(context)
-    return EventResponse(event=_serialize_event(_get_event_or_404(_validate_text(id, field_name="id"))))
+    return EventResponse(event=_serialize_event(_get_event_or_404(_validate_text(resource_id, field_name="id"))))
 
 
 @router.get("/ras/tickets", response_model=TicketListResponse)
@@ -795,24 +802,24 @@ async def get_ras_ticket_summary(
 
 @router.get("/ras/ticket/{id}", response_model=TicketResponse)
 async def get_ras_ticket(
-    id: str,
+    resource_id: str,
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> TicketResponse:
     _ensure_state(context)
-    return TicketResponse(ticket=_serialize_ticket(_get_ticket_or_404(_validate_text(id, field_name="id"))))
+    return TicketResponse(ticket=_serialize_ticket(_get_ticket_or_404(_validate_text(resource_id, field_name="id"))))
 
 
 @router.put("/ras/ticket/{id}", response_model=TicketResponse)
 async def update_ras_ticket(
-    id: str,
+    resource_id: str,
     payload: TicketUpdateRequest,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> TicketResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    ticket_id = _validate_text(id, field_name="id")
+    ticket_id = _validate_text(resource_id, field_name="id")
     _get_ticket_or_404(ticket_id)
     updates = payload.ticket.model_dump(exclude_none=True)
     if "status" in updates:
@@ -830,13 +837,13 @@ async def update_ras_ticket(
 
 @router.delete("/ras/ticket/{id}", response_model=WSResultCode)
 async def delete_ras_ticket(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    ticket_id = _validate_text(id, field_name="id")
+    ticket_id = _validate_text(resource_id, field_name="id")
     _get_ticket_or_404(ticket_id)
     aml_state.pop_aml_ras_ticket(ticket_id)
     _record_event(severity="info", component="system", message=f"RAS ticket {ticket_id} deleted")
@@ -845,13 +852,13 @@ async def delete_ras_ticket(
 
 @router.post("/ras/ticket/{id}/acknowledge", response_model=WSResultCode)
 async def acknowledge_ras_ticket(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    ticket_id = _validate_text(id, field_name="id")
+    ticket_id = _validate_text(resource_id, field_name="id")
     ticket = _get_ticket_or_404(ticket_id)
     aml_state.update_aml_ras_ticket(ticket_id, {"status": "acknowledged"})
     _create_notification(notification_type="ras", message=f"RAS ticket {ticket_id} acknowledged")
@@ -861,14 +868,14 @@ async def acknowledge_ras_ticket(
 
 @router.post("/ras/ticket/{id}/resolve", response_model=WSResultCode)
 async def resolve_ras_ticket(
-    id: str,
+    resource_id: str,
     payload: ResolutionRequest,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    ticket_id = _validate_text(id, field_name="id")
+    ticket_id = _validate_text(resource_id, field_name="id")
     ticket = _get_ticket_or_404(ticket_id)
     resolution = _validate_text(payload.resolution.description, field_name="description")
     aml_state.update_aml_ras_ticket(ticket_id, {"status": "resolved", "resolution": resolution})
@@ -1034,23 +1041,23 @@ async def get_alert_summary(
 
 @router.get("/alert/{id}", response_model=AlertResponse)
 async def get_alert(
-    id: str,
+    resource_id: str,
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> AlertResponse:
     _ensure_state(context)
-    return AlertResponse(alert=_serialize_alert(_get_alert_or_404(_validate_text(id, field_name="id"))))
+    return AlertResponse(alert=_serialize_alert(_get_alert_or_404(_validate_text(resource_id, field_name="id"))))
 
 
 @router.post("/alert/{id}/acknowledge", response_model=WSResultCode)
 async def acknowledge_alert(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    alert_id = _validate_text(id, field_name="id")
+    alert_id = _validate_text(resource_id, field_name="id")
     _get_alert_or_404(alert_id)
     aml_state.update_aml_alert(alert_id, {"acknowledged": True})
     _create_notification(notification_type="alerts", message=f"Alert {alert_id} acknowledged")
@@ -1059,13 +1066,13 @@ async def acknowledge_alert(
 
 @router.delete("/alert/{id}", response_model=WSResultCode)
 async def delete_alert(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    alert_id = _validate_text(id, field_name="id")
+    alert_id = _validate_text(resource_id, field_name="id")
     _get_alert_or_404(alert_id)
     aml_state.pop_aml_alert(alert_id)
     return _ws_result(f"Dismissed alert {alert_id}")
@@ -1144,13 +1151,13 @@ async def get_unread_notification_count(
 
 @router.post("/notification/{id}/read", response_model=WSResultCode)
 async def mark_notification_read(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    notification_id = _validate_text(id, field_name="id")
+    notification_id = _validate_text(resource_id, field_name="id")
     _get_notification_or_404(notification_id)
     aml_state.update_aml_notification(notification_id, {"read": True})
     return _ws_result(f"Marked notification {notification_id} as read")
@@ -1158,13 +1165,13 @@ async def mark_notification_read(
 
 @router.delete("/notification/{id}", response_model=WSResultCode)
 async def delete_notification(
-    id: str,
+    resource_id: str,
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    notification_id = _validate_text(id, field_name="id")
+    notification_id = _validate_text(resource_id, field_name="id")
     _get_notification_or_404(notification_id)
     aml_state.pop_aml_notification(notification_id)
     return _ws_result(f"Deleted notification {notification_id}")
@@ -1176,7 +1183,7 @@ async def get_health_summary(
     context: AppContext = Depends(get_context),
 ) -> HealthSummaryResponse:
     _ensure_state(context)
-    return HealthSummaryResponse(healthSummary=_health_summary())
+    return HealthSummaryResponse(healthSummary=_health_summary(context))
 
 
 @router.get("/summary", response_model=DashboardSummaryResponse)
@@ -1185,4 +1192,4 @@ async def get_dashboard_summary(
     context: AppContext = Depends(get_context),
 ) -> DashboardSummaryResponse:
     _ensure_state(context)
-    return DashboardSummaryResponse(summary=_dashboard_summary())
+    return DashboardSummaryResponse(summary=_dashboard_summary(context))

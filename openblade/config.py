@@ -26,9 +26,13 @@ class OpenBladeConfig:
     staging_dir: str = str(_DEFAULT_HOME / "staging")
     restore_dir: str = str(_DEFAULT_HOME / "restore")
     fuse_mount_point: str = str(_DEFAULT_HOME / "mount")
+    ltfs_mount_root: str = str(_DEFAULT_HOME / "ltfs")
     job_timeout_seconds: int = 3600
     changer_timeout_seconds: int = 60
     drive_timeout_seconds: int = 300
+    hardware_dry_run: bool = False
+    changer_device: str | None = None
+    drive_devices: tuple[str, ...] = ()
 
 
 def load_config() -> OpenBladeConfig:
@@ -39,6 +43,11 @@ def load_config() -> OpenBladeConfig:
         backend = BackendMode.MOCK
 
     real_hw = os.environ.get("OPENBLADE_REAL_HARDWARE_ENABLED", "false").lower() == "true"
+    drive_devices = tuple(
+        device.strip()
+        for device in os.environ.get("OPENBLADE_DRIVE_DEVICES", "").split(",")
+        if device.strip()
+    )
 
     return OpenBladeConfig(
         backend=backend,
@@ -48,4 +57,8 @@ def load_config() -> OpenBladeConfig:
         cache_dir=os.environ.get("OPENBLADE_CACHE_DIR", str(_DEFAULT_HOME / "cache")),
         staging_dir=os.environ.get("OPENBLADE_STAGING_DIR", str(_DEFAULT_HOME / "staging")),
         restore_dir=os.environ.get("OPENBLADE_RESTORE_DIR", str(_DEFAULT_HOME / "restore")),
+        ltfs_mount_root=os.environ.get("OPENBLADE_LTFS_MOUNT_ROOT", str(_DEFAULT_HOME / "ltfs")),
+        hardware_dry_run=os.environ.get("OPENBLADE_HARDWARE_DRY_RUN", "false").lower() == "true",
+        changer_device=os.environ.get("OPENBLADE_CHANGER_DEVICE") or None,
+        drive_devices=drive_devices,
     )

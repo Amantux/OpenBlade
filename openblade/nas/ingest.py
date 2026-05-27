@@ -14,7 +14,11 @@ from pydantic import BaseModel, Field
 
 from openblade.domain.models import MountMode
 from openblade.domain.policies import FormatConfirmation, SafetyToken
-from openblade.nas.archive_lifecycle import ArchiveLifecycleManager, ArchiveLifecycleResult, DatasetArchiveResult
+from openblade.nas.archive_lifecycle import (
+    ArchiveLifecycleManager,
+    ArchiveLifecycleResult,
+    DatasetArchiveResult,
+)
 from openblade.nas.catalog_shard import CatalogShardWriter
 from openblade.nas.ltfs_manifest import TapeMetadataWriter
 from openblade.nas.manifest_validator import ManifestValidator, VersionedManifestWriter
@@ -51,6 +55,8 @@ class IngestJob(BaseModel):
     errors: list[str] = Field(default_factory=list)
     cancel_requested: bool = False
     partial_success: bool = False
+    cache_drive_id: str | None = None
+    reserved_cache_bytes: int = 0
 
 
 class StartIngestResponse(BaseModel):
@@ -61,6 +67,7 @@ class StartIngestResponse(BaseModel):
 
 ArchivePlanStore: dict[str, ArchivePlan] = {}
 IngestJobStore: dict[str, IngestJob] = {}
+_CACHE_DRIVE_RESERVATIONS: dict[str, dict[str, int]] = {}
 _STORE_LOCK = RLock()
 
 
@@ -74,8 +81,41 @@ class _PreparedFile:
     cache_path: str | None = None
 
 
+@dataclass(frozen=True)
+class _SourceSnapshot:
+    size_bytes: int
+    mtime_ns: int
+    checksum_sha256: str | None = None
+
+
 class IngestCancelledError(RuntimeError):
     pass
+
+
+def _reserve_cache_drive_bytes(drive_id: str, job_id: str, bytes_required: int) -> None:
+    with _STORE_LOCK:
+        reservations = _CACHE_DRIVE_RESERVATIONS.setdefault(drive_id, {})
+        reservations[job_id] = bytes_required
+
+
+def _release_cache_drive_bytes(drive_id: str, job_id: str) -> None:
+    with _STORE_LOCK:
+        reservations = _CACHE_DRIVE_RESERVATIONS.get(drive_id)
+        if reservations is None:
+            return
+        reservations.pop(job_id, None)
+        if not reservations:
+            _CACHE_DRIVE_RESERVATIONS.pop(drive_id, None)
+
+
+def _reserved_cache_drive_bytes(drive_id: str, *, exclude_job_id: str | None = None) -> int:
+    with _STORE_LOCK:
+        reservations = _CACHE_DRIVE_RESERVATIONS.get(drive_id, {})
+        return sum(
+            reserved
+            for job_id, reserved in reservations.items()
+            if exclude_job_id is None or job_id != exclude_job_id
+        )
 
 
 class _BaseIngest:
@@ -122,6 +162,7 @@ class _BaseIngest:
         except Exception as exc:
             self._mark_dataset_failed(str(exc))
         finally:
+            self._cleanup()
             self.job.current_tape = None
         return self.job
 
@@ -136,6 +177,16 @@ class _BaseIngest:
         return NasFileState.ONLINE_CACHED
 
     def _record_cache_path(self, relative_path: str) -> str | None:
+        return None
+
+    def _before_write_file(self, prepared: _PreparedFile) -> None:
+        del prepared
+
+    def _abort_on_file_error(self, prepared: _PreparedFile, error: Exception) -> bool:
+        del prepared, error
+        return False
+
+    def _cleanup(self) -> None:
         return None
 
     def _check_cancelled(self) -> None:
@@ -156,6 +207,7 @@ class _BaseIngest:
                     prepared = self._prepare_single_file(relative_path, assignment)
                     self._prepared_files[prepared_key] = prepared
                 try:
+                    self._before_write_file(prepared)
                     tape_path = self._simulate_tape_write(
                         handle=handle,
                         barcode=assignment.barcode,
@@ -192,6 +244,8 @@ class _BaseIngest:
                         tape_barcode=assignment.barcode,
                         status=NasFileState.FAILED,
                     )
+                    if self._abort_on_file_error(prepared, exc):
+                        raise
         finally:
             self.ltfs.unmount(handle)
             if slot_id is not None:
@@ -218,18 +272,33 @@ class _BaseIngest:
         return relative_path
 
     def _resolve_size_bytes(self, relative_path: str, assignment: TapeAssignment) -> int:
-        del relative_path
+        source_path = Path(self._resolve_source_path(relative_path))
+        if source_path.is_file():
+            return max(1, int(source_path.stat().st_size))
         if assignment.files and assignment.estimated_bytes > 0:
             return max(1, assignment.estimated_bytes // len(assignment.files))
         if self.job.plan.total_files > 0 and self.job.plan.total_bytes > 0:
             return max(1, self.job.plan.total_bytes // self.job.plan.total_files)
         return 1024
 
+    def _read_source_bytes(self, prepared: _PreparedFile) -> bytes:
+        source_path = Path(prepared.source_path)
+        if source_path.is_file():
+            return source_path.read_bytes()
+        return b"simulated:" + prepared.source_path.encode()
+
     def _checksum_for_file(self, relative_path: str, barcode: str) -> str:
         """Return sha256 of the bytes that _simulate_tape_write will write for this file."""
         del barcode
         source_path = self._resolve_source_path(relative_path)
-        return hashlib.sha256(b"simulated:" + source_path.encode()).hexdigest()
+        prepared = _PreparedFile(
+            relative_path=relative_path,
+            source_path=source_path,
+            size_bytes=0,
+            checksum_sha256="",
+            mtime=_utcnow_iso(),
+        )
+        return hashlib.sha256(self._read_source_bytes(prepared)).hexdigest()
 
     def _ensure_formatted(self, barcode: str) -> None:
         tape = self.ltfs.ensure_tape(barcode)
@@ -275,7 +344,7 @@ class _BaseIngest:
         self._write_tape_bytes(
             handle,
             tape_path,
-            b"simulated:" + prepared.source_path.encode(),
+            self._read_source_bytes(prepared),
             size_bytes=prepared.size_bytes,
             checksum_sha256=prepared.checksum_sha256,
         )
@@ -433,6 +502,43 @@ class CacheDriveIngest(_BaseIngest):
     def _record_cache_path(self, relative_path: str) -> str | None:
         return str(Path(self.cache_drive.root_path) / relative_path)
 
+    def _preflight(self, job: IngestJob) -> list[str]:
+        cache_root = Path(self.cache_drive.root_path)
+        if not cache_root.exists() or not cache_root.is_dir():
+            raise RuntimeError(f"Cache drive root_path {cache_root} is not available")
+
+        total_bytes = 0
+        seen_paths: set[str] = set()
+        for prepared in self._prepared_files.values():
+            if prepared.source_path in seen_paths:
+                continue
+            seen_paths.add(prepared.source_path)
+            source_path = Path(prepared.source_path).resolve()
+            if not source_path.exists():
+                raise RuntimeError(f"Cache-drive source file {prepared.source_path} is not available")
+            try:
+                source_path.relative_to(cache_root.resolve())
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Cache-drive source file {prepared.source_path} is outside cache root {cache_root}"
+                ) from exc
+            total_bytes += prepared.size_bytes
+
+        available_bytes = max(self.cache_drive.max_bytes - self.cache_drive.min_free_bytes, 0)
+        reserved_bytes = _reserved_cache_drive_bytes(self.cache_drive.id, exclude_job_id=self.job.job_id)
+        if total_bytes + reserved_bytes > available_bytes:
+            raise RuntimeError(
+                f"Cache drive {self.cache_drive.id} cannot reserve {total_bytes} bytes; "
+                f"{available_bytes - reserved_bytes} bytes remain within configured budget"
+            )
+
+        _reserve_cache_drive_bytes(self.cache_drive.id, self.job.job_id, total_bytes)
+        self.job.reserved_cache_bytes = total_bytes
+        return super()._preflight(job)
+
+    def _cleanup(self) -> None:
+        _release_cache_drive_bytes(self.cache_drive.id, self.job.job_id)
+
 
 class SourceStreamIngest(_BaseIngest):
     """Execute source-stream ingest against the simulator tape layer."""
@@ -449,6 +555,7 @@ class SourceStreamIngest(_BaseIngest):
     ) -> None:
         super().__init__(job=job, dataset=dataset, service=service, library=library, ltfs=ltfs)
         self.config = config
+        self._source_snapshots: dict[str, _SourceSnapshot] = {}
 
     def _prepare_files(self) -> dict[str, _PreparedFile]:
         prepared: dict[str, _PreparedFile] = {}
@@ -459,15 +566,74 @@ class SourceStreamIngest(_BaseIngest):
         return prepared
 
     def _preflight(self, job: IngestJob) -> list[str]:
-        """Simulate source preflight check. Returns list of warnings."""
-        warnings = []
-        for assignment in job.plan.tape_assignments:
-            for filepath in assignment.files:
-                if not job.plan.source_path:
+        if not self.config.enabled:
+            raise RuntimeError("Source-stream ingest is disabled")
+
+        if not job.plan.source_path:
+            if any(
+                (
+                    self.config.require_source_online_for_entire_job,
+                    self.config.preflight_read_check,
+                    self.config.fail_on_source_change,
+                    self.config.snapshot_required,
+                )
+            ):
+                raise RuntimeError("source_path is required for robust source-stream ingest")
+            warnings = []
+            for assignment in job.plan.tape_assignments:
+                for filepath in assignment.files:
                     warnings.append(
                         f"No source_path set; streaming {filepath} without source validation"
                     )
-        return warnings
+            return warnings
+
+        source_root = Path(job.plan.source_path)
+        if not source_root.exists() or not source_root.is_dir():
+            raise RuntimeError(f"Source path {source_root} is not available")
+
+        for assignment in job.plan.tape_assignments:
+            for relative_path in assignment.files:
+                self._source_snapshots[relative_path] = self._capture_snapshot(relative_path)
+        return []
+
+    def _resolve_size_bytes(self, relative_path: str, assignment: TapeAssignment) -> int:
+        snapshot = self._source_snapshots.get(relative_path)
+        if snapshot is not None:
+            return snapshot.size_bytes
+        return super()._resolve_size_bytes(relative_path, assignment)
+
+    def _checksum_for_file(self, relative_path: str, barcode: str) -> str:
+        snapshot = self._source_snapshots.get(relative_path)
+        if snapshot is not None and snapshot.checksum_sha256 is not None:
+            return snapshot.checksum_sha256
+        return super()._checksum_for_file(relative_path, barcode)
+
+    def _before_write_file(self, prepared: _PreparedFile) -> None:
+        if not self.config.fail_on_source_change or prepared.relative_path not in self._source_snapshots:
+            return
+        if self._capture_snapshot(prepared.relative_path) != self._source_snapshots[prepared.relative_path]:
+            raise RuntimeError(f"Source changed during source-stream ingest: {prepared.relative_path}")
+
+    def _abort_on_file_error(self, prepared: _PreparedFile, error: Exception) -> bool:
+        del prepared, error
+        return not self.config.allow_partial_dataset_success
+
+    def _capture_snapshot(self, relative_path: str) -> _SourceSnapshot:
+        source_path = Path(self._resolve_source_path(relative_path))
+        if not source_path.exists() or not source_path.is_file():
+            raise RuntimeError(f"Source file {source_path} is not available")
+        stat = source_path.stat()
+        checksum = None
+        if "checksum" in self.config.source_change_detection or self.config.checksum_mode in {
+            "precompute",
+            "precompute_and_post_verify",
+        }:
+            checksum = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        return _SourceSnapshot(
+            size_bytes=max(int(stat.st_size), 0),
+            mtime_ns=stat.st_mtime_ns,
+            checksum_sha256=checksum,
+        )
 
 
 def register_archive_plan(plan: ArchivePlan) -> ArchivePlan:
@@ -489,7 +655,6 @@ def start_ingest_job(
     nas_service: NasService,
     cache_drive_id: str | None = None,
 ) -> IngestJob:
-    del cache_drive_id
     dataset = nas_service.upsert_dataset(
         NasDataset(
             pool_id=pool_id,
@@ -503,7 +668,12 @@ def start_ingest_job(
             status=DatasetStatus.ARCHIVING,
         )
     )
-    job = IngestJob(dataset_id=dataset.id, plan=plan, status=DatasetStatus.ARCHIVING)
+    job = IngestJob(
+        dataset_id=dataset.id,
+        plan=plan,
+        status=DatasetStatus.ARCHIVING,
+        cache_drive_id=cache_drive_id,
+    )
     with _STORE_LOCK:
         IngestJobStore[job.job_id] = job
     return job

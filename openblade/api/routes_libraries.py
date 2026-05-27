@@ -5,36 +5,18 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from openblade.api.library_context import resolve_emulator_url
+from openblade.api.library_context import get_library_profile, resolve_emulator_url
 from openblade.api.routes_aml_auth import require_auth
 from openblade.catalog.db import get_catalog_repository as get_repository
 from openblade.catalog.models import LibraryInstance
 from openblade.catalog.repository import CatalogRepository
 
 router = APIRouter(prefix="/api/libraries", tags=["libraries"])
-
-_LIBRARY_PROFILES: dict[int, dict[str, int]] = {
-    8010: {
-        "drive_count": 3, "slot_count": 24, "occupied_slot_count": 21,
-        "active_job_count": 2, "alerts_count": 0,
-    },
-    8011: {
-        "drive_count": 2, "slot_count": 18, "occupied_slot_count": 14,
-        "active_job_count": 1, "alerts_count": 1,
-    },
-    8012: {
-        "drive_count": 1, "slot_count": 12, "occupied_slot_count": 8,
-        "active_job_count": 0, "alerts_count": 0,
-    },
-}
-_DEFAULT_LIBRARY_PROFILE = {"drive_count": 1, "slot_count": 12, "occupied_slot_count": 12, "active_job_count": 0, "alerts_count": 0}
-
 
 class LibraryCreate(BaseModel):
     name: str
@@ -92,15 +74,8 @@ class LibraryProbeResult(BaseModel):
     last_seen_at: str | None
 
 
-def _get_library_profile(library: LibraryInstance) -> dict[str, int]:
-    parsed = urlparse(library.emulator_url)
-    if parsed.port and parsed.port in _LIBRARY_PROFILES:
-        return _LIBRARY_PROFILES[parsed.port]
-    return _DEFAULT_LIBRARY_PROFILE
-
-
 async def _probe_library(library: LibraryInstance) -> dict[str, object]:
-    profile = _get_library_profile(library)
+    profile = get_library_profile(library)
     occupied_slot_count = profile["occupied_slot_count"]
     slot_count = profile["slot_count"]
     utilization = round((occupied_slot_count / slot_count) * 100, 1) if slot_count else 0.0

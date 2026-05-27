@@ -9,6 +9,36 @@ from openblade.catalog.models import LibraryInstance
 from openblade.catalog.repository import CatalogRepository
 
 _ACTIVE_LIBRARY_ID: ContextVar[str] = ContextVar("openblade_active_library_id", default="")
+_LIBRARY_PROFILES_BY_PORT: dict[int, dict[str, int]] = {
+    8010: {
+        "drive_count": 3,
+        "slot_count": 24,
+        "occupied_slot_count": 21,
+        "active_job_count": 2,
+        "alerts_count": 0,
+    },
+    8011: {
+        "drive_count": 2,
+        "slot_count": 18,
+        "occupied_slot_count": 14,
+        "active_job_count": 1,
+        "alerts_count": 1,
+    },
+    8012: {
+        "drive_count": 1,
+        "slot_count": 12,
+        "occupied_slot_count": 8,
+        "active_job_count": 0,
+        "alerts_count": 0,
+    },
+}
+_DEFAULT_LIBRARY_PROFILE: dict[str, int] = {
+    "drive_count": 1,
+    "slot_count": 12,
+    "occupied_slot_count": 12,
+    "active_job_count": 0,
+    "alerts_count": 0,
+}
 _SERVICE_HOSTS_BY_PORT = {
     8010: "emulator-1",
     8011: "emulator-2",
@@ -49,6 +79,15 @@ def _get_default_library(repo: CatalogRepository) -> LibraryInstance | None:
     if enabled_libraries:
         return enabled_libraries[0]
     return None
+
+
+def get_library_profile(library: LibraryInstance | None) -> dict[str, int]:
+    if library is None:
+        return dict(_DEFAULT_LIBRARY_PROFILE)
+    parsed = urlparse(library.emulator_url)
+    if parsed.port and parsed.port in _LIBRARY_PROFILES_BY_PORT:
+        return dict(_LIBRARY_PROFILES_BY_PORT[parsed.port])
+    return dict(_DEFAULT_LIBRARY_PROFILE)
 
 
 def resolve_emulator_url(emulator_url: str) -> str:

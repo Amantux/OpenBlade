@@ -173,6 +173,54 @@ class TestLibraryCRUD:
         )
         assert response.status_code == 200
 
+    def test_drive_list_is_scoped_by_selected_library(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+        libraries = client.get("/api/libraries", headers=admin_auth_headers)
+        assert libraries.status_code == 200
+        primary, secondary, vault = libraries.json()[:3]
+
+        primary_drives = client.get(
+            "/aml/drives",
+            headers={**admin_auth_headers, "X-OpenBlade-Library-Id": str(primary["id"])},
+        )
+        secondary_drives = client.get(
+            "/aml/drives",
+            headers={**admin_auth_headers, "X-OpenBlade-Library-Id": str(secondary["id"])},
+        )
+        vault_drives = client.get(
+            "/aml/drives",
+            headers={**admin_auth_headers, "X-OpenBlade-Library-Id": str(vault["id"])},
+        )
+
+        assert primary_drives.status_code == 200
+        assert secondary_drives.status_code == 200
+        assert vault_drives.status_code == 200
+        assert len(primary_drives.json()["driveList"]["drive"]) == 3
+        assert len(secondary_drives.json()["driveList"]["drive"]) == 2
+        assert len(vault_drives.json()["driveList"]["drive"]) == 1
+
+    def test_dashboard_summary_is_scoped_by_selected_library(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
+        libraries = client.get("/api/libraries", headers=admin_auth_headers)
+        assert libraries.status_code == 200
+        primary, secondary = libraries.json()[:2]
+
+        primary_summary = client.get(
+            "/aml/summary",
+            headers={**admin_auth_headers, "X-OpenBlade-Library-Id": str(primary["id"])},
+        )
+        secondary_summary = client.get(
+            "/aml/summary",
+            headers={**admin_auth_headers, "X-OpenBlade-Library-Id": str(secondary["id"])},
+        )
+
+        assert primary_summary.status_code == 200
+        assert secondary_summary.status_code == 200
+        assert primary_summary.json()["summary"]["drives"]["total"] == 3
+        assert secondary_summary.json()["summary"]["drives"]["total"] == 2
+        assert primary_summary.json()["summary"]["slots"]["total"] == 24
+        assert secondary_summary.json()["summary"]["slots"]["total"] == 18
+
 
 class TestCartridgeLibraryScoping:
     def test_cartridge_library_id_is_nullable(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:

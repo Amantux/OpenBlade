@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 
 import structlog
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
 from openblade.config import BackendMode, OpenBladeConfig, load_config
+from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.hardware.discovery import discover_library
+from openblade.hardware.library import RealLibraryBackend
+from openblade.hardware.ltfs import RealLTFSBackend
+from openblade.hardware.runner import SafeRunner
+from openblade.hardware.safety import require_real_hardware
 from openblade.jobs.archive import ArchiveService
 from openblade.jobs.format import FormatService
 from openblade.jobs.inventory import InventoryService, run_inventory_job
@@ -19,14 +26,12 @@ from openblade.jobs.worker import Worker
 from openblade.nas.service import NasService
 from openblade.nas.types import NasDataset, NasFileRecord, NasFileState, NasPool, StoragePolicy
 from openblade.simulator.i3_config import scalar_i3_data_barcodes
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 from openblade.simulator.scenarios import scalar_i3_default
 
 structlog.configure()
 
-_library: MockLibraryBackend | None = None
-_ltfs: MockLTFSBackend | None = None
+_library: LibraryBackend | None = None
+_ltfs: LTFSBackend | None = None
 _catalog: CatalogRepository | None = None
 
 
@@ -320,8 +325,8 @@ def seed_demo_environment(catalog: CatalogRepository) -> None:
 @dataclass
 class AppContext:
     config: OpenBladeConfig
-    library: MockLibraryBackend
-    ltfs: MockLTFSBackend
+    library: LibraryBackend
+    ltfs: LTFSBackend
     catalog: CatalogRepository
     queue: JobQueue
     worker: Worker
@@ -331,17 +336,32 @@ class AppContext:
     restore_service: RestoreService
 
 
-def get_library() -> MockLibraryBackend:
+def _create_real_backends(config: OpenBladeConfig) -> tuple[RealLibraryBackend, RealLTFSBackend]:
+    guard = require_real_hardware(config)
+    runner = SafeRunner(dry_run=config.hardware_dry_run)
+    discovery = discover_library(runner, guard)
+    library = RealLibraryBackend(config=config, runner=runner, discovery=discovery)
+    ltfs = RealLTFSBackend(
+        library=library,
+        guard=guard,
+        runner=runner,
+        mount_root=Path(config.ltfs_mount_root),
+    )
+    return library, ltfs
+
+
+def get_library() -> LibraryBackend:
     global _library, _ltfs
     if _library is None:
         cfg = load_config()
-        if cfg.backend != BackendMode.MOCK:
-            raise NotImplementedError("Real hardware backend not yet implemented")
-        _library, _ltfs = scalar_i3_default()
+        if cfg.backend == BackendMode.MOCK:
+            _library, _ltfs = scalar_i3_default()
+        else:
+            _library, _ltfs = _create_real_backends(cfg)
     return _library
 
 
-def get_ltfs() -> MockLTFSBackend:
+def get_ltfs() -> LTFSBackend:
     global _ltfs
     if _ltfs is None:
         get_library()
@@ -356,22 +376,25 @@ def get_catalog() -> CatalogRepository:
     if _catalog is None:
         _catalog = CatalogRepository(get_session())
         _seed_nas_defaults(_catalog)
-        seed_demo_environment(_catalog)
+        if cfg.backend == BackendMode.MOCK:
+            seed_demo_environment(_catalog)
     return _catalog
 
 
 def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     active_config = config or load_config()
-    if active_config.backend != BackendMode.MOCK:
-        raise NotImplementedError("Real hardware backend not yet implemented")
     init_db(active_config.db_url)
-    library, ltfs = scalar_i3_default()
+    if active_config.backend == BackendMode.MOCK:
+        library, ltfs = scalar_i3_default()
+    else:
+        library, ltfs = _create_real_backends(active_config)
     catalog = CatalogRepository(get_session())
     _seed_nas_defaults(catalog)
-    _seed_library_defaults(catalog)
-    if config is None:
-        _seed_demo_catalog(catalog)
-        _seed_nas_pools(catalog)
+    if active_config.backend == BackendMode.MOCK:
+        _seed_library_defaults(catalog)
+        if config is None:
+            _seed_demo_catalog(catalog)
+            _seed_nas_pools(catalog)
     run_inventory_job(library, catalog)
     queue = JobQueue()
     worker = Worker(queue)

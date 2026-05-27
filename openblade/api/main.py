@@ -48,6 +48,7 @@ from openblade.api import (
     routes_volume_groups,
 )
 from openblade.api.routes_gateway import router as gateway_router
+from openblade.api.routes_test_runner import router as test_runner_router
 from openblade.api.service_auth import ServiceTokenForbiddenError, controller_only_error
 from openblade.bootstrap import get_context
 from openblade.domain.errors import (
@@ -143,6 +144,7 @@ app.include_router(routes_aml_operations.router, prefix="/aml", tags=["aml-opera
 app.include_router(routes_aml_system.router, prefix="/aml", tags=["aml-system"])
 app.include_router(routes_proxy.router)
 app.include_router(routes_upload.router)
+app.include_router(test_runner_router)
 
 
 @app.on_event("startup")

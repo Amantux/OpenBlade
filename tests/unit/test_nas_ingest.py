@@ -21,6 +21,7 @@ from openblade.nas.types import (
     IngestMode,
     NasFileState,
     NasPool,
+    SourceStreamConfig,
     TapeAssignment,
 )
 
@@ -75,11 +76,11 @@ def _make_plan(cache_root: Path) -> ArchivePlan:
     )
 
 
-def _make_source_stream_plan() -> ArchivePlan:
+def _make_source_stream_plan(source_root: Path | None = None) -> ArchivePlan:
     return ArchivePlan(
         plan_id="plan-source",
         ingest_mode=IngestMode.SOURCE_STREAM,
-        source_path=None,
+        source_path=None if source_root is None else str(source_root),
         pool="pool-1",
         volume_group="vg-1",
         files=["a.txt", "nested/b.txt"],
@@ -204,7 +205,33 @@ def test_cancelled_ingest_marks_dataset_cancelled(tmp_path: Path) -> None:
     assert any("Cancelled by user" in error for error in result.errors)
 
 
-def test_source_stream_ingest_adds_preflight_warning(tmp_path: Path) -> None:
+def test_cache_drive_ingest_fails_when_capacity_budget_is_exceeded(tmp_path: Path) -> None:
+    service, _ = _setup_service(tmp_path)
+    service.upsert_cache_drive(
+        CacheDriveConfig(
+            id="cache-1",
+            name="Cache 1",
+            root_path=str(tmp_path / "cache"),
+            max_bytes=8,
+            min_free_bytes=4,
+        )
+    )
+    plan = register_archive_plan(_make_plan(tmp_path / "cache"))
+    job = start_ingest_job(
+        plan=plan,
+        dataset_name="dataset-a",
+        pool_id="pool-1",
+        nas_service=service,
+        cache_drive_id="cache-1",
+    )
+
+    result = _run_job(service, job.job_id)
+
+    assert result.status is DatasetStatus.FAILED
+    assert any("cannot reserve" in error for error in result.errors)
+
+
+def test_source_stream_ingest_requires_source_path_by_default(tmp_path: Path) -> None:
     service, _ = _setup_service(tmp_path)
     plan = register_archive_plan(_make_source_stream_plan())
     job = start_ingest_job(
@@ -216,11 +243,49 @@ def test_source_stream_ingest_adds_preflight_warning(tmp_path: Path) -> None:
 
     result = _run_job(service, job.job_id, cache_drive_id=None)
 
-    assert result.status is DatasetStatus.ARCHIVED
-    assert any(
-        "No source_path set; streaming a.txt without source validation" in error
-        for error in result.errors
+    assert result.status is DatasetStatus.FAILED
+    assert any("source_path is required" in error for error in result.errors)
+
+
+def test_source_stream_ingest_detects_source_changes(tmp_path: Path, monkeypatch) -> None:
+    service, _ = _setup_service(tmp_path)
+    stream_root = tmp_path / "stream"
+    _write_file(stream_root / "a.txt", b"alpha")
+    _write_file(stream_root / "nested" / "b.txt", b"bravo")
+    service.update_source_stream_config(
+        SourceStreamConfig(
+            enabled=True,
+            require_source_online_for_entire_job=True,
+            preflight_read_check=True,
+            fail_on_source_change=True,
+            checksum_mode="precompute_and_post_verify",
+        )
     )
+    plan = register_archive_plan(_make_source_stream_plan(stream_root))
+    job = start_ingest_job(
+        plan=plan,
+        dataset_name="dataset-a",
+        pool_id="pool-1",
+        nas_service=service,
+    )
+
+    context = get_context()
+    write_bytes = context.ltfs.write_bytes
+    mutated = {"done": False}
+
+    def mutate_source_after_first_write(handle, dest, content, **kwargs):
+        result = write_bytes(handle, dest, content, **kwargs)
+        if not mutated["done"]:
+            (stream_root / "nested" / "b.txt").write_bytes(b"changed")
+            mutated["done"] = True
+        return result
+
+    monkeypatch.setattr(context.ltfs, "write_bytes", mutate_source_after_first_write)
+
+    result = _run_job(service, job.job_id, cache_drive_id=None)
+
+    assert result.status is DatasetStatus.FAILED
+    assert any("Source changed during source-stream ingest" in error for error in result.errors)
 
 
 def test_ingest_updates_tape_set(tmp_path: Path) -> None:

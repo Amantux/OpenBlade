@@ -16,11 +16,13 @@ import Spinner from '../components/ui/Spinner';
 function stateClass(state: string): string {
   switch (state.toLowerCase()) {
     case 'running':
-      return 'border-blue-500/30 bg-blue-500/15 text-blue-300';
     case 'completed':
-      return 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300';
+      return 'border-quantum-red/30 bg-quantum-red/10 text-red-200';
+    case 'failed':
+    case 'error':
+      return 'border-red-700/40 bg-red-950/40 text-red-100';
     default:
-      return 'border-slate-700 bg-slate-800 text-slate-200';
+      return 'border-quantum-border bg-quantum-panel text-slate-200';
   }
 }
 
@@ -39,8 +41,8 @@ export default function ImportExport() {
   const primaryStation = stationsQuery.data?.[0];
   const openDoorMutation = useMutation({ mutationFn: () => openIeDoor(primaryStation?.id), onSuccess: async () => { await refreshAll(); } });
   const closeDoorMutation = useMutation({ mutationFn: () => closeIeDoor(primaryStation?.id), onSuccess: async () => { await refreshAll(); } });
-  const importMutation = useMutation({ mutationFn: startImport, onSuccess: async () => { await refreshAll(); } });
-  const exportMutation = useMutation({ mutationFn: startExport, onSuccess: async () => { await refreshAll(); } });
+  const importMutation = useMutation({ mutationFn: () => startImport(), onSuccess: async () => { await refreshAll(); } });
+  const exportMutation = useMutation({ mutationFn: () => startExport(), onSuccess: async () => { await refreshAll(); } });
 
   if (importQuery.isLoading || exportQuery.isLoading || stationsQuery.isLoading) {
     return <Spinner />;

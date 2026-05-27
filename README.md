@@ -13,6 +13,7 @@ OpenBlade is a simulator-first DIY tape archive controller inspired by iBlade-st
 ```bash
 pip install -e '.[dev]'
 pytest -m 'not real_hardware'
+cd frontend && npm install && npm run test && npm run build
 openblade inventory
 uvicorn openblade.api.main:app --reload
 ```
@@ -26,5 +27,7 @@ uvicorn openblade.api.main:app --reload
 ## Safety defaults
 - Mock backend is the default
 - Real hardware requires `OPENBLADE_BACKEND=real` and `OPENBLADE_REAL_HARDWARE_ENABLED=true`
+- Use `openblade hardware connect-i3` to validate guarded Quantum i3 discovery before attempting live operations
+- Use `openblade hardware validate-ltfs --device /dev/st0 --barcode ABC123L9` to validate LTFS capabilities explicitly
 - Formatting requires barcode confirmation plus a one-time safety token
 - Drive unload is blocked if LTFS is mounted or dirty

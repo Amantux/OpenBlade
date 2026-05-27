@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from openblade.api import aml_state
+from openblade.api.library_context import get_active_library, get_library_profile
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
 from openblade.api.service_auth import require_service_token
 from openblade.bootstrap import AppContext, get_context
@@ -261,8 +262,36 @@ def _validate_drive_config(payload: DriveConfigPatch) -> dict[str, Any]:
     return updates
 
 
-def _get_drive_or_404(serial_number: str) -> dict[str, Any]:
-    drive = aml_state.get_aml_drive(serial_number)
+def _scoped_drives(context: AppContext) -> list[dict[str, Any]]:
+    active_library = get_active_library(context.catalog)
+    drives = aml_state.list_aml_drives()
+    if active_library is None:
+        return drives
+
+    profile = get_library_profile(active_library)
+    drive_count = max(profile["drive_count"], 0)
+    scoped = drives[:drive_count]
+    for index, drive in enumerate(scoped, start=1):
+        drive["location"] = f"{active_library.name} / Bay {index}"
+    return scoped
+
+
+def _drive_aliases(drives: list[dict[str, Any]]) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for index, drive in enumerate(drives, start=1):
+        serial_number = str(drive.get("serialNumber", ""))
+        if serial_number:
+            aliases[f"DRV-{index:03d}"] = serial_number
+    return aliases
+
+
+def _get_drive_or_404(serial_number: str, context: AppContext) -> dict[str, Any]:
+    drives = _scoped_drives(context)
+    resolved_serial_number = _drive_aliases(drives).get(serial_number, serial_number)
+    drive = next(
+        (candidate for candidate in drives if str(candidate.get("serialNumber")) == resolved_serial_number),
+        None,
+    )
     if drive is None:
         raise HTTPException(status_code=404, detail="Drive not found")
     return drive
@@ -400,7 +429,7 @@ async def get_fleet_status(
     context: AppContext = Depends(get_context),
 ) -> FleetStatusResponse:
     _ensure_state(context)
-    drives = aml_state.list_aml_drives()
+    drives = _scoped_drives(context)
     return FleetStatusResponse(fleetStatus=_fleet_status(drives))
 
 
@@ -412,7 +441,7 @@ async def clean_all_drives(
     _ensure_state(context)
     _require_admin(current_user)
     cleaned = 0
-    for drive in aml_state.list_aml_drives():
+    for drive in _scoped_drives(context):
         if not _drive_needs_cleaning(drive):
             continue
         cleaned += 1
@@ -437,7 +466,7 @@ async def list_drive_types(
 ) -> TypeListResponse:
     _ensure_state(context)
     types = dict(_SUPPORTED_DRIVE_TYPES)
-    for drive in aml_state.list_aml_drives():
+    for drive in _scoped_drives(context):
         drive_type = str(drive.get("type", "")).strip()
         if drive_type and drive_type not in types:
             types[drive_type] = {
@@ -455,7 +484,7 @@ async def list_drives_needing_cleaning(
     context: AppContext = Depends(get_context),
 ) -> DriveListResponse:
     _ensure_state(context)
-    drives = [_serialize_drive(drive) for drive in aml_state.list_aml_drives() if _drive_needs_cleaning(drive)]
+    drives = [_serialize_drive(drive) for drive in _scoped_drives(context) if _drive_needs_cleaning(drive)]
     return DriveListResponse(driveList=DriveListResource(drive=drives))
 
 
@@ -465,7 +494,7 @@ async def list_drives(
     context: AppContext = Depends(get_context),
 ) -> DriveListResponse:
     _ensure_state(context)
-    return DriveListResponse(driveList=DriveListResource(drive=[_serialize_drive(drive) for drive in aml_state.list_aml_drives()]))
+    return DriveListResponse(driveList=DriveListResource(drive=[_serialize_drive(drive) for drive in _scoped_drives(context)]))
 
 
 @router.get("/drive/{serialNumber}/status", response_model=DriveStatusResponse)
@@ -476,7 +505,7 @@ async def get_drive_status(
 ) -> DriveStatusResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return DriveStatusResponse(driveStatus=_drive_status(_get_drive_or_404(serial_number)))
+    return DriveStatusResponse(driveStatus=_drive_status(_get_drive_or_404(serial_number, context)))
 
 
 @router.post("/drive/{serialNumber}/online", response_model=WSResultCode)
@@ -488,7 +517,7 @@ async def bring_drive_online(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     _update_drive(serial_number, {"status": "online", "state": "idle", "history": _append_history(drive, event_type="online")})
     return _ws_result(f"Drive {serial_number} is online")
 
@@ -502,7 +531,7 @@ async def take_drive_offline(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     _update_drive(serial_number, {"status": "offline", "state": "offline", "history": _append_history(drive, event_type="offline")})
     return _ws_result(f"Drive {serial_number} is offline")
 
@@ -516,7 +545,7 @@ async def reset_drive(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     _update_drive(serial_number, {"status": "online", "state": "idle", "history": _append_history(drive, event_type="reset")})
     return _ws_result(f"Drive {serial_number} reset completed")
 
@@ -530,7 +559,7 @@ async def clean_drive(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     loaded_media = _loaded_media(drive)
     _update_drive(
         serial_number,
@@ -553,7 +582,7 @@ async def get_drive_media(
 ) -> MediaResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return MediaResponse(media=_loaded_media(_get_drive_or_404(serial_number)))
+    return MediaResponse(media=_loaded_media(_get_drive_or_404(serial_number, context)))
 
 
 @router.post("/drive/{serialNumber}/unload", response_model=WSResultCode, dependencies=[Depends(require_service_token)])
@@ -565,7 +594,7 @@ async def unload_drive_media(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     loaded_media = _loaded_media(drive)
     statistics = dict(drive.get("statistics") or {})
     statistics["unloadCount"] = int(statistics.get("unloadCount", int(drive.get("loadCount", 0)) - (1 if loaded_media else 0))) + (1 if loaded_media else 0)
@@ -595,7 +624,7 @@ async def get_drive_statistics(
 ) -> DriveStatsResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return DriveStatsResponse(driveStats=_drive_stats(_get_drive_or_404(serial_number)))
+    return DriveStatsResponse(driveStats=_drive_stats(_get_drive_or_404(serial_number, context)))
 
 
 @router.get("/drive/{serialNumber}/history", response_model=HistoryListResponse)
@@ -606,7 +635,7 @@ async def get_drive_history(
 ) -> HistoryListResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return HistoryListResponse(historyList=HistoryListResource(event=_drive_history(_get_drive_or_404(serial_number))))
+    return HistoryListResponse(historyList=HistoryListResource(event=_drive_history(_get_drive_or_404(serial_number, context))))
 
 
 @router.get("/drive/{serialNumber}/errors", response_model=ErrorListResponse)
@@ -617,7 +646,7 @@ async def get_drive_errors(
 ) -> ErrorListResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return ErrorListResponse(errorList=ErrorListResource(error=_drive_errors(_get_drive_or_404(serial_number))))
+    return ErrorListResponse(errorList=ErrorListResource(error=_drive_errors(_get_drive_or_404(serial_number, context))))
 
 
 @router.delete("/drive/{serialNumber}/errors", response_model=WSResultCode)
@@ -629,7 +658,7 @@ async def clear_drive_errors(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     _update_drive(serial_number, {"errors": [], "errorCount": 0, "history": _append_history(drive, event_type="clearErrors")})
     return _ws_result(f"Cleared drive errors for {serial_number}")
 
@@ -643,7 +672,7 @@ async def run_drive_diagnostic(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     diagnostic = DiagnosticResult(
         timestamp=_timestamp(),
         status="completed",
@@ -665,7 +694,7 @@ async def get_drive_diagnostic_results(
 ) -> DiagnosticResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return DiagnosticResponse(diagnosticResult=_diagnostic_result(_get_drive_or_404(serial_number)))
+    return DiagnosticResponse(diagnosticResult=_diagnostic_result(_get_drive_or_404(serial_number, context)))
 
 
 @router.get("/drive/{serialNumber}/config", response_model=DriveConfigResponse)
@@ -676,7 +705,7 @@ async def get_drive_config(
 ) -> DriveConfigResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return DriveConfigResponse(driveConfig=_drive_config(_get_drive_or_404(serial_number)))
+    return DriveConfigResponse(driveConfig=_drive_config(_get_drive_or_404(serial_number, context)))
 
 
 @router.put("/drive/{serialNumber}/config", response_model=DriveConfigResponse)
@@ -689,7 +718,7 @@ async def update_drive_config(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     config = dict(drive.get("config") or {})
     config.update(_validate_drive_config(payload.driveConfig))
     updated = _update_drive(serial_number, {"config": config})
@@ -703,7 +732,7 @@ async def get_drive_logs(
 ) -> dict[str, list[dict[str, Any]]]:
     _ensure_state(context)
     logs: list[dict[str, Any]] = []
-    for drive in aml_state.list_aml_drives():
+    for drive in _scoped_drives(context):
         serial = str(drive.get("serialNumber"))
         logs.extend({"serialNumber": serial, **item.model_dump()} for item in _drive_history(drive))
         logs.extend(
@@ -735,7 +764,7 @@ async def get_drive_ports(
             "speed": "16G",
             "status": str(drive.get("status", "online")),
         }
-        for drive in aml_state.list_aml_drives()
+        for drive in _scoped_drives(context)
     ]
     return {"ports": ports}
 
@@ -749,7 +778,7 @@ async def power_cycle_drive(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(str(payload.get("serialNumber", "")), field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     _update_drive(serial_number, {"state": "resetting", "history": _append_history(drive, event_type="powerCycle")})
     return _job_response("drive-power-cycle", f"Power cycle queued for drive {serial_number}", {"serialNumber": serial_number})
 
@@ -767,7 +796,7 @@ async def get_drive_activity_report(
             "errorCount": int(drive.get("errorCount", 0)),
             "lastCleaned": drive.get("lastCleaned"),
         }
-        for drive in aml_state.list_aml_drives()
+        for drive in _scoped_drives(context)
     ]
     return {"generatedAt": _timestamp(), "drives": items}
 
@@ -779,7 +808,7 @@ async def get_drive_utilization_report(
 ) -> dict[str, Any]:
     _ensure_state(context)
     items = []
-    for drive in aml_state.list_aml_drives():
+    for drive in _scoped_drives(context):
         load_count = int(drive.get("loadCount", 0))
         items.append(
             {
@@ -800,7 +829,7 @@ async def get_drive_operation_state(
 ) -> dict[str, Any]:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     return {"serialNumber": serial_number, "state": str(drive.get("state", "idle")), "status": str(drive.get("status", "online"))}
 
 
@@ -814,7 +843,7 @@ async def put_drive_operation_state(
     _ensure_state(context)
     _require_admin(current_user)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    drive = _get_drive_or_404(serial_number)
+    drive = _get_drive_or_404(serial_number, context)
     updates = {key: value for key, value in payload.items() if key in {"state", "status"} and value is not None}
     updated = _update_drive(serial_number, {**{k: drive.get(k) for k in ()}, **updates})
     return {"serialNumber": serial_number, "state": str(updated.get("state", "idle")), "status": str(updated.get("status", "online"))}
@@ -839,7 +868,7 @@ async def get_drive(
 ) -> DriveResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
-    return DriveResponse(drive=_serialize_drive(_get_drive_or_404(serial_number)))
+    return DriveResponse(drive=_serialize_drive(_get_drive_or_404(serial_number, context)))
 
 
 @router.put("/drive/{serialNumber}", response_model=DriveResponse)

@@ -70,4 +70,6 @@ testpaths = ["tests"]
 markers = [
   "real_hardware: tests requiring actual tape hardware",
   "slow: long-running simulator stress tests",
+  "i3: Quantum i3 emulator and protocol tests",
+  "real_i3: tests requiring a physical Quantum Scalar i3",
 ]

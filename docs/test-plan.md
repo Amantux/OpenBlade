@@ -9,6 +9,9 @@ Exercise the simulator library and LTFS backend together, including load/unload,
 ## End-to-end tests
 Run archive and restore through the same services used by the CLI and API.
 
+## Frontend regressions
+Run `cd frontend && npm run test` for Vitest coverage over auth state, active-library scoping, and IE station flows, then `cd frontend && npm run build` to confirm production compilation.
+
 ## Property tests
 Check cartridge uniqueness and non-negative capacity across generated operation sequences.
 
