@@ -104,12 +104,14 @@ def auth_headers(i3_client: httpx.Client, i3_credentials: tuple[str, str]) -> di
     """
     user, password = i3_credentials
     try:
-        resp = i3_client.post("/aml/auth/login", json={"username": user, "password": password})
-        if resp.status_code == 200:
-            data = resp.json()
-            token = data.get("token") or data.get("access_token") or data.get("sessionToken")
-            if token:
-                return {"Authorization": f"Bearer {token}"}
+        # Use a transient client to avoid mutating the shared i3_client cookies
+        with httpx.Client(base_url=i3_client.base_url, timeout=30.0) as tmp:
+            resp = tmp.post("/aml/auth/login", json={"username": user, "password": password})
+            if resp.status_code == 200:
+                data = resp.json()
+                token = data.get("token") or data.get("access_token") or data.get("sessionToken")
+                if token:
+                    return {"Authorization": f"Bearer {token}"}
     except httpx.HTTPError:
         pass
     # Fall back to basic auth embedded in header
@@ -122,12 +124,14 @@ def auth_headers(i3_client: httpx.Client, i3_credentials: tuple[str, str]) -> di
 def fresh_auth_headers(i3_client: httpx.Client, i3_credentials: tuple[str, str]) -> dict[str, str]:
     """Like auth_headers but always obtains a fresh token (for session-expiry tests)."""
     user, password = i3_credentials
-    resp = i3_client.post("/aml/auth/login", json={"username": user, "password": password})
-    assert resp.status_code == 200, f"Login failed: {resp.text}"
-    data = resp.json()
-    token = data.get("token") or data.get("access_token") or data.get("sessionToken")
-    assert token, "No token returned from login"
-    return {"Authorization": f"Bearer {token}"}
+    # Use a transient client to avoid mutating the shared i3_client cookies
+    with httpx.Client(base_url=i3_client.base_url, timeout=30.0) as tmp:
+        resp = tmp.post("/aml/auth/login", json={"username": user, "password": password})
+        assert resp.status_code == 200, f"Login failed: {resp.text}"
+        data = resp.json()
+        token = data.get("token") or data.get("access_token") or data.get("sessionToken")
+        assert token, "No token returned from login"
+        return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture(autouse=False)
