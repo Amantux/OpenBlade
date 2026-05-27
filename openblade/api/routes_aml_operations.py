@@ -592,8 +592,8 @@ def _robotics_status() -> RoboticsStatus:
 @router.post("/operations/move", response_model=WSResultCode)
 @router.post("/move", response_model=WSResultCode)
 async def create_move(
-    payload: dict,
     current_user: AmlUser = Depends(require_auth),
+    payload: dict = Body(...),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
