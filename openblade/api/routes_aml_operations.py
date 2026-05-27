@@ -609,6 +609,30 @@ async def create_move(
     dest_raw = data.get("destination") or data.get("targetDrive") or data.get("drive") or data.get("target")
     barcode_raw = data.get("barcode") or data.get("label") or data.get("volumeLabel") or ""
 
+    # If barcode is missing, try to infer it from the source slot in the current inventory
+    if not barcode_raw and source_raw:
+        try:
+            inventory = context.library.inventory()
+            # source_raw is often an integer slot id
+            target_slot_id = int(source_raw) if isinstance(source_raw, (int, str)) and str(source_raw).isdigit() else None
+            found = None
+            if target_slot_id is not None:
+                for slot in inventory.slots:
+                    if slot.slot_id == target_slot_id:
+                        found = slot
+                        break
+            # Fallback: try matching string address
+            if found is None:
+                for slot in inventory.slots:
+                    if str(slot.slot_id) == str(source_raw):
+                        found = slot
+                        break
+            if found and getattr(found, "barcode", None):
+                barcode_raw = str(found.barcode)
+        except Exception:
+            # If inventory lookup fails, continue and let validation handle it
+            barcode_raw = barcode_raw
+
     # If any core move fields are missing, return 422 (validation error) so clients see a clear validation response
     if not source_raw or not dest_raw or not barcode_raw:
         raise HTTPException(status_code=422, detail="Missing move fields")
