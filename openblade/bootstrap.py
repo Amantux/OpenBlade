@@ -381,6 +381,42 @@ def get_catalog() -> CatalogRepository:
     return _catalog
 
 
+def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
+    """Populate MockLTFSBackend with small example files based on catalog NAS records.
+
+    This helps emulator-backed tests that expect LTFS content to exist.
+    """
+    try:
+        from openblade.simulator.ltfs_volume import MockFileRecord
+    except Exception:
+        return
+
+    datasets = catalog.list_nas_datasets()
+    for ds in datasets:
+        dataset_id = ds.get("id")
+        try:
+            files = catalog.list_nas_file_records(dataset_id)
+        except Exception:
+            files = []
+        for f in files:
+            barcode = f.get("tape_barcode")
+            path = f.get("relative_path")
+            size = int(f.get("size_bytes", 0))
+            if not barcode or not path:
+                continue
+            try:
+                tape = ltfs.ensure_tape(barcode)
+            except Exception:
+                continue
+            # create small deterministic content to avoid large memory usage
+            content = (f"{dataset_id}:{path}").encode()[:1024]
+            checksum = hashlib.sha256(content).hexdigest()
+            if path not in tape.files:
+                tape.files[path] = MockFileRecord(tape_path=path, size_bytes=len(content), checksum_sha256=checksum, content=content)
+                tape.used_bytes = max(tape.used_bytes, tape.used_bytes + len(content))
+                tape.formatted = True
+
+
 def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     active_config = config or load_config()
     init_db(active_config.db_url)
@@ -395,6 +431,12 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
         if config is None:
             _seed_demo_catalog(catalog)
             _seed_nas_pools(catalog)
+            # Also populate the simulated LTFS backend with small example files so
+            # emulator operations that rely on LTFS content behave realistically.
+            try:
+                _seed_demo_ltfs(catalog, ltfs)
+            except Exception:
+                pass
     run_inventory_job(library, catalog)
     queue = JobQueue()
     worker = Worker(queue)
