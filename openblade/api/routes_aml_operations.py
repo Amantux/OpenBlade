@@ -589,8 +589,8 @@ def _robotics_status() -> RoboticsStatus:
     )
 
 
-@router.post("/operations/move", response_model=WSResultCode)
-@router.post("/move", response_model=WSResultCode)
+@router.post("/operations/move", response_model=WSResultCode, dependencies=[Depends(require_auth)])
+@router.post("/move", response_model=WSResultCode, dependencies=[Depends(require_auth)])
 async def create_move(
     current_user: AmlUser = Depends(require_auth),
     payload: dict = Body(...),
