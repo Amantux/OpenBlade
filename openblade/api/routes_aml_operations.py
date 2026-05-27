@@ -605,9 +605,21 @@ async def create_move(
     else:
         data = payload
 
-    source_raw = data.get("source") or data.get("sourceSlot") or data.get("sourceAddress") or data.get("slot")
-    dest_raw = data.get("destination") or data.get("targetDrive") or data.get("drive") or data.get("target")
-    barcode_raw = data.get("barcode") or data.get("label") or data.get("volumeLabel") or ""
+    def _first_present(d: dict, keys: list[str]):
+        for k in keys:
+            if k in d:
+                return d.get(k)
+        return None
+
+    source_raw = _first_present(data, ["source", "sourceSlot", "sourceAddress", "slot"])
+    dest_raw = _first_present(data, ["destination", "targetDrive", "drive", "target"])
+    barcode_raw = _first_present(data, ["barcode", "label", "volumeLabel"]) or ""
+
+    # Debug logging to help diagnose legacy payload handling (temporary)
+    try:
+        print(f"DEBUG create_move payload={payload} source_raw={source_raw} dest_raw={dest_raw} barcode_raw={barcode_raw}")
+    except Exception:
+        pass
 
     # Debug logging to help diagnose legacy payload handling (temporary)
     try:
