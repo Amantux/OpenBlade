@@ -335,6 +335,11 @@ async def _parse_login_request(request: Request) -> LoginRequest:
     else:
         form = await request.form()
         payload = dict(form)
+
+    # Backwards compatible: accept 'username' as an alias for 'name'
+    if isinstance(payload, dict) and "username" in payload and "name" not in payload:
+        payload["name"] = payload.pop("username")
+
     try:
         return LoginRequest.model_validate(payload)
     except Exception as exc:  # pragma: no cover - FastAPI handles model details normally.
@@ -501,7 +506,10 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
         raise HTTPException(status_code=503, detail="Service access is disabled")
     session_record = aml_state.create_session(user)
     aml_state.record_login_activity(user.name, success=True, remote_address=remote_address)
-    response = JSONResponse(content=_ws_result("Login successful").model_dump())
+    payload = _ws_result("Login successful").model_dump()
+    # Provide session token in response body for API clients/tests that expect it
+    payload["token"] = session_record.token
+    response = JSONResponse(content=payload)
     _is_production = os.environ.get("OPENBLADE_ENV", "development").lower() == "production"
     response.set_cookie(
         "sessionID",
@@ -514,6 +522,13 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     if user.require_password_change:
         response.headers["Warning"] = "Default Password Supplied"
     return response
+
+
+@router.post("/auth/login", response_model=WSResultCode, openapi_extra={"no_auth": True})
+@no_auth
+async def auth_login(request: Request, context: AppContext = Depends(get_context)) -> Response:
+    """Compatibility alias for older clients/tests expecting /aml/auth/login"""
+    return await login(request, context)
 
 
 @router.delete("/users/login", response_model=WSResultCode)
