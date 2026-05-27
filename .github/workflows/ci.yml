@@ -3,46 +3,81 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  lint:
+  backend-lint:
+    name: backend-lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
 
-  typecheck:
+  backend-typecheck:
+    name: backend-typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
       - run: pip install -e '.[dev]'
       - run: mypy openblade
 
-  tests:
+  backend-tests:
+    name: backend-tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: pytest -m 'not real_hardware' --cov=openblade --cov-report=term-missing
+      - run: pytest tests/unit tests/safety -q --tb=short
 
-  e2e-mock:
+  i3-smoke:
+    name: i3-smoke
     runs-on: ubuntu-latest
+    env:
+      I3_TIMING_PROFILE: instant
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: pytest tests/e2e -m 'not real_hardware' -v
+      - run: pytest tests/i3 -q --tb=short
+
+  frontend-build-test:
+    name: frontend-build-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test -- --run
