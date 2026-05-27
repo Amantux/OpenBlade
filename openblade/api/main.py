@@ -122,6 +122,11 @@ app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_libraries.router)
 app.include_router(routes_safety.router)
+# Compatibility shims for frontend and i3 tests that expect /storage and /restore/plan
+from openblade.api import routes_storage_compat
+app.include_router(routes_storage_compat.router)
+# Also mount NAS config under /storage for UI compatibility
+app.include_router(nas_config.router, prefix="/storage")
 app.include_router(routes_iblade.router, prefix="/iblade", tags=["iblade"])
 app.include_router(gateway_router)
 app.include_router(routes_virtual_fs.router, prefix="/virtual", tags=["virtual"])
