@@ -20,7 +20,8 @@ router = APIRouter(prefix="/api/libraries", tags=["libraries"])
 
 class LibraryCreate(BaseModel):
     name: str
-    emulator_url: str
+    emulator_url: str | None = None
+    aml_url: str | None = None
     serial_number: str | None = None
     model: str = "Scalar i3"
     enabled: bool = True
@@ -149,7 +150,16 @@ async def create_library(
     data: LibraryCreate,
     repo: CatalogRepository = Depends(get_repository),
 ) -> LibraryResponse:
-    library = repo.create_library_instance(**data.model_dump())
+    payload = data.model_dump()
+    # Backwards-compat: accept 'aml_url' as an alias for emulator_url
+    if not payload.get("emulator_url") and payload.get("aml_url"):
+        payload["emulator_url"] = payload.get("aml_url")
+    # remove legacy alias to avoid unexpected kwargs in repository layer
+    payload.pop("aml_url", None)
+    if not payload.get("emulator_url"):
+        # keep validation consistent with previous behavior
+        raise HTTPException(status_code=422, detail="emulator_url is required")
+    library = repo.create_library_instance(**payload)
     return LibraryResponse.model_validate(_library_response_payload(library, await _probe_library(library)))
 
 
