@@ -318,10 +318,16 @@ async def require_auth(
     request: Request, context: AppContext = Depends(get_context)
 ) -> AmlUser:
     _ensure_state(context)
+    # Prefer session cookie, fall back to Bearer token for API clients/tests
     session_id = request.cookies.get("sessionID")
-    if session_id is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    user = aml_state.get_session_user(session_id)
+    user = None
+    if session_id:
+        user = aml_state.get_session_user(session_id)
+    if user is None:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1]
+            user = aml_state.get_session_user(token)
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user
