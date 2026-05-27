@@ -609,6 +609,10 @@ async def create_move(
     dest_raw = data.get("destination") or data.get("targetDrive") or data.get("drive") or data.get("target")
     barcode_raw = data.get("barcode") or data.get("label") or data.get("volumeLabel") or ""
 
+    # If any core move fields are missing, return 422 (validation error) so clients see a clear validation response
+    if not source_raw or not dest_raw or not barcode_raw:
+        raise HTTPException(status_code=422, detail="Missing move fields")
+
     source = _normalize_move_address(_validate_identifier(str(source_raw or ""), field_name="source"))
     destination = _normalize_move_address(_validate_identifier(str(dest_raw or ""), field_name="destination"))
     barcode = _validate_identifier(str(barcode_raw or ""), field_name="barcode")
