@@ -644,7 +644,14 @@ async def create_move(
             barcode_raw = barcode_raw
 
     # If any core move fields are missing, return 422 (validation error) so clients see a clear validation response
-    if not source_raw or not dest_raw or not barcode_raw:
+    def _is_missing(val: object) -> bool:
+        if val is None:
+            return True
+        if isinstance(val, str) and not val.strip():
+            return True
+        return False
+
+    if _is_missing(source_raw) or _is_missing(dest_raw) or _is_missing(barcode_raw):
         raise HTTPException(status_code=422, detail="Missing move fields")
 
     source = _normalize_move_address(_validate_identifier(str(source_raw or ""), field_name="source"))
