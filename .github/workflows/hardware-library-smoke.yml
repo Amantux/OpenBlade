@@ -1,0 +1,123 @@
+name: Quantum hardware smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_aml_url:
+        description: "AML API base URL for the physical Quantum library"
+        required: true
+        type: string
+      target_model:
+        description: "Hardware model under test"
+        required: true
+        default: "Scalar i3"
+        type: choice
+        options:
+          - Scalar i3
+          - Scalar i6
+          - Other
+      target_name:
+        description: "Display name when registering with OpenBlade"
+        required: true
+        default: "Quantum Library Under Test"
+        type: string
+      target_serial:
+        description: "Serial number (optional, used for idempotent registration)"
+        required: false
+        default: ""
+        type: string
+      openblade_api_url:
+        description: "Optional OpenBlade API base URL for library registration"
+        required: false
+        default: ""
+        type: string
+      include_motion_tests:
+        description: "Include changer/move command checks in command matrix"
+        required: true
+        default: false
+        type: boolean
+      include_control_plane_checks:
+        description: "Validate /api/libraries command compatibility (requires OpenBlade target URL)"
+        required: true
+        default: false
+        type: boolean
+      timing_profile:
+        description: "Timing profile for real hardware smoke tests"
+        required: true
+        default: hardware
+        type: choice
+        options:
+          - instant
+          - realistic
+          - hardware
+
+permissions:
+  contents: read
+
+jobs:
+  register-and-validate:
+    runs-on: ubuntu-latest
+    env:
+      I3_AML_USER: ${{ secrets.QUANTUM_AML_USER }}
+      I3_AML_PASSWORD: ${{ secrets.QUANTUM_AML_PASSWORD }}
+      OPENBLADE_ADMIN_USER: ${{ secrets.OPENBLADE_ADMIN_USER }}
+      OPENBLADE_ADMIN_PASSWORD: ${{ secrets.OPENBLADE_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${I3_AML_USER}" ] || [ -z "${I3_AML_PASSWORD}" ]; then
+            echo "::error::Set QUANTUM_AML_USER and QUANTUM_AML_PASSWORD repository secrets."
+            exit 1
+          fi
+
+      - name: Register target library in OpenBlade
+        if: ${{ inputs.openblade_api_url != '' }}
+        env:
+          TARGET_URL: ${{ inputs.target_aml_url }}
+          TARGET_NAME: ${{ inputs.target_name }}
+          TARGET_MODEL: ${{ inputs.target_model }}
+          TARGET_SERIAL: ${{ inputs.target_serial }}
+          OPENBLADE_URL: ${{ inputs.openblade_api_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENBLADE_ADMIN_USER}" ] || [ -z "${OPENBLADE_ADMIN_PASSWORD}" ]; then
+            echo "::error::Set OPENBLADE_ADMIN_USER and OPENBLADE_ADMIN_PASSWORD secrets to register libraries."
+            exit 1
+          fi
+          python3 tests/i3/register_target_library.py \
+            --openblade-url "${OPENBLADE_URL}" \
+            --target-aml-url "${TARGET_URL}" \
+            --target-name "${TARGET_NAME}" \
+            --target-model "${TARGET_MODEL}" \
+            --target-serial "${TARGET_SERIAL}" \
+            --username "${OPENBLADE_ADMIN_USER}" \
+            --password "${OPENBLADE_ADMIN_PASSWORD}"
+
+      - name: Run real hardware command matrix
+        env:
+          I3_TEST_MODE: real
+          I3_REAL_HARDWARE_ENABLED: "true"
+          I3_AML_URL: ${{ inputs.target_aml_url }}
+          I3_TIMING_PROFILE: ${{ inputs.timing_profile }}
+          I3_COMMAND_MATRIX_INCLUDE_MOTION: ${{ inputs.include_motion_tests }}
+          I3_COMMAND_MATRIX_INCLUDE_CONTROL_PLANE: ${{ inputs.include_control_plane_checks }}
+          I3_COMMAND_MATRIX_REPORT: /tmp/i3-command-matrix.json
+        run: |
+          set -euo pipefail
+          python3 -m pytest tests/i3/test_00_command_matrix.py -q --tb=short
+          cat /tmp/i3-command-matrix.json
+
+      - name: Upload hardware command matrix report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: i3-command-matrix
+          path: /tmp/i3-command-matrix.json
