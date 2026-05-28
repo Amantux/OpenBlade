@@ -74,3 +74,26 @@ python3 -m pytest tests/i3/ -m i3 -v --tb=short
 Navigate to **System & Admin → Test Runner** in the OpenBlade web UI.
 Select a target, timing profile, and test modules, then click **Run Tests**.
 Output streams live to the browser. Download the JSON report when complete.
+
+## GitHub workflow: real hardware registration + command smoke
+
+Use the **Quantum hardware smoke** workflow (`.github/workflows/hardware-library-smoke.yml`)
+to validate a physical Scalar i3/i6 (or similar) against the smoke command set.
+
+The workflow:
+1. Optionally registers/updates the target library in OpenBlade (`/api/libraries`).
+2. Runs `tests/i3/test_00_command_matrix.py` in real mode.
+3. Uploads a JSON compatibility report artifact (`i3-command-matrix`).
+
+Required repository secrets:
+- `QUANTUM_AML_USER`
+- `QUANTUM_AML_PASSWORD`
+
+Optional secrets for OpenBlade library registration step:
+- `OPENBLADE_ADMIN_USER`
+- `OPENBLADE_ADMIN_PASSWORD`
+
+Notes:
+- `include_motion_tests=true` adds move-command compatibility checks.
+- `include_control_plane_checks=true` also checks `/api/libraries` compatibility and
+  should be used when `target_aml_url` points at an OpenBlade API endpoint.
