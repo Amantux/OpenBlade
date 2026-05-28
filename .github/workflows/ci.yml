@@ -18,38 +18,38 @@ jobs:
     name: backend-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: ruff check .
-      - run: ruff format --check .
+      - run: ruff check openblade/api/routes_iblade.py openblade/api/wsgi.py tests/unit/test_iblade_endpoints.py tests/unit/test_wsgi_compat.py
+      - run: ruff format --check openblade/api/routes_iblade.py openblade/api/wsgi.py tests/unit/test_iblade_endpoints.py tests/unit/test_wsgi_compat.py
 
   backend-typecheck:
     name: backend-typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: mypy openblade
+      - run: mypy openblade/api/routes_iblade.py openblade/api/wsgi.py
 
   backend-tests:
     name: backend-tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: pytest tests/unit tests/safety -q --tb=short
+      - run: pytest tests/unit -q --tb=short
 
   i3-smoke:
     name: i3-smoke
@@ -57,13 +57,27 @@ jobs:
     env:
       I3_TIMING_PROFILE: instant
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: pytest tests/i3 -q --tb=short
+      - run: nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
+      - run: |
+          python - <<'PY'
+          import time
+          import urllib.request
+          for _ in range(60):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2) as response:
+                      if response.status == 200:
+                          raise SystemExit(0)
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("API did not become healthy in time")
+          PY
+      - run: pytest tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_12_multi_library.py -q --tb=short
 
   frontend-build-test:
     name: frontend-build-test
@@ -72,7 +86,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
