@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpDown, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import {
   createLibrary,
   deleteLibrary,
@@ -243,6 +244,9 @@ function Section({
   activeLibraryId,
   enabledCount,
   onSelect,
+  onOpenLibrary,
+  onOpenStatus,
+  onOpenReports,
   onEdit,
   onDelete,
   deletingId,
@@ -253,6 +257,9 @@ function Section({
   activeLibraryId: string;
   enabledCount: number;
   onSelect: (library: LibrarySummary) => void;
+  onOpenLibrary: (library: LibrarySummary) => void;
+  onOpenStatus: (library: LibrarySummary) => void;
+  onOpenReports: (library: LibrarySummary) => void;
   onEdit: (library: LibrarySummary) => void;
   onDelete: (library: LibrarySummary) => void;
   deletingId: number | null;
@@ -325,6 +332,15 @@ function Section({
 
                 <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap gap-2">
+                    <Button type="button" onClick={() => onOpenLibrary(library)}>
+                      Open Library
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => onOpenStatus(library)}>
+                      Status
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => onOpenReports(library)}>
+                      Reports
+                    </Button>
                     <Button type="button" variant={isActive ? 'secondary' : 'primary'} onClick={() => onSelect(library)}>
                       {isActive ? 'Selected' : 'Select'}
                     </Button>
@@ -357,6 +373,7 @@ function Section({
 }
 
 export default function Libraries() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const hasUserSelectedLibrary = useRef(
     typeof window !== 'undefined' && window.localStorage.getItem(USER_CLEARED_LIBRARY_STORAGE_KEY) === '1',
@@ -562,6 +579,18 @@ export default function Libraries() {
         activeLibraryId={activeLibraryId}
         enabledCount={enabledCount}
         onSelect={handleSelect}
+        onOpenLibrary={(library) => {
+          activateLibrary(library);
+          navigate(`/libraries/${library.id}/items/overview`);
+        }}
+        onOpenStatus={(library) => {
+          activateLibrary(library);
+          navigate(`/libraries/${library.id}/admin/status`);
+        }}
+        onOpenReports={(library) => {
+          activateLibrary(library);
+          navigate(`/reports/events?libraryId=${library.id}`);
+        }}
         onEdit={(library) => {
           setEditingLibrary(library);
           setModalMode('edit');
@@ -577,6 +606,18 @@ export default function Libraries() {
         activeLibraryId={activeLibraryId}
         enabledCount={enabledCount}
         onSelect={handleSelect}
+        onOpenLibrary={(library) => {
+          activateLibrary(library);
+          navigate(`/libraries/${library.id}/items/overview`);
+        }}
+        onOpenStatus={(library) => {
+          activateLibrary(library);
+          navigate(`/libraries/${library.id}/admin/status`);
+        }}
+        onOpenReports={(library) => {
+          activateLibrary(library);
+          navigate(`/reports/events?libraryId=${library.id}`);
+        }}
         onEdit={(library) => {
           setEditingLibrary(library);
           setModalMode('edit');
@@ -592,6 +633,18 @@ export default function Libraries() {
         activeLibraryId={activeLibraryId}
         enabledCount={enabledCount}
         onSelect={handleSelect}
+        onOpenLibrary={(library) => {
+          activateLibrary(library);
+          navigate(`/libraries/${library.id}/items/overview`);
+        }}
+        onOpenStatus={(library) => {
+          activateLibrary(library);
+          navigate(`/libraries/${library.id}/admin/status`);
+        }}
+        onOpenReports={(library) => {
+          activateLibrary(library);
+          navigate(`/reports/events?libraryId=${library.id}`);
+        }}
         onEdit={(library) => {
           setEditingLibrary(library);
           setModalMode('edit');
