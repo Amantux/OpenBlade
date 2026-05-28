@@ -43,23 +43,24 @@ function normalizeJob(job: AmlJobResource): JobResponse {
   };
 }
 
-export async function getJobs(): Promise<JobResponse[]> {
-  const jobs = await apiRequest<AmlJobListResponse>('/jobs');
+export async function getJobs(libraryId = ''): Promise<JobResponse[]> {
+  const jobs = await apiRequest<AmlJobListResponse>('/jobs', { libraryId });
   return jobs.jobList.job.map(normalizeJob);
 }
 
-export async function getJobHistory(): Promise<JobResponse[]> {
-  const jobs = await apiRequest<AmlJobListResponse>('/jobs/history');
+export async function getJobHistory(libraryId = ''): Promise<JobResponse[]> {
+  const jobs = await apiRequest<AmlJobListResponse>('/jobs/history', { libraryId });
   return jobs.jobList.job.map(normalizeJob);
 }
 
-export async function getJob(id: string): Promise<JobResponse> {
-  const job = await apiRequest<AmlJobResponse>(`/job/${id}`);
+export async function getJob(id: string, libraryId = ''): Promise<JobResponse> {
+  const job = await apiRequest<AmlJobResponse>(`/job/${id}`, { libraryId });
   return normalizeJob(job.job);
 }
 
-export function cancelJob(id: string) {
+export function cancelJob(id: string, libraryId = '') {
   return apiRequest<{ summary: string }>(`/job/${id}`, {
     method: 'DELETE',
+    libraryId,
   });
 }

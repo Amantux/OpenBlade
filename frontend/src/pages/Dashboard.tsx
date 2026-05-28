@@ -16,7 +16,6 @@ import Spinner from '../components/ui/Spinner';
 import { useInventory } from '../hooks/useInventory';
 import { useJobs } from '../hooks/useJobs';
 import { getJobState, getJobTypeLabel, getSlotTone, normalizeDrive, normalizeSlot, type NormalizedSlot } from '../lib/lmc';
-import { useLibraryScope } from '../lib/useLibraryScope';
 import { formatBytes, formatDate, getDriveStateVariant, toTitleCase } from '../lib/utils';
 
 interface PartitionRow {
@@ -81,16 +80,15 @@ function tapeOpVariant(status: string): 'green' | 'blue' | 'red' | 'gray' {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { libraryId, libraryName } = useLibraryScope();
-  const inventoryQuery = useInventory(libraryId);
-  const jobsQuery = useJobs(libraryId);
-  const summaryQuery = useQuery({ queryKey: ['dashboard', 'summary', libraryId], queryFn: getAmlSummary, refetchInterval: 10_000 });
+  const inventoryQuery = useInventory('all');
+  const jobsQuery = useJobs('all');
+  const summaryQuery = useQuery({ queryKey: ['dashboard', 'summary', 'all'], queryFn: () => getAmlSummary('all'), refetchInterval: 10_000 });
   const statsQuery = useQuery({ queryKey: ['dashboard', 'stats'], queryFn: getDashboardStats, refetchInterval: 30_000 });
-  const ticketsQuery = useQuery({ queryKey: ['dashboard', 'tickets', libraryId], queryFn: getRasTickets, refetchInterval: 10_000 });
-  const eventsQuery = useQuery({ queryKey: ['dashboard', 'events', libraryId], queryFn: () => getEvents(6), refetchInterval: 10_000 });
+  const ticketsQuery = useQuery({ queryKey: ['dashboard', 'tickets', 'all'], queryFn: () => getRasTickets('all'), refetchInterval: 10_000 });
+  const eventsQuery = useQuery({ queryKey: ['dashboard', 'events', 'all'], queryFn: () => getEvents(6, 'all'), refetchInterval: 10_000 });
   const publicHealthQuery = useQuery({ queryKey: ['dashboard', 'public-health'], queryFn: getPublicHealth, refetchInterval: 30_000 });
   const catalogStatusQuery = useQuery({ queryKey: ['dashboard', 'catalog-status'], queryFn: getCatalogStatus, refetchInterval: 30_000 });
-  const libraryStatusQuery = useQuery({ queryKey: ['dashboard', 'library-status', libraryId], queryFn: getLibraryStatus, refetchInterval: 30_000 });
+  const libraryStatusQuery = useQuery({ queryKey: ['dashboard', 'library-status', 'all'], queryFn: getLibraryStatus, refetchInterval: 30_000 });
   const recentTapeOpsQuery = useQuery({ queryKey: ['dashboard', 'recent-tape-ops'], queryFn: () => listTapeOperations(5), refetchInterval: 30_000 });
   const hydrationJobsQuery = useQuery({ queryKey: ['dashboard', 'hydration-jobs'], queryFn: listHydrationJobs, refetchInterval: 30_000 });
   const [selectedPartitionId, setSelectedPartitionId] = useState<string>();
@@ -173,9 +171,9 @@ export default function Dashboard() {
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-xs text-slate-400">
         <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">
-          Library: <span className="font-medium text-slate-200">{libraryName || 'Primary Tape Library'}</span>
+          Scope: <span className="font-medium text-slate-200">All Libraries</span>
         </span>
-        <Link to="/libraries" className="text-blue-400 hover:underline">Switch</Link>
+        <Link to="/libraries" className="text-blue-400 hover:underline">Manage libraries</Link>
       </div>
       <div className="grid gap-4 xl:grid-cols-4">
         <Card>
@@ -461,7 +459,7 @@ export default function Dashboard() {
 
       <NorthPanel
         title="Partition Summary"
-        subtitle="Logical partitions and magazine assignments for the active library frame."
+        subtitle="Logical partition telemetry from the current aggregate dashboard snapshot."
         columns={[
           { key: 'partition', header: 'Partition', render: (row: PartitionRow) => row.partition },
           { key: 'elements', header: 'Elements', render: (row: PartitionRow) => row.elements },
@@ -511,10 +509,10 @@ export default function Dashboard() {
             ]),
             variant: 'primary',
           },
-          { label: 'Physical Map', onClick: () => void navigate('/library'), variant: 'secondary' },
-          { label: 'Open Archive', onClick: () => void navigate('/archive'), variant: 'secondary' },
+          { label: 'Fleet Overview', onClick: () => void navigate('/libraries'), variant: 'secondary' },
+          { label: 'Open NAS', onClick: () => void navigate('/nas/file-station'), variant: 'secondary' },
           { label: 'Open Catalog', onClick: () => void navigate('/catalog'), variant: 'secondary' },
-          { label: 'View Jobs', onClick: () => void navigate('/jobs'), variant: 'secondary' },
+          { label: 'System Health', onClick: () => void navigate('/system/health'), variant: 'secondary' },
         ]}
       />
     </div>

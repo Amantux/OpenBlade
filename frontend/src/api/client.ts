@@ -8,6 +8,7 @@ interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
   namespace?: ApiNamespace;
   skipAuthRedirect?: boolean;
+  libraryId?: string;
 }
 
 export class ApiError extends Error {
@@ -94,8 +95,9 @@ export async function apiRequest<T>(
   }
 
   const namespace = init.namespace ?? 'aml';
-  if (namespace === 'aml' && activeLibraryIdRef.current && activeLibraryIdRef.current !== 'all') {
-    headers.set('X-OpenBlade-Library-Id', activeLibraryIdRef.current);
+  const resolvedLibraryId = init.libraryId ?? activeLibraryIdRef.current;
+  if (namespace === 'aml' && resolvedLibraryId && resolvedLibraryId !== 'all') {
+    headers.set('X-OpenBlade-Library-Id', resolvedLibraryId);
   }
 
   const response = await fetch(buildUrl(path, namespace), {

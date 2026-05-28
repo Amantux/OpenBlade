@@ -106,18 +106,18 @@ function mapSlots(partition: string, slots: AmlSlotResource[], startIndex: numbe
   }));
 }
 
-export async function getInventory(): Promise<InventoryResponse> {
+export async function getInventory(libraryId = ''): Promise<InventoryResponse> {
   const [drivesResponse, partitionsResponse, physicalStatusResponse] = await Promise.all([
-    apiRequest<AmlDriveListResponse>('/drives'),
-    apiRequest<AmlPartitionListResponse>('/partitions'),
-    apiRequest<AmlPhysicalStatusResponse>('/physical/status'),
+    apiRequest<AmlDriveListResponse>('/drives', { libraryId }),
+    apiRequest<AmlPartitionListResponse>('/partitions', { libraryId }),
+    apiRequest<AmlPhysicalStatusResponse>('/physical/status', { libraryId }),
   ]);
 
   const partitions = partitionsResponse.partitionList.partition;
   const slotResponses = await Promise.all(
     partitions.flatMap((partition) => [
-      apiRequest<AmlSlotListResponse>(`/partition/${encodeURIComponent(partition.name)}/slots`),
-      apiRequest<AmlSlotListResponse>(`/partition/${encodeURIComponent(partition.name)}/ieSlots`),
+      apiRequest<AmlSlotListResponse>(`/partition/${encodeURIComponent(partition.name)}/slots`, { libraryId }),
+      apiRequest<AmlSlotListResponse>(`/partition/${encodeURIComponent(partition.name)}/ieSlots`, { libraryId }),
     ]),
   );
 
@@ -147,7 +147,7 @@ export async function getInventory(): Promise<InventoryResponse> {
   };
 }
 
-export async function getDrives(): Promise<DriveResponse[]> {
-  const response = await apiRequest<AmlDriveListResponse>('/drives');
+export async function getDrives(libraryId = ''): Promise<DriveResponse[]> {
+  const response = await apiRequest<AmlDriveListResponse>('/drives', { libraryId });
   return response.driveList.drive.map(mapDrive);
 }

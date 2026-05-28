@@ -4,7 +4,7 @@ import { cancelJob, getJob, getJobHistory, getJobs } from '../api/jobs';
 export function useJobs(libraryId = '', refetchInterval = 10_000) {
   return useQuery({
     queryKey: ['jobs', libraryId],
-    queryFn: getJobs,
+    queryFn: () => getJobs(libraryId),
     refetchInterval,
     refetchIntervalInBackground: false,
   });
@@ -13,7 +13,7 @@ export function useJobs(libraryId = '', refetchInterval = 10_000) {
 export function useJobHistory(libraryId = '', refetchInterval = 30_000) {
   return useQuery({
     queryKey: ['jobs', 'history', libraryId],
-    queryFn: getJobHistory,
+    queryFn: () => getJobHistory(libraryId),
     refetchInterval,
     refetchIntervalInBackground: false,
   });
@@ -22,7 +22,7 @@ export function useJobHistory(libraryId = '', refetchInterval = 30_000) {
 export function useJob(jobId?: string, libraryId = '', isActive = false) {
   return useQuery({
     queryKey: ['jobs', libraryId, jobId],
-    queryFn: () => getJob(jobId ?? ''),
+    queryFn: () => getJob(jobId ?? '', libraryId),
     enabled: Boolean(jobId),
     refetchInterval: isActive ? 2_000 : 10_000,
     refetchIntervalInBackground: false,

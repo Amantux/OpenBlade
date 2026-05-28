@@ -53,8 +53,8 @@ interface AmlSummaryEnvelope {
   summary: AmlSummary;
 }
 
-export async function getAmlSummary(): Promise<AmlSummary> {
-  const response = await apiRequest<AmlSummaryEnvelope>('/summary');
+export async function getAmlSummary(libraryId = ''): Promise<AmlSummary> {
+  const response = await apiRequest<AmlSummaryEnvelope>('/summary', { libraryId });
   return response.summary;
 }
 
