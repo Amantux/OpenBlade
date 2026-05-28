@@ -14,12 +14,18 @@ import StatusBar from './StatusBar';
 import TopBar from './TopBar';
 
 function isGlobalLibraryScopePath(pathname: string): boolean {
-  return pathname === '/archive'
+  return pathname.startsWith('/nas/')
+    || pathname === '/nas'
+    || pathname === '/archive'
     || pathname === '/media/pools'
     || pathname.startsWith('/storage/')
     || pathname === '/file-station'
     || pathname === '/files/browse'
     || pathname === '/gateway';
+}
+
+function isLibraryScopedPath(pathname: string): boolean {
+  return pathname.startsWith('/libraries/') && pathname !== '/libraries';
 }
 
 export default function Layout() {
@@ -57,9 +63,22 @@ export default function Layout() {
         <main className="overflow-y-auto bg-quantum-panel p-4">
           {isGlobalLibraryScopePath(location.pathname) ? (
             <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
-              <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">Scope: All Libraries</span>
+              <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">Scope: NAS / All Libraries</span>
               <Link to="/libraries" className="text-blue-400 hover:underline">
                 Manage libraries
+              </Link>
+            </div>
+          ) : null}
+          {isLibraryScopedPath(location.pathname) ? (
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+              <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">
+                Library: {activeLibraryName || `Library ${activeLibraryId || 'Unscoped'}`}
+              </span>
+              {activeLibraryRole ? (
+                <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">Role: {activeLibraryRole}</span>
+              ) : null}
+              <Link to="/libraries" className="text-blue-400 hover:underline">
+                Switch library
               </Link>
             </div>
           ) : null}

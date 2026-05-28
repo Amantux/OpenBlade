@@ -2,14 +2,11 @@ import {
   Activity,
   ChevronDown,
   ChevronRight,
-  Database,
   Gauge,
-  HardDrive,
   Layers3,
   Network,
   Search,
   ServerCog,
-  Workflow,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
@@ -47,108 +44,71 @@ interface NavSection {
 
 const sections: NavSection[] = [
   {
-    id: 'overview',
-    label: 'Overview',
+    id: 'dashboard',
+    label: 'Dashboard',
     icon: Gauge,
     items: [
       { label: 'Dashboard', to: '/', end: true },
-      { label: 'Multi-Library Grid', to: '/libraries' },
-      { label: 'Health & Alerts', to: '/health' },
+      { label: 'Fleet Overview', to: '/libraries' },
+      { label: 'System Health', to: '/system/health' },
     ],
   },
   {
-    id: 'library',
-    label: 'Library',
-    icon: Layers3,
-    items: [
-      { label: 'Physical Map', to: '/library', end: true },
-      { label: 'Inventory', to: '/library/inventory' },
-      { label: 'Partitions', to: '/partitions' },
-      { label: 'IE Station', to: '/library/ie' },
-    ],
-  },
-  {
-    id: 'media',
-    label: 'Media',
-    icon: Database,
-    items: [
-      { label: 'Cartridges', to: '/media', end: true },
-      { label: 'Archive', to: '/archive' },
-      { label: 'Media Pools', to: '/media/pools' },
-      { label: 'LTFS Browse', to: '/media/ltfs' },
-    ],
-  },
-  {
-    id: 'catalog',
-    label: 'Catalog',
-    icon: Database,
-    items: [
-      { label: 'Catalog Records', to: '/catalog', end: true },
-      { label: 'Rebuild', to: '/catalog/rebuild' },
-      { label: 'Manifest Versions', to: '/catalog/manifests' },
-    ],
-  },
-  {
-    id: 'drives',
-    label: 'Drives',
-    icon: HardDrive,
-    items: [
-      { label: 'Drive Overview', to: '/drives', end: true },
-      { label: 'Drive Operations', to: '/drives/ops' },
-    ],
-  },
-  {
-    id: 'operations',
-    label: 'Operations',
-    icon: Workflow,
-    items: [
-      { label: 'Job Queue', to: '/jobs' },
-      { label: 'Move Operations', to: '/operations/move' },
-      { label: 'Inventory Scan', to: '/operations/inventory' },
-      { label: 'Import / Export', to: '/operations/ie' },
-    ],
-  },
-  {
-    id: 'storage',
-    label: 'Storage',
+    id: 'nas',
+    label: 'NAS',
     icon: ServerCog,
     items: [
-      // Ingest group
-      { label: 'Storage Policies', to: '/storage/policies', group: 'Ingest' },
-      { label: 'Cache Drives', to: '/storage/cache-drives', group: 'Ingest' },
-      { label: 'Source Streaming', to: '/storage/source-streaming', group: 'Ingest' },
-      // Archive group
-      { label: 'Archive Planning', to: '/storage/archive-planning', group: 'Archive' },
+      { label: 'File Station', to: '/nas/file-station', group: 'Files & Access' },
+      { label: 'File Browser', to: '/nas/browser', group: 'Files & Access' },
+      { label: 'Shares', to: '/nas/shares', group: 'Files & Access' },
+      { label: 'Virtual Pools', to: '/nas/pools', group: 'Files & Access' },
+      { label: 'Restore Queue', to: '/nas/restore-queue', group: 'Files & Access' },
+      { label: 'Archive Planning', to: '/nas/archive-planning', group: 'Archive' },
+      { label: 'Storage Policies', to: '/nas/policies', group: 'Ingest' },
+      { label: 'Cache Drives', to: '/nas/cache-drives', group: 'Ingest' },
+      { label: 'Source Streaming', to: '/nas/source-streaming', group: 'Ingest' },
+      { label: 'Protocol Gateway', to: '/nas/gateway', group: 'Files & Access' },
       { label: 'Dataset Details', to: '/storage/dataset-details', group: 'Archive' },
-      // Files & Access group
-      { label: 'Virtual Pools', to: '/storage/virtual-pools', group: 'Files & Access' },
-      { label: 'Restore Queue', to: '/storage/restore-queue', group: 'Files & Access' },
-      { label: 'File Station', to: '/file-station', group: 'Files & Access' },
-      { label: 'File Browser', to: '/files/browse', group: 'Files & Access' },
-      { label: 'File Sharing', to: '/storage/shares', group: 'Files & Access' },
-      { label: 'Protocol Gateway', to: '/gateway', group: 'Files & Access' },
+    ],
+  },
+  {
+    id: 'libraries',
+    label: 'Libraries',
+    icon: Layers3,
+    items: [
+      { label: 'Fleet Overview', to: '/libraries', end: true, group: 'Fleet' },
+      { label: 'Overview', to: '/library', group: 'Items' },
+      { label: 'Physical Map', to: '/library', group: 'Items' },
+      { label: 'Inventory', to: '/library/inventory', group: 'Items' },
+      { label: 'Cartridges', to: '/media', group: 'Items' },
+      { label: 'Drives', to: '/drives', group: 'Items' },
+      { label: 'Partitions', to: '/partitions', group: 'Items' },
+      { label: 'IE Station', to: '/library/ie', group: 'Items' },
+      { label: 'LTFS Browse', to: '/media/ltfs', group: 'Items' },
+      { label: 'Jobs', to: '/jobs', group: 'Items' },
+      { label: 'Move Operations', to: '/operations/move', group: 'Items' },
+      { label: 'Inventory Scan', to: '/operations/inventory', group: 'Items' },
+      { label: 'Import / Export', to: '/operations/ie', group: 'Items' },
+      { label: 'Status', to: '/system/library', group: 'Admin' },
+      { label: 'Diagnostics', to: '/system/diagnostics', group: 'Admin' },
+      { label: 'Safety', to: '/admin/safety', group: 'Admin' },
     ],
   },
   {
     id: 'system',
-    label: 'System & Admin',
+    label: 'System',
     icon: Network,
     items: [
-      // System sub-group
       { label: 'System Info', to: '/system', end: true, group: 'System' },
       { label: 'Health', to: '/system/health', group: 'System' },
-      { label: 'Error Codes', to: '/system/error-codes', group: 'System' },
-      { label: 'Library Status', to: '/system/library', group: 'System' },
-      { label: 'Catalog Status', to: '/system/catalog', group: 'System' },
       { label: 'Network', to: '/system/network', group: 'System' },
       { label: 'Configuration', to: '/system/config', group: 'System' },
       { label: 'Firmware', to: '/system/firmware', group: 'System' },
-      { label: 'Diagnostics', to: '/system/diagnostics', group: 'System' },
-      // Admin sub-group
-      { label: 'Security', to: '/admin/security', group: 'Admin' },
-      { label: 'Safety', to: '/admin/safety', group: 'Admin' },
-      // Testing sub-group
+      { label: 'Security', to: '/admin/security', group: 'System' },
       { label: 'Test Runner', to: '/system/test-runner', group: 'Testing' },
+      { label: 'Catalog Status', to: '/system/catalog', group: 'System' },
+      { label: 'Error Codes', to: '/system/error-codes', group: 'System' },
+      { label: 'Catalog Records', to: '/catalog', group: 'System' },
     ],
   },
   {
@@ -170,14 +130,16 @@ const sections: NavSection[] = [
 const SIDEBAR_STORAGE_KEY = 'openblade_sidebar_expanded';
 
 function loadExpandedState(): Record<string, boolean> {
+  const defaults = Object.fromEntries(sections.map(s => [s.id, true]));
   try {
     const raw = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Record<string, boolean>;
+    if (raw) {
+      return { ...defaults, ...(JSON.parse(raw) as Record<string, boolean>) };
+    }
   } catch {
     // ignore
   }
-  // Default: all expanded
-  return Object.fromEntries(sections.map(s => [s.id, true]));
+  return defaults;
 }
 
 function saveExpandedState(state: Record<string, boolean>) {
@@ -480,7 +442,7 @@ export default function Sidebar() {
 
                 {isExpanded ? (
                   <div className="mt-1 space-y-1 pl-2">
-                    {section.id === 'library' ? (
+                    {section.id === 'libraries' ? (
                       <NavLink
                         to="/libraries"
                         className={({ isActive }) =>
@@ -507,4 +469,3 @@ export default function Sidebar() {
     </>
   );
 }
-
