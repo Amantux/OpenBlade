@@ -53,7 +53,7 @@ export default function Health() {
   const [eventLimit, setEventLimit] = useState(20);
 
   const systemQuery = useQuery({ queryKey: ['health-dashboard', 'system'], queryFn: getSystemHealth, refetchInterval: 30_000 });
-  const ticketsQuery = useQuery({ queryKey: ['health-dashboard', 'tickets'], queryFn: getRasTickets, refetchInterval: 30_000 });
+  const ticketsQuery = useQuery({ queryKey: ['health-dashboard', 'tickets'], queryFn: () => getRasTickets(), refetchInterval: 30_000 });
   const eventsQuery = useQuery({ queryKey: ['health-dashboard', 'events', eventLimit], queryFn: () => getEvents(eventLimit), refetchInterval: 30_000 });
   const alertsQuery = useQuery({ queryKey: ['health-dashboard', 'alerts'], queryFn: getAlerts, refetchInterval: 30_000 });
 

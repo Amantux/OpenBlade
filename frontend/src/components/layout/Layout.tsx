@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import { activeLibraryIdRef } from '../../api/client';
 import { useHealth } from '../../hooks/useHealth';
 import { useInventory } from '../../hooks/useInventory';
 import {
@@ -14,7 +15,9 @@ import StatusBar from './StatusBar';
 import TopBar from './TopBar';
 
 function isGlobalLibraryScopePath(pathname: string): boolean {
-  return pathname.startsWith('/nas/')
+  return pathname === '/'
+    || pathname === '/dashboard'
+    || pathname.startsWith('/nas/')
     || pathname === '/nas'
     || pathname === '/archive'
     || pathname === '/media/pools'
@@ -34,9 +37,14 @@ export default function Layout() {
   const [activeLibraryId, setActiveLibraryIdState] = useState(() => getActiveLibraryId());
   const [activeLibraryName, setActiveLibraryName] = useState(() => getActiveLibraryName());
   const [activeLibraryRole, setActiveLibraryRole] = useState(() => getActiveLibraryRole());
-  const inventoryQuery = useInventory(activeLibraryId);
+  const isGlobalScope = isGlobalLibraryScopePath(location.pathname);
+  const inventoryScope = isGlobalScope ? 'all' : activeLibraryId;
+  const inventoryQuery = useInventory(inventoryScope);
   const inventory = inventoryQuery.data;
   const systemHealth = deriveSystemHealth(health, inventory?.drives ?? [], inventory?.changer?.state ?? inventory?.changer_state);
+  const topBarLibraryName = isGlobalScope
+    ? 'ALL LIBRARIES'
+    : (inventory?.library_id || activeLibraryName || 'LIBRARY-01');
 
   useEffect(
     () => subscribeActiveLibrary((id) => {
@@ -47,6 +55,10 @@ export default function Layout() {
     [],
   );
 
+  useEffect(() => {
+    activeLibraryIdRef.current = isGlobalScope ? 'all' : activeLibraryId;
+  }, [isGlobalScope, activeLibraryId]);
+
   return (
     <div className="min-h-screen bg-quantum-panel text-slate-100">
       <div className="grid min-h-screen grid-cols-[260px,1fr] grid-rows-[auto,1fr,42px]">
@@ -54,7 +66,7 @@ export default function Layout() {
           <Sidebar />
         </div>
         <TopBar
-          libraryName={inventory?.library_id ?? 'LIBRARY-01'}
+          libraryName={topBarLibraryName}
           health={systemHealth}
           backend={health?.backend ?? 'backend'}
           activeLibraryName={activeLibraryId ? activeLibraryName || undefined : undefined}

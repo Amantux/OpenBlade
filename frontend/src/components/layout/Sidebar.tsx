@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
+  getActiveLibraryId,
   getActiveLibraryName,
   getActiveLibraryRole,
   subscribeActiveLibrary,
@@ -28,6 +29,7 @@ interface NavItem {
   to: string;
   end?: boolean;
   group?: string;
+  requiresLibrary?: boolean;
 }
 
 interface NavSection {
@@ -36,6 +38,7 @@ interface NavSection {
   icon: typeof Layers3;
   items: NavItem[];
   badgeQuery?: () => Promise<number>; // optional live badge
+  requiresLibrary?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,27 +80,28 @@ const sections: NavSection[] = [
     icon: Layers3,
     items: [
       { label: 'Fleet Overview', to: '/libraries', end: true, group: 'Fleet' },
-      { label: 'Overview', to: '/library', group: 'Items' },
-      { label: 'Physical Map', to: '/library', group: 'Items' },
-      { label: 'Inventory', to: '/library/inventory', group: 'Items' },
-      { label: 'Cartridges', to: '/media', group: 'Items' },
-      { label: 'Drives', to: '/drives', group: 'Items' },
-      { label: 'Partitions', to: '/partitions', group: 'Items' },
-      { label: 'IE Station', to: '/library/ie', group: 'Items' },
-      { label: 'LTFS Browse', to: '/media/ltfs', group: 'Items' },
-      { label: 'Jobs', to: '/jobs', group: 'Items' },
-      { label: 'Move Operations', to: '/operations/move', group: 'Items' },
-      { label: 'Inventory Scan', to: '/operations/inventory', group: 'Items' },
-      { label: 'Import / Export', to: '/operations/ie', group: 'Items' },
-      { label: 'Status', to: '/system/library', group: 'Admin' },
-      { label: 'Diagnostics', to: '/system/diagnostics', group: 'Admin' },
-      { label: 'Safety', to: '/admin/safety', group: 'Admin' },
+      { label: 'Overview', to: '/library', group: 'Items', requiresLibrary: true },
+      { label: 'Physical Map', to: '/library', group: 'Items', requiresLibrary: true },
+      { label: 'Inventory', to: '/library/inventory', group: 'Items', requiresLibrary: true },
+      { label: 'Cartridges', to: '/media', group: 'Items', requiresLibrary: true },
+      { label: 'Drives', to: '/drives', group: 'Items', requiresLibrary: true },
+      { label: 'Partitions', to: '/partitions', group: 'Items', requiresLibrary: true },
+      { label: 'IE Station', to: '/library/ie', group: 'Items', requiresLibrary: true },
+      { label: 'LTFS Browse', to: '/media/ltfs', group: 'Items', requiresLibrary: true },
+      { label: 'Jobs', to: '/jobs', group: 'Items', requiresLibrary: true },
+      { label: 'Move Operations', to: '/operations/move', group: 'Items', requiresLibrary: true },
+      { label: 'Inventory Scan', to: '/operations/inventory', group: 'Items', requiresLibrary: true },
+      { label: 'Import / Export', to: '/operations/ie', group: 'Items', requiresLibrary: true },
+      { label: 'Status', to: '/system/library', group: 'Admin', requiresLibrary: true },
+      { label: 'Diagnostics', to: '/system/diagnostics', group: 'Admin', requiresLibrary: true },
+      { label: 'Safety', to: '/admin/safety', group: 'Admin', requiresLibrary: true },
     ],
   },
   {
     id: 'system',
     label: 'System',
     icon: Network,
+    requiresLibrary: true,
     items: [
       { label: 'System Info', to: '/system', end: true, group: 'System' },
       { label: 'Health', to: '/system/health', group: 'System' },
@@ -115,6 +119,7 @@ const sections: NavSection[] = [
     id: 'reports',
     label: 'Reports',
     icon: Activity,
+    requiresLibrary: true,
     items: [
       { label: 'RAS Tickets', to: '/reports/ras' },
       { label: 'Events Log', to: '/reports/events' },
@@ -122,6 +127,15 @@ const sections: NavSection[] = [
     ],
   },
 ];
+
+function getVisibleSections(hasActiveLibrary: boolean): NavSection[] {
+  return sections
+    .filter((section) => !section.requiresLibrary || hasActiveLibrary)
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.requiresLibrary || hasActiveLibrary),
+    }));
+}
 
 // ---------------------------------------------------------------------------
 // localStorage helpers for sidebar expanded state (UX-4)
@@ -162,7 +176,7 @@ interface CommandItem {
   category: string;
 }
 
-function CommandPalette({ onClose }: { onClose: () => void }) {
+function CommandPalette({ onClose, sections }: { onClose: () => void; sections: NavSection[] }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -333,6 +347,7 @@ function GroupedNavItems({ items }: { items: NavItem[] }) {
 // ---------------------------------------------------------------------------
 
 export default function Sidebar() {
+  const [activeLibraryId, setActiveLibraryId] = useState(() => getActiveLibraryId());
   const [activeLibraryName, setActiveLibraryName] = useState(() => getActiveLibraryName());
   const [activeLibraryRole, setActiveLibraryRole] = useState(() => getActiveLibraryRole());
   const [expanded, setExpanded] = useState<Record<string, boolean>>(loadExpandedState);
@@ -359,6 +374,7 @@ export default function Sidebar() {
 
   useEffect(
     () => subscribeActiveLibrary(() => {
+      setActiveLibraryId(getActiveLibraryId());
       setActiveLibraryName(getActiveLibraryName());
       setActiveLibraryRole(getActiveLibraryRole());
     }),
@@ -389,10 +405,12 @@ export default function Sidebar() {
   const activeLibraryLabel = activeLibraryName
     ? `⬡ ${activeLibraryName}${activeLibraryRole ? ` · ${toTitleCase(activeLibraryRole)}` : ''}`
     : 'No Library';
+  const hasActiveLibrary = Boolean(activeLibraryId);
+  const visibleSections = getVisibleSections(hasActiveLibrary);
 
   return (
     <>
-      {showPalette && <CommandPalette onClose={() => setShowPalette(false)} />}
+      {showPalette && <CommandPalette onClose={() => setShowPalette(false)} sections={visibleSections} />}
 
       <aside className="flex min-h-screen w-[280px] flex-col border-r border-quantum-border bg-quantum-sidebar">
         <div className="border-b border-quantum-border px-4 py-4">
@@ -414,10 +432,10 @@ export default function Sidebar() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {sections.map((section) => {
+          {visibleSections.map((section) => {
             const Icon = section.icon;
             const isExpanded = expanded[section.id];
-            const showJobBadge = section.id === 'operations' && (activeJobCount ?? 0) > 0;
+            const showJobBadge = section.id === 'libraries' && hasActiveLibrary && (activeJobCount ?? 0) > 0;
 
             return (
               <div key={section.id} className="rounded-md border border-transparent bg-transparent">
@@ -443,20 +461,27 @@ export default function Sidebar() {
                 {isExpanded ? (
                   <div className="mt-1 space-y-1 pl-2">
                     {section.id === 'libraries' ? (
-                      <NavLink
-                        to="/libraries"
-                        className={({ isActive }) =>
-                          cn(
-                            'mx-3 mb-2 block truncate rounded border px-2 py-1 text-xs transition',
-                            activeLibraryName
-                              ? 'border-quantum-border bg-quantum-panel text-slate-300 hover:border-quantum-red/40 hover:text-white'
-                              : 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20',
-                            isActive && activeLibraryName && 'border-quantum-red/60 text-white',
-                          )
-                        }
-                      >
-                        {activeLibraryLabel}
-                      </NavLink>
+                      <>
+                        <NavLink
+                          to="/libraries"
+                          className={({ isActive }) =>
+                            cn(
+                              'mx-3 mb-2 block truncate rounded border px-2 py-1 text-xs transition',
+                              activeLibraryName
+                                ? 'border-quantum-border bg-quantum-panel text-slate-300 hover:border-quantum-red/40 hover:text-white'
+                                : 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20',
+                              isActive && activeLibraryName && 'border-quantum-red/60 text-white',
+                            )
+                          }
+                        >
+                          {activeLibraryLabel}
+                        </NavLink>
+                        {!hasActiveLibrary ? (
+                          <div className="mx-3 mb-2 rounded border border-dashed border-amber-500/40 px-2 py-1 text-[11px] text-amber-300">
+                            Select a library in Fleet Overview to unlock library, system, and report tabs.
+                          </div>
+                        ) : null}
+                      </>
                     ) : null}
                     <GroupedNavItems items={section.items} />
                   </div>

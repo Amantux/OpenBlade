@@ -137,8 +137,8 @@ export async function getHealth(): Promise<HealthResponse> {
   };
 }
 
-export async function getRasTickets(): Promise<RasTicket[]> {
-  const response = await apiRequest<TicketEnvelope>('/ras/tickets?limit=250');
+export async function getRasTickets(libraryId = ''): Promise<RasTicket[]> {
+  const response = await apiRequest<TicketEnvelope>('/ras/tickets?limit=250', { libraryId });
   return response.ticketList.ticket.map((ticket) => ({
     id: ticket.id,
     severity: ticket.severity,
@@ -155,8 +155,8 @@ export async function acknowledgeTicket(id: string): Promise<void> {
   await apiRequest(`/ras/ticket/${encodeURIComponent(id)}/acknowledge`, { method: 'POST' });
 }
 
-export async function getEvents(limit = 100): Promise<Event[]> {
-  const response = await apiRequest<EventEnvelope>(`/events?limit=${limit}`);
+export async function getEvents(limit = 100, libraryId = ''): Promise<Event[]> {
+  const response = await apiRequest<EventEnvelope>(`/events?limit=${limit}`, { libraryId });
   return response.eventList.event.map((event) => ({
     id: event.id,
     timestamp: event.timestamp,
