@@ -257,3 +257,26 @@ def test_iblade_errors_use_ws_result_code_format(client: TestClient, path: str) 
     payload = response.json()
     assert set(payload) == {"code", "summary", "description", "action", "customCode"}
     assert payload["code"] == "AML_NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/iblade/operations/assignment", {"index": "not-a-number", "tapes": ["VOL001L9"]}),
+        ("/iblade/operations/merge", {"source": "left", "destination": 2}),
+        ("/iblade/operations/merge", {"source": 1, "destination": "right"}),
+        ("/iblade/operations/volume-groups/repair", {"index": "oops"}),
+        ("/iblade/operations/safe-repair", {"index": True}),
+    ],
+)
+def test_iblade_operations_reject_non_integer_group_indices(
+    client: TestClient,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    _login(client)
+    response = client.post(path, json=payload)
+    assert response.status_code == 400
+    error = response.json()
+    assert error["code"] == "AML_BAD_REQUEST"
+    assert "must be an integer" in error["summary"]

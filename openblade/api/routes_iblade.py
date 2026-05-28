@@ -79,6 +79,25 @@ def _validate_identifier(value: str, *, field_name: str) -> str:
     return normalized
 
 
+def _parse_int_field(
+    data: dict[str, Any], *, field_name: str, default: int
+) -> int:
+    value = data.get(field_name, default)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} must be an integer"
+        )
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized and (normalized.isdigit() or (normalized.startswith("-") and normalized[1:].isdigit())):
+            return int(normalized)
+    raise HTTPException(status_code=400, detail=f"{field_name} must be an integer")
+
+
 def _queue_job(
     job_type: str, message: str, metadata: dict[str, Any] | None = None
 ) -> IBladeJobResponse:
@@ -736,7 +755,7 @@ async def assignment_operation(
 ) -> IBladeJobResponse:
     _ensure_state(context)
     data = payload or {}
-    index = int(data.get("index", 1))
+    index = _parse_int_field(data, field_name="index", default=1)
     tapes = [str(item) for item in data.get("tapes", data.get("barcodes", []))]
     if tapes:
         group = _volume_group_or_404(index)
@@ -768,8 +787,8 @@ async def merge_operation(
 ) -> IBladeJobResponse:
     _ensure_state(context)
     data = payload or {}
-    source_index = int(data.get("source", 1))
-    destination_index = int(data.get("destination", 2))
+    source_index = _parse_int_field(data, field_name="source", default=1)
+    destination_index = _parse_int_field(data, field_name="destination", default=2)
     if source_index != destination_index:
         source = _volume_group_or_404(source_index)
         destination = _volume_group_or_404(destination_index)
@@ -836,7 +855,7 @@ async def repair_volume_group_operation(
 ) -> IBladeJobResponse:
     _ensure_state(context)
     data = payload or {}
-    index = int(data.get("index", 1))
+    index = _parse_int_field(data, field_name="index", default=1)
     aml_state.update_iblade_volume_group(index, {"state": "READY", "reason": "NONE"})
     return _queue_job("iblade-vg-repair", f"Repair queued for volume group {index}", data)
 
@@ -878,7 +897,7 @@ async def safe_repair_operation(
 ) -> IBladeJobResponse:
     _ensure_state(context)
     data = payload or {}
-    index = int(data.get("index", 1))
+    index = _parse_int_field(data, field_name="index", default=1)
     aml_state.update_iblade_volume_group(index, {"state": "READY", "reason": "NONE"})
     return _queue_job("iblade-safe-repair", f"Safe repair queued for volume group {index}", data)
 

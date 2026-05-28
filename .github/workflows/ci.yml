@@ -24,8 +24,25 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: ruff check openblade/api/routes_iblade.py openblade/api/wsgi.py tests/unit/test_iblade_endpoints.py tests/unit/test_wsgi_compat.py
-      - run: ruff format --check openblade/api/routes_iblade.py openblade/api/wsgi.py tests/unit/test_iblade_endpoints.py tests/unit/test_wsgi_compat.py
+      - name: Run ruff on changed Python files
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            diff_range="origin/${{ github.base_ref }}...HEAD"
+          else
+            diff_range="${{ github.event.before }}...${{ github.sha }}"
+          fi
+
+          mapfile -t py_files < <(git diff --name-only --diff-filter=ACMRT "$diff_range" | grep -E '\.py$' || true)
+          if [ "${#py_files[@]}" -eq 0 ]; then
+            echo "No Python changes detected."
+            exit 0
+          fi
+
+          printf 'Linting files:\n%s\n' "${py_files[@]}"
+          ruff check "${py_files[@]}"
+          ruff format --check "${py_files[@]}"
 
   backend-typecheck:
     name: backend-typecheck
@@ -37,7 +54,24 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: mypy openblade/api/routes_iblade.py openblade/api/wsgi.py
+      - name: Run mypy on changed backend files
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            diff_range="origin/${{ github.base_ref }}...HEAD"
+          else
+            diff_range="${{ github.event.before }}...${{ github.sha }}"
+          fi
+
+          mapfile -t app_files < <(git diff --name-only --diff-filter=ACMRT "$diff_range" | grep -E '^openblade/.*\.py$' || true)
+          if [ "${#app_files[@]}" -eq 0 ]; then
+            echo "No backend Python changes detected."
+            exit 0
+          fi
+
+          printf 'Type checking files:\n%s\n' "${app_files[@]}"
+          mypy "${app_files[@]}"
 
   backend-tests:
     name: backend-tests
@@ -50,6 +84,7 @@ jobs:
           cache: "pip"
       - run: pip install -e '.[dev]'
       - run: pytest tests/unit -q --tb=short
+      - run: pytest tests/safety/test_safety_regression.py -q --tb=short
 
   i3-smoke:
     name: i3-smoke
@@ -77,7 +112,7 @@ jobs:
                   time.sleep(1)
           raise SystemExit("API did not become healthy in time")
           PY
-      - run: pytest tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_12_multi_library.py -q --tb=short
+      - run: pytest tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_03_changer.py tests/i3/test_12_multi_library.py -q --tb=short
 
   frontend-build-test:
     name: frontend-build-test
