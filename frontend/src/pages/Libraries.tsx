@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpDown, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -41,8 +41,6 @@ interface LibraryFormModalProps {
 }
 
 type LibrarySort = 'status' | 'name' | 'sort_order';
-
-const USER_CLEARED_LIBRARY_STORAGE_KEY = 'openblade_user_cleared_library';
 
 function roleVariant(role: string): BadgeVariant {
   switch (role) {
@@ -375,9 +373,6 @@ function Section({
 export default function Libraries() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const hasUserSelectedLibrary = useRef(
-    typeof window !== 'undefined' && window.localStorage.getItem(USER_CLEARED_LIBRARY_STORAGE_KEY) === '1',
-  );
   const [activeLibraryId, setActiveLibraryIdState] = useState(() => getActiveLibraryId());
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<LibrarySort>('status');
@@ -388,17 +383,8 @@ export default function Libraries() {
   useEffect(() => subscribeActiveLibrary(setActiveLibraryIdState), []);
 
   const activateLibrary = (library: Pick<LibrarySummary, 'id' | 'name' | 'role'>) => {
-    hasUserSelectedLibrary.current = false;
-    window.localStorage.removeItem(USER_CLEARED_LIBRARY_STORAGE_KEY);
     setActiveLibraryId(String(library.id), library.name, library.role);
   };
-
-  useEffect(() => {
-    const firstEnabledLibrary = (librariesQuery.data ?? []).find((library) => library.enabled) ?? librariesQuery.data?.[0];
-    if (!activeLibraryId && firstEnabledLibrary && !hasUserSelectedLibrary.current) {
-      activateLibrary(firstEnabledLibrary);
-    }
-  }, [activeLibraryId, librariesQuery.data]);
 
   const createMutation = useMutation({
     mutationFn: (values: LibraryFormValues) => createLibrary(toPayload(values)),
@@ -406,6 +392,7 @@ export default function Libraries() {
       setModalMode(null);
       await queryClient.invalidateQueries({ queryKey: ['libraries'] });
       activateLibrary(library);
+      navigate(`/libraries/${library.id}/items/overview`);
     },
   });
 
@@ -483,8 +470,6 @@ export default function Libraries() {
   };
 
   const handleClearSelection = () => {
-    hasUserSelectedLibrary.current = true;
-    window.localStorage.setItem(USER_CLEARED_LIBRARY_STORAGE_KEY, '1');
     setActiveLibraryId('', '', '');
   };
 
@@ -538,6 +523,47 @@ export default function Libraries() {
           </div>
         </Card>
       ) : null}
+
+      <Card className="bg-quantum-north p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Add Library Workflow</div>
+            <h2 className="mt-1 text-lg font-semibold text-slate-100">Provision → Validate → Open</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Add a library endpoint, refresh probe health, then open per-library items, system, and reports.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                setEditingLibrary(null);
+                setModalMode('create');
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Step 1: Add Library
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void librariesQuery.refetch()}>
+              <RefreshCw className={cn('mr-2 h-4 w-4', librariesQuery.isFetching && 'animate-spin')} />
+              Step 2: Refresh Probe
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!activeLibrary}
+              onClick={() => {
+                if (!activeLibrary) {
+                  return;
+                }
+                navigate(`/libraries/${activeLibrary.id}/items/overview`);
+              }}
+            >
+              Step 3: Open Selected Library
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       {(createMutation.isError || updateMutation.isError || deleteMutation.isError) ? (
         <ErrorMessage

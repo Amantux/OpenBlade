@@ -4,7 +4,7 @@ import { getInventory } from '../api/inventory';
 export function useInventory(libraryId = '') {
   return useQuery({
     queryKey: ['inventory', libraryId],
-    queryFn: getInventory,
+    queryFn: () => getInventory(libraryId),
     refetchInterval: 10_000,
     refetchIntervalInBackground: false,
   });

@@ -27,7 +27,7 @@ export default function ReportsRas() {
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string>();
 
-  const rasQuery = useQuery({ queryKey: ['reports', 'ras'], queryFn: getRasTickets, refetchInterval: 30_000 });
+  const rasQuery = useQuery({ queryKey: ['reports', 'ras'], queryFn: () => getRasTickets(), refetchInterval: 30_000 });
 
   const components = useMemo(() => Array.from(new Set((rasQuery.data ?? []).map((ticket) => ticket.component))).sort(), [rasQuery.data]);
   const filtered = useMemo(() => {
