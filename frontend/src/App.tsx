@@ -1,6 +1,8 @@
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import Spinner from './components/ui/Spinner';
+import { getActiveLibraryId, setActiveLibraryId } from './lib/activeLibrary';
 import { AuthProvider, useAuth } from './lib/auth-context';
 import AdminSafetyPage from './pages/AdminSafetyPage';
 import AdminSecurityPage from './pages/AdminSecurityPage';
@@ -9,12 +11,10 @@ import Catalog from './pages/Catalog';
 import CatalogRebuildPage from './pages/CatalogRebuildPage';
 import CatalogStatusPage from './pages/CatalogStatusPage';
 import Dashboard from './pages/Dashboard';
-import DriveOperations from './pages/DriveOperations';
 import Drives from './pages/Drives';
 import ErrorCodesPage from './pages/ErrorCodesPage';
 import FileStation from './pages/FileStation';
 import GatewayPage from './pages/Gateway';
-import Health from './pages/Health';
 import ImportExport from './pages/ImportExport';
 import InventoryScan from './pages/InventoryScan';
 import Jobs from './pages/Jobs';
@@ -69,6 +69,26 @@ function ProtectedLayout() {
   return <Layout />;
 }
 
+function ActiveLibraryPathRedirect({ suffix }: { suffix: string }) {
+  const activeLibraryId = getActiveLibraryId();
+  if (!activeLibraryId) {
+    return <Navigate to="/libraries" replace />;
+  }
+  return <Navigate to={`/libraries/${activeLibraryId}${suffix}`} replace />;
+}
+
+function LibraryScopedOutlet() {
+  const { libraryId } = useParams();
+
+  useEffect(() => {
+    if (libraryId) {
+      setActiveLibraryId(libraryId, `Library ${libraryId}`);
+    }
+  }, [libraryId]);
+
+  return <Outlet />;
+}
+
 function RoutedApp() {
   return (
     <Routes>
@@ -76,36 +96,70 @@ function RoutedApp() {
       <Route element={<ProtectedLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="dashboard" element={<Dashboard />} />
+
+        <Route path="nas" element={<Navigate to="/nas/file-station" replace />} />
+        <Route path="nas/file-station" element={<FileStation />} />
+        <Route path="nas/browser" element={<VirtualFileBrowserPage />} />
+        <Route path="nas/shares" element={<Mounts />} />
+        <Route path="nas/pools" element={<VirtualPools />} />
+        <Route path="nas/restore-queue" element={<RestoreQueue />} />
+        <Route path="nas/archive-planning" element={<ArchivePlanning />} />
+        <Route path="nas/policies" element={<StoragePolicies />} />
+        <Route path="nas/cache-drives" element={<CacheDrives />} />
+        <Route path="nas/source-streaming" element={<SourceStreaming />} />
+        <Route path="nas/gateway" element={<GatewayPage />} />
+
         <Route path="libraries" element={<Libraries />} />
-        <Route path="health" element={<Health />} />
-        <Route path="library" element={<LibraryMap />} />
-        <Route path="library/inventory" element={<Library />} />
-        <Route path="library/ie" element={<LibraryIE />} />
-        <Route path="partitions" element={<Partitions />} />
-        <Route path="media" element={<Media />} />
+        <Route path="libraries/:libraryId" element={<LibraryScopedOutlet />}>
+          <Route index element={<Navigate to="items/overview" replace />} />
+          <Route path="items" element={<Navigate to="overview" replace />} />
+          <Route path="items/overview" element={<LibraryMap />} />
+          <Route path="items/map" element={<LibraryMap />} />
+          <Route path="items/inventory" element={<Library />} />
+          <Route path="items/cartridges" element={<Media />} />
+          <Route path="items/drives" element={<Drives />} />
+          <Route path="items/partitions" element={<Partitions />} />
+          <Route path="items/ie" element={<LibraryIE />} />
+          <Route path="items/ltfs" element={<LtfsBrowse />} />
+          <Route path="items/jobs" element={<Jobs />} />
+          <Route path="items/move" element={<MoveOperations />} />
+          <Route path="items/inventory-scan" element={<InventoryScan />} />
+          <Route path="items/import-export" element={<ImportExport />} />
+          <Route path="admin/status" element={<LibraryStatusPage />} />
+          <Route path="admin/diagnostics" element={<SystemDiagnostics />} />
+          <Route path="admin/safety" element={<AdminSafetyPage />} />
+        </Route>
+
+        <Route path="health" element={<Navigate to="/system/health" replace />} />
+        <Route path="library" element={<ActiveLibraryPathRedirect suffix="/items/map" />} />
+        <Route path="library/inventory" element={<ActiveLibraryPathRedirect suffix="/items/inventory" />} />
+        <Route path="library/ie" element={<ActiveLibraryPathRedirect suffix="/items/ie" />} />
+        <Route path="partitions" element={<ActiveLibraryPathRedirect suffix="/items/partitions" />} />
+        <Route path="media" element={<ActiveLibraryPathRedirect suffix="/items/cartridges" />} />
+        <Route path="media/ltfs" element={<ActiveLibraryPathRedirect suffix="/items/ltfs" />} />
+        <Route path="drives" element={<ActiveLibraryPathRedirect suffix="/items/drives" />} />
+        <Route path="drives/ops" element={<ActiveLibraryPathRedirect suffix="/items/drives" />} />
+        <Route path="jobs" element={<ActiveLibraryPathRedirect suffix="/items/jobs" />} />
+        <Route path="operations/move" element={<ActiveLibraryPathRedirect suffix="/items/move" />} />
+        <Route path="operations/inventory" element={<ActiveLibraryPathRedirect suffix="/items/inventory-scan" />} />
+        <Route path="operations/ie" element={<ActiveLibraryPathRedirect suffix="/items/import-export" />} />
+        <Route path="file-station" element={<Navigate to="/nas/file-station" replace />} />
+        <Route path="files/browse" element={<Navigate to="/nas/browser" replace />} />
+        <Route path="storage/shares" element={<Navigate to="/nas/shares" replace />} />
+        <Route path="storage/virtual-pools" element={<Navigate to="/nas/pools" replace />} />
+        <Route path="storage/restore-queue" element={<Navigate to="/nas/restore-queue" replace />} />
+        <Route path="storage/archive-planning" element={<Navigate to="/nas/archive-planning" replace />} />
+        <Route path="storage/policies" element={<Navigate to="/nas/policies" replace />} />
+        <Route path="storage/cache-drives" element={<Navigate to="/nas/cache-drives" replace />} />
+        <Route path="storage/source-streaming" element={<Navigate to="/nas/source-streaming" replace />} />
+        <Route path="gateway" element={<Navigate to="/nas/gateway" replace />} />
+
+        <Route path="storage/dataset-details" element={<DatasetDetails />} />
         <Route path="media/pools" element={<MediaPools />} />
-        <Route path="media/ltfs" element={<LtfsBrowse />} />
         <Route path="catalog" element={<Catalog />} />
         <Route path="catalog/rebuild" element={<CatalogRebuildPage />} />
         <Route path="catalog/manifests" element={<ManifestVersionsPage />} />
         <Route path="archive" element={<Archive />} />
-        <Route path="drives" element={<Drives />} />
-        <Route path="drives/ops" element={<DriveOperations />} />
-        <Route path="jobs" element={<Jobs />} />
-        <Route path="operations/move" element={<MoveOperations />} />
-        <Route path="operations/inventory" element={<InventoryScan />} />
-        <Route path="operations/ie" element={<ImportExport />} />
-        <Route path="storage/policies" element={<StoragePolicies />} />
-        <Route path="storage/cache-drives" element={<CacheDrives />} />
-        <Route path="storage/source-streaming" element={<SourceStreaming />} />
-        <Route path="storage/archive-planning" element={<ArchivePlanning />} />
-        <Route path="storage/virtual-pools" element={<VirtualPools />} />
-        <Route path="storage/restore-queue" element={<RestoreQueue />} />
-        <Route path="storage/dataset-details" element={<DatasetDetails />} />
-        <Route path="storage/shares" element={<Mounts />} />
-        <Route path="file-station" element={<FileStation />} />
-        <Route path="gateway" element={<GatewayPage />} />
-        <Route path="files/browse" element={<VirtualFileBrowserPage />} />
         <Route path="admin/security" element={<AdminSecurityPage />} />
         <Route path="admin/safety" element={<AdminSafetyPage />} />
         <Route path="system" element={<System />} />
