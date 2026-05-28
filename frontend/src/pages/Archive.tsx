@@ -17,7 +17,7 @@ import {
   getVolumeGroups,
 } from '../api/volumeGroups';
 import { formatDate } from '../lib/utils';
-import type { JobResponse, VolumeGroup } from '../types/api';
+import type { JobResponse } from '../types/api';
 
 function stateVariant(state: string): 'gray' | 'green' | 'blue' | 'amber' | 'red' | 'redDim' {
   if (state === 'FAILED') return 'red';
@@ -116,9 +116,8 @@ export default function Archive() {
   const archiveMutation = useMutation({
     mutationFn: async () => {
       const queuedJobIds: string[] = [];
-      let currentGroup: VolumeGroup | undefined = selectedGroup;
-      if (preferredTape && currentGroup && !(currentGroup.barcodes ?? []).includes(preferredTape)) {
-        currentGroup = await assignVolumeGroupCartridge(currentGroup.name, preferredTape);
+      if (preferredTape && selectedGroup && !(selectedGroup.barcodes ?? []).includes(preferredTape)) {
+        await assignVolumeGroupCartridge(selectedGroup.name, preferredTape);
       }
       for (const sourcePath of sourcePaths) {
         const response = await postArchive({ source_path: sourcePath, volume_group: volumeGroup });

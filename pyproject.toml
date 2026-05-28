@@ -33,7 +33,7 @@ dev = [
   "hypothesis>=6.112",
   "ruff>=0.6",
   "mypy>=1.11",
-  "types-all>=1.0.0; python_version >= '3.12'",
+  "asyncssh>=2.21",
   "pyfakefs>=5.6",
 ]
 

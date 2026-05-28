@@ -15,7 +15,6 @@ def client() -> TestClient:
         yield test_client
 
 
-
 def _login(client: TestClient) -> None:
     response = client.post("/aml/users/login", json={"name": "admin", "password": "password"})
     assert response.status_code == 200
@@ -37,27 +36,120 @@ def _login(client: TestClient) -> None:
         ("/iblade/reasons/NONE", {"code", "description"}, False),
         ("/iblade/vgreasons", {"code", "description"}, False),
         ("/iblade/vgreasons/NONE", {"code", "description"}, False),
-        ("/iblade/product", {"product", "model", "serial", "firmware", "software", "vendor", "build"}, False),
+        (
+            "/iblade/product",
+            {"product", "model", "serial", "firmware", "software", "vendor", "build"},
+            False,
+        ),
         ("/iblade/product/model", {"element", "value"}, False),
-        ("/iblade/messages", {"id", "code", "severity", "summary", "description", "action", "created_at", "acknowledged"}, True),
-        ("/iblade/messages/MSG-001", {"id", "code", "severity", "summary", "description", "action", "created_at", "acknowledged"}, True),
+        (
+            "/iblade/messages",
+            {
+                "id",
+                "code",
+                "severity",
+                "summary",
+                "description",
+                "action",
+                "created_at",
+                "acknowledged",
+            },
+            True,
+        ),
+        (
+            "/iblade/messages/MSG-001",
+            {
+                "id",
+                "code",
+                "severity",
+                "summary",
+                "description",
+                "action",
+                "created_at",
+                "acknowledged",
+            },
+            True,
+        ),
         ("/iblade/nas-drives", {"serialNumber", "model", "status", "state"}, True),
         ("/iblade/lto-media", {"barcode", "type", "state"}, True),
         ("/iblade/lto_media/VOL001L9", {"barcode", "type", "state"}, True),
         ("/iblade/hosts", {"id", "hostname", "ip", "wwn", "connection_type", "state"}, True),
-        ("/iblade/network", {"hostname", "management_ip", "subnet_mask", "gateway", "dns", "mtu", "vlan", "bondMode"}, True),
+        (
+            "/iblade/network",
+            {
+                "hostname",
+                "management_ip",
+                "subnet_mask",
+                "gateway",
+                "dns",
+                "mtu",
+                "vlan",
+                "bondMode",
+            },
+            True,
+        ),
         ("/iblade/reports/configuration", {"generated_at", "items", "summary"}, True),
         ("/iblade/reports/media", {"generated_at", "items", "summary"}, True),
         ("/iblade/reports/media-count", {"generated_at", "items", "summary"}, True),
         ("/iblade/reports/volume-groups", {"generated_at", "items", "summary"}, True),
-        ("/iblade/status/io", {"activeTransfers", "queueDepth", "throughputMBps", "activeDrives"}, True),
-        ("/iblade/status/open-messages", {"id", "code", "severity", "summary", "description", "action", "created_at", "acknowledged"}, True),
-        ("/iblade/status/system/open-messages", {"id", "code", "severity", "summary", "description", "action", "created_at", "acknowledged"}, True),
-        ("/iblade/system/settings", {"autoDiscovery", "defaultVolumeGroup", "exportPolicy", "ioThrottle", "retentionLock", "serviceMode", "snapshotRetention"}, True),
+        (
+            "/iblade/status/io",
+            {"activeTransfers", "queueDepth", "throughputMBps", "activeDrives"},
+            True,
+        ),
+        (
+            "/iblade/status/open-messages",
+            {
+                "id",
+                "code",
+                "severity",
+                "summary",
+                "description",
+                "action",
+                "created_at",
+                "acknowledged",
+            },
+            True,
+        ),
+        (
+            "/iblade/status/system/open-messages",
+            {
+                "id",
+                "code",
+                "severity",
+                "summary",
+                "description",
+                "action",
+                "created_at",
+                "acknowledged",
+            },
+            True,
+        ),
+        (
+            "/iblade/system/settings",
+            {
+                "autoDiscovery",
+                "defaultVolumeGroup",
+                "exportPolicy",
+                "ioThrottle",
+                "retentionLock",
+                "serviceMode",
+                "snapshotRetention",
+            },
+            True,
+        ),
         ("/iblade/system/settings/autoDiscovery", {"name", "value"}, True),
         ("/iblade/system/extended-snapshot", {"generated_at", "items", "summary"}, True),
-        ("/iblade/volume-groups", {"index", "name", "state", "reason", "mediaCount", "policy", "tapes"}, True),
-        ("/iblade/volume-groups/1", {"index", "name", "state", "reason", "mediaCount", "policy", "tapes"}, True),
+        (
+            "/iblade/volume-groups",
+            {"index", "name", "state", "reason", "mediaCount", "policy", "tapes"},
+            True,
+        ),
+        (
+            "/iblade/volume-groups/1",
+            {"index", "name", "state", "reason", "mediaCount", "policy", "tapes"},
+            True,
+        ),
     ],
 )
 def test_iblade_get_endpoints_return_expected_schema(
@@ -119,7 +211,13 @@ def test_iblade_volume_groups_create_and_delete(client: TestClient) -> None:
     _login(client)
     create_response = client.post(
         "/iblade/volume_groups",
-        json={"name": "qa-vg", "state": "READY", "reason": "NONE", "policy": "balanced", "tapes": ["VOL001L9"]},
+        json={
+            "name": "qa-vg",
+            "state": "READY",
+            "reason": "NONE",
+            "policy": "balanced",
+            "tapes": ["VOL001L9"],
+        },
     )
     assert create_response.status_code == 201
     created = create_response.json()
@@ -159,3 +257,26 @@ def test_iblade_errors_use_ws_result_code_format(client: TestClient, path: str) 
     payload = response.json()
     assert set(payload) == {"code", "summary", "description", "action", "customCode"}
     assert payload["code"] == "AML_NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/iblade/operations/assignment", {"index": "not-a-number", "tapes": ["VOL001L9"]}),
+        ("/iblade/operations/merge", {"source": "left", "destination": 2}),
+        ("/iblade/operations/merge", {"source": 1, "destination": "right"}),
+        ("/iblade/operations/volume-groups/repair", {"index": "oops"}),
+        ("/iblade/operations/safe-repair", {"index": True}),
+    ],
+)
+def test_iblade_operations_reject_non_integer_group_indices(
+    client: TestClient,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    _login(client)
+    response = client.post(path, json=payload)
+    assert response.status_code == 400
+    error = response.json()
+    assert error["code"] == "AML_BAD_REQUEST"
+    assert "must be an integer" in error["summary"]

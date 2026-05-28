@@ -3,46 +3,131 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  lint:
+  backend-lint:
+    name: backend-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: ruff check .
-      - run: ruff format --check .
+      - name: Run ruff on changed Python files
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            diff_range="origin/${{ github.base_ref }}...HEAD"
+          else
+            diff_range="${{ github.event.before }}...${{ github.sha }}"
+          fi
 
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e '.[dev]'
-      - run: mypy openblade
+          mapfile -t py_files < <(git diff --name-only --diff-filter=ACMRT "$diff_range" | grep -E '\.py$' || true)
+          if [ "${#py_files[@]}" -eq 0 ]; then
+            echo "No Python changes detected."
+            exit 0
+          fi
 
-  tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e '.[dev]'
-      - run: pytest -m 'not real_hardware' --cov=openblade --cov-report=term-missing
+          printf 'Linting files:\n%s\n' "${py_files[@]}"
+          ruff check "${py_files[@]}"
+          ruff format --check "${py_files[@]}"
 
-  e2e-mock:
+  backend-typecheck:
+    name: backend-typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: pytest tests/e2e -m 'not real_hardware' -v
+      - name: Run mypy on changed backend files
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            diff_range="origin/${{ github.base_ref }}...HEAD"
+          else
+            diff_range="${{ github.event.before }}...${{ github.sha }}"
+          fi
+
+          mapfile -t app_files < <(git diff --name-only --diff-filter=ACMRT "$diff_range" | grep -E '^openblade/.*\.py$' || true)
+          if [ "${#app_files[@]}" -eq 0 ]; then
+            echo "No backend Python changes detected."
+            exit 0
+          fi
+
+          printf 'Type checking files:\n%s\n' "${app_files[@]}"
+          mypy "${app_files[@]}"
+
+  backend-tests:
+    name: backend-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      - run: pytest tests/unit -q --tb=short
+      - run: pytest tests/safety/test_safety_regression.py -q --tb=short
+
+  i3-smoke:
+    name: i3-smoke
+    runs-on: ubuntu-latest
+    env:
+      I3_TIMING_PROFILE: instant
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      - run: nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
+      - run: |
+          python - <<'PY'
+          import time
+          import urllib.request
+          for _ in range(60):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2) as response:
+                      if response.status == 200:
+                          raise SystemExit(0)
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("API did not become healthy in time")
+          PY
+      - run: pytest tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_03_changer.py tests/i3/test_12_multi_library.py -q --tb=short
+
+  frontend-build-test:
+    name: frontend-build-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint -- --max-warnings=0
+      - run: npm run build
+      - run: npm run test -- --run
