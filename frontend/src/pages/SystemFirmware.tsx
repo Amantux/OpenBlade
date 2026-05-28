@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listActiveJobs } from '../api/operations';
 import {
@@ -74,15 +74,12 @@ export default function SystemFirmware() {
   const activeJobs = jobsQuery.data ?? [];
   const libraryBusy = activeJobs.length > 0;
 
-  const cards = useMemo(
-    () => [
-      { label: 'Library Firmware', value: firmware.currentVersion, detail: firmware.lastActivated ? `Activated ${formatDate(firmware.lastActivated)}` : 'No activation history' },
-      { label: 'Blade Versions', value: bladeVersions || 'Unknown', detail: `${bladeFirmware.length} controller bundle(s)` },
-      { label: 'Drive Versions', value: driveVersions || 'Unknown', detail: `${drivesQuery.data?.length ?? 0} drives tracked` },
-      { label: 'Library Busy', value: libraryBusy ? 'Yes' : 'No', detail: libraryBusy ? `${activeJobs.length} active job(s)` : 'Safe to stage firmware' },
-    ],
-    [activeJobs.length, bladeFirmware.length, bladeVersions, driveVersions, drivesQuery.data?.length, firmware.currentVersion, firmware.lastActivated, libraryBusy],
-  );
+  const cards = [
+    { label: 'Library Firmware', value: firmware.currentVersion, detail: firmware.lastActivated ? `Activated ${formatDate(firmware.lastActivated)}` : 'No activation history' },
+    { label: 'Blade Versions', value: bladeVersions || 'Unknown', detail: `${bladeFirmware.length} controller bundle(s)` },
+    { label: 'Drive Versions', value: driveVersions || 'Unknown', detail: `${drivesQuery.data?.length ?? 0} drives tracked` },
+    { label: 'Library Busy', value: libraryBusy ? 'Yes' : 'No', detail: libraryBusy ? `${activeJobs.length} active job(s)` : 'Safe to stage firmware' },
+  ];
 
   const activity = [
     ...bladeFirmware.map((item) => ({
