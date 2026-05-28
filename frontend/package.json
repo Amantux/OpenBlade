@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:routes": "node scripts/verify-route-links.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.11",
