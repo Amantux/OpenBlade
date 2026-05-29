@@ -43,7 +43,10 @@ jobs:
           cache: "pip"
       - run: pip install -e '.[dev]'
       - run: python -m pytest tests/i3/test_15_manual_matrix_contract.py tests/integration/test_aml_emulator_latency.py -q --tb=short
-      - run: nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
+      - run: |
+          rm -f /tmp/openblade-emulator-gates.db
+          OPENBLADE_BACKEND=mock OPENBLADE_DB_URL=sqlite:////tmp/openblade-emulator-gates.db \
+            nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
       - name: Wait for API health
         run: |
           python - <<'PY'
