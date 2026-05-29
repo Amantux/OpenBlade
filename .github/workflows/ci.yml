@@ -14,8 +14,56 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: detect-changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      api: ${{ steps.filter.outputs.api }}
+      simulator: ${{ steps.filter.outputs.simulator }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      cicd: ${{ steps.filter.outputs.cicd }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'openblade/**/*.py'
+              - 'tests/unit/**'
+              - 'tests/safety/**'
+              - 'tests/integration/test_library_commands.py'
+              - 'pyproject.toml'
+            api:
+              - 'openblade/api/**'
+              - 'openblade/bootstrap.py'
+              - 'openblade/config.py'
+              - 'tests/integration/test_aml_*.py'
+              - 'tests/integration/test_multi_library.py'
+              - 'tests/integration/test_library_commands.py'
+              - 'tests/unit/test_emulator_client_config.py'
+              - 'tools/emulator_spec/**'
+            simulator:
+              - 'openblade/simulator/**'
+              - 'openblade/emulator_contract/**'
+              - 'tests/i3/**'
+              - 'tests/integration/test_aml_emulator_latency*.py'
+              - 'tests/integration/test_aml_scope_lockdown.py'
+              - 'tests/integration/test_aml_library_spec_parity.py'
+              - 'deploy/emulator/**'
+              - 'scripts/emulator/**'
+              - 'docker-compose.yml'
+              - 'tools/emulator_spec/**'
+            frontend:
+              - 'frontend/**'
+            cicd:
+              - '.github/workflows/**'
+
   backend-lint:
     name: backend-lint
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.api == 'true' || needs.changes.outputs.simulator == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -24,28 +72,13 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - name: Run ruff on changed Python files
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-            diff_range="origin/${{ github.base_ref }}...HEAD"
-          else
-            diff_range="${{ github.event.before }}...${{ github.sha }}"
-          fi
-
-          mapfile -t py_files < <(git diff --name-only --diff-filter=ACMRT "$diff_range" | grep -E '\.py$' || true)
-          if [ "${#py_files[@]}" -eq 0 ]; then
-            echo "No Python changes detected."
-            exit 0
-          fi
-
-          printf 'Linting files:\n%s\n' "${py_files[@]}"
-          ruff check "${py_files[@]}"
-          ruff format --check "${py_files[@]}"
+      - run: ruff check .
+      - run: ruff format --check .
 
   backend-typecheck:
     name: backend-typecheck
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.api == 'true' || needs.changes.outputs.simulator == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -54,27 +87,12 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - name: Run mypy on changed backend files
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-            diff_range="origin/${{ github.base_ref }}...HEAD"
-          else
-            diff_range="${{ github.event.before }}...${{ github.sha }}"
-          fi
-
-          mapfile -t app_files < <(git diff --name-only --diff-filter=ACMRT "$diff_range" | grep -E '^openblade/.*\.py$' || true)
-          if [ "${#app_files[@]}" -eq 0 ]; then
-            echo "No backend Python changes detected."
-            exit 0
-          fi
-
-          printf 'Type checking files:\n%s\n' "${app_files[@]}"
-          mypy "${app_files[@]}"
+      - run: mypy openblade
 
   backend-tests:
     name: backend-tests
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.api == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -87,8 +105,30 @@ jobs:
       - run: pytest tests/integration/test_library_commands.py -q --tb=short
       - run: pytest tests/safety/test_safety_regression.py -q --tb=short
 
+  api-aml-integration:
+    name: api-aml-integration
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.api == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      - run: >
+          pytest
+          tests/integration/test_aml_*.py
+          tests/integration/test_multi_library.py
+          tests/integration/test_library_commands.py
+          tests/unit/test_emulator_client_config.py
+          -q --tb=short
+
   i3-smoke:
     name: i3-smoke
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.simulator == 'true' || needs.changes.outputs.api == 'true' }}
     runs-on: ubuntu-latest
     env:
       I3_TIMING_PROFILE: instant
@@ -117,6 +157,8 @@ jobs:
 
   frontend-build-test:
     name: frontend-build-test
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.frontend == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -133,3 +175,26 @@ jobs:
       - run: npm run test:routes
       - run: npm run build
       - run: npm run test -- --run
+
+  cicd-workflow-validate:
+    name: cicd-workflow-validate
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.cicd == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pyyaml
+      - name: Validate workflow YAML syntax
+        run: |
+          python - <<'PY'
+          import pathlib
+          import yaml
+          workflows = pathlib.Path(".github/workflows")
+          for path in sorted(workflows.glob("*.yml")):
+            with path.open("r", encoding="utf-8") as handle:
+              yaml.safe_load(handle)
+          print("Workflow YAML validation passed.")
+          PY

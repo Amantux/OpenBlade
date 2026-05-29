@@ -9,6 +9,25 @@ OpenBlade is a simulator-first DIY tape archive controller inspired by iBlade-st
 - CLI and API for inventory, formatting, archive, restore, and job inspection
 - Property, integration, fault-injection, and end-to-end tests
 
+## OpenBlade goals
+1. **Safety-first operations**: keep destructive and hardware-sensitive workflows gated and explicit.
+2. **Simulator-first reliability**: make the Quantum i3 emulator deterministic enough for archive/restore/inventory/fault regression work.
+3. **Quantum compatibility**: maintain AML/API/state behavior aligned with the documented i3/i6 Web Services surface in strict scope.
+4. **Operator control plane clarity**: provide a focused API/UI/CLI for fleet and library workflows without out-of-scope feature leakage.
+5. **Continuous verification**: enforce compatibility and regression evidence in CI/CD before changes land on `master`.
+
+## Layered CI/CD (targeted)
+OpenBlade CI/CD is intentionally split by layer so each change runs only relevant checks:
+
+| Layer | Primary workflow/jobs | Trigger scope |
+| --- | --- | --- |
+| API + backend domain | `CI`: `backend-lint`, `backend-typecheck`, `backend-tests`, `api-aml-integration` | `openblade/**/*.py`, AML integration tests, backend config |
+| Simulator/emulator parity | `CI`: `i3-smoke`; `i3-emulator-compliance`; `emulator-change-gates` | simulator, AML routes, emulator contract/tools, i3 tests, compose/runtime wiring |
+| Frontend/UI | `CI`: `frontend-build-test` | `frontend/**` |
+| CI/CD policy layer | `CI`: `cicd-workflow-validate` | `.github/workflows/**` |
+
+This keeps checks up to date and targeted while preserving full coverage on workflow dispatch and on emulator-specific workflows.
+
 ## Quick start
 ```bash
 pip install -e '.[dev]'
