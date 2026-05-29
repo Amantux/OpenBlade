@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
 import os
 import re
@@ -24,8 +25,174 @@ from openblade.simulator.i3_config import scalar_i3_default_config
 
 _DEFAULT_ADMIN_PASSWORD = "password"
 _DEFAULT_SERVICE_PASSWORD = "service123"
+_LATENCY_PROFILES = {"instant", "realistic", "hardware", "custom"}
+_LATENCY_TIERS = ("instant", "realistic", "hardware")
+_DEFAULT_EMULATOR_LATENCY_PROFILE_MS: dict[str, dict[str, int]] = {
+    "auth": {"instant": 0, "realistic": 100, "hardware": 500},
+    "inventory": {"instant": 0, "realistic": 2000, "hardware": 45000},
+    "mount": {"instant": 0, "realistic": 2000, "hardware": 15000},
+    "unmount": {"instant": 0, "realistic": 1500, "hardware": 10000},
+    "move": {"instant": 0, "realistic": 1500, "hardware": 8000},
+    "format": {"instant": 0, "realistic": 8000, "hardware": 300000},
+    "query": {"instant": 0, "realistic": 150, "hardware": 1200},
+    "config": {"instant": 0, "realistic": 400, "hardware": 3000},
+    "diagnostic": {"instant": 0, "realistic": 1500, "hardware": 90000},
+    "reboot": {"instant": 0, "realistic": 4000, "hardware": 30000},
+    "power": {"instant": 0, "realistic": 4000, "hardware": 30000},
+}
 
 _aml_log = logging.getLogger(__name__)
+
+
+def _parse_env_bool(raw: str | None, *, default: bool) -> bool:
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_latency_profile(profile: str | None) -> str:
+    normalized = (profile or "instant").strip().lower()
+    if normalized in _LATENCY_PROFILES:
+        return normalized
+    return "instant"
+
+
+def _env_emulator_latency_profile() -> str:
+    return _normalize_latency_profile(
+        os.environ.get("OPENBLADE_EMULATOR_LATENCY_PROFILE")
+        or os.environ.get("EMULATOR_LATENCY_PROFILE")
+    )
+
+
+def _env_emulator_latency_enabled() -> bool:
+    raw = os.environ.get("OPENBLADE_EMULATOR_LATENCY_ENABLED")
+    if raw is None:
+        raw = os.environ.get("EMULATOR_LATENCY_ENABLED")
+    return _parse_env_bool(raw, default=True)
+
+
+def _env_emulator_latency_profile_ms() -> dict[str, dict[str, int]] | None:
+    raw = os.environ.get("OPENBLADE_EMULATOR_LATENCY_PROFILE_MS")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        _aml_log.warning("Invalid OPENBLADE_EMULATOR_LATENCY_PROFILE_MS JSON; ignoring override")
+        return None
+    if not isinstance(data, dict):
+        return None
+    parsed: dict[str, dict[str, int]] = {}
+    for operation, values in data.items():
+        if not isinstance(operation, str) or not isinstance(values, dict):
+            continue
+        casted: dict[str, int] = {}
+        for tier in _LATENCY_TIERS:
+            value = values.get(tier)
+            if not isinstance(value, int) or value < 0:
+                casted = {}
+                break
+            casted[tier] = value
+        if casted:
+            parsed[operation] = casted
+    return parsed or None
+
+
+def _default_emulator_latency_config(
+    *,
+    profile_override: str | None = None,
+    enabled_override: bool | None = None,
+) -> dict[str, Any]:
+    profile_ms = deepcopy(_DEFAULT_EMULATOR_LATENCY_PROFILE_MS)
+    profile_ms_override = _env_emulator_latency_profile_ms()
+    if profile_ms_override:
+        for operation, values in profile_ms_override.items():
+            profile_ms[operation] = values
+    return {
+        "enabled": _env_emulator_latency_enabled()
+        if enabled_override is None
+        else enabled_override,
+        "profile": _env_emulator_latency_profile()
+        if profile_override is None
+        else _normalize_latency_profile(profile_override),
+        "profileMs": profile_ms,
+    }
+
+
+def _normalize_emulator_latency_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = _default_emulator_latency_config()
+    if not isinstance(config, dict):
+        return normalized
+    profile = config.get("profile")
+    if isinstance(profile, str):
+        normalized["profile"] = _normalize_latency_profile(profile)
+    enabled = config.get("enabled")
+    if isinstance(enabled, bool):
+        normalized["enabled"] = enabled
+    profile_ms = config.get("profileMs")
+    if isinstance(profile_ms, dict):
+        parsed_profile_ms: dict[str, dict[str, int]] = {}
+        for operation, values in profile_ms.items():
+            if not isinstance(operation, str) or not isinstance(values, dict):
+                continue
+            casted: dict[str, int] = {}
+            for tier in _LATENCY_TIERS:
+                value = values.get(tier)
+                if not isinstance(value, int) or value < 0:
+                    casted = {}
+                    break
+                casted[tier] = value
+            if casted:
+                parsed_profile_ms[operation] = casted
+        if parsed_profile_ms:
+            normalized["profileMs"] = parsed_profile_ms
+    return normalized
+
+
+def _default_latency_stat() -> dict[str, Any]:
+    return {"min": None, "max": None, "avg": 0.0, "total": 0, "last": 0}
+
+
+def _default_emulator_latency_metrics() -> dict[str, Any]:
+    return {
+        "capturedRequests": 0,
+        "durationMs": _default_latency_stat(),
+        "simulatedDelayMs": _default_latency_stat(),
+        "endpoints": {},
+    }
+
+
+def _new_latency_endpoint_metric(method: str, endpoint: str) -> dict[str, Any]:
+    return {
+        "method": method,
+        "endpoint": endpoint,
+        "count": 0,
+        "lastStatusCode": 0,
+        "statusCodes": {},
+        "durationMs": _default_latency_stat(),
+        "simulatedDelayMs": _default_latency_stat(),
+    }
+
+
+def _update_latency_stats(stats: dict[str, Any], value_ms: int, *, count: int) -> None:
+    normalized_value = max(0, int(value_ms))
+    previous_min = stats.get("min")
+    previous_max = stats.get("max")
+    stats["min"] = (
+        normalized_value
+        if previous_min is None
+        else min(int(previous_min), normalized_value)
+    )
+    stats["max"] = (
+        normalized_value
+        if previous_max is None
+        else max(int(previous_max), normalized_value)
+    )
+    total = int(stats.get("total", 0)) + normalized_value
+    stats["total"] = total
+    stats["last"] = normalized_value
+    stats["avg"] = round(total / max(count, 1), 3)
+
 
 def _get_admin_password() -> str:
     pw = os.environ.get("OPENBLADE_ADMIN_PASSWORD", _DEFAULT_ADMIN_PASSWORD)
@@ -36,6 +203,7 @@ def _get_admin_password() -> str:
         )
     return pw
 
+
 def _get_service_password() -> str:
     pw = os.environ.get("OPENBLADE_SERVICE_PASSWORD", _DEFAULT_SERVICE_PASSWORD)
     if pw == _DEFAULT_SERVICE_PASSWORD:
@@ -44,6 +212,7 @@ def _get_service_password() -> str:
             "Set OPENBLADE_SERVICE_PASSWORD env var before deploying to production."
         )
     return pw
+
 
 # Keep module-level names for backward compat (test code may reference these)
 DEFAULT_ADMIN_PASSWORD = _DEFAULT_ADMIN_PASSWORD
@@ -110,152 +279,173 @@ class AMLState:
     )
     service_access_code: str = field(default_factory=lambda: _generate_numeric_code(8))
     service_access_generated_at: datetime = field(default_factory=lambda: _utcnow())
-    aml_system_config: dict[str, Any] = field(default_factory=lambda: {
-        "hostname": "openblade-1",
-        "timezone": "UTC",
-        "locale": "en_US",
-        "dateFormat": "YYYY-MM-DD",
-        "temperatureUnit": "celsius",
-        "emulatorLatency": {
-            "profile": "instant",
-            "profileMs": {
-                "auth": {"instant": 0, "realistic": 100, "hardware": 500},
-                "inventory": {"instant": 0, "realistic": 2000, "hardware": 45000},
-                "mount": {"instant": 0, "realistic": 2000, "hardware": 15000},
-                "unmount": {"instant": 0, "realistic": 1500, "hardware": 10000},
-                "move": {"instant": 0, "realistic": 1500, "hardware": 8000},
-                "format": {"instant": 0, "realistic": 8000, "hardware": 300000},
-                "query": {"instant": 0, "realistic": 150, "hardware": 1200},
-                "config": {"instant": 0, "realistic": 400, "hardware": 3000},
-                "diagnostic": {"instant": 0, "realistic": 1500, "hardware": 90000},
+    aml_system_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "hostname": "openblade-1",
+            "timezone": "UTC",
+            "locale": "en_US",
+            "dateFormat": "YYYY-MM-DD",
+            "temperatureUnit": "celsius",
+            "emulatorLatency": _default_emulator_latency_config(),
+        }
+    )
+    aml_emulator_latency_metrics: dict[str, Any] = field(
+        default_factory=lambda: _default_emulator_latency_metrics()
+    )
+    aml_network_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "interfaces": {
+                "eth0": {
+                    "name": "eth0",
+                    "type": "ethernet",
+                    "ip": "192.168.1.100",
+                    "mask": "255.255.255.0",
+                    "gateway": "192.168.1.1",
+                    "mac": "00:1A:2B:3C:4D:5E",
+                    "status": "up",
+                    "speed": "1G",
+                    "duplex": "full",
+                    "enabled": True,
+                },
+                "eth1": {
+                    "name": "eth1",
+                    "type": "ethernet",
+                    "ip": "10.0.0.100",
+                    "mask": "255.255.255.0",
+                    "gateway": "10.0.0.1",
+                    "mac": "00:1A:2B:3C:4D:5F",
+                    "status": "up",
+                    "speed": "1G",
+                    "duplex": "full",
+                    "enabled": True,
+                },
             },
-        },
-    })
-    aml_network_config: dict[str, Any] = field(default_factory=lambda: {
-        "interfaces": {
-            "eth0": {
-                "name": "eth0",
-                "type": "ethernet",
-                "ip": "192.168.1.100",
-                "mask": "255.255.255.0",
-                "gateway": "192.168.1.1",
-                "mac": "00:1A:2B:3C:4D:5E",
-                "status": "up",
-                "speed": "1G",
-                "duplex": "full",
+            "dns": {
+                "primary": "8.8.8.8",
+                "secondary": "8.8.4.4",
+                "search": ["local"],
+                "domain": "local",
+            },
+            "ntp": {
                 "enabled": True,
+                "servers": ["pool.ntp.org", "time.cloudflare.com"],
+                "status": "synced",
+                "lastSync": "2024-01-15T06:00:00Z",
             },
-            "eth1": {
-                "name": "eth1",
-                "type": "ethernet",
-                "ip": "10.0.0.100",
-                "mask": "255.255.255.0",
-                "gateway": "10.0.0.1",
-                "mac": "00:1A:2B:3C:4D:5F",
-                "status": "up",
-                "speed": "1G",
-                "duplex": "full",
-                "enabled": True,
-            },
-        },
-        "dns": {"primary": "8.8.8.8", "secondary": "8.8.4.4", "search": ["local"], "domain": "local"},
-        "ntp": {
+            "routes": [],
+        }
+    )
+    aml_snmp_config: dict[str, Any] = field(
+        default_factory=lambda: {
             "enabled": True,
-            "servers": ["pool.ntp.org", "time.cloudflare.com"],
-            "status": "synced",
-            "lastSync": "2024-01-15T06:00:00Z",
-        },
-        "routes": [],
-    })
-    aml_snmp_config: dict[str, Any] = field(default_factory=lambda: {
-        "enabled": True,
-        "version": "v2c",
-        "community": "public",
-        "trapHosts": [],
-        "contact": "admin@example.com",
-        "location": "Data Center",
-    })
-    aml_email_config: dict[str, Any] = field(default_factory=lambda: {
-        "enabled": False,
-        "smtpHost": "",
-        "smtpPort": 587,
-        "smtpUser": "",
-        "from": "openblade@example.com",
-        "tls": True,
-        "recipients": [],
-    })
-    aml_syslog_config: dict[str, Any] = field(default_factory=lambda: {
-        "enabled": False,
-        "host": "",
-        "port": 514,
-        "protocol": "UDP",
-        "facility": "local0",
-        "severity": "warning",
-    })
-    aml_services: dict[str, dict[str, Any]] = field(default_factory=lambda: {
-        "api": {
-            "name": "api",
-            "status": "running",
-            "pid": 1234,
-            "uptime": 86400,
-            "description": "OpenBlade API",
-        },
-        "web": {
-            "name": "web",
-            "status": "running",
-            "pid": 1235,
-            "uptime": 86400,
-            "description": "Web UI",
-        },
-        "archiver": {
-            "name": "archiver",
-            "status": "running",
-            "pid": 1236,
-            "uptime": 86400,
-            "description": "Archive Service",
-        },
-    })
+            "version": "v2c",
+            "community": "public",
+            "trapHosts": [],
+            "contact": "admin@example.com",
+            "location": "Data Center",
+        }
+    )
+    aml_email_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "smtpHost": "",
+            "smtpPort": 587,
+            "smtpUser": "",
+            "from": "openblade@example.com",
+            "tls": True,
+            "recipients": [],
+        }
+    )
+    aml_syslog_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "host": "",
+            "port": 514,
+            "protocol": "UDP",
+            "facility": "local0",
+            "severity": "warning",
+        }
+    )
+    aml_services: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: {
+            "api": {
+                "name": "api",
+                "status": "running",
+                "pid": 1234,
+                "uptime": 86400,
+                "description": "OpenBlade API",
+            },
+            "web": {
+                "name": "web",
+                "status": "running",
+                "pid": 1235,
+                "uptime": 86400,
+                "description": "Web UI",
+            },
+            "archiver": {
+                "name": "archiver",
+                "status": "running",
+                "pid": 1236,
+                "uptime": 86400,
+                "description": "Archive Service",
+            },
+        }
+    )
     aml_audit_log: list[dict[str, Any]] = field(default_factory=list)
-    aml_ha_config: dict[str, Any] = field(default_factory=lambda: {
-        "enabled": False,
-        "role": "standalone",
-        "partner": None,
-        "state": "active",
-        "lastFailover": None,
-    })
-    aml_callhome_config: dict[str, Any] = field(default_factory=lambda: {
-        "enabled": False,
-        "endpoint": "https://callhome.quantum.com",
-        "interval": 3600,
-        "lastContact": None,
-    })
-    aml_system_security: dict[str, Any] = field(default_factory=lambda: {
-        "tlsEnabled": True,
-        "tlsVersion": "TLS1.3",
-        "cipherSuites": ["TLS_AES_256_GCM_SHA384"],
-        "certExpiry": "2025-12-31",
-        "sshEnabled": True,
-        "loginBanner": "",
-    })
-    aml_debug_config: dict[str, Any] = field(default_factory=lambda: {"logLevel": "INFO", "debugMode": False, "traceEnabled": False})
-    aml_system_preferences: dict[str, Any] = field(default_factory=lambda: {
-        "sessionTimeout": 1800,
-        "idleTimeout": 900,
-        "passwordPolicy": {"minLength": 8, "requireSpecial": True},
-        "auditLog": True,
-    })
-    aml_remote_config: dict[str, Any] = field(default_factory=lambda: {
-        "ssh": {"enabled": True, "port": 22},
-        "vnc": {"enabled": False, "port": 5900},
-        "rdp": {"enabled": False},
-    })
-    aml_proxy_config: dict[str, Any] = field(default_factory=lambda: {
-        "enabled": False,
-        "host": "",
-        "port": 8080,
-        "user": "",
-        "noProxy": ["localhost", "127.0.0.1"],
-    })
+    aml_ha_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "role": "standalone",
+            "partner": None,
+            "state": "active",
+            "lastFailover": None,
+        }
+    )
+    aml_callhome_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "endpoint": "https://callhome.quantum.com",
+            "interval": 3600,
+            "lastContact": None,
+        }
+    )
+    aml_system_security: dict[str, Any] = field(
+        default_factory=lambda: {
+            "tlsEnabled": True,
+            "tlsVersion": "TLS1.3",
+            "cipherSuites": ["TLS_AES_256_GCM_SHA384"],
+            "certExpiry": "2025-12-31",
+            "sshEnabled": True,
+            "loginBanner": "",
+        }
+    )
+    aml_debug_config: dict[str, Any] = field(
+        default_factory=lambda: {"logLevel": "INFO", "debugMode": False, "traceEnabled": False}
+    )
+    aml_system_preferences: dict[str, Any] = field(
+        default_factory=lambda: {
+            "sessionTimeout": 1800,
+            "idleTimeout": 900,
+            "passwordPolicy": {"minLength": 8, "requireSpecial": True},
+            "auditLog": True,
+        }
+    )
+    aml_remote_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "ssh": {"enabled": True, "port": 22},
+            "vnc": {"enabled": False, "port": 5900},
+            "rdp": {"enabled": False},
+        }
+    )
+    aml_proxy_config: dict[str, Any] = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "host": "",
+            "port": 8080,
+            "user": "",
+            "noProxy": ["localhost", "127.0.0.1"],
+        }
+    )
     aml_system_started_at: float = field(default_factory=lambda: time.time() - 86400.0)
     session_timeout_minutes: int = 30
     password_policy: dict[str, Any] = field(
@@ -281,19 +471,35 @@ class AMLState:
     fc_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_fc_blades())
     mgmt_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_mgmt_blades())
     blade_firmware: list[dict[str, Any]] = field(default_factory=lambda: _default_blade_firmware())
-    drive_firmware_images: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_drive_firmware_images())
-    system_firmware_info: dict[str, Any] = field(default_factory=lambda: _default_system_firmware_info())
+    drive_firmware_images: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_drive_firmware_images()
+    )
+    system_firmware_info: dict[str, Any] = field(
+        default_factory=lambda: _default_system_firmware_info()
+    )
     drive_sleds: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_drive_sleds())
-    power_supplies: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_power_supplies())
+    power_supplies: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_power_supplies()
+    )
     aml_fans: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_fans())
     aml_robots: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_robots())
     aml_towers: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_towers())
-    aml_ie_stations: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_ie_stations())
-    aml_magazines: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_magazines())
-    aml_partitions: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_partitions())
-    aml_partitions_global: dict[str, Any] = field(default_factory=lambda: _default_aml_partitions_global())
+    aml_ie_stations: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_ie_stations()
+    )
+    aml_magazines: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_magazines()
+    )
+    aml_partitions: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_partitions()
+    )
+    aml_partitions_global: dict[str, Any] = field(
+        default_factory=lambda: _default_aml_partitions_global()
+    )
     aml_media: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_media())
-    aml_media_pools: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_media_pools())
+    aml_media_pools: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_media_pools()
+    )
     aml_drives: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_drives())
     aml_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
     aml_job_history: list[dict[str, Any]] = field(default_factory=list)
@@ -301,13 +507,17 @@ class AMLState:
     aml_mounts: dict[str, dict[str, Any]] = field(default_factory=dict)
     aml_events: list[dict[str, Any]] = field(default_factory=lambda: _default_aml_events())
     aml_ras_tickets: dict[str, dict[str, Any]] = field(default_factory=dict)
-    aml_logs_store: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_logs_store())
+    aml_logs_store: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_logs_store()
+    )
     aml_alerts_store: dict[str, dict[str, Any]] = field(default_factory=dict)
     aml_tapealerts: list[dict[str, Any]] = field(default_factory=list)
     aml_notifications: dict[str, dict[str, Any]] = field(default_factory=dict)
     aml_log_level: dict[str, Any] = field(default_factory=lambda: _default_aml_log_level())
     aml_event_subscriptions: list[dict[str, Any]] = field(default_factory=list)
-    aml_inventory_status: dict[str, Any] = field(default_factory=lambda: _default_aml_inventory_status())
+    aml_inventory_status: dict[str, Any] = field(
+        default_factory=lambda: _default_aml_inventory_status()
+    )
     aml_import_status: dict[str, Any] = field(
         default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None}
     )
@@ -315,61 +525,139 @@ class AMLState:
         default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None}
     )
     aml_cleaning_status: dict[str, Any] = field(
-        default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None, "drives": []}
+        default_factory=lambda: {
+            "state": "idle",
+            "startTime": None,
+            "completedTime": None,
+            "drives": [],
+        }
     )
-    aml_drive_cleaning_reports: list[dict[str, Any]] = field(default_factory=lambda: _default_aml_drive_cleaning_reports())
-    aml_drive_operation_tasks: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_drive_operation_tasks())
-    aml_diagnostic_tests: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_diagnostic_tests())
-    aml_diagnostic_results: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_diagnostic_results())
+    aml_drive_cleaning_reports: list[dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_drive_cleaning_reports()
+    )
+    aml_drive_operation_tasks: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_drive_operation_tasks()
+    )
+    aml_library_operation_tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aml_physical_segments: list[dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_physical_segments()
+    )
+    aml_diagnostic_tests: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_diagnostic_tests()
+    )
+    aml_diagnostic_results: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_diagnostic_results()
+    )
     aml_robotics_last_test_time: str | None = None
-    aml_system_certificates: list[dict[str, Any]] = field(default_factory=lambda: [{
-        "id": "cert-001", "name": "default", "subject": "CN=OpenBlade",
-        "issuer": "CN=OpenBlade CA", "notBefore": "2024-01-01T00:00:00Z",
-        "notAfter": "2025-01-01T00:00:00Z", "fingerprint": "AA:BB:CC:DD",
-        "status": "active", "type": "self-signed"
-    }])
-    aml_system_cert_info: dict[str, Any] = field(default_factory=lambda: {
-        "subject": "CN=OpenBlade", "issuer": "CN=OpenBlade CA",
-        "notBefore": "2024-01-01T00:00:00Z", "notAfter": "2025-01-01T00:00:00Z",
-        "fingerprint": "AA:BB:CC:DD", "status": "active"
-    })
+    aml_system_certificates: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {
+                "id": "cert-001",
+                "name": "default",
+                "subject": "CN=OpenBlade",
+                "issuer": "CN=OpenBlade CA",
+                "notBefore": "2024-01-01T00:00:00Z",
+                "notAfter": "2025-01-01T00:00:00Z",
+                "fingerprint": "AA:BB:CC:DD",
+                "status": "active",
+                "type": "self-signed",
+            }
+        ]
+    )
+    aml_system_cert_info: dict[str, Any] = field(
+        default_factory=lambda: {
+            "subject": "CN=OpenBlade",
+            "issuer": "CN=OpenBlade CA",
+            "notBefore": "2024-01-01T00:00:00Z",
+            "notAfter": "2025-01-01T00:00:00Z",
+            "fingerprint": "AA:BB:CC:DD",
+            "status": "active",
+        }
+    )
     aml_system_recent_traps: list[dict[str, Any]] = field(default_factory=list)
-    aml_system_storage_volumes: dict[str, dict[str, Any]] = field(default_factory=lambda: {
-        "system": {"name": "system", "total": 500, "used": 120, "free": 380, "unit": "GB", "status": "healthy"},
-        "data": {"name": "data", "total": 2000, "used": 800, "free": 1200, "unit": "GB", "status": "healthy"},
-    })
-    aml_system_backup_status: dict[str, Any] = field(default_factory=lambda: {
-        "state": "idle", "lastBackup": None, "nextBackup": None, "progress": 0
-    })
+    aml_system_storage_volumes: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: {
+            "system": {
+                "name": "system",
+                "total": 500,
+                "used": 120,
+                "free": 380,
+                "unit": "GB",
+                "status": "healthy",
+            },
+            "data": {
+                "name": "data",
+                "total": 2000,
+                "used": 800,
+                "free": 1200,
+                "unit": "GB",
+                "status": "healthy",
+            },
+        }
+    )
+    aml_system_backup_status: dict[str, Any] = field(
+        default_factory=lambda: {
+            "state": "idle",
+            "lastBackup": None,
+            "nextBackup": None,
+            "progress": 0,
+        }
+    )
     aml_system_backup_history: list[dict[str, Any]] = field(default_factory=list)
     aml_system_available_updates: list[dict[str, Any]] = field(default_factory=list)
-    aml_system_update_status: dict[str, Any] = field(default_factory=lambda: {
-        "state": "idle", "progress": 0, "message": "No update in progress"
-    })
-    aml_system_last_diagnostics: dict[str, Any] = field(default_factory=lambda: {
-        "state": "idle", "lastRun": None, "result": None, "tests": []
-    })
-    aml_system_support_bundle: dict[str, Any] = field(default_factory=lambda: {
-        "state": "idle", "filename": None, "createdAt": None, "size": 0
-    })
+    aml_system_update_status: dict[str, Any] = field(
+        default_factory=lambda: {"state": "idle", "progress": 0, "message": "No update in progress"}
+    )
+    aml_system_last_diagnostics: dict[str, Any] = field(
+        default_factory=lambda: {"state": "idle", "lastRun": None, "result": None, "tests": []}
+    )
+    aml_system_support_bundle: dict[str, Any] = field(
+        default_factory=lambda: {"state": "idle", "filename": None, "createdAt": None, "size": 0}
+    )
     aml_system_manual_time_utc: str | None = None
-    aml_ltfs_sections: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_ltfs_sections())
-    aml_iscsi_blades: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_iscsi_blades())
-    aml_advanced_ha_config: dict[str, Any] = field(default_factory=lambda: _default_aml_advanced_ha_config())
-    aml_advanced_ha_nodes: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_advanced_ha_nodes())
+    aml_ltfs_sections: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_ltfs_sections()
+    )
+    aml_iscsi_blades: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_iscsi_blades()
+    )
+    aml_advanced_ha_config: dict[str, Any] = field(
+        default_factory=lambda: _default_aml_advanced_ha_config()
+    )
+    aml_advanced_ha_nodes: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_advanced_ha_nodes()
+    )
     aml_ekm_config: dict[str, Any] = field(default_factory=lambda: _default_aml_ekm_config())
     aml_ekm_status: dict[str, Any] = field(default_factory=lambda: _default_aml_ekm_status())
     aml_ekm_keys: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_ekm_keys())
-    aml_sharing_config: dict[str, Any] = field(default_factory=lambda: _default_aml_sharing_config())
-    aml_sharing_status: dict[str, Any] = field(default_factory=lambda: _default_aml_sharing_status())
-    aml_sharing_clients: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_sharing_clients())
-    aml_remote_libraries: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_aml_remote_libraries())
-    aml_supported_media: list[dict[str, Any]] = field(default_factory=lambda: _default_aml_supported_media())
-    iblade_messages: list[dict[str, Any]] = field(default_factory=lambda: _default_iblade_messages())
+    aml_sharing_config: dict[str, Any] = field(
+        default_factory=lambda: _default_aml_sharing_config()
+    )
+    aml_sharing_status: dict[str, Any] = field(
+        default_factory=lambda: _default_aml_sharing_status()
+    )
+    aml_sharing_clients: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_sharing_clients()
+    )
+    aml_remote_libraries: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_remote_libraries()
+    )
+    aml_supported_media: list[dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_supported_media()
+    )
+    iblade_messages: list[dict[str, Any]] = field(
+        default_factory=lambda: _default_iblade_messages()
+    )
     iblade_hosts: dict[str, dict[str, Any]] = field(default_factory=lambda: _default_iblade_hosts())
-    iblade_network_config: dict[str, Any] = field(default_factory=lambda: _default_iblade_network_config())
-    iblade_system_settings: dict[str, Any] = field(default_factory=lambda: _default_iblade_system_settings())
-    iblade_volume_groups: dict[int, dict[str, Any]] = field(default_factory=lambda: _default_iblade_volume_groups())
+    iblade_network_config: dict[str, Any] = field(
+        default_factory=lambda: _default_iblade_network_config()
+    )
+    iblade_system_settings: dict[str, Any] = field(
+        default_factory=lambda: _default_iblade_system_settings()
+    )
+    iblade_volume_groups: dict[int, dict[str, Any]] = field(
+        default_factory=lambda: _default_iblade_volume_groups()
+    )
 
 
 def _utcnow() -> datetime:
@@ -430,7 +718,9 @@ def _default_aml_licenses() -> dict[str, dict[str, Any]]:
 def _default_aml_inventory_status() -> dict[str, Any]:
     config = scalar_i3_default_config()
     partition = config["partition"]
-    elements_total = int(partition["slotCount"]) + len(config["drives"]) + int(partition["ieSlotCount"])
+    elements_total = (
+        int(partition["slotCount"]) + len(config["drives"]) + int(partition["ieSlotCount"])
+    )
     return {
         "state": "idle",
         "startTime": None,
@@ -446,7 +736,9 @@ def _default_aml_partitions() -> dict[str, dict[str, Any]]:
     partition = config["partition"]
     drives = [str(drive["id"]) for drive in config["drives"]]
     data_media = [media for media in config["media"] if media.get("role") != "cleaning"]
-    cleaning_barcodes = [str(media["barcode"]) for media in config["media"] if media.get("role") == "cleaning"]
+    cleaning_barcodes = [
+        str(media["barcode"]) for media in config["media"] if media.get("role") == "cleaning"
+    ]
     data_slot_addresses = [str(media["slotAddress"]) for media in data_media]
     return {
         str(partition["name"]): {
@@ -493,13 +785,26 @@ def _default_aml_partitions() -> dict[str, dict[str, Any]]:
                 "mountCount": sum(int(drive.get("loadCount", 0)) for drive in config["drives"]),
                 "unmountCount": sum(int(drive.get("loadCount", 0)) for drive in config["drives"]),
                 "errorCount": sum(int(drive.get("errorCount", 0)) for drive in config["drives"]),
-                "lastMount": max((str(media.get("lastLoaded")) for media in data_media if media.get("lastLoaded")), default=None),
-                "lastUnmount": max((str(media.get("lastLoaded")) for media in data_media if media.get("lastLoaded")), default=None),
+                "lastMount": max(
+                    (
+                        str(media.get("lastLoaded"))
+                        for media in data_media
+                        if media.get("lastLoaded")
+                    ),
+                    default=None,
+                ),
+                "lastUnmount": max(
+                    (
+                        str(media.get("lastLoaded"))
+                        for media in data_media
+                        if media.get("lastLoaded")
+                    ),
+                    default=None,
+                ),
                 "mediaUsage": [],
             },
         }
     }
-
 
 
 def _default_aml_partitions_global() -> dict[str, Any]:
@@ -509,7 +814,6 @@ def _default_aml_partitions_global() -> dict[str, Any]:
         "maxPartitions": 8,
         "currentPartitions": 1,
     }
-
 
 
 def _default_aml_events() -> list[dict[str, Any]]:
@@ -531,7 +835,6 @@ def _default_aml_events() -> list[dict[str, Any]]:
             "details": {"drive": "DRV-001"},
         },
     ]
-
 
 
 def _default_aml_logs_store() -> dict[str, dict[str, Any]]:
@@ -563,13 +866,11 @@ def _default_aml_logs_store() -> dict[str, dict[str, Any]]:
     }
 
 
-
 def _default_aml_log_level() -> dict[str, Any]:
     return {
         "level": "INFO",
         "components": {"api": "INFO", "archive": "INFO", "robotics": "DEBUG"},
     }
-
 
 
 def _default_aml_media() -> dict[str, dict[str, Any]]:
@@ -606,11 +907,9 @@ def _default_aml_media() -> dict[str, dict[str, Any]]:
     return media
 
 
-
 def _normalize_aml_media_pool_id(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     return normalized or f"pool-{uuid4().hex[:8]}"
-
 
 
 def _build_aml_media_pool(
@@ -627,8 +926,16 @@ def _build_aml_media_pool(
 ) -> dict[str, Any]:
     normalized_pool_id = _normalize_aml_media_pool_id(pool_id)
     normalized_name = str(name).strip() or normalized_pool_id
-    normalized_barcodes = [barcode.strip() for barcode in assigned_barcodes or [] if isinstance(barcode, str) and barcode.strip()]
-    normalized_target = str(target_lto_generation).strip() if isinstance(target_lto_generation, str) and target_lto_generation.strip() else None
+    normalized_barcodes = [
+        barcode.strip()
+        for barcode in assigned_barcodes or []
+        if isinstance(barcode, str) and barcode.strip()
+    ]
+    normalized_target = (
+        str(target_lto_generation).strip()
+        if isinstance(target_lto_generation, str) and target_lto_generation.strip()
+        else None
+    )
     normalized_max_drives = max(1, int(max_drives))
     normalized_quota = None if quota_gb is None else max(1, int(quota_gb))
     normalized_color = str(color).strip().upper() or "#2563EB"
@@ -647,7 +954,6 @@ def _build_aml_media_pool(
         "createdAt": created_at or _isoformat(_utcnow()),
     }
     return stored
-
 
 
 def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
@@ -705,7 +1011,6 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
     }
 
 
-
 def _default_aml_drives() -> dict[str, dict[str, Any]]:
     drives: dict[str, dict[str, Any]] = {}
     for item in scalar_i3_default_config()["drives"]:
@@ -725,7 +1030,12 @@ def _default_aml_drives() -> dict[str, dict[str, Any]]:
             "cleaningCount": int(item.get("cleaningCount", 1)),
             "lastCleaned": item.get("lastCleaned"),
             "loadedMedia": None,
-            "config": {"compression": True, "encryption": False, "speed": "400MB/s", "bufferSize": "256MB"},
+            "config": {
+                "compression": True,
+                "encryption": False,
+                "speed": "400MB/s",
+                "bufferSize": "256MB",
+            },
             "encryptionState": {
                 "enabled": False,
                 "mode": "applicationManaged",
@@ -737,7 +1047,6 @@ def _default_aml_drives() -> dict[str, dict[str, Any]]:
             "diagnosticResult": None,
         }
     return drives
-
 
 
 def _default_iblade_messages() -> list[dict[str, Any]]:
@@ -871,7 +1180,6 @@ def _default_blade_firmware() -> list[dict[str, Any]]:
     ]
 
 
-
 def _default_drive_firmware_images() -> dict[str, dict[str, Any]]:
     return {
         "lto9-h3j4.img": {
@@ -895,7 +1203,6 @@ def _default_drive_firmware_images() -> dict[str, dict[str, Any]]:
             "active": False,
         },
     }
-
 
 
 def _default_system_firmware_info() -> dict[str, Any]:
@@ -923,7 +1230,6 @@ def _default_system_firmware_info() -> dict[str, Any]:
         },
         "lastActivated": "2024-01-05T14:00:00Z",
     }
-
 
 
 def _default_eth_blades() -> dict[str, dict[str, Any]]:
@@ -1228,32 +1534,39 @@ def _default_aml_ie_stations() -> dict[str, dict[str, Any]]:
 
 def _default_aml_magazines() -> dict[str, dict[str, Any]]:
     config = scalar_i3_default_config()
-    data_media = [item for item in config["media"] if item.get("role") != "cleaning"]
-    bay_barcodes: dict[int, list[str]] = {1: [], 2: []}
-    for media in data_media:
+    total_slots = int(config["partition"]["slotCount"])
+    bay_slot_counts: dict[int, int] = {1: total_slots // 2, 2: total_slots - (total_slots // 2)}
+    bay_media_by_slot: dict[int, list[tuple[int, str]]] = {1: [], 2: []}
+
+    for media in config["media"]:
         parts = str(media.get("slotAddress", "1,1,1")).split(",")
         bay = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
-        bay_barcodes.setdefault(bay, []).append(str(media["barcode"]))
+        slot = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 1
+        bay_media_by_slot.setdefault(bay, []).append((slot, str(media["barcode"])))
+
+    def _magazine_for_bay(bay: int) -> dict[str, Any]:
+        slot_count = bay_slot_counts.get(bay, 0)
+        slot_addresses = [f"1,{bay},{index}" for index in range(1, slot_count + 1)]
+        ordered_barcodes = [
+            barcode for _, barcode in sorted(bay_media_by_slot.get(bay, []), key=lambda item: item[0])
+        ]
+        return {
+            "id": f"MAG-{bay}",
+            "bay": bay,
+            "location": f"1,{bay},MAG-{bay}",
+            "status": "online",
+            "slotCount": slot_count,
+            "occupiedSlots": len(ordered_barcodes),
+            "slotAddresses": slot_addresses,
+            "tapes": ordered_barcodes,
+            "barcodeFormat": "^[A-Z0-9]{8}$",
+            "coordinateSystem": "1,bay,slot",
+        }
 
     return {
-        "MAG-1": {
-            "id": "MAG-1",
-            "location": "TWR-1,col1,row1",
-            "status": "online",
-            "slotCount": 10,
-            "occupiedSlots": min(3, len(bay_barcodes.get(1, []))),
-            "tapes": bay_barcodes.get(1, [])[:3],
-        },
-        "MAG-2": {
-            "id": "MAG-2",
-            "location": "TWR-2,col1,row1",
-            "status": "online",
-            "slotCount": 10,
-            "occupiedSlots": min(3, len(bay_barcodes.get(2, []))),
-            "tapes": bay_barcodes.get(2, [])[:3],
-        },
+        "MAG-1": _magazine_for_bay(1),
+        "MAG-2": _magazine_for_bay(2),
     }
-
 
 
 def _default_aml_ltfs_sections() -> dict[str, dict[str, Any]]:
@@ -1261,7 +1574,6 @@ def _default_aml_ltfs_sections() -> dict[str, dict[str, Any]]:
         str(section["sectionNumber"]): deepcopy(section)
         for section in scalar_i3_default_config()["ltfsSections"]
     }
-
 
 
 def _default_aml_iscsi_blades() -> dict[str, dict[str, Any]]:
@@ -1307,7 +1619,6 @@ def _default_aml_iscsi_blades() -> dict[str, dict[str, Any]]:
     }
 
 
-
 def _default_aml_advanced_ha_config() -> dict[str, Any]:
     return {
         "enabled": False,
@@ -1316,7 +1627,6 @@ def _default_aml_advanced_ha_config() -> dict[str, Any]:
         "heartbeatInterval": 5,
         "autoFailback": False,
     }
-
 
 
 def _default_aml_advanced_ha_nodes() -> dict[str, dict[str, Any]]:
@@ -1342,7 +1652,6 @@ def _default_aml_advanced_ha_nodes() -> dict[str, dict[str, Any]]:
     }
 
 
-
 def _default_aml_ekm_config() -> dict[str, Any]:
     return {
         "enabled": False,
@@ -1355,7 +1664,6 @@ def _default_aml_ekm_config() -> dict[str, Any]:
     }
 
 
-
 def _default_aml_ekm_status() -> dict[str, Any]:
     return {
         "connected": False,
@@ -1363,7 +1671,6 @@ def _default_aml_ekm_status() -> dict[str, Any]:
         "error": None,
         "cacheAgeSeconds": 0,
     }
-
 
 
 def _default_aml_ekm_keys() -> dict[str, dict[str, Any]]:
@@ -1378,7 +1685,6 @@ def _default_aml_ekm_keys() -> dict[str, dict[str, Any]]:
     }
 
 
-
 def _default_aml_sharing_config() -> dict[str, Any]:
     return {
         "enabled": False,
@@ -1386,7 +1692,6 @@ def _default_aml_sharing_config() -> dict[str, Any]:
         "serverId": "openblade-share-1",
         "exportedPartitions": [],
     }
-
 
 
 def _default_aml_sharing_status() -> dict[str, Any]:
@@ -1398,19 +1703,24 @@ def _default_aml_sharing_status() -> dict[str, Any]:
     }
 
 
-
 def _default_aml_sharing_clients() -> dict[str, dict[str, Any]]:
     return {}
-
 
 
 def _default_aml_remote_libraries() -> dict[str, dict[str, Any]]:
     return {}
 
 
-
 def _default_aml_supported_media() -> list[dict[str, Any]]:
     return [
+        {
+            "name": "LTO-7",
+            "description": "LTO Ultrium 7 data cartridge",
+            "nativeCapacity": "6 TB",
+            "compressedCapacity": "15 TB",
+            "generations": ["LTO-6", "LTO-7"],
+            "cleaning": False,
+        },
         {
             "name": "LTO-8",
             "description": "LTO Ultrium 8 data cartridge",
@@ -1420,43 +1730,62 @@ def _default_aml_supported_media() -> list[dict[str, Any]]:
             "cleaning": False,
         },
         {
-            "name": "LTO-9",
-            "description": "LTO Ultrium 9 data cartridge",
-            "nativeCapacity": "18 TB",
-            "compressedCapacity": "45 TB",
-            "generations": ["LTO-8", "LTO-9"],
-            "cleaning": False,
-        },
-        {
-            "name": "LTO-9-CLN",
-            "description": "LTO Ultrium 9 cleaning cartridge",
+            "name": "LTO-7-CLN",
+            "description": "LTO Ultrium 7 cleaning cartridge",
             "nativeCapacity": "N/A",
             "compressedCapacity": "N/A",
-            "generations": ["LTO-9"],
+            "generations": ["LTO-7"],
+            "cleaning": True,
+        },
+        {
+            "name": "LTO-8-CLN",
+            "description": "LTO Ultrium 8 cleaning cartridge",
+            "nativeCapacity": "N/A",
+            "compressedCapacity": "N/A",
+            "generations": ["LTO-8"],
             "cleaning": True,
         },
     ]
 
 
-
 def _default_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
-    return [
-        {
-            "serialNumber": "DRV-001",
-            "lastCleaned": "2024-01-10T08:00:00Z",
-            "mediaBarcode": "CLN001L9",
-            "useCount": 0,
-            "expired": False,
-        },
-        {
-            "serialNumber": "DRV-002",
-            "lastCleaned": "2024-01-08T14:00:00Z",
-            "mediaBarcode": "CLN002L9",
-            "useCount": 0,
-            "expired": False,
-        },
-    ]
+    config = scalar_i3_default_config()
+    cleaning_by_type: dict[str, list[str]] = {}
+    fallback_cleaning: list[str] = []
+    for media in config["media"]:
+        if str(media.get("role", "data")) != "cleaning":
+            continue
+        barcode = str(media.get("barcode", "")).strip()
+        media_type = str(media.get("type", "")).strip()
+        if not barcode:
+            continue
+        fallback_cleaning.append(barcode)
+        if media_type:
+            cleaning_by_type.setdefault(media_type, []).append(barcode)
 
+    reports: list[dict[str, Any]] = []
+    for drive in config["drives"]:
+        drive_serial = str(drive.get("id", ""))
+        cleaning_type = f"{str(drive.get('type', '')).strip()}-CLN"
+        candidates = cleaning_by_type.get(cleaning_type, [])
+        if candidates:
+            media_barcode = candidates.pop(0)
+            if media_barcode in fallback_cleaning:
+                fallback_cleaning.remove(media_barcode)
+        else:
+            media_barcode = fallback_cleaning.pop(0) if fallback_cleaning else None
+        if media_barcode is None:
+            continue
+        reports.append(
+            {
+                "serialNumber": drive_serial,
+                "lastCleaned": str(drive.get("lastCleaned", "2024-01-10T08:00:00Z")),
+                "mediaBarcode": media_barcode,
+                "useCount": 0,
+                "expired": False,
+            }
+        )
+    return reports
 
 
 def _default_aml_drive_operation_tasks() -> dict[str, dict[str, Any]]:
@@ -1519,6 +1848,55 @@ def _default_aml_drive_operation_tasks() -> dict[str, dict[str, Any]]:
     }
 
 
+def _default_aml_physical_segments() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "SEG-ST-001",
+            "coordinate": {"frame": 0, "rack": 1, "section": 1, "column": 1, "row": 1, "type": 1},
+            "size": 12,
+            "owner": "partition1",
+            "configuredType": 0,
+            "status": "used",
+            "type": "storage",
+        },
+        {
+            "id": "SEG-ST-002",
+            "coordinate": {"frame": 0, "rack": 1, "section": 2, "column": 1, "row": 1, "type": 1},
+            "size": 12,
+            "owner": "partition1",
+            "configuredType": 0,
+            "status": "used",
+            "type": "storage",
+        },
+        {
+            "id": "SEG-ST-003",
+            "coordinate": {"frame": 0, "rack": 1, "section": 3, "column": 1, "row": 1, "type": 1},
+            "size": 13,
+            "owner": "",
+            "configuredType": 0,
+            "status": "available",
+            "type": "storage",
+        },
+        {
+            "id": "SEG-ST-004",
+            "coordinate": {"frame": 0, "rack": 2, "section": 4, "column": 1, "row": 1, "type": 1},
+            "size": 13,
+            "owner": "",
+            "configuredType": 0,
+            "status": "available",
+            "type": "storage",
+        },
+        {
+            "id": "SEG-CLN-001",
+            "coordinate": {"frame": 0, "rack": 1, "section": 5, "column": 1, "row": 1, "type": 5},
+            "size": 3,
+            "owner": "partition1",
+            "configuredType": 2,
+            "status": "used",
+            "type": "cleaning",
+        },
+    ]
+
 
 def _default_aml_diagnostic_tests() -> dict[str, dict[str, Any]]:
     return {
@@ -1544,7 +1922,6 @@ def _default_aml_diagnostic_tests() -> dict[str, dict[str, Any]]:
             "estimatedDuration": 60,
         },
     }
-
 
 
 def _default_aml_diagnostic_results() -> dict[str, dict[str, Any]]:
@@ -1627,12 +2004,25 @@ def verify_password(password_hash: str, password: str) -> bool:
 _STATE = AMLState()
 
 
-def ensure_initialized(db_url: str, *, force_reset: bool = False) -> None:
+def ensure_initialized(
+    db_url: str,
+    *,
+    force_reset: bool = False,
+    emulator_latency_profile: str | None = None,
+    emulator_latency_enabled: bool | None = None,
+) -> None:
     global _STATE
     normalized_db_url = _normalize_db_url(db_url)
     init_db(normalized_db_url)
     if force_reset or _STATE.db_url != normalized_db_url:
         _STATE = AMLState(db_url=normalized_db_url)
+    if emulator_latency_profile is not None or emulator_latency_enabled is not None:
+        current = get_aml_emulator_latency_config()
+        if emulator_latency_profile is not None:
+            current["profile"] = _normalize_latency_profile(emulator_latency_profile)
+        if emulator_latency_enabled is not None:
+            current["enabled"] = emulator_latency_enabled
+        set_aml_emulator_latency_config(current)
     _seed_default_users()
     _migrate_plaintext_passwords()
     purge_expired_sessions()
@@ -1648,18 +2038,81 @@ def set_aml_system_config(v: dict[str, Any]) -> None:
 
 def get_aml_emulator_latency_config() -> dict[str, Any]:
     config = _STATE.aml_system_config.get("emulatorLatency")
-    if isinstance(config, dict):
-        return deepcopy(config)
-    return {
-        "profile": "instant",
-        "profileMs": {},
-    }
+    return _normalize_emulator_latency_config(config if isinstance(config, dict) else None)
 
 
 def set_aml_emulator_latency_config(config: dict[str, Any]) -> dict[str, Any]:
-    stored = deepcopy(config)
+    stored = _normalize_emulator_latency_config(config)
     _STATE.aml_system_config["emulatorLatency"] = stored
     return deepcopy(stored)
+
+
+def reset_aml_emulator_latency_metrics() -> dict[str, Any]:
+    _STATE.aml_emulator_latency_metrics = _default_emulator_latency_metrics()
+    return get_aml_emulator_latency_metrics()
+
+
+def record_aml_emulator_latency_metric(
+    *,
+    method: str,
+    endpoint: str,
+    status_code: int,
+    duration_ms: int,
+    simulated_delay_ms: int,
+) -> None:
+    metrics = _STATE.aml_emulator_latency_metrics
+    request_count = int(metrics.get("capturedRequests", 0)) + 1
+    metrics["capturedRequests"] = request_count
+
+    endpoints = metrics.setdefault("endpoints", {})
+    if not isinstance(endpoints, dict):
+        endpoints = {}
+        metrics["endpoints"] = endpoints
+
+    metric_key = f"{method.upper()} {endpoint}"
+    endpoint_metrics = endpoints.get(metric_key)
+    if not isinstance(endpoint_metrics, dict):
+        endpoint_metrics = _new_latency_endpoint_metric(method.upper(), endpoint)
+        endpoints[metric_key] = endpoint_metrics
+
+    endpoint_count = int(endpoint_metrics.get("count", 0)) + 1
+    endpoint_metrics["count"] = endpoint_count
+    endpoint_metrics["lastStatusCode"] = int(status_code)
+
+    status_codes = endpoint_metrics.setdefault("statusCodes", {})
+    if not isinstance(status_codes, dict):
+        status_codes = {}
+        endpoint_metrics["statusCodes"] = status_codes
+    status_key = str(int(status_code))
+    status_codes[status_key] = int(status_codes.get(status_key, 0)) + 1
+
+    duration_stats = endpoint_metrics.setdefault("durationMs", _default_latency_stat())
+    simulated_stats = endpoint_metrics.setdefault("simulatedDelayMs", _default_latency_stat())
+    _update_latency_stats(duration_stats, duration_ms, count=endpoint_count)
+    _update_latency_stats(simulated_stats, simulated_delay_ms, count=endpoint_count)
+
+    total_duration_stats = metrics.setdefault("durationMs", _default_latency_stat())
+    total_simulated_stats = metrics.setdefault("simulatedDelayMs", _default_latency_stat())
+    _update_latency_stats(total_duration_stats, duration_ms, count=request_count)
+    _update_latency_stats(total_simulated_stats, simulated_delay_ms, count=request_count)
+
+
+def get_aml_emulator_latency_metrics() -> dict[str, Any]:
+    metrics = _STATE.aml_emulator_latency_metrics
+    endpoints = metrics.get("endpoints")
+    endpoint_items: list[dict[str, Any]] = []
+    if isinstance(endpoints, dict):
+        for key in sorted(endpoints.keys()):
+            metric = endpoints.get(key)
+            if isinstance(metric, dict):
+                endpoint_items.append(deepcopy(metric))
+
+    return {
+        "capturedRequests": int(metrics.get("capturedRequests", 0)),
+        "durationMs": deepcopy(metrics.get("durationMs", _default_latency_stat())),
+        "simulatedDelayMs": deepcopy(metrics.get("simulatedDelayMs", _default_latency_stat())),
+        "endpoints": endpoint_items,
+    }
 
 
 def get_aml_network_config() -> dict[str, Any]:
@@ -1850,7 +2303,9 @@ def create_ldap_user(name: str, role: int = 1) -> AmlUser:
         return user
 
 
-def update_user(name: str, *, password: str | None = None, role: int | None = None) -> AmlUser | None:
+def update_user(
+    name: str, *, password: str | None = None, role: int | None = None
+) -> AmlUser | None:
     with get_session() as session:
         user = session.get(AmlUser, name.lower())
         if user is None:
@@ -2062,7 +2517,9 @@ def get_service_access() -> dict[str, Any]:
     return dict(_STATE.service_access)
 
 
-def set_service_access(enabled: bool, authentication_code_expiry: int | None = None) -> dict[str, Any]:
+def set_service_access(
+    enabled: bool, authentication_code_expiry: int | None = None
+) -> dict[str, Any]:
     _STATE.service_access["enabled"] = enabled
     if authentication_code_expiry is not None:
         _STATE.service_access["authenticationCodeExpiry"] = authentication_code_expiry
@@ -2462,7 +2919,9 @@ def delete_access_group(name: str) -> bool:
     for wwpn in group.get("hosts", []):
         host = _STATE.aml_hosts.get(wwpn)
         if host is not None:
-            host["groups"] = [group_name for group_name in host.get("groups", []) if group_name != name]
+            host["groups"] = [
+                group_name for group_name in host.get("groups", []) if group_name != name
+            ]
     return True
 
 
@@ -2642,7 +3101,9 @@ def delete_aml_host(wwpn: str) -> bool:
     for group_name in host.get("groups", []):
         group = _STATE.access_groups.get(group_name)
         if group is not None:
-            group["hosts"] = [host_wwpn for host_wwpn in group.get("hosts", []) if host_wwpn != wwpn]
+            group["hosts"] = [
+                host_wwpn for host_wwpn in group.get("hosts", []) if host_wwpn != wwpn
+            ]
     return True
 
 
@@ -2721,15 +3182,12 @@ def delete_aml_license(serial_number: str) -> bool:
     return True
 
 
-
 def _unique_partition_values(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
-
 def _sync_aml_partition_counts() -> None:
     _STATE.aml_partitions_global["currentPartitions"] = len(_STATE.aml_partitions)
-
 
 
 def list_aml_partitions() -> list[dict[str, Any]]:
@@ -2737,11 +3195,9 @@ def list_aml_partitions() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_partitions.items())]
 
 
-
 def get_aml_partition(name: str) -> dict[str, Any] | None:
     partition = _STATE.aml_partitions.get(name)
     return deepcopy(partition) if partition is not None else None
-
 
 
 def create_aml_partition(name: str, partition: dict[str, Any]) -> dict[str, Any] | None:
@@ -2765,7 +3221,9 @@ def create_aml_partition(name: str, partition: dict[str, Any]) -> dict[str, Any]
             partition.get("policy")
             or {
                 "autoClean": True,
-                "cleaningThreshold": _STATE.aml_partitions_global.get("defaultCleaningThreshold", 100),
+                "cleaningThreshold": _STATE.aml_partitions_global.get(
+                    "defaultCleaningThreshold", 100
+                ),
                 "mediaAutoAssign": True,
                 "mountTimeout": _STATE.aml_partitions_global.get("defaultMountTimeout", 300),
                 "unmountTimeout": 60,
@@ -2773,7 +3231,9 @@ def create_aml_partition(name: str, partition: dict[str, Any]) -> dict[str, Any]
                 "roboticsTimeout": 120,
             }
         ),
-        "access": deepcopy(partition.get("access") or {"mode": "readWrite", "groups": [], "hosts": []}),
+        "access": deepcopy(
+            partition.get("access") or {"mode": "readWrite", "groups": [], "hosts": []}
+        ),
         "cleaning": deepcopy(
             partition.get("cleaning")
             or {
@@ -2788,7 +3248,8 @@ def create_aml_partition(name: str, partition: dict[str, Any]) -> dict[str, Any]
             partition.get("encryption") or {"enabled": False, "type": "none", "keyManager": None}
         ),
         "qos": deepcopy(
-            partition.get("qos") or {"maxMountsPerHour": 60, "priority": "normal", "preemption": False}
+            partition.get("qos")
+            or {"maxMountsPerHour": 60, "priority": "normal", "preemption": False}
         ),
         "lme": deepcopy(partition.get("lme") or {"enabled": False, "exportPath": None}),
         "alerts": deepcopy(partition.get("alerts") or []),
@@ -2819,7 +3280,6 @@ def create_aml_partition(name: str, partition: dict[str, Any]) -> dict[str, Any]
     return get_aml_partition(name)
 
 
-
 def update_aml_partition(name: str, updates: dict[str, Any]) -> dict[str, Any] | None:
     partition = _STATE.aml_partitions.get(name)
     if partition is None:
@@ -2837,7 +3297,6 @@ def update_aml_partition(name: str, updates: dict[str, Any]) -> dict[str, Any] |
     return get_aml_partition(name)
 
 
-
 def delete_aml_partition(name: str) -> bool:
     if name not in _STATE.aml_partitions:
         return False
@@ -2846,11 +3305,9 @@ def delete_aml_partition(name: str) -> bool:
     return True
 
 
-
 def get_aml_partitions_global() -> dict[str, Any]:
     _sync_aml_partition_counts()
     return deepcopy(_STATE.aml_partitions_global)
-
 
 
 def set_aml_partitions_global(values: dict[str, Any]) -> dict[str, Any]:
@@ -2863,14 +3320,12 @@ def set_aml_partitions_global(values: dict[str, Any]) -> dict[str, Any]:
     return get_aml_partitions_global()
 
 
-
 def set_aml_partition_section(name: str, section: str, value: Any) -> Any | None:
     partition = _STATE.aml_partitions.get(name)
     if partition is None:
         return None
     partition[section] = deepcopy(value)
     return deepcopy(partition[section])
-
 
 
 def add_aml_partition_list_item(name: str, field: str, value: str) -> list[str] | None:
@@ -2884,7 +3339,6 @@ def add_aml_partition_list_item(name: str, field: str, value: str) -> list[str] 
     return list(partition[field])
 
 
-
 def remove_aml_partition_list_item(name: str, field: str, value: str) -> bool:
     partition = _STATE.aml_partitions.get(name)
     if partition is None:
@@ -2894,7 +3348,6 @@ def remove_aml_partition_list_item(name: str, field: str, value: str) -> bool:
         return False
     partition[field] = [item for item in items if item != value]
     return True
-
 
 
 def add_aml_partition_access_value(name: str, field: str, value: str) -> list[str] | None:
@@ -2909,7 +3362,6 @@ def add_aml_partition_access_value(name: str, field: str, value: str) -> list[st
     return list(access[field])
 
 
-
 def remove_aml_partition_access_value(name: str, field: str, value: str) -> bool:
     partition = _STATE.aml_partitions.get(name)
     if partition is None:
@@ -2920,7 +3372,6 @@ def remove_aml_partition_access_value(name: str, field: str, value: str) -> bool
         return False
     access[field] = [item for item in values if item != value]
     return True
-
 
 
 def _sync_aml_media_counts() -> None:
@@ -2948,7 +3399,11 @@ def _sync_aml_media_counts() -> None:
                 if not isinstance(barcode, str):
                     continue
                 normalized_barcode = barcode.strip()
-                if not normalized_barcode or normalized_barcode not in valid_barcodes or normalized_barcode in assigned_barcodes:
+                if (
+                    not normalized_barcode
+                    or normalized_barcode not in valid_barcodes
+                    or normalized_barcode in assigned_barcodes
+                ):
                     continue
                 normalized.append(normalized_barcode)
                 assigned_barcodes.add(normalized_barcode)
@@ -2965,7 +3420,11 @@ def _sync_aml_media_counts() -> None:
         except (TypeError, ValueError):
             normalized_quota = None
         target_generation = pool.get("targetLtoGeneration", pool.get("type"))
-        normalized_target = str(target_generation).strip() if isinstance(target_generation, str) and str(target_generation).strip() else None
+        normalized_target = (
+            str(target_generation).strip()
+            if isinstance(target_generation, str) and str(target_generation).strip()
+            else None
+        )
         created_at = str(pool.get("createdAt", _isoformat(_utcnow())))
         color = str(pool.get("color", "#2563EB")).strip().upper() or "#2563EB"
 
@@ -2980,7 +3439,11 @@ def _sync_aml_media_counts() -> None:
         pool["barcodes"] = list(normalized)
         pool["mediaCount"] = len(normalized)
         existing_type = pool.get("type")
-        normalized_type = str(existing_type).strip() if isinstance(existing_type, str) and str(existing_type).strip() else None
+        normalized_type = (
+            str(existing_type).strip()
+            if isinstance(existing_type, str) and str(existing_type).strip()
+            else None
+        )
         pool["type"] = normalized_target if normalized_target is not None else normalized_type
         pool["createdAt"] = created_at
 
@@ -2989,18 +3452,15 @@ def _sync_aml_media_counts() -> None:
             _STATE.aml_media_pools[normalized_id] = pool
 
 
-
 def list_aml_media() -> list[dict[str, Any]]:
     _sync_aml_media_counts()
     return [deepcopy(item) for _, item in sorted(_STATE.aml_media.items())]
-
 
 
 def get_aml_media(barcode: str) -> dict[str, Any] | None:
     _sync_aml_media_counts()
     media = _STATE.aml_media.get(barcode)
     return deepcopy(media) if media is not None else None
-
 
 
 def update_aml_media(barcode: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3016,14 +3476,12 @@ def update_aml_media(barcode: str, updates: dict[str, Any]) -> dict[str, Any] | 
     return get_aml_media(barcode)
 
 
-
 def delete_aml_media(barcode: str) -> bool:
     if barcode not in _STATE.aml_media:
         return False
     del _STATE.aml_media[barcode]
     _sync_aml_media_counts()
     return True
-
 
 
 def _next_media_slot_address(partition: str) -> str:
@@ -3040,7 +3498,6 @@ def _next_media_slot_address(partition: str) -> str:
             continue
     next_slot = max(slot_numbers, default=0) + 1
     return f"1,1,{next_slot}"
-
 
 
 def import_aml_media(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3062,7 +3519,12 @@ def import_aml_media(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "state": str(item.get("state", "home")),
             "writeProtected": bool(item.get("writeProtected", False)),
             "worm": bool(item.get("worm", False)),
-            "generations": int(item.get("generations", 1 if media_type.startswith("LTO") and "CLN" not in media_type else 0)),
+            "generations": int(
+                item.get(
+                    "generations",
+                    1 if media_type.startswith("LTO") and "CLN" not in media_type else 0,
+                )
+            ),
             "loadCount": int(item.get("loadCount", 0)),
             "errorCount": int(item.get("errorCount", 0)),
             "lastLoaded": item.get("lastLoaded"),
@@ -3073,7 +3535,6 @@ def import_aml_media(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return imported
 
 
-
 def export_aml_media(barcodes: list[str]) -> list[str]:
     removed: list[str] = []
     for barcode in barcodes:
@@ -3082,7 +3543,6 @@ def export_aml_media(barcodes: list[str]) -> list[str]:
             removed.append(barcode)
     _sync_aml_media_counts()
     return removed
-
 
 
 def move_aml_media(barcode: str, destination: str) -> dict[str, Any] | None:
@@ -3101,13 +3561,18 @@ def move_aml_media(barcode: str, destination: str) -> dict[str, Any] | None:
     return get_aml_media(barcode)
 
 
-
 def search_aml_media(
-    *, partition: str | None = None, media_type: str | None = None, state: str | None = None, barcode: str | None = None
+    *,
+    partition: str | None = None,
+    media_type: str | None = None,
+    state: str | None = None,
+    barcode: str | None = None,
 ) -> list[dict[str, Any]]:
     items = list_aml_media()
     if partition is not None:
-        items = [item for item in items if str(item.get("partition", "")).lower() == partition.lower()]
+        items = [
+            item for item in items if str(item.get("partition", "")).lower() == partition.lower()
+        ]
     if media_type is not None:
         items = [item for item in items if str(item.get("type", "")).lower() == media_type.lower()]
     if state is not None:
@@ -3117,8 +3582,9 @@ def search_aml_media(
     return items
 
 
-
-def list_aml_scratch_media(partition: str | None = None, media_type: str | None = None) -> list[dict[str, Any]]:
+def list_aml_scratch_media(
+    partition: str | None = None, media_type: str | None = None
+) -> list[dict[str, Any]]:
     items = search_aml_media(partition=partition, media_type=media_type)
     return [
         item
@@ -3130,11 +3596,9 @@ def list_aml_scratch_media(partition: str | None = None, media_type: str | None 
     ]
 
 
-
 def list_aml_media_pools() -> list[dict[str, Any]]:
     _sync_aml_media_counts()
     return [deepcopy(item) for _, item in sorted(_STATE.aml_media_pools.items())]
-
 
 
 def get_aml_media_pool(pool_id: str) -> dict[str, Any] | None:
@@ -3142,7 +3606,6 @@ def get_aml_media_pool(pool_id: str) -> dict[str, Any] | None:
     normalized_pool_id = _normalize_aml_media_pool_id(pool_id)
     pool = _STATE.aml_media_pools.get(normalized_pool_id)
     return deepcopy(pool) if pool is not None else None
-
 
 
 def find_aml_media_pool_name(barcode: str) -> str | None:
@@ -3153,30 +3616,38 @@ def find_aml_media_pool_name(barcode: str) -> str | None:
     return None
 
 
-
 def assign_aml_media_to_pool(pool_id: str, barcodes: list[str]) -> dict[str, Any] | None:
     normalized_pool_id = _normalize_aml_media_pool_id(pool_id)
     pool = _STATE.aml_media_pools.get(normalized_pool_id)
     if pool is None:
         return None
 
-    normalized_barcodes = [barcode for barcode in dict.fromkeys(barcodes) if barcode in _STATE.aml_media]
+    normalized_barcodes = [
+        barcode for barcode in dict.fromkeys(barcodes) if barcode in _STATE.aml_media
+    ]
     if not normalized_barcodes:
         _sync_aml_media_counts()
         return get_aml_media_pool(normalized_pool_id)
 
     for candidate in _STATE.aml_media_pools.values():
-        existing = candidate.get("assignedBarcodes") if isinstance(candidate.get("assignedBarcodes"), list) else []
-        candidate["assignedBarcodes"] = [barcode for barcode in existing if barcode not in normalized_barcodes]
+        existing = (
+            candidate.get("assignedBarcodes")
+            if isinstance(candidate.get("assignedBarcodes"), list)
+            else []
+        )
+        candidate["assignedBarcodes"] = [
+            barcode for barcode in existing if barcode not in normalized_barcodes
+        ]
 
-    assigned = pool.get("assignedBarcodes") if isinstance(pool.get("assignedBarcodes"), list) else []
+    assigned = (
+        pool.get("assignedBarcodes") if isinstance(pool.get("assignedBarcodes"), list) else []
+    )
     for barcode in normalized_barcodes:
         if barcode not in assigned:
             assigned.append(barcode)
     pool["assignedBarcodes"] = assigned
     _sync_aml_media_counts()
     return get_aml_media_pool(normalized_pool_id)
-
 
 
 def unassign_aml_media_from_pool(pool_id: str, barcodes: list[str]) -> dict[str, Any] | None:
@@ -3186,11 +3657,14 @@ def unassign_aml_media_from_pool(pool_id: str, barcodes: list[str]) -> dict[str,
         return None
 
     normalized_barcodes = set(barcodes)
-    existing = pool.get("assignedBarcodes") if isinstance(pool.get("assignedBarcodes"), list) else []
-    pool["assignedBarcodes"] = [barcode for barcode in existing if barcode not in normalized_barcodes]
+    existing = (
+        pool.get("assignedBarcodes") if isinstance(pool.get("assignedBarcodes"), list) else []
+    )
+    pool["assignedBarcodes"] = [
+        barcode for barcode in existing if barcode not in normalized_barcodes
+    ]
     _sync_aml_media_counts()
     return get_aml_media_pool(normalized_pool_id)
-
 
 
 def create_aml_media_pool(pool_id: str, pool: dict[str, Any]) -> dict[str, Any] | None:
@@ -3198,7 +3672,10 @@ def create_aml_media_pool(pool_id: str, pool: dict[str, Any]) -> dict[str, Any] 
     if normalized_pool_id in _STATE.aml_media_pools:
         return None
 
-    if any(str(existing.get("name", "")).strip().lower() == str(pool.get("name", "")).strip().lower() for existing in _STATE.aml_media_pools.values()):
+    if any(
+        str(existing.get("name", "")).strip().lower() == str(pool.get("name", "")).strip().lower()
+        for existing in _STATE.aml_media_pools.values()
+    ):
         return None
 
     stored = _build_aml_media_pool(
@@ -3209,13 +3686,14 @@ def create_aml_media_pool(pool_id: str, pool: dict[str, Any]) -> dict[str, Any] 
         target_lto_generation=pool.get("targetLtoGeneration", pool.get("type")),
         quota_gb=pool.get("quotaGB"),
         color=str(pool.get("color", "#2563EB")),
-        assigned_barcodes=pool.get("assignedBarcodes") if isinstance(pool.get("assignedBarcodes"), list) else [],
+        assigned_barcodes=pool.get("assignedBarcodes")
+        if isinstance(pool.get("assignedBarcodes"), list)
+        else [],
         created_at=str(pool.get("createdAt")) if pool.get("createdAt") else None,
     )
     _STATE.aml_media_pools[normalized_pool_id] = stored
     _sync_aml_media_counts()
     return get_aml_media_pool(normalized_pool_id)
-
 
 
 def update_aml_media_pool(pool_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3224,7 +3702,9 @@ def update_aml_media_pool(pool_id: str, updates: dict[str, Any]) -> dict[str, An
     if pool is None:
         return None
 
-    next_name = str(updates.get("name", pool.get("name", normalized_pool_id))).strip() or str(pool.get("name", normalized_pool_id))
+    next_name = str(updates.get("name", pool.get("name", normalized_pool_id))).strip() or str(
+        pool.get("name", normalized_pool_id)
+    )
     for existing_id, existing_pool in _STATE.aml_media_pools.items():
         if existing_id == normalized_pool_id:
             continue
@@ -3236,7 +3716,11 @@ def update_aml_media_pool(pool_id: str, updates: dict[str, Any]) -> dict[str, An
         target_generation = normalized_updates["targetLtoGeneration"]
         if isinstance(target_generation, str):
             stripped_target = target_generation.strip()
-            normalized_updates["type"] = stripped_target if stripped_target.upper().startswith("LTO-") else f"LTO-{stripped_target}"
+            normalized_updates["type"] = (
+                stripped_target
+                if stripped_target.upper().startswith("LTO-")
+                else f"LTO-{stripped_target}"
+            )
         else:
             normalized_updates["type"] = None
 
@@ -3249,7 +3733,6 @@ def update_aml_media_pool(pool_id: str, updates: dict[str, Any]) -> dict[str, An
     return get_aml_media_pool(normalized_pool_id)
 
 
-
 def delete_aml_media_pool(pool_id: str) -> bool:
     normalized_pool_id = _normalize_aml_media_pool_id(pool_id)
     if normalized_pool_id not in _STATE.aml_media_pools:
@@ -3258,16 +3741,13 @@ def delete_aml_media_pool(pool_id: str) -> bool:
     return True
 
 
-
 def list_aml_drives() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_drives.items())]
-
 
 
 def get_aml_drive(serial_number: str) -> dict[str, Any] | None:
     drive = _STATE.aml_drives.get(serial_number)
     return deepcopy(drive) if drive is not None else None
-
 
 
 def update_aml_drive(serial_number: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3281,10 +3761,11 @@ def update_aml_drive(serial_number: str, updates: dict[str, Any]) -> dict[str, A
     return get_aml_drive(serial_number)
 
 
-
 def list_blade_firmware() -> list[dict[str, Any]]:
-    return [deepcopy(item) for item in sorted(_STATE.blade_firmware, key=lambda entry: str(entry.get("name", "")))]
-
+    return [
+        deepcopy(item)
+        for item in sorted(_STATE.blade_firmware, key=lambda entry: str(entry.get("name", "")))
+    ]
 
 
 def upsert_blade_firmware(item: dict[str, Any]) -> dict[str, Any]:
@@ -3298,16 +3779,13 @@ def upsert_blade_firmware(item: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(current)
 
 
-
 def list_drive_firmware_images() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.drive_firmware_images.items())]
-
 
 
 def get_drive_firmware_image(name: str) -> dict[str, Any] | None:
     image = _STATE.drive_firmware_images.get(name)
     return deepcopy(image) if image is not None else None
-
 
 
 def upsert_drive_firmware_image(image: dict[str, Any]) -> dict[str, Any]:
@@ -3317,13 +3795,11 @@ def upsert_drive_firmware_image(image: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(current)
 
 
-
 def delete_drive_firmware_image(name: str) -> bool:
     if name not in _STATE.drive_firmware_images:
         return False
     del _STATE.drive_firmware_images[name]
     return True
-
 
 
 def activate_drive_firmware_image(name: str) -> dict[str, Any] | None:
@@ -3334,10 +3810,8 @@ def activate_drive_firmware_image(name: str) -> dict[str, Any] | None:
     return get_drive_firmware_image(name)
 
 
-
 def get_system_firmware_info() -> dict[str, Any]:
     return deepcopy(_STATE.system_firmware_info)
-
 
 
 def set_system_firmware_info(info: dict[str, Any]) -> dict[str, Any]:
@@ -3345,10 +3819,8 @@ def set_system_firmware_info(info: dict[str, Any]) -> dict[str, Any]:
     return get_system_firmware_info()
 
 
-
 def list_aml_jobs() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_jobs.items())]
-
 
 
 def get_aml_job(job_id: str) -> dict[str, Any] | None:
@@ -3356,13 +3828,11 @@ def get_aml_job(job_id: str) -> dict[str, Any] | None:
     return deepcopy(job) if job is not None else None
 
 
-
 def set_aml_job(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(job)
     stored["id"] = job_id
     _STATE.aml_jobs[job_id] = stored
     return deepcopy(stored)
-
 
 
 def update_aml_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3376,16 +3846,13 @@ def update_aml_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any] | Non
     return deepcopy(job)
 
 
-
 def pop_aml_job(job_id: str) -> dict[str, Any] | None:
     job = _STATE.aml_jobs.pop(job_id, None)
     return deepcopy(job) if job is not None else None
 
 
-
 def list_aml_job_history() -> list[dict[str, Any]]:
     return [deepcopy(item) for item in _STATE.aml_job_history]
-
 
 
 def append_aml_job_history(job: dict[str, Any]) -> dict[str, Any]:
@@ -3394,15 +3861,12 @@ def append_aml_job_history(job: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(stored)
 
 
-
 def clear_aml_job_history() -> None:
     _STATE.aml_job_history.clear()
 
 
-
 def list_aml_moves() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_moves.items())]
-
 
 
 def get_aml_move(move_id: str) -> dict[str, Any] | None:
@@ -3410,13 +3874,11 @@ def get_aml_move(move_id: str) -> dict[str, Any] | None:
     return deepcopy(move) if move is not None else None
 
 
-
 def set_aml_move(move_id: str, move: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(move)
     stored["id"] = move_id
     _STATE.aml_moves[move_id] = stored
     return deepcopy(stored)
-
 
 
 def update_aml_move(move_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3430,16 +3892,13 @@ def update_aml_move(move_id: str, updates: dict[str, Any]) -> dict[str, Any] | N
     return deepcopy(move)
 
 
-
 def pop_aml_move(move_id: str) -> dict[str, Any] | None:
     move = _STATE.aml_moves.pop(move_id, None)
     return deepcopy(move) if move is not None else None
 
 
-
 def list_aml_mounts() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_mounts.items())]
-
 
 
 def get_aml_mount(mount_id: str) -> dict[str, Any] | None:
@@ -3447,13 +3906,11 @@ def get_aml_mount(mount_id: str) -> dict[str, Any] | None:
     return deepcopy(mount) if mount is not None else None
 
 
-
 def set_aml_mount(mount_id: str, mount: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(mount)
     stored["id"] = mount_id
     _STATE.aml_mounts[mount_id] = stored
     return deepcopy(stored)
-
 
 
 def update_aml_mount(mount_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3467,16 +3924,13 @@ def update_aml_mount(mount_id: str, updates: dict[str, Any]) -> dict[str, Any] |
     return deepcopy(mount)
 
 
-
 def pop_aml_mount(mount_id: str) -> dict[str, Any] | None:
     mount = _STATE.aml_mounts.pop(mount_id, None)
     return deepcopy(mount) if mount is not None else None
 
 
-
 def get_aml_inventory_status() -> dict[str, Any]:
     return deepcopy(_STATE.aml_inventory_status)
-
 
 
 def set_aml_inventory_status(status: dict[str, Any]) -> dict[str, Any]:
@@ -3484,10 +3938,8 @@ def set_aml_inventory_status(status: dict[str, Any]) -> dict[str, Any]:
     return get_aml_inventory_status()
 
 
-
 def get_aml_import_status() -> dict[str, Any]:
     return deepcopy(_STATE.aml_import_status)
-
 
 
 def set_aml_import_status(status: dict[str, Any]) -> dict[str, Any]:
@@ -3495,10 +3947,8 @@ def set_aml_import_status(status: dict[str, Any]) -> dict[str, Any]:
     return get_aml_import_status()
 
 
-
 def get_aml_export_status() -> dict[str, Any]:
     return deepcopy(_STATE.aml_export_status)
-
 
 
 def set_aml_export_status(status: dict[str, Any]) -> dict[str, Any]:
@@ -3515,17 +3965,21 @@ def set_aml_cleaning_status(status: dict[str, Any]) -> dict[str, Any]:
     return get_aml_cleaning_status()
 
 
-
 def list_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
-    return [deepcopy(item) for item in sorted(_STATE.aml_drive_cleaning_reports, key=lambda item: str(item.get("lastCleaned", "")), reverse=True)]
-
+    return [
+        deepcopy(item)
+        for item in sorted(
+            _STATE.aml_drive_cleaning_reports,
+            key=lambda item: str(item.get("lastCleaned", "")),
+            reverse=True,
+        )
+    ]
 
 
 def append_aml_drive_cleaning_report(report: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(report)
     _STATE.aml_drive_cleaning_reports.append(stored)
     return deepcopy(stored)
-
 
 
 def list_aml_drive_operation_tasks(
@@ -3538,14 +3992,29 @@ def list_aml_drive_operation_tasks(
         tasks = [task for task in tasks if str(task.get("type")) == task_type]
     if component_id is not None:
         tasks = [task for task in tasks if str(task.get("componentId")) == component_id]
-    return sorted(tasks, key=lambda item: (str(item.get("opened", "")), str(item.get("id", ""))), reverse=True)
+    return sorted(
+        tasks, key=lambda item: (str(item.get("opened", "")), str(item.get("id", ""))), reverse=True
+    )
 
+
+def list_aml_library_operation_tasks(
+    *,
+    task_type: str | None = None,
+    component_id: str | None = None,
+) -> list[dict[str, Any]]:
+    tasks = [deepcopy(item) for _, item in sorted(_STATE.aml_library_operation_tasks.items())]
+    if task_type is not None:
+        tasks = [task for task in tasks if str(task.get("type")) == task_type]
+    if component_id is not None:
+        tasks = [task for task in tasks if str(task.get("componentId")) == component_id]
+    return sorted(
+        tasks, key=lambda item: (str(item.get("opened", "")), str(item.get("id", ""))), reverse=True
+    )
 
 
 def get_aml_drive_operation_task(task_id: str) -> dict[str, Any] | None:
     task = _STATE.aml_drive_operation_tasks.get(task_id)
     return deepcopy(task) if task is not None else None
-
 
 
 def set_aml_drive_operation_task(task_id: str, task: dict[str, Any]) -> dict[str, Any]:
@@ -3555,10 +4024,34 @@ def set_aml_drive_operation_task(task_id: str, task: dict[str, Any]) -> dict[str
     return deepcopy(stored)
 
 
+def get_aml_library_operation_task(task_id: str) -> dict[str, Any] | None:
+    task = _STATE.aml_library_operation_tasks.get(task_id)
+    return deepcopy(task) if task is not None else None
+
+
+def set_aml_library_operation_task(task_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(task)
+    stored["id"] = task_id
+    _STATE.aml_library_operation_tasks[task_id] = stored
+    return deepcopy(stored)
+
+
+def delete_aml_library_operation_task(task_id: str) -> dict[str, Any] | None:
+    task = _STATE.aml_library_operation_tasks.pop(task_id, None)
+    return deepcopy(task) if task is not None else None
+
+
+def list_aml_physical_segments() -> list[dict[str, Any]]:
+    return [deepcopy(item) for item in _STATE.aml_physical_segments]
+
+
+def set_aml_physical_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    _STATE.aml_physical_segments = [deepcopy(item) for item in segments]
+    return list_aml_physical_segments()
+
 
 def list_aml_diagnostic_tests() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_diagnostic_tests.items())]
-
 
 
 def get_aml_diagnostic_test(test_id: str) -> dict[str, Any] | None:
@@ -3566,16 +4059,13 @@ def get_aml_diagnostic_test(test_id: str) -> dict[str, Any] | None:
     return deepcopy(test) if test is not None else None
 
 
-
 def list_aml_diagnostic_results() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_diagnostic_results.items())]
-
 
 
 def get_aml_diagnostic_result(result_id: str) -> dict[str, Any] | None:
     result = _STATE.aml_diagnostic_results.get(result_id)
     return deepcopy(result) if result is not None else None
-
 
 
 def set_aml_diagnostic_result(result_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -3585,13 +4075,18 @@ def set_aml_diagnostic_result(result_id: str, result: dict[str, Any]) -> dict[st
     return deepcopy(stored)
 
 
-
 def get_latest_aml_diagnostic_result() -> dict[str, Any] | None:
     results = list_aml_diagnostic_results()
     if not results:
         return None
-    return max(results, key=lambda item: (str(item.get("endTime", "")), str(item.get("startTime", "")), str(item.get("id", ""))))
-
+    return max(
+        results,
+        key=lambda item: (
+            str(item.get("endTime", "")),
+            str(item.get("startTime", "")),
+            str(item.get("id", "")),
+        ),
+    )
 
 
 def get_aml_robotics_last_test_time() -> str | None:
@@ -3602,10 +4097,13 @@ def set_aml_robotics_last_test_time(ts: str | None) -> None:
     _STATE.aml_robotics_last_test_time = ts
 
 
-
 def list_aml_events() -> list[dict[str, Any]]:
-    return [deepcopy(item) for item in sorted(_STATE.aml_events, key=lambda item: str(item.get("timestamp", "")), reverse=True)]
-
+    return [
+        deepcopy(item)
+        for item in sorted(
+            _STATE.aml_events, key=lambda item: str(item.get("timestamp", "")), reverse=True
+        )
+    ]
 
 
 def get_aml_event(event_id: str) -> dict[str, Any] | None:
@@ -3615,7 +4113,6 @@ def get_aml_event(event_id: str) -> dict[str, Any] | None:
     return None
 
 
-
 def append_aml_event(event: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(event)
     _STATE.aml_events.append(stored)
@@ -3623,15 +4120,12 @@ def append_aml_event(event: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(stored)
 
 
-
 def clear_aml_events() -> None:
     _STATE.aml_events.clear()
 
 
-
 def list_aml_ras_tickets() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_ras_tickets.items())]
-
 
 
 def get_aml_ras_ticket(ticket_id: str) -> dict[str, Any] | None:
@@ -3639,13 +4133,11 @@ def get_aml_ras_ticket(ticket_id: str) -> dict[str, Any] | None:
     return deepcopy(ticket) if ticket is not None else None
 
 
-
 def set_aml_ras_ticket(ticket_id: str, ticket: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(ticket)
     stored["id"] = ticket_id
     _STATE.aml_ras_tickets[ticket_id] = stored
     return deepcopy(stored)
-
 
 
 def update_aml_ras_ticket(ticket_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3659,22 +4151,18 @@ def update_aml_ras_ticket(ticket_id: str, updates: dict[str, Any]) -> dict[str, 
     return deepcopy(ticket)
 
 
-
 def pop_aml_ras_ticket(ticket_id: str) -> dict[str, Any] | None:
     ticket = _STATE.aml_ras_tickets.pop(ticket_id, None)
     return deepcopy(ticket) if ticket is not None else None
-
 
 
 def list_aml_logs() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_logs_store.items())]
 
 
-
 def get_aml_log(name: str) -> dict[str, Any] | None:
     log = _STATE.aml_logs_store.get(name)
     return deepcopy(log) if log is not None else None
-
 
 
 def set_aml_log(name: str, log: dict[str, Any]) -> dict[str, Any]:
@@ -3684,16 +4172,13 @@ def set_aml_log(name: str, log: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(stored)
 
 
-
 def pop_aml_log(name: str) -> dict[str, Any] | None:
     log = _STATE.aml_logs_store.pop(name, None)
     return deepcopy(log) if log is not None else None
 
 
-
 def list_aml_alerts() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_alerts_store.items())]
-
 
 
 def get_aml_alert(alert_id: str) -> dict[str, Any] | None:
@@ -3701,13 +4186,11 @@ def get_aml_alert(alert_id: str) -> dict[str, Any] | None:
     return deepcopy(alert) if alert is not None else None
 
 
-
 def set_aml_alert(alert_id: str, alert: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(alert)
     stored["id"] = alert_id
     _STATE.aml_alerts_store[alert_id] = stored
     return deepcopy(stored)
-
 
 
 def update_aml_alert(alert_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3721,21 +4204,17 @@ def update_aml_alert(alert_id: str, updates: dict[str, Any]) -> dict[str, Any] |
     return deepcopy(alert)
 
 
-
 def pop_aml_alert(alert_id: str) -> dict[str, Any] | None:
     alert = _STATE.aml_alerts_store.pop(alert_id, None)
     return deepcopy(alert) if alert is not None else None
-
 
 
 def clear_aml_alerts() -> None:
     _STATE.aml_alerts_store.clear()
 
 
-
 def list_aml_tapealerts() -> list[dict[str, Any]]:
     return [deepcopy(item) for item in _STATE.aml_tapealerts]
-
 
 
 def set_aml_tapealerts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3743,15 +4222,12 @@ def set_aml_tapealerts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list_aml_tapealerts()
 
 
-
 def clear_aml_tapealerts() -> None:
     _STATE.aml_tapealerts.clear()
 
 
-
 def list_aml_notifications() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_notifications.items())]
-
 
 
 def get_aml_notification(notification_id: str) -> dict[str, Any] | None:
@@ -3759,13 +4235,11 @@ def get_aml_notification(notification_id: str) -> dict[str, Any] | None:
     return deepcopy(notification) if notification is not None else None
 
 
-
 def set_aml_notification(notification_id: str, notification: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(notification)
     stored["id"] = notification_id
     _STATE.aml_notifications[notification_id] = stored
     return deepcopy(stored)
-
 
 
 def update_aml_notification(notification_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3779,21 +4253,17 @@ def update_aml_notification(notification_id: str, updates: dict[str, Any]) -> di
     return deepcopy(notification)
 
 
-
 def pop_aml_notification(notification_id: str) -> dict[str, Any] | None:
     notification = _STATE.aml_notifications.pop(notification_id, None)
     return deepcopy(notification) if notification is not None else None
-
 
 
 def clear_aml_notifications() -> None:
     _STATE.aml_notifications.clear()
 
 
-
 def get_aml_log_level() -> dict[str, Any]:
     return deepcopy(_STATE.aml_log_level)
-
 
 
 def set_aml_log_level(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3801,17 +4271,14 @@ def set_aml_log_level(payload: dict[str, Any]) -> dict[str, Any]:
     return get_aml_log_level()
 
 
-
 def list_aml_event_subscriptions() -> list[dict[str, Any]]:
     return [deepcopy(item) for item in _STATE.aml_event_subscriptions]
-
 
 
 def add_aml_event_subscription(subscription: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(subscription)
     _STATE.aml_event_subscriptions.append(stored)
     return deepcopy(stored)
-
 
 
 def clear_aml_event_subscriptions() -> None:
@@ -3914,7 +4381,6 @@ def set_aml_system_manual_time_utc(ts: str | None) -> None:
     _STATE.aml_system_manual_time_utc = ts
 
 
-
 def get_fc_blade_by_serial(serial_number: str) -> dict[str, Any] | None:
     for blade in _STATE.fc_blades.values():
         if str(blade.get("serialNumber")) == serial_number:
@@ -3922,13 +4388,11 @@ def get_fc_blade_by_serial(serial_number: str) -> dict[str, Any] | None:
     return None
 
 
-
 def update_fc_blade_by_serial(serial_number: str, updates: dict[str, Any]) -> dict[str, Any] | None:
     for blade_id, blade in _STATE.fc_blades.items():
         if str(blade.get("serialNumber")) == serial_number:
             return update_fc_blade(blade_id, updates)
     return None
-
 
 
 def get_fc_port_by_number(serial_number: str, port_number: int) -> dict[str, Any] | None:
@@ -3941,8 +4405,9 @@ def get_fc_port_by_number(serial_number: str, port_number: int) -> dict[str, Any
     return None
 
 
-
-def update_fc_port_by_number(serial_number: str, port_number: int, updates: dict[str, Any]) -> dict[str, Any] | None:
+def update_fc_port_by_number(
+    serial_number: str, port_number: int, updates: dict[str, Any]
+) -> dict[str, Any] | None:
     for blade in _STATE.fc_blades.values():
         if str(blade.get("serialNumber")) != serial_number:
             continue
@@ -3954,10 +4419,11 @@ def update_fc_port_by_number(serial_number: str, port_number: int, updates: dict
     return None
 
 
-
 def list_aml_ltfs_sections() -> list[dict[str, Any]]:
-    return [deepcopy(item) for _, item in sorted(_STATE.aml_ltfs_sections.items(), key=lambda entry: int(entry[0]))]
-
+    return [
+        deepcopy(item)
+        for _, item in sorted(_STATE.aml_ltfs_sections.items(), key=lambda entry: int(entry[0]))
+    ]
 
 
 def get_aml_ltfs_section(section_number: int | str) -> dict[str, Any] | None:
@@ -3965,8 +4431,9 @@ def get_aml_ltfs_section(section_number: int | str) -> dict[str, Any] | None:
     return deepcopy(section) if section is not None else None
 
 
-
-def update_aml_ltfs_section(section_number: int | str, updates: dict[str, Any]) -> dict[str, Any] | None:
+def update_aml_ltfs_section(
+    section_number: int | str, updates: dict[str, Any]
+) -> dict[str, Any] | None:
     section = _STATE.aml_ltfs_sections.get(str(section_number))
     if section is None:
         return None
@@ -3976,11 +4443,9 @@ def update_aml_ltfs_section(section_number: int | str, updates: dict[str, Any]) 
     return get_aml_ltfs_section(section_number)
 
 
-
 def get_aml_iscsi_blade(serial_number: str) -> dict[str, Any] | None:
     blade = _STATE.aml_iscsi_blades.get(serial_number)
     return deepcopy(blade) if blade is not None else None
-
 
 
 def update_aml_iscsi_blade(serial_number: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -3993,10 +4458,8 @@ def update_aml_iscsi_blade(serial_number: str, updates: dict[str, Any]) -> dict[
     return get_aml_iscsi_blade(serial_number)
 
 
-
 def get_aml_advanced_ha_config() -> dict[str, Any]:
     return deepcopy(_STATE.aml_advanced_ha_config)
-
 
 
 def set_aml_advanced_ha_config(updates: dict[str, Any]) -> dict[str, Any]:
@@ -4006,16 +4469,13 @@ def set_aml_advanced_ha_config(updates: dict[str, Any]) -> dict[str, Any]:
     return get_aml_advanced_ha_config()
 
 
-
 def list_aml_advanced_ha_nodes() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_advanced_ha_nodes.items())]
-
 
 
 def get_aml_advanced_ha_node(node_id: str) -> dict[str, Any] | None:
     node = _STATE.aml_advanced_ha_nodes.get(node_id)
     return deepcopy(node) if node is not None else None
-
 
 
 def update_aml_advanced_ha_node(node_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -4028,10 +4488,8 @@ def update_aml_advanced_ha_node(node_id: str, updates: dict[str, Any]) -> dict[s
     return get_aml_advanced_ha_node(node_id)
 
 
-
 def get_aml_ekm_config() -> dict[str, Any]:
     return deepcopy(_STATE.aml_ekm_config)
-
 
 
 def set_aml_ekm_config(updates: dict[str, Any]) -> dict[str, Any]:
@@ -4041,10 +4499,8 @@ def set_aml_ekm_config(updates: dict[str, Any]) -> dict[str, Any]:
     return get_aml_ekm_config()
 
 
-
 def get_aml_ekm_status() -> dict[str, Any]:
     return deepcopy(_STATE.aml_ekm_status)
-
 
 
 def set_aml_ekm_status(status: dict[str, Any]) -> dict[str, Any]:
@@ -4052,10 +4508,8 @@ def set_aml_ekm_status(status: dict[str, Any]) -> dict[str, Any]:
     return get_aml_ekm_status()
 
 
-
 def list_aml_ekm_keys() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_ekm_keys.items())]
-
 
 
 def set_aml_ekm_keys(keys: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4063,10 +4517,8 @@ def set_aml_ekm_keys(keys: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list_aml_ekm_keys()
 
 
-
 def get_aml_sharing_config() -> dict[str, Any]:
     return deepcopy(_STATE.aml_sharing_config)
-
 
 
 def set_aml_sharing_config(updates: dict[str, Any]) -> dict[str, Any]:
@@ -4076,10 +4528,8 @@ def set_aml_sharing_config(updates: dict[str, Any]) -> dict[str, Any]:
     return get_aml_sharing_config()
 
 
-
 def get_aml_sharing_status() -> dict[str, Any]:
     return deepcopy(_STATE.aml_sharing_status)
-
 
 
 def set_aml_sharing_status(status: dict[str, Any]) -> dict[str, Any]:
@@ -4087,10 +4537,8 @@ def set_aml_sharing_status(status: dict[str, Any]) -> dict[str, Any]:
     return get_aml_sharing_status()
 
 
-
 def list_aml_sharing_clients() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_sharing_clients.items())]
-
 
 
 def set_aml_sharing_clients(clients: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4098,10 +4546,8 @@ def set_aml_sharing_clients(clients: list[dict[str, Any]]) -> list[dict[str, Any
     return list_aml_sharing_clients()
 
 
-
 def list_aml_remote_libraries() -> list[dict[str, Any]]:
     return [deepcopy(item) for _, item in sorted(_STATE.aml_remote_libraries.items())]
-
 
 
 def get_aml_remote_library(library_id: str) -> dict[str, Any] | None:
@@ -4109,13 +4555,11 @@ def get_aml_remote_library(library_id: str) -> dict[str, Any] | None:
     return deepcopy(library) if library is not None else None
 
 
-
 def create_aml_remote_library(payload: dict[str, Any]) -> dict[str, Any]:
     next_id = f"rlib-{len(_STATE.aml_remote_libraries) + 1}"
     library = {"id": next_id, **deepcopy(payload)}
     _STATE.aml_remote_libraries[next_id] = library
     return deepcopy(library)
-
 
 
 def update_aml_remote_library(library_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -4130,13 +4574,11 @@ def update_aml_remote_library(library_id: str, updates: dict[str, Any]) -> dict[
     return get_aml_remote_library(library_id)
 
 
-
 def delete_aml_remote_library(library_id: str) -> bool:
     if library_id not in _STATE.aml_remote_libraries:
         return False
     del _STATE.aml_remote_libraries[library_id]
     return True
-
 
 
 def list_aml_supported_media() -> list[dict[str, Any]]:

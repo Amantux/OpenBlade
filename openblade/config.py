@@ -14,6 +14,12 @@ class BackendMode(str, Enum):
 
 
 _DEFAULT_HOME = Path.home() / ".openblade"
+_DEFAULT_EMULATOR_URLS = (
+    "http://localhost:8010",
+    "http://localhost:8011",
+    "http://localhost:8012",
+)
+_LATENCY_PROFILES = {"instant", "realistic", "hardware", "custom"}
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,46 @@ class OpenBladeConfig:
     hardware_dry_run: bool = False
     changer_device: str | None = None
     drive_devices: tuple[str, ...] = ()
+    emulator_urls: tuple[str, ...] = _DEFAULT_EMULATOR_URLS
+    emulator_latency_profile: str = "instant"
+    emulator_latency_enabled: bool = True
+    scalar_api_only: bool = False
+
+
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_emulator_urls() -> tuple[str, ...]:
+    raw_urls = os.environ.get("OPENBLADE_EMULATOR_URLS", "")
+    if not raw_urls.strip():
+        return _DEFAULT_EMULATOR_URLS
+
+    parsed = tuple(
+        candidate.rstrip("/")
+        for candidate in (url.strip() for url in raw_urls.split(","))
+        if candidate
+    )
+    return parsed or _DEFAULT_EMULATOR_URLS
+
+
+def _load_emulator_latency_profile() -> str:
+    raw = os.environ.get("OPENBLADE_EMULATOR_LATENCY_PROFILE") or os.environ.get(
+        "EMULATOR_LATENCY_PROFILE", "instant"
+    )
+    normalized = raw.strip().lower()
+    if normalized in _LATENCY_PROFILES:
+        return normalized
+    return "instant"
+
+
+def _load_emulator_latency_enabled() -> bool:
+    if "OPENBLADE_EMULATOR_LATENCY_ENABLED" in os.environ:
+        return _env_bool("OPENBLADE_EMULATOR_LATENCY_ENABLED", default=True)
+    return _env_bool("EMULATOR_LATENCY_ENABLED", default=True)
 
 
 def load_config() -> OpenBladeConfig:
@@ -61,4 +107,8 @@ def load_config() -> OpenBladeConfig:
         hardware_dry_run=os.environ.get("OPENBLADE_HARDWARE_DRY_RUN", "false").lower() == "true",
         changer_device=os.environ.get("OPENBLADE_CHANGER_DEVICE") or None,
         drive_devices=drive_devices,
+        emulator_urls=_load_emulator_urls(),
+        emulator_latency_profile=_load_emulator_latency_profile(),
+        emulator_latency_enabled=_load_emulator_latency_enabled(),
+        scalar_api_only=_env_bool("OPENBLADE_SCALAR_API_ONLY", default=False),
     )

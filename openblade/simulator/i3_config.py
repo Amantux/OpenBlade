@@ -7,7 +7,8 @@ from typing import Any
 
 _TOTAL_SLOTS = 50
 _DATA_TAPE_COUNT = 28
-_CLEANING_SLOT_IDS = (49, 50)
+_DRIVE_TYPES = ("LTO-7", "LTO-7", "LTO-8")
+_CLEANING_SLOT_IDS = (48, 49, 50)
 _SLOTS_PER_BAY = _TOTAL_SLOTS // 2
 
 
@@ -61,12 +62,17 @@ def _build_data_media() -> list[dict[str, Any]]:
 
 
 def _build_cleaning_media() -> list[dict[str, Any]]:
+    if len(_CLEANING_SLOT_IDS) < len(_DRIVE_TYPES):
+        raise ValueError("Cleaning slot configuration must include one slot per configured drive type")
+
     cleaning: list[dict[str, Any]] = []
-    for index, slot_id in enumerate(_CLEANING_SLOT_IDS, start=1):
+    for index, (slot_id, drive_type) in enumerate(
+        zip(_CLEANING_SLOT_IDS, _DRIVE_TYPES, strict=True), start=1
+    ):
         cleaning.append(
             {
                 "barcode": f"CLN{index:03d}L9",
-                "type": "LTO-7-CLN" if index == 1 else "LTO-8-CLN",
+                "type": f"{drive_type}-CLN",
                 "partition": None,
                 "slotAddress": _slot_address(slot_id),
                 "mockSlotId": slot_id,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,36 +76,37 @@ def _seed_nas_defaults(catalog: CatalogRepository) -> None:
             service.upsert_share(share)
 
 
-def _seed_library_defaults(catalog: CatalogRepository) -> None:
-    desired = [
-        {
-            "name": "Primary Tape Library",
-            "emulator_url": "http://localhost:8010",
-            "serial_number": "OB-SCALAR-I3-001",
-            "model": "Scalar i3",
-            "role": "primary",
-            "sort_order": 0,
-            "legacy_names": {"primary"},
-        },
-        {
-            "name": "Secondary Archive",
-            "emulator_url": "http://localhost:8011",
-            "serial_number": "OB-SCALAR-I3-002",
-            "model": "Scalar i3",
-            "role": "archive",
-            "sort_order": 1,
-            "legacy_names": {"Library 2"},
-        },
-        {
-            "name": "Cold Storage Vault",
-            "emulator_url": "http://localhost:8012",
-            "serial_number": "OB-SCALAR-I3-003",
-            "model": "Scalar i3",
-            "role": "cold_storage",
-            "sort_order": 2,
-            "legacy_names": {"Library 3"},
-        },
+def _configured_library_specs(config: OpenBladeConfig) -> list[dict[str, object]]:
+    default_metadata = [
+        ("Primary Tape Library", "OB-SCALAR-I3-001", "primary", {"primary"}),
+        ("Secondary Archive", "OB-SCALAR-I3-002", "archive", {"Library 2"}),
+        ("Cold Storage Vault", "OB-SCALAR-I3-003", "cold_storage", {"Library 3"}),
     ]
+    specs: list[dict[str, object]] = []
+    for index, emulator_url in enumerate(config.emulator_urls):
+        if index < len(default_metadata):
+            name, serial, role, legacy_names = default_metadata[index]
+        else:
+            name = f"Tape Library {index + 1}"
+            serial = f"OB-SCALAR-I3-{index + 1:03d}"
+            role = "archive"
+            legacy_names = set()
+        specs.append(
+            {
+                "name": name,
+                "emulator_url": emulator_url,
+                "serial_number": serial,
+                "model": "Scalar i3",
+                "role": role,
+                "sort_order": index,
+                "legacy_names": legacy_names,
+            }
+        )
+    return specs
+
+
+def _seed_library_defaults(catalog: CatalogRepository, config: OpenBladeConfig) -> None:
+    desired = _configured_library_specs(config)
 
     existing_libraries = catalog.list_library_instances()
     for spec in desired:
@@ -164,7 +166,11 @@ def _seed_demo_catalog(catalog: CatalogRepository) -> None:
             "policy_id": "balanced",
             "source_path": "/demo/media-archive-2024",
             "files": [
-                (f"media/archive-2024/reel-{index:02d}.mov", 400_000_000, "VOL002L9" if index <= 10 else "VOL003L9")
+                (
+                    f"media/archive-2024/reel-{index:02d}.mov",
+                    400_000_000,
+                    "VOL002L9" if index <= 10 else "VOL003L9",
+                )
                 for index in range(1, 21)
             ],
         },
@@ -205,7 +211,11 @@ def _seed_demo_catalog(catalog: CatalogRepository) -> None:
         volume_group = catalog.create_volume_group(spec["volume_group"])
         tape_set = sorted({barcode for _, _, barcode in spec["files"]})
         shard_map = {
-            barcode: [relative_path for relative_path, _, current_barcode in spec["files"] if current_barcode == barcode]
+            barcode: [
+                relative_path
+                for relative_path, _, current_barcode in spec["files"]
+                if current_barcode == barcode
+            ]
             for barcode in tape_set
         }
         total_bytes = sum(size_bytes for _, size_bytes, _ in spec["files"])
@@ -230,7 +240,9 @@ def _seed_demo_catalog(catalog: CatalogRepository) -> None:
             ).model_dump(mode="json")
         )
         for relative_path, size_bytes, barcode in spec["files"]:
-            checksum = hashlib.sha256(f"{spec['dataset_id']}:{relative_path}:{size_bytes}".encode()).hexdigest()
+            checksum = hashlib.sha256(
+                f"{spec['dataset_id']}:{relative_path}:{size_bytes}".encode()
+            ).hexdigest()
             catalog_path = f"/{spec['volume_group']}/{relative_path}"
             record = catalog.create_file_record(
                 catalog_path,
@@ -243,7 +255,11 @@ def _seed_demo_catalog(catalog: CatalogRepository) -> None:
                 shard_profile="demo",
                 parent_id=None,
             )
-            instances = [instance for instance in record.instances if instance.barcode == barcode and instance.tape_path == catalog_path]
+            instances = [
+                instance
+                for instance in record.instances
+                if instance.barcode == barcode and instance.tape_path == catalog_path
+            ]
             if not instances:
                 instance = catalog.create_file_instance(record.id, barcode, catalog_path)
                 catalog.mark_instance_archived(instance.id, checksum_verified=True)
@@ -267,7 +283,10 @@ def _seed_demo_catalog(catalog: CatalogRepository) -> None:
             )
             if barcode in data_barcodes:
                 cartridge = catalog.add_cartridge(barcode, volume_group.id)
-                cartridge.used_bytes = max(int(cartridge.used_bytes), sum(size for _, size, file_barcode in spec["files"] if file_barcode == barcode))
+                cartridge.used_bytes = max(
+                    int(cartridge.used_bytes),
+                    sum(size for _, size, file_barcode in spec["files"] if file_barcode == barcode),
+                )
                 cartridge.capacity_bytes = max(int(cartridge.capacity_bytes), 18_000_000_000)
                 cartridge.formatted = True
                 catalog.session.commit()
@@ -316,8 +335,11 @@ def _seed_nas_pools(catalog: CatalogRepository) -> None:
             service.upsert_pool(pool)
 
 
-def seed_demo_environment(catalog: CatalogRepository) -> None:
-    _seed_library_defaults(catalog)
+def seed_demo_environment(
+    catalog: CatalogRepository, config: OpenBladeConfig | None = None
+) -> None:
+    active_config = config or load_config()
+    _seed_library_defaults(catalog, active_config)
     _seed_demo_catalog(catalog)
     _seed_nas_pools(catalog)
 
@@ -377,7 +399,7 @@ def get_catalog() -> CatalogRepository:
         _catalog = CatalogRepository(get_session())
         _seed_nas_defaults(_catalog)
         if cfg.backend == BackendMode.MOCK:
-            seed_demo_environment(_catalog)
+            seed_demo_environment(_catalog, cfg)
     return _catalog
 
 
@@ -401,7 +423,6 @@ def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
         for f in files:
             barcode = f.get("tape_barcode")
             path = f.get("relative_path")
-            size = int(f.get("size_bytes", 0))
             if not barcode or not path:
                 continue
             try:
@@ -412,7 +433,12 @@ def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
             content = (f"{dataset_id}:{path}").encode()[:1024]
             checksum = hashlib.sha256(content).hexdigest()
             if path not in tape.files:
-                tape.files[path] = MockFileRecord(tape_path=path, size_bytes=len(content), checksum_sha256=checksum, content=content)
+                tape.files[path] = MockFileRecord(
+                    tape_path=path,
+                    size_bytes=len(content),
+                    checksum_sha256=checksum,
+                    content=content,
+                )
                 tape.used_bytes = max(tape.used_bytes, tape.used_bytes + len(content))
                 tape.formatted = True
 
@@ -427,16 +453,14 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     catalog = CatalogRepository(get_session())
     _seed_nas_defaults(catalog)
     if active_config.backend == BackendMode.MOCK:
-        _seed_library_defaults(catalog)
+        _seed_library_defaults(catalog, active_config)
         if config is None:
             _seed_demo_catalog(catalog)
             _seed_nas_pools(catalog)
             # Also populate the simulated LTFS backend with small example files so
             # emulator operations that rely on LTFS content behave realistically.
-            try:
+            with suppress(Exception):
                 _seed_demo_ltfs(catalog, ltfs)
-            except Exception:
-                pass
     run_inventory_job(library, catalog)
     queue = JobQueue()
     worker = Worker(queue)
@@ -473,5 +497,10 @@ def reset_context(context: AppContext | None = None) -> AppContext:
 
     from openblade.api import aml_state
 
-    aml_state.ensure_initialized(_CONTEXT.config.db_url, force_reset=True)
+    aml_state.ensure_initialized(
+        _CONTEXT.config.db_url,
+        force_reset=True,
+        emulator_latency_profile=_CONTEXT.config.emulator_latency_profile,
+        emulator_latency_enabled=_CONTEXT.config.emulator_latency_enabled,
+    )
     return _CONTEXT

@@ -120,6 +120,15 @@ def test_move_returns_result(authed: TestClient) -> None:
 
 
 def test_move_accepts_numeric_slot_addresses(authed: TestClient) -> None:
+    inventory_resp = authed.get("/aml/library/inventory")
+    assert inventory_resp.status_code == 200
+    inventory_payload = inventory_resp.json()
+    inventory_slots = (
+        inventory_payload.get("slots")
+        or inventory_payload.get("slot")
+        or []
+    )
+
     media_resp = authed.get("/aml/media")
     assert media_resp.status_code == 200
     media_items = (media_resp.json().get("mediaList") or {}).get("media") or []
@@ -127,11 +136,10 @@ def test_move_accepts_numeric_slot_addresses(authed: TestClient) -> None:
         item for item in media_items if str(item.get("slotAddress", "")).startswith("1,1,")
     )
     source_slot = str(source_media["slotAddress"]).split(",")[-1]
-    occupied_slots = {str(item.get("slotAddress", "")) for item in media_items}
     dest_slot = next(
-        str(index)
-        for index in range(1, 31)
-        if f"1,1,{index}" not in occupied_slots
+        str(slot.get("slotId") or slot.get("id"))
+        for slot in inventory_slots
+        if not bool(slot.get("occupied"))
     )
 
     resp = authed.post(

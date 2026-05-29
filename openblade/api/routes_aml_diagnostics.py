@@ -306,8 +306,9 @@ def _build_physical_library_elements() -> list[PhysicalLibraryElement]:
 
     represented_slots: set[str] = set()
     for tower in aml_state.get_aml_towers().values():
+        bay = int(tower.get("bay", 1))
         for index in range(1, int(tower.get("slots", 0)) + 1):
-            address = f"1,1,{index}"
+            address = f"1,{bay},{index}"
             barcode = occupied_slots.get(address)
             represented_slots.add(address)
             elements.append(

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from openblade.api import aml_state
@@ -729,7 +729,7 @@ async def unsubscribe_events(
 
 @router.get("/event/{id}", response_model=EventResponse)
 async def get_event(
-    resource_id: str,
+    resource_id: str = Path(..., alias="id", min_length=1),
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> EventResponse:
@@ -802,7 +802,7 @@ async def get_ras_ticket_summary(
 
 @router.get("/ras/ticket/{id}", response_model=TicketResponse)
 async def get_ras_ticket(
-    resource_id: str,
+    resource_id: str = Path(..., alias="id", min_length=1),
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> TicketResponse:
@@ -812,8 +812,8 @@ async def get_ras_ticket(
 
 @router.put("/ras/ticket/{id}", response_model=TicketResponse)
 async def update_ras_ticket(
-    resource_id: str,
     payload: TicketUpdateRequest,
+    resource_id: str = Path(..., alias="id", min_length=1),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> TicketResponse:
@@ -837,7 +837,7 @@ async def update_ras_ticket(
 
 @router.delete("/ras/ticket/{id}", response_model=WSResultCode)
 async def delete_ras_ticket(
-    resource_id: str,
+    resource_id: str = Path(..., alias="id", min_length=1),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
@@ -852,7 +852,7 @@ async def delete_ras_ticket(
 
 @router.post("/ras/ticket/{id}/acknowledge", response_model=WSResultCode)
 async def acknowledge_ras_ticket(
-    resource_id: str,
+    resource_id: str = Path(..., alias="id", min_length=1),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
@@ -868,8 +868,8 @@ async def acknowledge_ras_ticket(
 
 @router.post("/ras/ticket/{id}/resolve", response_model=WSResultCode)
 async def resolve_ras_ticket(
-    resource_id: str,
     payload: ResolutionRequest,
+    resource_id: str = Path(..., alias="id", min_length=1),
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:

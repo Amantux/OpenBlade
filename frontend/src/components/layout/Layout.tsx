@@ -17,14 +17,10 @@ import TopBar from './TopBar';
 function isGlobalLibraryScopePath(pathname: string): boolean {
   return pathname === '/'
     || pathname === '/dashboard'
-    || pathname.startsWith('/nas/')
-    || pathname === '/nas'
+    || pathname === '/system/health'
+    || pathname === '/system/test-runner'
     || pathname === '/archive'
-    || pathname === '/media/pools'
-    || pathname.startsWith('/storage/')
-    || pathname === '/file-station'
-    || pathname === '/files/browse'
-    || pathname === '/gateway';
+    || pathname === '/media/pools';
 }
 
 function isLibraryScopedPath(pathname: string): boolean {
@@ -75,10 +71,8 @@ export default function Layout() {
         <main className="overflow-y-auto bg-quantum-panel p-4">
           {isGlobalLibraryScopePath(location.pathname) ? (
             <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
-              <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">Scope: NAS / All Libraries</span>
-              <Link to="/libraries" className="text-blue-400 hover:underline">
-                Manage libraries
-              </Link>
+              <span className="rounded border border-quantum-border bg-quantum-panel px-2 py-1">Scope: Fleet / All Libraries</span>
+              <Link to="/libraries" className="text-blue-400 hover:underline">Manage libraries</Link>
             </div>
           ) : null}
           {isLibraryScopedPath(location.pathname) ? (

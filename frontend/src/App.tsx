@@ -13,8 +13,6 @@ import CatalogStatusPage from './pages/CatalogStatusPage';
 import Dashboard from './pages/Dashboard';
 import Drives from './pages/Drives';
 import ErrorCodesPage from './pages/ErrorCodesPage';
-import FileStation from './pages/FileStation';
-import GatewayPage from './pages/Gateway';
 import ImportExport from './pages/ImportExport';
 import InventoryScan from './pages/InventoryScan';
 import Jobs from './pages/Jobs';
@@ -28,7 +26,6 @@ import LtfsBrowse from './pages/LtfsBrowse';
 import ManifestVersionsPage from './pages/ManifestVersionsPage';
 import Media from './pages/Media';
 import MediaPools from './pages/MediaPools';
-import Mounts from './pages/Mounts';
 import MoveOperations from './pages/MoveOperations';
 import Partitions from './pages/Partitions';
 import ReportsActivity from './pages/ReportsActivity';
@@ -40,14 +37,6 @@ import SystemDiagnostics from './pages/SystemDiagnostics';
 import SystemFirmware from './pages/SystemFirmware';
 import SystemHealthPage from './pages/SystemHealthPage';
 import SystemNetwork from './pages/SystemNetwork';
-import VirtualFileBrowserPage from './pages/VirtualFileBrowserPage';
-import ArchivePlanning from './pages/nas/ArchivePlanning';
-import CacheDrives from './pages/nas/CacheDrives';
-import DatasetDetails from './pages/nas/DatasetDetails';
-import RestoreQueue from './pages/nas/RestoreQueue';
-import SourceStreaming from './pages/nas/SourceStreaming';
-import StoragePolicies from './pages/nas/StoragePolicies';
-import VirtualPools from './pages/nas/VirtualPools';
 import TestRunner from './pages/TestRunner';
 
 function ProtectedLayout() {
@@ -97,18 +86,6 @@ function RoutedApp() {
         <Route index element={<Dashboard />} />
         <Route path="dashboard" element={<Dashboard />} />
 
-        <Route path="nas" element={<Navigate to="/nas/file-station" replace />} />
-        <Route path="nas/file-station" element={<FileStation />} />
-        <Route path="nas/browser" element={<VirtualFileBrowserPage />} />
-        <Route path="nas/shares" element={<Mounts />} />
-        <Route path="nas/pools" element={<VirtualPools />} />
-        <Route path="nas/restore-queue" element={<RestoreQueue />} />
-        <Route path="nas/archive-planning" element={<ArchivePlanning />} />
-        <Route path="nas/policies" element={<StoragePolicies />} />
-        <Route path="nas/cache-drives" element={<CacheDrives />} />
-        <Route path="nas/source-streaming" element={<SourceStreaming />} />
-        <Route path="nas/gateway" element={<GatewayPage />} />
-
         <Route path="libraries" element={<Libraries />} />
         <Route path="libraries/:libraryId" element={<LibraryScopedOutlet />}>
           <Route index element={<Navigate to="items/overview" replace />} />
@@ -143,18 +120,6 @@ function RoutedApp() {
         <Route path="operations/move" element={<ActiveLibraryPathRedirect suffix="/items/move" />} />
         <Route path="operations/inventory" element={<ActiveLibraryPathRedirect suffix="/items/inventory-scan" />} />
         <Route path="operations/ie" element={<ActiveLibraryPathRedirect suffix="/items/import-export" />} />
-        <Route path="file-station" element={<Navigate to="/nas/file-station" replace />} />
-        <Route path="files/browse" element={<Navigate to="/nas/browser" replace />} />
-        <Route path="storage/shares" element={<Navigate to="/nas/shares" replace />} />
-        <Route path="storage/virtual-pools" element={<Navigate to="/nas/pools" replace />} />
-        <Route path="storage/restore-queue" element={<Navigate to="/nas/restore-queue" replace />} />
-        <Route path="storage/archive-planning" element={<Navigate to="/nas/archive-planning" replace />} />
-        <Route path="storage/policies" element={<Navigate to="/nas/policies" replace />} />
-        <Route path="storage/cache-drives" element={<Navigate to="/nas/cache-drives" replace />} />
-        <Route path="storage/source-streaming" element={<Navigate to="/nas/source-streaming" replace />} />
-        <Route path="gateway" element={<Navigate to="/nas/gateway" replace />} />
-
-        <Route path="storage/dataset-details" element={<DatasetDetails />} />
         <Route path="media/pools" element={<MediaPools />} />
         <Route path="catalog" element={<Catalog />} />
         <Route path="catalog/rebuild" element={<CatalogRebuildPage />} />

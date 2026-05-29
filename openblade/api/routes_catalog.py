@@ -147,7 +147,7 @@ async def list_catalog_file_shards(
 async def seed_demo_catalog(
     context: AppContext = Depends(get_context),
 ) -> CatalogSeedDemoResponse:
-    seed_demo_environment(context.catalog)
+    seed_demo_environment(context.catalog, context.config)
     files, total = context.catalog.list_catalog_files(limit=500, offset=0)
     return CatalogSeedDemoResponse(
         status="ok",

@@ -643,7 +643,7 @@ async def create_move(
     # Fast-path legacy move: if explicit sourceSlot/targetDrive provided, call library.load()
     # This avoids strict barcode requirements and mirrors operator UI workflows.
     # Prefer a value-based fast-path: if both source_raw and dest_raw are present treat as legacy slot/drive move
-    if source_raw is not None and dest_raw is not None:
+    if source_raw is not None and dest_raw is not None and not barcode_raw:
         try:
             s = int(source_raw)
             d = int(dest_raw)

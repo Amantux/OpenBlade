@@ -394,14 +394,46 @@ def _barcode_pool(context: AppContext, minimum_count: int) -> list[str]:
     return barcodes
 
 
+def _barcode_by_slot_address() -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for media in aml_state.list_aml_media():
+        slot_address = str(media.get("slotAddress", "")).strip()
+        barcode = str(media.get("barcode", "")).strip()
+        if slot_address and barcode:
+            mapping[slot_address] = barcode
+    return mapping
+
+
+def _magazine_slot_addresses(magazine: dict[str, Any]) -> list[str]:
+    configured = magazine.get("slotAddresses")
+    if isinstance(configured, list):
+        addresses = [str(item).strip() for item in configured if str(item).strip()]
+        if addresses:
+            return addresses
+
+    bay = int(magazine.get("bay", 1))
+    slot_count = int(magazine.get("slotCount", 0))
+    return [f"1,{bay},{index}" for index in range(1, slot_count + 1)]
+
+
 def _build_tower_slots(tower: dict[str, Any], context: AppContext) -> list[Slot]:
     total_slots = int(tower.get("slots", 0))
     occupied_slots = min(int(tower.get("occupiedSlots", 0)), total_slots)
-    barcodes = _barcode_pool(context, occupied_slots)
+    bay = int(tower.get("bay", 1))
+    inventory = context.library.inventory()
+    start_slot_id = 1 + ((bay - 1) * total_slots)
+    end_slot_id = start_slot_id + total_slots - 1
+    barcodes = [
+        str(slot.barcode)
+        for slot in inventory.slots
+        if start_slot_id <= slot.slot_id <= end_slot_id and slot.barcode is not None
+    ]
+    if len(barcodes) < occupied_slots:
+        barcodes = _barcode_pool(context, occupied_slots)
     return [
         Slot(
             id=f"{tower['id']}-S{index}",
-            address=f"1,1,{index}",
+            address=f"1,{bay},{index}",
             state="occupied" if index <= occupied_slots else "empty",
             barcode=barcodes[index - 1] if index <= occupied_slots else None,
             type="storage",
@@ -440,8 +472,13 @@ def _ie_station_with_counts(station: dict[str, Any]) -> dict[str, Any]:
 
 def _magazine_with_counts(magazine: dict[str, Any]) -> dict[str, Any]:
     updated = dict(magazine)
-    updated["tapes"] = list(updated.get("tapes", []))
-    updated["occupiedSlots"] = len(updated["tapes"])
+    slot_addresses = _magazine_slot_addresses(updated)
+    barcode_by_address = _barcode_by_slot_address()
+    mapped_tapes = [barcode_by_address[address] for address in slot_addresses if address in barcode_by_address]
+    updated["slotAddresses"] = slot_addresses
+    updated["tapes"] = mapped_tapes
+    updated["slotCount"] = len(slot_addresses) if slot_addresses else int(updated.get("slotCount", 0))
+    updated["occupiedSlots"] = len(mapped_tapes)
     return updated
 
 
@@ -486,17 +523,22 @@ def _ie_station_status_response(station: dict[str, Any]) -> IEStationStatusRespo
 
 def _magazine_slots(magazine: dict[str, Any]) -> list[Slot]:
     current = _magazine_with_counts(magazine)
-    tapes = current.get("tapes", [])
-    return [
-        Slot(
-            id=f"{current['id']}-S{index}",
-            address=f"MAG,{index}",
-            state="occupied" if index <= len(tapes) else "empty",
-            barcode=tapes[index - 1] if index <= len(tapes) else None,
-            type="magazine",
+    slot_addresses = _magazine_slot_addresses(current)
+    barcode_by_address = _barcode_by_slot_address()
+    slots: list[Slot] = []
+    for index, library_coordinate in enumerate(slot_addresses, start=1):
+        barcode = barcode_by_address.get(library_coordinate)
+        slots.append(
+            Slot(
+                id=f"{current['id']}-S{index}",
+                address=f"{current['id']},{index}",
+                state="occupied" if barcode else "empty",
+                barcode=barcode,
+                type="magazine",
+                libraryCoordinate=library_coordinate,
+            )
         )
-        for index in range(1, int(current.get("slotCount", 0)) + 1)
-    ]
+    return slots
 
 
 @router.get("/robots", response_model=RobotListResponse)

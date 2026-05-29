@@ -6,90 +6,18 @@ services:
     environment:
       OPENBLADE_BACKEND: mock
       OPENBLADE_DB_URL: sqlite:////data/openblade.db
+      OPENBLADE_EMULATOR_URLS: ${OPENBLADE_EMULATOR_URLS:-http://host.docker.internal:8010,http://host.docker.internal:8011,http://host.docker.internal:8012}
     volumes:
       - openblade-data:/data
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  emulator-1:
-    image: ${OPENBLADE_EMULATOR_IMAGE:-ghcr.io/amantux/openblade-i3-emulator:latest}
-    command: uvicorn openblade.api.main:app --host 0.0.0.0 --port 8010
-    container_name: openblade-emulator-1
-    environment:
-      OPENBLADE_BACKEND: mock
-      OPENBLADE_DB_URL: sqlite:////data/openblade.db
-      LIBRARY_ID: "1"
-      LIBRARY_NAME: library-1
-      EMULATOR_PROFILE: ${EMULATOR_PROFILE:-scalar-i3-50-3}
-      EMULATOR_SLOT_COUNT: ${EMULATOR_SLOT_COUNT:-50}
-      EMULATOR_DRIVE_COUNT: ${EMULATOR_DRIVE_COUNT:-3}
-      EMULATOR_OCCUPANCY_PERCENT: ${EMULATOR_OCCUPANCY_PERCENT:-60}
-      EMULATOR_LATENCY_PROFILE: ${EMULATOR_LATENCY_PROFILE:-instant}
-    volumes:
-      - emulator-1-data:/data
-    ports:
-      - "8010:8010"
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  emulator-2:
-    image: ${OPENBLADE_EMULATOR_IMAGE:-ghcr.io/amantux/openblade-i3-emulator:latest}
-    command: uvicorn openblade.api.main:app --host 0.0.0.0 --port 8010
-    container_name: openblade-emulator-2
-    environment:
-      OPENBLADE_BACKEND: mock
-      OPENBLADE_DB_URL: sqlite:////data/openblade.db
-      LIBRARY_ID: "2"
-      LIBRARY_NAME: library-2
-      EMULATOR_PROFILE: ${EMULATOR_PROFILE:-scalar-i3-50-3}
-      EMULATOR_SLOT_COUNT: ${EMULATOR_SLOT_COUNT:-50}
-      EMULATOR_DRIVE_COUNT: ${EMULATOR_DRIVE_COUNT:-3}
-      EMULATOR_OCCUPANCY_PERCENT: ${EMULATOR_OCCUPANCY_PERCENT:-60}
-      EMULATOR_LATENCY_PROFILE: ${EMULATOR_LATENCY_PROFILE:-instant}
-    volumes:
-      - emulator-2-data:/data
-    ports:
-      - "8011:8010"
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  emulator-3:
-    image: ${OPENBLADE_EMULATOR_IMAGE:-ghcr.io/amantux/openblade-i3-emulator:latest}
-    command: uvicorn openblade.api.main:app --host 0.0.0.0 --port 8010
-    container_name: openblade-emulator-3
-    environment:
-      OPENBLADE_BACKEND: mock
-      OPENBLADE_DB_URL: sqlite:////data/openblade.db
-      LIBRARY_ID: "3"
-      LIBRARY_NAME: library-3
-      EMULATOR_PROFILE: ${EMULATOR_PROFILE:-scalar-i3-50-3}
-      EMULATOR_SLOT_COUNT: ${EMULATOR_SLOT_COUNT:-50}
-      EMULATOR_DRIVE_COUNT: ${EMULATOR_DRIVE_COUNT:-3}
-      EMULATOR_OCCUPANCY_PERCENT: ${EMULATOR_OCCUPANCY_PERCENT:-60}
-      EMULATOR_LATENCY_PROFILE: ${EMULATOR_LATENCY_PROFILE:-instant}
-    volumes:
-      - emulator-3-data:/data
-    ports:
-      - "8012:8010"
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
 
   web:
     build:
@@ -103,6 +31,3 @@ services:
 
 volumes:
   openblade-data:
-  emulator-1-data:
-  emulator-2-data:
-  emulator-3-data:

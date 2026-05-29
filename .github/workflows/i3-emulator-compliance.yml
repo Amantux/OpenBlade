@@ -2,8 +2,48 @@ name: i3-emulator-compliance
 
 on:
   pull_request:
+    paths:
+      - "openblade/simulator/**"
+      - "openblade/api/main.py"
+      - "openblade/api/aml_state.py"
+      - "openblade/api/aml_latency.py"
+      - "openblade/api/aml_scope.py"
+      - "openblade/api/routes_aml_*.py"
+      - "openblade/api/routes_aml_matrix_fallback.py"
+      - "openblade/api/routes_iblade.py"
+      - "openblade/config.py"
+      - "openblade/emulator_contract/**"
+      - "deploy/emulator/**"
+      - "scripts/emulator/**"
+      - "tools/emulator_spec/**"
+      - "tests/i3/**"
+      - "tests/integration/test_aml_*.py"
+      - "tests/integration/test_multi_library.py"
+      - "tests/integration/test_library_commands.py"
+      - "tests/unit/test_emulator_client_config.py"
+      - "docker-compose.yml"
   push:
     branches: [master]
+    paths:
+      - "openblade/simulator/**"
+      - "openblade/api/main.py"
+      - "openblade/api/aml_state.py"
+      - "openblade/api/aml_latency.py"
+      - "openblade/api/aml_scope.py"
+      - "openblade/api/routes_aml_*.py"
+      - "openblade/api/routes_aml_matrix_fallback.py"
+      - "openblade/api/routes_iblade.py"
+      - "openblade/config.py"
+      - "openblade/emulator_contract/**"
+      - "deploy/emulator/**"
+      - "scripts/emulator/**"
+      - "tools/emulator_spec/**"
+      - "tests/i3/**"
+      - "tests/integration/test_aml_*.py"
+      - "tests/integration/test_multi_library.py"
+      - "tests/integration/test_library_commands.py"
+      - "tests/unit/test_emulator_client_config.py"
+      - "docker-compose.yml"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +58,7 @@ jobs:
       matrix:
         include:
           - suite: core
-            tests: "tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_03_changer.py tests/i3/test_04_drives.py tests/i3/test_05_media.py tests/i3/test_14_emulator_profile.py tests/i3/test_15_manual_matrix_contract.py"
+            tests: "tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_03_changer.py tests/i3/test_04_drives.py tests/i3/test_05_media.py tests/i3/test_14_emulator_profile.py tests/i3/test_15_manual_matrix_contract.py tests/i3/test_16_manual_matrix_generated_suites.py tests/i3/test_17_matrix_endpoint_coverage.py"
           - suite: operations
             tests: "tests/i3/test_06_operations.py tests/i3/test_07_ltfs.py tests/i3/test_08_archive_cycle.py tests/i3/test_09_restore_cycle.py"
           - suite: system
@@ -34,6 +74,8 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
+      - run: python3 tools/emulator_spec/validate_cross_repo_contract.py
+      - run: python3 tools/emulator_spec/generate_matrix_endpoint_catalog.py
       - run: |
           rm -f /tmp/openblade-i3-compliance.db
           OPENBLADE_BACKEND=mock OPENBLADE_DB_URL=sqlite:////tmp/openblade-i3-compliance.db \
@@ -52,4 +94,42 @@ jobs:
                   time.sleep(1)
           raise SystemExit("API did not become healthy in time")
           PY
-      - run: pytest ${{ matrix.tests }} -q --tb=short
+      - run: mkdir -p test-results
+      - run: pytest ${{ matrix.tests }} -q --tb=short --junitxml=test-results/i3-${{ matrix.suite }}.xml
+      - name: Upload i3 suite artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: i3-emulator-suite-${{ matrix.suite }}
+          path: |
+            test-results/i3-${{ matrix.suite }}.xml
+            /tmp/openblade-api.log
+
+  aml-compatibility-suite:
+    name: aml-compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      - run: python3 tools/emulator_spec/validate_cross_repo_contract.py
+      - run: python3 tools/emulator_spec/generate_matrix_endpoint_catalog.py
+      - run: mkdir -p test-results
+      - run: >
+          pytest
+          tests/i3/test_17_matrix_endpoint_coverage.py
+          tests/integration/test_aml_*.py
+          tests/integration/test_multi_library.py
+          tests/integration/test_library_commands.py
+          tests/unit/test_emulator_client_config.py
+          -q --tb=short
+          --junitxml=test-results/aml-compatibility.xml
+      - name: Upload AML compatibility artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aml-compatibility-suite
+          path: test-results/aml-compatibility.xml

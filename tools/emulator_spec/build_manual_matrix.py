@@ -44,6 +44,16 @@ LATENCY_BY_OPERATION: dict[str, LatencyProfile] = {
 }
 
 
+REQUIREMENT_SUFFIXES: tuple[str, ...] = (
+    "endpoint",
+    "payload-contract",
+    "output-contract",
+    "state-transition",
+    "documented-errors",
+    "timing-notes",
+)
+
+
 def _normalize_path(raw: str) -> str:
     cleaned = raw.replace("\u00a0", " ")
     cleaned = re.split(r"\s+\.{2,}.*$", cleaned, maxsplit=1)[0]
@@ -93,6 +103,53 @@ def _case_templates(endpoint_id: str, method: str) -> list[dict[str, str]]:
     return templates
 
 
+def _requirement_entries(
+    endpoint_id: str,
+    method: str,
+    path: str,
+    table_id: int,
+    latency: LatencyProfile,
+) -> list[dict[str, object]]:
+    payload_note = "path and query parameters only" if method.upper() == "GET" else "request payload defined by manual table"
+    return [
+        {
+            "id": f"{endpoint_id}::endpoint",
+            "category": "endpoint",
+            "summary": f"Endpoint {method} {path} documented in table {table_id}.",
+        },
+        {
+            "id": f"{endpoint_id}::payload-contract",
+            "category": "payload-contract",
+            "summary": f"Payload contract uses {payload_note}.",
+        },
+        {
+            "id": f"{endpoint_id}::output-contract",
+            "category": "output-contract",
+            "summary": "Output payload and status codes must match the documented response contract.",
+        },
+        {
+            "id": f"{endpoint_id}::state-transition",
+            "category": "state-transition",
+            "summary": "Operation preserves documented inventory/drive/changer state-machine invariants.",
+        },
+        {
+            "id": f"{endpoint_id}::documented-errors",
+            "category": "documented-errors",
+            "summary": "Documented error behaviors (auth, validation, conflict/state, and server failures) are enforced.",
+        },
+        {
+            "id": f"{endpoint_id}::timing-notes",
+            "category": "timing-notes",
+            "summary": "Timing notes map to instant/realistic/hardware latency targets.",
+            "latency_profile_ms": {
+                "instant": latency.instant_ms,
+                "realistic": latency.realistic_ms,
+                "hardware": latency.hardware_ms,
+            },
+        },
+    ]
+
+
 def build_matrix(manual_text: str) -> dict[str, object]:
     seen: set[tuple[str, str]] = set()
     seen_tables: set[int] = set()
@@ -129,6 +186,8 @@ def build_matrix(manual_text: str) -> dict[str, object]:
                 },
                 "case_templates": _case_templates(endpoint_id, method),
                 "minimum_case_count": 5,
+                "requirements": _requirement_entries(endpoint_id, method, path, table_id, latency),
+                "requirement_count": len(REQUIREMENT_SUFFIXES),
             }
         )
     endpoints.sort(key=lambda item: (int(item["table_id"]), str(item["method"]), str(item["path"])))
@@ -141,6 +200,7 @@ def build_matrix(manual_text: str) -> dict[str, object]:
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "endpoint_count": len(endpoints),
         "minimum_cases_per_endpoint": 5,
+        "requirement_id_scheme": "{endpoint_id}::{requirement-dimension}",
         "scope": "manual-documented-apis-only",
         "endpoints": endpoints,
     }

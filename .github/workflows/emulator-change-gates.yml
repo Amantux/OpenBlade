@@ -4,23 +4,45 @@ on:
   pull_request:
     paths:
       - "openblade/simulator/**"
+      - "openblade/api/main.py"
       - "openblade/api/aml_state.py"
+      - "openblade/api/aml_latency.py"
+      - "openblade/api/aml_scope.py"
       - "openblade/api/routes_aml_*.py"
+      - "openblade/api/routes_aml_matrix_fallback.py"
+      - "openblade/api/routes_iblade.py"
+      - "openblade/config.py"
       - "openblade/emulator_contract/**"
+      - "deploy/emulator/**"
+      - "scripts/emulator/**"
       - "tools/emulator_spec/**"
       - "tests/i3/**"
-      - "tests/integration/test_aml_emulator_latency.py"
+      - "tests/integration/test_aml_*.py"
+      - "tests/integration/test_multi_library.py"
+      - "tests/integration/test_library_commands.py"
+      - "tests/unit/test_emulator_client_config.py"
       - "docker-compose.yml"
   push:
     branches: [master]
     paths:
       - "openblade/simulator/**"
+      - "openblade/api/main.py"
       - "openblade/api/aml_state.py"
+      - "openblade/api/aml_latency.py"
+      - "openblade/api/aml_scope.py"
       - "openblade/api/routes_aml_*.py"
+      - "openblade/api/routes_aml_matrix_fallback.py"
+      - "openblade/api/routes_iblade.py"
+      - "openblade/config.py"
       - "openblade/emulator_contract/**"
+      - "deploy/emulator/**"
+      - "scripts/emulator/**"
       - "tools/emulator_spec/**"
       - "tests/i3/**"
-      - "tests/integration/test_aml_emulator_latency.py"
+      - "tests/integration/test_aml_*.py"
+      - "tests/integration/test_multi_library.py"
+      - "tests/integration/test_library_commands.py"
+      - "tests/unit/test_emulator_client_config.py"
       - "docker-compose.yml"
   workflow_dispatch:
 
@@ -42,7 +64,19 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: python -m pytest tests/i3/test_15_manual_matrix_contract.py tests/integration/test_aml_emulator_latency.py -q --tb=short
+      - run: python3 tools/emulator_spec/validate_cross_repo_contract.py
+      - run: python3 tools/emulator_spec/generate_matrix_endpoint_catalog.py
+      - run: >
+          python -m pytest
+          tests/i3/test_14_emulator_profile.py
+          tests/i3/test_15_manual_matrix_contract.py
+          tests/i3/test_16_manual_matrix_generated_suites.py
+          tests/i3/test_17_matrix_endpoint_coverage.py
+          tests/integration/test_aml_emulator_latency*.py
+          tests/integration/test_aml_scope_lockdown.py
+          tests/integration/test_aml_library_spec_parity.py
+          tests/unit/test_emulator_client_config.py
+          -q --tb=short
       - run: |
           rm -f /tmp/openblade-emulator-gates.db
           OPENBLADE_BACKEND=mock OPENBLADE_DB_URL=sqlite:////tmp/openblade-emulator-gates.db \
@@ -61,4 +95,4 @@ jobs:
                   time.sleep(1)
           raise SystemExit("API did not become healthy in time")
           PY
-      - run: python -m pytest tests/i3/test_14_emulator_profile.py -q --tb=short
+      - run: python -m pytest tests/i3/ -m i3 -q --tb=short

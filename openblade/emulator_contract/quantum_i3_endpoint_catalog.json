@@ -1,0 +1,4223 @@
+{
+  "endpoint_count": 468,
+  "endpoints": [
+    {
+      "id": "t001-get-aml",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 1
+    },
+    {
+      "id": "t002-get-aml-access-devices",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/access/devices",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 2
+    },
+    {
+      "id": "t003-get-aml-access-groups",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/access/groups",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 3
+    },
+    {
+      "id": "t004-get-aml-access-group-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/access/group/{name}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 4
+    },
+    {
+      "id": "t005-post-aml-access-group-name",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/access/group/{name}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 5
+    },
+    {
+      "id": "t006-delete-aml-access-group-name",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/access/group/{name}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 6
+    },
+    {
+      "id": "t007-post-aml-access-group-name-device",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/access/group/{name}/device",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 7
+    },
+    {
+      "id": "t008-put-aml-access-group-name-device",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/access/group/{name}/device",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 8
+    },
+    {
+      "id": "t009-delete-aml-access-group-name-device-serialNumber",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/access/group/{name}/device/{serialNumber}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 9
+    },
+    {
+      "id": "t010-get-aml-access-group-name-devices",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/access/group/{name}/devices",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 10
+    },
+    {
+      "id": "t011-post-aml-access-group-name-devices",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/access/group/{name}/devices",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 11
+    },
+    {
+      "id": "t012-post-aml-access-group-name-hosts",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/access/group/{name}/hosts",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 12
+    },
+    {
+      "id": "t013-delete-aml-access-group-name-host-WWPN",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/access/group/{name}/host/{WWPN}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 13
+    },
+    {
+      "id": "t014-get-aml-access-host-WWPN",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/access/host/{WWPN}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 14
+    },
+    {
+      "id": "t015-put-aml-access-host-WWPN",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/access/host/{WWPN}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 15
+    },
+    {
+      "id": "t016-delete-aml-access-host-WWPN",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/access/host/{WWPN}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 16
+    },
+    {
+      "id": "t017-get-aml-access-hosts",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/access/hosts",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 17
+    },
+    {
+      "id": "t018-post-aml-access-hosts",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/access/hosts",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 18
+    },
+    {
+      "id": "t019-get-aml-access-licenses",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/access/licenses",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 19
+    },
+    {
+      "id": "t020-put-aml-access-licenses",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/access/licenses",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 20
+    },
+    {
+      "id": "t021-get-aml-access-license-serialNumber",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/access/license/{serialNumber}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 21
+    },
+    {
+      "id": "t022-post-aml-access-license-serialNumber",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/access/license/{serialNumber}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 22
+    },
+    {
+      "id": "t023-delete-aml-access-license-serialNumber",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/access/license/{serialNumber}",
+      "route_module": "openblade.api.routes_aml_access",
+      "status": "native",
+      "table_id": 23
+    },
+    {
+      "id": "t024-get-aml-device-settings-robot",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/device/settings/robot",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 24
+    },
+    {
+      "id": "t025-put-aml-device-settings-robot",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/device/settings/robot",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 25
+    },
+    {
+      "id": "t026-get-aml-devices-blades",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 26
+    },
+    {
+      "id": "t027-get-aml-devices-blades-ethernet",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades/ethernet",
+      "route_module": "openblade.api.routes_aml_blades",
+      "status": "native",
+      "table_id": 27
+    },
+    {
+      "id": "t028-get-aml-devices-blade-ethernet-serialNumber",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/ethernet/{serialNumber}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 28
+    },
+    {
+      "id": "t029-get-aml-devices-blade-ethernet-serialNumber-operations-identify",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/ethernet/{serialNumber}/operations/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 29
+    },
+    {
+      "id": "t030-post-aml-devices-blade-ethernet-serialNumber-operations-identify",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/ethernet/{serialNumber}/operations/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 30
+    },
+    {
+      "id": "t031-delete-aml-devices-blade-ethernet-serialNumber-operations",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/ethernet/{serialNumber}/operations/",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 31
+    },
+    {
+      "id": "t032-get-aml-devices-blade-ethernet-serialNumber-operations-powerCycle",
+      "method": "GET",
+      "operation_class": "power",
+      "path": "/aml/devices/blade/ethernet/{serialNumber}/operations/powerCycle",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 32
+    },
+    {
+      "id": "t033-post-aml-devices-blade-ethernet-serialNumber-operations-powerCycle",
+      "method": "POST",
+      "operation_class": "power",
+      "path": "/aml/devices/blade/ethernet/{serialNumber}/operations/powerCycle",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 33
+    },
+    {
+      "id": "t034-get-aml-devices-blades-fibreChannel",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades/fibreChannel",
+      "route_module": "openblade.api.routes_aml_blades",
+      "status": "native",
+      "table_id": 34
+    },
+    {
+      "id": "t035-get-aml-devices-blades-fibreChannel-hosts",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades/fibreChannel/hosts",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 35
+    },
+    {
+      "id": "t036-get-aml-devices-blades-fibreChannel-hpf",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades/fibreChannel/hpf",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 36
+    },
+    {
+      "id": "t037-get-aml-devices-blade-fibreChannel-serialNumber",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 37
+    },
+    {
+      "id": "t038-get-aml-devices-blade-fibreChannel-serialNumber-hosts",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/hosts",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 38
+    },
+    {
+      "id": "t039-post-aml-devices-blade-fibreChannel-serialNumber-hosts",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/hosts",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 39
+    },
+    {
+      "id": "t040-get-aml-devices-blade-fibreChannel-serialNumber-host-wwpn",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/host/{wwpn}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 40
+    },
+    {
+      "id": "t041-put-aml-devices-blade-fibreChannel-serialNumber-host-wwpn",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/host/{wwpn}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 41
+    },
+    {
+      "id": "t042-delete-aml-devices-blade-fibreChannel-serialNumber-host-wwpn",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/host/{wwpn}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 42
+    },
+    {
+      "id": "t043-get-aml-devices-blade-fibreChannel-serialNumber-host-wwpn-mapping",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/host/{wwpn}/mapping",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 43
+    },
+    {
+      "id": "t044-put-aml-devices-blade-fibreChannel-serialNumber-host-wwpn-mapping",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/host/{wwpn}/mapping",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 44
+    },
+    {
+      "id": "t045-get-aml-devices-blade-fibreChannel-serialNumber-hpf",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/hpf",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 45
+    },
+    {
+      "id": "t046-put-aml-devices-blade-fibreChannel-serialNumber-hpf",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/hpf",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 46
+    },
+    {
+      "id": "t047-put-aml-devices-blade-fibreChannel-serialNumber-hpf-intervention",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/hpf/intervention",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 47
+    },
+    {
+      "id": "t048-get-aml-devices-blade-fibreChannel-serialNumber-operations-identify",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/operations/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 48
+    },
+    {
+      "id": "t049-post-aml-devices-blade-fibreChannel-serialNumber-operations-identify",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/operations/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 49
+    },
+    {
+      "id": "t050-delete-aml-devices-blade-fibreChannel-serialNumber-operations-identify",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/operations/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 50
+    },
+    {
+      "id": "t051-get-aml-devices-blade-fibreChannel-serialNumber-operations-powerCycle",
+      "method": "GET",
+      "operation_class": "power",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/operations/powerCycle",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 51
+    },
+    {
+      "id": "t052-post-aml-devices-blade-fibreChannel-serialNumber-operations-powerCycle",
+      "method": "POST",
+      "operation_class": "power",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/operations/powerCycle",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 52
+    },
+    {
+      "id": "t053-get-aml-devices-blade-fibreChannel-serialNumber-operations-reboot",
+      "method": "GET",
+      "operation_class": "reboot",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/operations/reboot",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 53
+    },
+    {
+      "id": "t054-post-aml-devices-blade-fibreChannel-serialNumber-operations-reboot",
+      "method": "POST",
+      "operation_class": "reboot",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/operations/reboot",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 54
+    },
+    {
+      "id": "t055-post-aml-devices-blade-fibreChannel-serialNumber-port-id-operations-reset",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/port/{id}/operations/reset",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 55
+    },
+    {
+      "id": "t056-get-aml-devices-blade-fibreChannel-serialNumber-ports",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/ports",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 56
+    },
+    {
+      "id": "t057-put-aml-devices-blade-fibreChannel-serialNumber-ports",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/ports",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 57
+    },
+    {
+      "id": "t058-get-aml-devices-blade-fibreChannel-serialNumber-zoning",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/zoning",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 58
+    },
+    {
+      "id": "t059-put-aml-devices-blade-fibreChannel-serialNumber-zoning",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/fibreChannel/{serialNumber}/zoning",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 59
+    },
+    {
+      "id": "t060-get-aml-devices-blades-firmware",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades/firmware",
+      "route_module": "openblade.api.routes_aml_firmware",
+      "status": "native",
+      "table_id": 60
+    },
+    {
+      "id": "t061-post-aml-devices-blades-firmware",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/blades/firmware",
+      "route_module": "openblade.api.routes_aml_firmware",
+      "status": "native",
+      "table_id": 61
+    },
+    {
+      "id": "t062-get-aml-devices-blades-library",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades/library",
+      "route_module": "openblade.api.routes_aml_blades",
+      "status": "native",
+      "table_id": 62
+    },
+    {
+      "id": "t063-get-aml-devices-blade-library-serialNumber",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/library/{serialNumber}",
+      "route_module": "openblade.api.routes_aml_blades",
+      "status": "native",
+      "table_id": 63
+    },
+    {
+      "id": "t064-get-aml-devices-blades-ltfs",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades/ltfs",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 64
+    },
+    {
+      "id": "t065-get-aml-devices-blade-ltfs-sectionNumber",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/ltfs/{sectionNumber}",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 65
+    },
+    {
+      "id": "t066-delete-aml-devices-blade-ltfs-sectionNumber",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/ltfs/{sectionNumber}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 66
+    },
+    {
+      "id": "t067-get-aml-devices-blades-windows",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blades/windows",
+      "route_module": "openblade.api.routes_aml_blades",
+      "status": "native",
+      "table_id": 67
+    },
+    {
+      "id": "t068-get-aml-devices-blade-windows-sectionNumber",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/blade/windows/{sectionNumber}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 68
+    },
+    {
+      "id": "t069-delete-aml-devices-blade-windows-sectionNumber",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/devices/blade/windows/{sectionNumber}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 69
+    },
+    {
+      "id": "t070-get-aml-devices-ieStations",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/ieStations",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 70
+    },
+    {
+      "id": "t071-get-aml-devices-ieStation-number",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/ieStation/{number}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 71
+    },
+    {
+      "id": "t072-get-aml-devices-ieStation-number-lock",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/ieStation/{number}/lock",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 72
+    },
+    {
+      "id": "t073-put-aml-devices-ieStation-number-lock",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/ieStation/{number}/lock",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 73
+    },
+    {
+      "id": "t074-get-aml-devices-magazines",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/magazines",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 74
+    },
+    {
+      "id": "t075-put-aml-devices-magazines",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/magazines",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 75
+    },
+    {
+      "id": "t076-get-aml-devices-magazines-ieSlots",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/magazines/ieSlots",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 76
+    },
+    {
+      "id": "t077-put-aml-devices-magazines-ieSlots",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/magazines/ieSlots",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 77
+    },
+    {
+      "id": "t078-post-aml-devices-magazines-eject",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/magazines/eject",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 78
+    },
+    {
+      "id": "t079-post-aml-devices-magazines-ieAssign",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/magazines/ieAssign",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 79
+    },
+    {
+      "id": "t080-post-aml-devices-magazine-eject",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/magazine/eject",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 80
+    },
+    {
+      "id": "t081-put-aml-devices-magazines-release",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/magazines/release",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 81
+    },
+    {
+      "id": "t082-get-aml-devices-robots",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/robots",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 82
+    },
+    {
+      "id": "t083-get-aml-devices-robots-enable",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/robots/enable",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 83
+    },
+    {
+      "id": "t084-post-aml-devices-robots-enable",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/robots/enable",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 84
+    },
+    {
+      "id": "t085-get-aml-devices-robot-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/robot/{name}",
+      "route_module": "openblade.api.routes_aml_physical",
+      "status": "native",
+      "table_id": 85
+    },
+    {
+      "id": "t086-get-aml-devices-robot-name-state",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/robot/{name}/state",
+      "route_module": "openblade.api.routes_aml_physical",
+      "status": "native",
+      "table_id": 86
+    },
+    {
+      "id": "t087-put-aml-devices-robot-name-state",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/robot/{name}/state",
+      "route_module": "openblade.api.routes_aml_physical",
+      "status": "native",
+      "table_id": 87
+    },
+    {
+      "id": "t088-post-aml-devices-robot-name-park",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/robot/{name}/park",
+      "route_module": "openblade.api.routes_aml_physical",
+      "status": "native",
+      "table_id": 88
+    },
+    {
+      "id": "t089-get-aml-devices-towers",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/towers",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 89
+    },
+    {
+      "id": "t090-get-aml-devices-tower-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/tower/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 90
+    },
+    {
+      "id": "t091-post-aml-devices-tower-id-identify",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/tower/{id}/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 91
+    },
+    {
+      "id": "t092-get-aml-devices-tower-id-mode",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/tower/{id}/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 92
+    },
+    {
+      "id": "t093-put-aml-devices-tower-id-mode",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/tower/{id}/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 93
+    },
+    {
+      "id": "t094-post-aml-devices-tower-id-reset",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/tower/{id}/reset",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 94
+    },
+    {
+      "id": "t095-get-aml-devices-tower-id-state",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/tower/{id}/state",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 95
+    },
+    {
+      "id": "t096-put-aml-devices-tower-id-state",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/devices/tower/{id}/state",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 96
+    },
+    {
+      "id": "t097-get-aml-devices-usb",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/devices/usb",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 97
+    },
+    {
+      "id": "t098-post-aml-devices-usb",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/usb",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 98
+    },
+    {
+      "id": "t099-delete-aml-devices-usb",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/devices/usb",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 99
+    },
+    {
+      "id": "t100-post-aml-devices-usb-backup",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/usb/backup",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 100
+    },
+    {
+      "id": "t101-post-aml-devices-usb-restore",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/usb/restore",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 101
+    },
+    {
+      "id": "t102-post-aml-devices-usb-erase",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/usb/erase",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 102
+    },
+    {
+      "id": "t103-post-aml-devices-usb-pause",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/usb/pause",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 103
+    },
+    {
+      "id": "t104-post-aml-devices-usb-resume",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/usb/resume",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 104
+    },
+    {
+      "id": "t105-post-aml-devices-usb-eject",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/devices/usb/eject",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 105
+    },
+    {
+      "id": "t106-get-aml-drives",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives",
+      "route_module": "openblade.api.routes_aml_drives",
+      "status": "native",
+      "table_id": 106
+    },
+    {
+      "id": "t107-delete-aml-drives-firmware-image-name",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/drives/firmware/image/{name}",
+      "route_module": "openblade.api.routes_aml_firmware",
+      "status": "native",
+      "table_id": 107
+    },
+    {
+      "id": "t108-get-aml-drives-firmware-images",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/firmware/images",
+      "route_module": "openblade.api.routes_aml_firmware",
+      "status": "native",
+      "table_id": 108
+    },
+    {
+      "id": "t109-post-aml-drives-firmware-images",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drives/firmware/images",
+      "route_module": "openblade.api.routes_aml_firmware",
+      "status": "native",
+      "table_id": 109
+    },
+    {
+      "id": "t110-get-aml-drives-firmware-operations-update",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/firmware/operations/update",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 110
+    },
+    {
+      "id": "t111-post-aml-drives-firmware-operations-update",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drives/firmware/operations/update",
+      "route_module": "openblade.api.routes_aml_drives",
+      "status": "native",
+      "table_id": 111
+    },
+    {
+      "id": "t112-get-aml-drives-logs",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/logs",
+      "route_module": "openblade.api.routes_aml_drives",
+      "status": "native",
+      "table_id": 112
+    },
+    {
+      "id": "t113-get-aml-drives-log-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/log/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 113
+    },
+    {
+      "id": "t114-delete-aml-drives-log-name",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/drives/log/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 114
+    },
+    {
+      "id": "t115-post-aml-drives-log-name-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drives/log/{name}/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 115
+    },
+    {
+      "id": "t116-get-aml-drives-ports",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/ports",
+      "route_module": "openblade.api.routes_aml_drives",
+      "status": "native",
+      "table_id": 116
+    },
+    {
+      "id": "t117-post-aml-drives-powerCycle",
+      "method": "POST",
+      "operation_class": "power",
+      "path": "/aml/drives/powerCycle",
+      "route_module": "openblade.api.routes_aml_drives",
+      "status": "native",
+      "table_id": 117
+    },
+    {
+      "id": "t118-get-aml-drives-reports-activity",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/reports/activity",
+      "route_module": "openblade.api.routes_aml_drives",
+      "status": "native",
+      "table_id": 118
+    },
+    {
+      "id": "t119-get-aml-drives-reports-activity-details",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/reports/activity/details",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 119
+    },
+    {
+      "id": "t120-get-aml-drives-reports-cleaning",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/reports/cleaning",
+      "route_module": "openblade.api.routes_aml_diagnostics",
+      "status": "native",
+      "table_id": 120
+    },
+    {
+      "id": "t121-post-aml-drives-reports-cleaning-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drives/reports/cleaning/email",
+      "route_module": "openblade.api.routes_aml_diagnostics",
+      "status": "native",
+      "table_id": 121
+    },
+    {
+      "id": "t122-get-aml-drives-reports-utilization",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drives/reports/utilization",
+      "route_module": "openblade.api.routes_aml_drives",
+      "status": "native",
+      "table_id": 122
+    },
+    {
+      "id": "t123-post-aml-drives-reports-utilization-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drives/reports/utilization/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 123
+    },
+    {
+      "id": "t124-get-aml-drive-serialNumber",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{serialNumber}",
+      "route_module": "openblade.api.routes_aml_drives",
+      "status": "native",
+      "table_id": 124
+    },
+    {
+      "id": "t125-get-aml-drive-serialNumber-dataPath",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{serialNumber}/dataPath",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 125
+    },
+    {
+      "id": "t126-put-aml-drive-serialNumber-dataPath",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/dataPath",
+      "route_module": "openblade.api.routes_aml_advanced",
+      "status": "native",
+      "table_id": 126
+    },
+    {
+      "id": "t127-get-aml-drive-serialNumber-operations-clean",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{serialNumber}/operations/clean",
+      "route_module": "openblade.api.routes_aml_diagnostics",
+      "status": "native",
+      "table_id": 127
+    },
+    {
+      "id": "t128-post-aml-drive-serialNumber-operations-clean",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/operations/clean",
+      "route_module": "openblade.api.routes_aml_diagnostics",
+      "status": "native",
+      "table_id": 128
+    },
+    {
+      "id": "t129-get-aml-drive-serialNumber-operations-clean-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{serialNumber}/operations/clean/{id}",
+      "route_module": "openblade.api.routes_aml_diagnostics",
+      "status": "native",
+      "table_id": 129
+    },
+    {
+      "id": "t130-delete-aml-drive-serialNumber-operations-clean-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/operations/clean/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 130
+    },
+    {
+      "id": "t131-post-aml-drive-identifier-operations-configure",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drive/{identifier}/operations/configure",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 131
+    },
+    {
+      "id": "t132-post-aml-drive-serialNumber-operations-eject",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/operations/eject",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 132
+    },
+    {
+      "id": "t133-get-aml-drive-serialNumber-operations-identify",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{serialNumber}/operations/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 133
+    },
+    {
+      "id": "t134-post-aml-drive-serialNumber-operations-identify",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/operations/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 134
+    },
+    {
+      "id": "t135-delete-aml-drive-serialNumber-operations-identify",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/operations/identify",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 135
+    },
+    {
+      "id": "t136-post-aml-drive-serialNumber-operations-powerCycle",
+      "method": "POST",
+      "operation_class": "power",
+      "path": "/aml/drive/{serialNumber}/operations/powerCycle",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 136
+    },
+    {
+      "id": "t137-post-aml-drive-serialNumber-operations-performanceTest",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/operations/performanceTest",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 137
+    },
+    {
+      "id": "t138-get-aml-drive-identifier-operations-state",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{identifier}/operations/state",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 138
+    },
+    {
+      "id": "t139-put-aml-drive-identifier-operations-state",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/drive/{identifier}/operations/state",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 139
+    },
+    {
+      "id": "t140-post-aml-drive-serialNumber-operations-test",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/operations/test",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 140
+    },
+    {
+      "id": "t141-post-aml-drive-serialNumber-operations-wrapTest",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/operations/wrapTest",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 141
+    },
+    {
+      "id": "t142-get-aml-drive-serialNumber-ports",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{serialNumber}/ports",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 142
+    },
+    {
+      "id": "t143-put-aml-drive-serialNumber-ports",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/ports",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 143
+    },
+    {
+      "id": "t144-get-aml-drive-serialNumber-log",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{serialNumber}/log",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 144
+    },
+    {
+      "id": "t145-post-aml-drive-serialNumber-log-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/log/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 145
+    },
+    {
+      "id": "t146-get-aml-drive-serialNumber-mode",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/drive/{serialNumber}/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 146
+    },
+    {
+      "id": "t147-put-aml-drive-serialNumber-mode",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/drive/{serialNumber}/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 147
+    },
+    {
+      "id": "t148-post-aml-drive-serialNumber-removeITNexus",
+      "method": "POST",
+      "operation_class": "move",
+      "path": "/aml/drive/{serialNumber}/removeITNexus",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 148
+    },
+    {
+      "id": "t149-get-aml-enum",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/enum",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 149
+    },
+    {
+      "id": "t150-get-aml-enum-component",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/enum/{component}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 150
+    },
+    {
+      "id": "t151-get-aml-enum-component-element",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/enum/{component}/{element}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 151
+    },
+    {
+      "id": "t152-get-aml-media",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media",
+      "route_module": "openblade.api.routes_aml_media",
+      "status": "native",
+      "table_id": 152
+    },
+    {
+      "id": "t153-get-aml-media-cleaning",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/cleaning",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 153
+    },
+    {
+      "id": "t154-get-aml-media-edlm",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/edlm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 154
+    },
+    {
+      "id": "t155-post-aml-media-edlm",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/media/edlm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 155
+    },
+    {
+      "id": "t156-get-aml-media-edlm-results",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/edlm/results",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 156
+    },
+    {
+      "id": "t157-get-aml-media-edlm-result-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/edlm/result/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 157
+    },
+    {
+      "id": "t158-delete-aml-media-edlm-result-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/media/edlm/result/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 158
+    },
+    {
+      "id": "t159-get-aml-media-edlm-sessions",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/edlm/sessions",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 159
+    },
+    {
+      "id": "t160-get-aml-media-edlm-session-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/edlm/session/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 160
+    },
+    {
+      "id": "t161-put-aml-media-edlm-session-id-operations-pause",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/media/edlm/session/{id}/operations/pause",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 161
+    },
+    {
+      "id": "t162-put-aml-media-edlm-session-id-operations-resume",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/media/edlm/session/{id}/operations/resume",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 162
+    },
+    {
+      "id": "t163-put-aml-media-edlm-session-id-operations-stop",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/media/edlm/session/{id}/operations/stop",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 163
+    },
+    {
+      "id": "t164-get-aml-media-operations-moveMedium",
+      "method": "GET",
+      "operation_class": "move",
+      "path": "/aml/media/operations/moveMedium",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 164
+    },
+    {
+      "id": "t165-post-aml-media-operations-moveMedium",
+      "method": "POST",
+      "operation_class": "move",
+      "path": "/aml/media/operations/moveMedium",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 165
+    },
+    {
+      "id": "t166-get-aml-media-operations-moveMedium-maxAllowed",
+      "method": "GET",
+      "operation_class": "move",
+      "path": "/aml/media/operations/moveMedium/maxAllowed",
+      "route_module": "openblade.api.routes_aml_media",
+      "status": "native",
+      "table_id": 166
+    },
+    {
+      "id": "t167-put-aml-media-operations-moveMedium-maxAllowed",
+      "method": "PUT",
+      "operation_class": "move",
+      "path": "/aml/media/operations/moveMedium/maxAllowed",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 167
+    },
+    {
+      "id": "t168-get-aml-media-reports-crossPartitionMoves",
+      "method": "GET",
+      "operation_class": "move",
+      "path": "/aml/media/reports/crossPartitionMoves",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 168
+    },
+    {
+      "id": "t169-post-aml-media-reports-crossPartitionMoves-email",
+      "method": "POST",
+      "operation_class": "move",
+      "path": "/aml/media/reports/crossPartitionMoves/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 169
+    },
+    {
+      "id": "t170-get-aml-media-reports-edlm",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/reports/edlm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 170
+    },
+    {
+      "id": "t171-post-aml-media-reports-edlm-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/media/reports/edlm/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 171
+    },
+    {
+      "id": "t172-get-aml-media-reports-inventory",
+      "method": "GET",
+      "operation_class": "inventory",
+      "path": "/aml/media/reports/inventory",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 172
+    },
+    {
+      "id": "t173-post-aml-media-reports-inventory-email",
+      "method": "POST",
+      "operation_class": "inventory",
+      "path": "/aml/media/reports/inventory/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 173
+    },
+    {
+      "id": "t174-get-aml-media-reports-securityEvents",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/reports/securityEvents",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 174
+    },
+    {
+      "id": "t175-post-aml-media-reports-securityEvents-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/media/reports/securityEvents/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 175
+    },
+    {
+      "id": "t176-get-aml-media-reports-tapeAlerts",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/reports/tapeAlerts",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 176
+    },
+    {
+      "id": "t177-post-aml-media-reports-tapeAlerts-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/media/reports/tapeAlerts/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 177
+    },
+    {
+      "id": "t178-get-aml-media-reports-usage",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/media/reports/usage",
+      "route_module": "openblade.api.routes_aml_media",
+      "status": "native",
+      "table_id": 178
+    },
+    {
+      "id": "t179-post-aml-media-reports-usage-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/media/reports/usage/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 179
+    },
+    {
+      "id": "t180-get-aml-medium-barcode",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/medium/{barcode}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 180
+    },
+    {
+      "id": "t181-get-aml-partitions",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 181
+    },
+    {
+      "id": "t182-post-aml-partitions",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partitions",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 182
+    },
+    {
+      "id": "t183-get-aml-partitions-policy-activeVault",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions/policy/activeVault",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 183
+    },
+    {
+      "id": "t184-post-aml-partitions-policy-activeVault",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partitions/policy/activeVault",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 184
+    },
+    {
+      "id": "t185-get-aml-partitions-policy-autoImport",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions/policy/autoImport",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 185
+    },
+    {
+      "id": "t186-get-aml-partitions-policy-autoExport",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions/policy/autoExport",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 186
+    },
+    {
+      "id": "t187-get-aml-partitions-policy-driveCleaning",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions/policy/driveCleaning",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 187
+    },
+    {
+      "id": "t188-get-aml-partitions-policy-edlm",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions/policy/edlm",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 188
+    },
+    {
+      "id": "t189-post-aml-partitions-policy-edlm",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partitions/policy/edlm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 189
+    },
+    {
+      "id": "t190-get-aml-partitions-policy-ekm",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions/policy/ekm",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 190
+    },
+    {
+      "id": "t191-get-aml-partitions-policy-ekm-keySets",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions/policy/ekm/keySets",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 191
+    },
+    {
+      "id": "t192-post-aml-partitions-policy-ekm-keySets",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partitions/policy/ekm/keySets",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 192
+    },
+    {
+      "id": "t193-put-aml",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 193
+    },
+    {
+      "id": "t194-get-aml-partitions-reports-utilization",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partitions/reports/utilization",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 194
+    },
+    {
+      "id": "t195-post-aml-partitions-reports-utilization-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partitions/reports/utilization/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 195
+    },
+    {
+      "id": "t196-get-aml-partition-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 196
+    },
+    {
+      "id": "t197-put-aml-partition-name",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 197
+    },
+    {
+      "id": "t198-delete-aml-partition-name",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}",
+      "route_module": "openblade.api.routes_aml_partitions",
+      "status": "native",
+      "table_id": 198
+    },
+    {
+      "id": "t199-get-aml-partition-name-ampExtensionsCount",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/ampExtensionsCount",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 199
+    },
+    {
+      "id": "t200-put-aml-partition-name-ampExtensionsCount",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/ampExtensionsCount",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 200
+    },
+    {
+      "id": "t201-get-aml-partition-name-barcodeReporting",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/barcodeReporting",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 201
+    },
+    {
+      "id": "t202-put-aml-partition-name-barcodeReporting",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/barcodeReporting",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 202
+    },
+    {
+      "id": "t203-get-aml-partition-name-controlPath",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/controlPath",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 203
+    },
+    {
+      "id": "t204-put-aml-partition-name-controlPath",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/controlPath",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 204
+    },
+    {
+      "id": "t205-get-aml-partition-name-dataPath",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/dataPath",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 205
+    },
+    {
+      "id": "t206-put-aml-partition-name-dataPath",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/dataPath",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 206
+    },
+    {
+      "id": "t207-get-aml-partition-name-driveSerialNumbers",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/driveSerialNumbers",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 207
+    },
+    {
+      "id": "t208-post-aml-partition-name-driveSerialNumbers",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/driveSerialNumbers",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 208
+    },
+    {
+      "id": "t209-delete-aml-partition-name-driveSerialNumbers",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/driveSerialNumbers",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 209
+    },
+    {
+      "id": "t210-get-aml-partition-name-mode",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 210
+    },
+    {
+      "id": "t211-put-aml-partition-name-mode",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 211
+    },
+    {
+      "id": "t212-get-aml-partition-name-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/name",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 212
+    },
+    {
+      "id": "t213-put-aml-partition-name-name",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/name",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 213
+    },
+    {
+      "id": "t214-get-aml-partition-name-operations",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/operations",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 214
+    },
+    {
+      "id": "t215-get-aml-partition-name-operations-autoImport",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/operations/autoImport",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 215
+    },
+    {
+      "id": "t216-post-aml-partition-name-operations-autoImport",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/operations/autoImport",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 216
+    },
+    {
+      "id": "t217-get-aml-partition-name-operations-autoImport-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/operations/autoImport/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 217
+    },
+    {
+      "id": "t218-delete-aml-partition-name-operations-autoImport-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/operations/autoImport/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 218
+    },
+    {
+      "id": "t219-get-aml-partition-name-operations-inventory",
+      "method": "GET",
+      "operation_class": "inventory",
+      "path": "/aml/partition/{name}/operations/inventory",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 219
+    },
+    {
+      "id": "t220-post-aml-partition-name-operations-inventory",
+      "method": "POST",
+      "operation_class": "inventory",
+      "path": "/aml/partition/{name}/operations/inventory",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 220
+    },
+    {
+      "id": "t221-get-aml-partition-name-operations-inventory-taskId",
+      "method": "GET",
+      "operation_class": "inventory",
+      "path": "/aml/partition/{name}/operations/inventory/{taskId}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 221
+    },
+    {
+      "id": "t222-delete-aml-partition-name-operations-inventory-taskId",
+      "method": "DELETE",
+      "operation_class": "inventory",
+      "path": "/aml/partition/{name}/operations/inventory/{taskId}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 222
+    },
+    {
+      "id": "t223-get-aml-partition-name-policy-activeVault",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/policy/activeVault",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 223
+    },
+    {
+      "id": "t224-put-aml-partition-name-policy-activeVault",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/activeVault",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 224
+    },
+    {
+      "id": "t225-delete-aml-partition-name-policy-activeVault",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/activeVault",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 225
+    },
+    {
+      "id": "t226-get-aml-partition-name-policy-autoImport",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/policy/autoImport",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 226
+    },
+    {
+      "id": "t227-put-aml-partition-name-policy-autoImport",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/autoImport",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 227
+    },
+    {
+      "id": "t228-get-aml-partition-name-policy-autoExport",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/policy/autoExport",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 228
+    },
+    {
+      "id": "t229-put-aml-partition-name-policy-autoExport",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/autoExport",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 229
+    },
+    {
+      "id": "t230-get-aml-partition-name-policy-driveCleaning",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/policy/driveCleaning",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 230
+    },
+    {
+      "id": "t231-post-aml-partition-name-policy-driveCleaning",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/driveCleaning",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 231
+    },
+    {
+      "id": "t232-put-aml-partition-name-policy-driveCleaning",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/driveCleaning",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 232
+    },
+    {
+      "id": "t233-delete-aml-partition-name-policy-driveCleaning",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/driveCleaning",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 233
+    },
+    {
+      "id": "t234-get-aml-partition-name-policy-driveLeveling",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/policy/driveLeveling",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 234
+    },
+    {
+      "id": "t235-put-aml-partition-name-policy-driveLeveling",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/driveLeveling",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 235
+    },
+    {
+      "id": "t236-get-aml-partition-name-policy-edlm",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/policy/edlm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 236
+    },
+    {
+      "id": "t237-put-aml-partition-name-policy-edlm",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/edlm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 237
+    },
+    {
+      "id": "t238-delete-aml-partition-name-policy-edlm",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/edlm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 238
+    },
+    {
+      "id": "t239-get-aml-partition-name-policy-ekm",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/policy/ekm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 239
+    },
+    {
+      "id": "t240-put-aml-partition-name-policy-ekm",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/policy/ekm",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 240
+    },
+    {
+      "id": "t241-get-aml-partition-name-segments",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/partition/{name}/segments",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 241
+    },
+    {
+      "id": "t242-post-aml-partition-name-segments",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/segments",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 242
+    },
+    {
+      "id": "t243-delete-aml-partition-name-segments",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/segments",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 243
+    },
+    {
+      "id": "t244-put-aml-partition-name-segments",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/partition/{name}/segments",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 244
+    },
+    {
+      "id": "t245-get-aml-physicalLibrary",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 245
+    },
+    {
+      "id": "t246-put-aml-physicalLibrary",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 246
+    },
+    {
+      "id": "t247-get-aml-physicalLibrary-elements",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/elements",
+      "route_module": "openblade.api.routes_aml_diagnostics",
+      "status": "native",
+      "table_id": 247
+    },
+    {
+      "id": "t248-get-aml-physicalLibrary-environment",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/environment",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 248
+    },
+    {
+      "id": "t249-post-aml-physicalLibrary-environment-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/environment/email",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 249
+    },
+    {
+      "id": "t250-get-aml-physicalLibrary-i3-i6-modules",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/i3-i6/modules",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 250
+    },
+    {
+      "id": "t251-get-aml-physicalLibrary-mode",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/mode",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 251
+    },
+    {
+      "id": "t252-put-aml-physicalLibrary-mode",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/mode",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 252
+    },
+    {
+      "id": "t253-get-aml-physicalLibrary-operations",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/operations",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 253
+    },
+    {
+      "id": "t254-get-aml-physicalLibrary-operations-inventory",
+      "method": "GET",
+      "operation_class": "inventory",
+      "path": "/aml/physicalLibrary/operations/inventory",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 254
+    },
+    {
+      "id": "t255-post-aml-physicalLibrary-operations-inventory",
+      "method": "POST",
+      "operation_class": "inventory",
+      "path": "/aml/physicalLibrary/operations/inventory",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 255
+    },
+    {
+      "id": "t256-get-aml-physicalLibrary-operations-inventory-id",
+      "method": "GET",
+      "operation_class": "inventory",
+      "path": "/aml/physicalLibrary/operations/inventory/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 256
+    },
+    {
+      "id": "t257-delete-aml-physicalLibrary-operations-inventory-id",
+      "method": "DELETE",
+      "operation_class": "inventory",
+      "path": "/aml/physicalLibrary/operations/inventory/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 257
+    },
+    {
+      "id": "t258-get-aml-physicalLibrary-operations-shutdown",
+      "method": "GET",
+      "operation_class": "power",
+      "path": "/aml/physicalLibrary/operations/shutdown",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 258
+    },
+    {
+      "id": "t259-post-aml-physicalLibrary-operations-shutdown",
+      "method": "POST",
+      "operation_class": "power",
+      "path": "/aml/physicalLibrary/operations/shutdown",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 259
+    },
+    {
+      "id": "t260-get-aml-physicalLibrary-operations-shutdown-id",
+      "method": "GET",
+      "operation_class": "power",
+      "path": "/aml/physicalLibrary/operations/shutdown/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 260
+    },
+    {
+      "id": "t261-delete-aml-physicalLibrary-operations-shutdown-id",
+      "method": "DELETE",
+      "operation_class": "power",
+      "path": "/aml/physicalLibrary/operations/shutdown/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 261
+    },
+    {
+      "id": "t262-get-aml-physicalLibrary-operations-reboot",
+      "method": "GET",
+      "operation_class": "reboot",
+      "path": "/aml/physicalLibrary/operations/reboot",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 262
+    },
+    {
+      "id": "t263-post-aml-physicalLibrary-operations-reboot",
+      "method": "POST",
+      "operation_class": "reboot",
+      "path": "/aml/physicalLibrary/operations/reboot",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 263
+    },
+    {
+      "id": "t264-get-aml-physicalLibrary-operations-reboot-id",
+      "method": "GET",
+      "operation_class": "reboot",
+      "path": "/aml/physicalLibrary/operations/reboot/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 264
+    },
+    {
+      "id": "t265-delete-aml-physicalLibrary-operations-reboot-id",
+      "method": "DELETE",
+      "operation_class": "reboot",
+      "path": "/aml/physicalLibrary/operations/reboot/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 265
+    },
+    {
+      "id": "t266-get-aml-physicalLibrary-operations-reset",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/operations/reset",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 266
+    },
+    {
+      "id": "t267-post-aml-physicalLibrary-operations-reset",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/operations/reset",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 267
+    },
+    {
+      "id": "t268-get-aml-physicalLibrary-operations-reset-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/operations/reset/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 268
+    },
+    {
+      "id": "t269-delete-aml-physicalLibrary-operations-reset-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/operations/reset/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 269
+    },
+    {
+      "id": "t270-get-aml-physicalLibrary-operations-teach",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/operations/teach",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 270
+    },
+    {
+      "id": "t271-post-aml-physicalLibrary-operations-teach",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/operations/teach",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 271
+    },
+    {
+      "id": "t272-get-aml-physicalLibrary-operations-teach-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/operations/teach/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 272
+    },
+    {
+      "id": "t273-delete-aml-physicalLibrary-operations-teach-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/operations/teach/{id}",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 273
+    },
+    {
+      "id": "t274-get-aml-physicalLibrary-quattro-modules",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/quattro/modules",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 274
+    },
+    {
+      "id": "t275-get-aml-physicalLibrary-subset-configuration",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/subset/configuration",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 275
+    },
+    {
+      "id": "t276-get-aml-physicalLibrary-subset-remoteAccess",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/subset/remoteAccess",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 276
+    },
+    {
+      "id": "t277-get-aml-physicalLibrary-subset-resources",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/subset/resources",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 277
+    },
+    {
+      "id": "t278-get-aml-physicalLibrary-subset-settings",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/subset/settings",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 278
+    },
+    {
+      "id": "t280-get-aml-physicalLibrary-segments",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/segments",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 280
+    },
+    {
+      "id": "t281-get-aml-physicalLibrary-segments-amp",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/segments/amp",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 281
+    },
+    {
+      "id": "t282-put-aml-physicalLibrary-segments-amp",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/segments/amp",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 282
+    },
+    {
+      "id": "t283-get-aml-physicalLibrary-segments-cleaning",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/segments/cleaning",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 283
+    },
+    {
+      "id": "t284-post-aml-physicalLibrary-segments-cleaning",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/segments/cleaning",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 284
+    },
+    {
+      "id": "t285-delete-aml-physicalLibrary-segments-cleaning",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/physicalLibrary/segments/cleaning",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 285
+    },
+    {
+      "id": "t286-post-aml-physicalLibrary-segments-operations-inventory",
+      "method": "POST",
+      "operation_class": "inventory",
+      "path": "/aml/physicalLibrary/segments/operations/inventory",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 286
+    },
+    {
+      "id": "t287-get-aml-physicalLibrary-status",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/physicalLibrary/status",
+      "route_module": "openblade.api.routes_aml_library",
+      "status": "native",
+      "table_id": 287
+    },
+    {
+      "id": "t288-get-aml-service-logs",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/service/logs",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 288
+    },
+    {
+      "id": "t289-get-aml-service-log-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/service/log/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 289
+    },
+    {
+      "id": "t290-post-aml-service-log-name-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/service/log/{name}/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 290
+    },
+    {
+      "id": "t291-post-aml-service-resetFactoryDefault",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/service/resetFactoryDefault",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 291
+    },
+    {
+      "id": "t292-get-aml-service-vt-test",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/service/vt/test",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 292
+    },
+    {
+      "id": "t293-post-aml-service-vt-test-abort",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/service/vt/test/abort",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 293
+    },
+    {
+      "id": "t294-get-aml-service-vt-test-operations",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/service/vt/test/operations",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 294
+    },
+    {
+      "id": "t295-post-aml-service-vt-test-operations",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/service/vt/test/operations",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 295
+    },
+    {
+      "id": "t296-get-aml-service-vt-test-operation-taskId",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/service/vt/test/operation/{taskId}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 296
+    },
+    {
+      "id": "t297-get-aml-service-vt-test-sessions",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/service/vt/test/sessions",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 297
+    },
+    {
+      "id": "t298-get-aml-service-vt-test-session",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/service/vt/test/session",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 298
+    },
+    {
+      "id": "t299-get-aml-service-vt-test-session-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/service/vt/test/session/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 299
+    },
+    {
+      "id": "t300-delete-aml-service-vt-test-session-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/service/vt/test/session/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 300
+    },
+    {
+      "id": "t301-get-aml-system-configuration-record",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/configuration/record",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 301
+    },
+    {
+      "id": "t302-post-aml-system-configuration-record-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/configuration/record/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 302
+    },
+    {
+      "id": "t303-get-aml-system-configurationChanges-report",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/configurationChanges/report",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 303
+    },
+    {
+      "id": "t304-post-aml-system-configurationChanges-report-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/configurationChanges/report/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 304
+    },
+    {
+      "id": "t308-put-aml-system-dateTime",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/dateTime",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 308
+    },
+    {
+      "id": "t309-post-aml-system-dateTime-clientDateTime",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/dateTime/clientDateTime",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 309
+    },
+    {
+      "id": "t310-get-aml-system-dateTime-ntp",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/dateTime/ntp",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 310
+    },
+    {
+      "id": "t311-put-aml-system-dateTime-ntp",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/dateTime/ntp",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 311
+    },
+    {
+      "id": "t312-get-aml-system-dateTime-timeZoneIDs",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/dateTime/timeZoneIDs",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 312
+    },
+    {
+      "id": "t313-get-aml-system-ekm-communicationCertificates",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ekm/communicationCertificates",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 313
+    },
+    {
+      "id": "t314-post-aml-system-ekm-communicationCertificates",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/ekm/communicationCertificates",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 314
+    },
+    {
+      "id": "t315-get-aml-system-ekm-logs",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ekm/logs",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 315
+    },
+    {
+      "id": "t316-get-aml-system-ekm-reports-audit-mediaStatus",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ekm/reports/audit/mediaStatus",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 316
+    },
+    {
+      "id": "t317-post-aml-system-ekm-reports-audit-mediaStatus-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/ekm/reports/audit/mediaStatus/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 317
+    },
+    {
+      "id": "t318-get-aml-system-ekm-reports-audit-partitionActivity",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ekm/reports/audit/partitionActivity",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 318
+    },
+    {
+      "id": "t319-post-aml-system-ekm-reports-audit-partitionActivity-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/ekm/reports/audit/partitionActivity/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 319
+    },
+    {
+      "id": "t320-get-aml-system-ekm-servers",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ekm/servers",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 320
+    },
+    {
+      "id": "t321-post-aml-system-ekm-servers",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/ekm/servers",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 321
+    },
+    {
+      "id": "t322-get-aml-system-ekm-servers-type",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ekm/servers/{type}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 322
+    },
+    {
+      "id": "t323-put-aml-system-ekm-servers-type",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/ekm/servers/{type}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 323
+    },
+    {
+      "id": "t324-delete-aml-system-ekm-servers-type",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/ekm/servers/{type}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 324
+    },
+    {
+      "id": "t325-post-aml-system-ekm-servers-type-test",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/ekm/servers/{type}/test",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 325
+    },
+    {
+      "id": "t326-get-aml-system-emmc",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/emmc",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 326
+    },
+    {
+      "id": "t327-get-aml-system-file",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/file",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 327
+    },
+    {
+      "id": "t328-get-aml-system-licenses",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/licenses",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 328
+    },
+    {
+      "id": "t329-post-aml-system-licenses",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/licenses",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 329
+    },
+    {
+      "id": "t330-get-aml-system-network",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 330
+    },
+    {
+      "id": "t331-get-aml-system-network-access-certificate",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/access/certificate",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 331
+    },
+    {
+      "id": "t332-post-aml-system-network-access-certificate",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/network/access/certificate",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 332
+    },
+    {
+      "id": "t333-get-aml-system-network-access-certificate-activate",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/access/certificate/activate",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 333
+    },
+    {
+      "id": "t334-post-aml-system-network-access-certificate-activate",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/network/access/certificate/activate",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 334
+    },
+    {
+      "id": "t335-post-aml-system-network-access-certificate-csr",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/network/access/certificate/csr",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 335
+    },
+    {
+      "id": "t336-get-aml-system-network-access-certificate-isSigned",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/access/certificate/isSigned",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 336
+    },
+    {
+      "id": "t337-get-aml-system-network-interfaces",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/interfaces",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 337
+    },
+    {
+      "id": "t338-get-aml-system-network-interface-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/interface/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 338
+    },
+    {
+      "id": "t339-put-aml-system-network-interface-name",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/network/interface/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 339
+    },
+    {
+      "id": "t340-get-aml-system-network-configurations",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/configurations",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 340
+    },
+    {
+      "id": "t341-get-aml-system-network-configuration-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/configuration/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 341
+    },
+    {
+      "id": "t342-put-aml-system-network-configuration-name-version",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/network/configuration/{name}/{version}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 342
+    },
+    {
+      "id": "t343-get-aml-system-network-dns",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/dns",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 343
+    },
+    {
+      "id": "t344-put-aml-system-network-dns",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/network/dns",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 344
+    },
+    {
+      "id": "t345-get-aml-system-network-emailServer",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/emailServer",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 345
+    },
+    {
+      "id": "t346-put-aml-system-network-emailServer",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/network/emailServer",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 346
+    },
+    {
+      "id": "t347-get-aml-system-network-internal",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/internal",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 347
+    },
+    {
+      "id": "t348-put-aml-system-network-internal",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/network/internal",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 348
+    },
+    {
+      "id": "t349-get-aml-system-network-internal-connectivity",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/internal/connectivity",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 349
+    },
+    {
+      "id": "t350-post-aml-system-network-internal-connectivity-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/network/internal/connectivity/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 350
+    },
+    {
+      "id": "t351-get-aml-system-network-ipv6-mode",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/ipv6/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 351
+    },
+    {
+      "id": "t352-put-aml-system-network-ipv6-mode",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/network/ipv6/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 352
+    },
+    {
+      "id": "t353-post-aml-system-network-emailServer-test",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/network/emailServer/test",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 353
+    },
+    {
+      "id": "t354-get-aml-system-network-snmp-MIBs",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/snmp/MIBs",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 354
+    },
+    {
+      "id": "t355-post-aml-system-network-snmp-MIBs-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/network/snmp/MIBs/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 355
+    },
+    {
+      "id": "t356-get-aml-system-network-syslogs",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/syslogs",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 356
+    },
+    {
+      "id": "t357-post-aml-system-network-syslogs",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/network/syslogs",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 357
+    },
+    {
+      "id": "t358-get-aml-system-network-syslog-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/network/syslog/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 358
+    },
+    {
+      "id": "t359-put-aml-system-network-syslog-id",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/network/syslog/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 359
+    },
+    {
+      "id": "t360-delete-aml-system-network-syslog-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/network/syslog/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 360
+    },
+    {
+      "id": "t361-post-aml-system-network-syslog-id-test",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/network/syslog/{id}/test",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 361
+    },
+    {
+      "id": "t362-get-aml-system-notifications-contact",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/contact",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 362
+    },
+    {
+      "id": "t363-put-aml-system-notifications-contact",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/contact",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 363
+    },
+    {
+      "id": "t364-get-aml-system-notifications-emailRecipients",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/emailRecipients",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 364
+    },
+    {
+      "id": "t365-post-aml-system-notifications-emailRecipients",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/emailRecipients",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 365
+    },
+    {
+      "id": "t366-get-aml-system-notifications-emailRecipient-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/emailRecipient/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 366
+    },
+    {
+      "id": "t367-delete-aml-system-notifications-emailRecipient-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/emailRecipient/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 367
+    },
+    {
+      "id": "t368-get-aml-system-notifications-heartbeat",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/heartbeat",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 368
+    },
+    {
+      "id": "t369-put-aml-system-notifications-heartbeat",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/heartbeat",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 369
+    },
+    {
+      "id": "t375-get-aml-system-notifications-mediaSecurity",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/mediaSecurity",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 375
+    },
+    {
+      "id": "t376-put-aml-system-notifications-mediaSecurity",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/mediaSecurity",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 376
+    },
+    {
+      "id": "t377-get-aml-system-notifications-reports",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/reports",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 377
+    },
+    {
+      "id": "t378-post-aml-system-notifications-reports",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/reports",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 378
+    },
+    {
+      "id": "t379-get-aml-system-notifications-report-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/report/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 379
+    },
+    {
+      "id": "t380-put-aml-system-notifications-report-id",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/report/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 380
+    },
+    {
+      "id": "t381-delete-aml-system-notifications-report-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/report/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 381
+    },
+    {
+      "id": "t382-get-aml-system-notifications-snmpTraps",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/snmpTraps",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 382
+    },
+    {
+      "id": "t383-post-aml-system-notifications-snmpTraps",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/snmpTraps",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 383
+    },
+    {
+      "id": "t384-post-aml-system-notifications-snmpTraps-test",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/snmpTraps/test",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 384
+    },
+    {
+      "id": "t385-get-aml-system-notifications-snmpTrap-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/snmpTrap/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 385
+    },
+    {
+      "id": "t386-put-aml-system-notifications-snmpTrap-id",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/snmpTrap/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 386
+    },
+    {
+      "id": "t387-delete-aml-system-notifications-snmpTrap-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/snmpTrap/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 387
+    },
+    {
+      "id": "t388-get-aml-system-notifications-telemetrics",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/telemetrics",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 388
+    },
+    {
+      "id": "t389-get-aml-system-notifications-telemetric-receiver",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/telemetric/{receiver}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 389
+    },
+    {
+      "id": "t390-put-aml-system-notifications-telemetric-receiver",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/telemetric/{receiver}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 390
+    },
+    {
+      "id": "t391-get-aml-system-notifications-tickets",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/tickets",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 391
+    },
+    {
+      "id": "t392-post-aml-system-notifications-tickets",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/tickets",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 392
+    },
+    {
+      "id": "t393-get-aml-system-notifications-ticket-id",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/ticket/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 393
+    },
+    {
+      "id": "t394-put-aml-system-notifications-ticket-id",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/ticket/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 394
+    },
+    {
+      "id": "t395-delete-aml-system-notifications-ticket-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/ticket/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 395
+    },
+    {
+      "id": "t396-get-aml-system-notifications-tickets-filters",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/notifications/tickets/filters",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 396
+    },
+    {
+      "id": "t397-put-aml-system-notifications-tickets-filters",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/notifications/tickets/filters",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 397
+    },
+    {
+      "id": "t398-post-aml-system-operations-reboot",
+      "method": "POST",
+      "operation_class": "reboot",
+      "path": "/aml/system/operations/reboot",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 398
+    },
+    {
+      "id": "t399-post-aml-system-operations-shutdown",
+      "method": "POST",
+      "operation_class": "power",
+      "path": "/aml/system/operations/shutdown",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 399
+    },
+    {
+      "id": "t400-get-aml-system-policy-externalApplicationServers",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/policy/externalApplicationServers",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 400
+    },
+    {
+      "id": "t401-post-aml-system-policy-externalApplicationServers",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/policy/externalApplicationServers",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 401
+    },
+    {
+      "id": "t402-get-aml-system-policy-externalApplicationServer-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/policy/externalApplicationServer/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 402
+    },
+    {
+      "id": "t403-put-aml-system-policy-externalApplicationServer-name",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/policy/externalApplicationServer/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 403
+    },
+    {
+      "id": "t404-delete-aml-system-policy-externalApplicationServer-name",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/policy/externalApplicationServer/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 404
+    },
+    {
+      "id": "t405-post-aml-system-policy-externalApplicationServer-name-test",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/policy/externalApplicationServer/{name}/test",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 405
+    },
+    {
+      "id": "t406-get-aml-system-ras",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ras",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 406
+    },
+    {
+      "id": "t407-get-aml-system-ras-group",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ras/{group}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 407
+    },
+    {
+      "id": "t408-get-aml-system-ras-reports-tickets",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ras/reports/tickets",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 408
+    },
+    {
+      "id": "t409-post-aml-system-ras-reports-tickets-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/ras/reports/tickets/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 409
+    },
+    {
+      "id": "t410-get-aml-system-ras-tickets",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ras/tickets",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 410
+    },
+    {
+      "id": "t413-put-aml-system-ras-ticket-id",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/ras/ticket/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 413
+    },
+    {
+      "id": "t414-post-aml-system-ras-ticket-id-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/ras/ticket/{id}/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 414
+    },
+    {
+      "id": "t415-get-aml-system-ras-ticket-id-history",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ras/ticket/{id}/history",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 415
+    },
+    {
+      "id": "t416-get-aml-system-ras-ticket-id-reports",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ras/ticket/{id}/reports",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 416
+    },
+    {
+      "id": "t417-get-aml-system-ras-ticket-id-resolution",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/ras/ticket/{id}/resolution",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 417
+    },
+    {
+      "id": "t418-get-aml-system-reports",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/reports",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 418
+    },
+    {
+      "id": "t419-get-aml-system-reports-templates",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/reports/templates",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 419
+    },
+    {
+      "id": "t420-post-aml-system-reports-templates",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/reports/templates",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 420
+    },
+    {
+      "id": "t421-get-aml-system-reports-template-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/reports/template/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 421
+    },
+    {
+      "id": "t422-put-aml-system-reports-template-name",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/reports/template/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 422
+    },
+    {
+      "id": "t423-delete-aml-system-reports-template-name",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/reports/template/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 423
+    },
+    {
+      "id": "t424-get-aml-system-saveRestore",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/saveRestore",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 424
+    },
+    {
+      "id": "t425-post-aml-system-saveRestore",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/saveRestore",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 425
+    },
+    {
+      "id": "t426-get-aml-system-saveRestore-rescue",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/saveRestore/rescue",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 426
+    },
+    {
+      "id": "t427-post-aml-system-saveRestore-rescue",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/saveRestore/rescue",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 427
+    },
+    {
+      "id": "t428-put-aml-system-saveRestore-rescue",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/saveRestore/rescue",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 428
+    },
+    {
+      "id": "t429-get-aml-system-saveRestore-revert",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/saveRestore/revert",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 429
+    },
+    {
+      "id": "t430-put-aml-system-saveRestore-revert",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/saveRestore/revert",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 430
+    },
+    {
+      "id": "t431-get-aml-system-sensor-configurations",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/sensor/configurations",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 431
+    },
+    {
+      "id": "t432-put-aml-system-sensor-configurations",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/system/sensor/configurations",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 432
+    },
+    {
+      "id": "t433-get-aml-system-sensors",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/sensors",
+      "route_module": "openblade.api.routes_aml_system",
+      "status": "native",
+      "table_id": 433
+    },
+    {
+      "id": "t434-get-aml-system-snapshot",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/snapshot",
+      "route_module": "openblade.api.routes_aml_system",
+      "status": "native",
+      "table_id": 434
+    },
+    {
+      "id": "t435-post-aml-system-snapshot-email",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/snapshot/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 435
+    },
+    {
+      "id": "t436-get-aml-system-software",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/software",
+      "route_module": "openblade.api.routes_aml_system",
+      "status": "native",
+      "table_id": 436
+    },
+    {
+      "id": "t437-post-aml-system-software",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/software",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 437
+    },
+    {
+      "id": "t438-get-aml-system-software-operations-update",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/software/operations/update",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 438
+    },
+    {
+      "id": "t439-post-aml-system-software-operations-update",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/software/operations/update",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 439
+    },
+    {
+      "id": "t440-get-aml-system-software-externalApplications",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/software/externalApplications",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 440
+    },
+    {
+      "id": "t441-post-aml-system-software-externalApplications",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/software/externalApplications",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 441
+    },
+    {
+      "id": "t442-get-aml-system-software-externalApplication-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/software/externalApplication/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 442
+    },
+    {
+      "id": "t443-delete-aml-system-software-externalApplication-name",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/system/software/externalApplication/{name}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 443
+    },
+    {
+      "id": "t444-get-aml-system-software-availableFirmware",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/system/software/availableFirmware",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 444
+    },
+    {
+      "id": "t445-post-aml-system-software-availableFirmware",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/software/availableFirmware",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 445
+    },
+    {
+      "id": "t446-post-aml-system-software-restartLMC",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/system/software/restartLMC",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 446
+    },
+    {
+      "id": "t447-get-aml-users",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 447
+    },
+    {
+      "id": "t448-post-aml-users",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/users",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 448
+    },
+    {
+      "id": "t449-get-aml-users-ldap",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users/ldap",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 449
+    },
+    {
+      "id": "t450-put-aml-users-ldap",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/users/ldap",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 450
+    },
+    {
+      "id": "t451-post-aml-users-ldap",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/users/ldap",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 451
+    },
+    {
+      "id": "t452-get-aml-users-ldap-certificates",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users/ldap/certificates",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 452
+    },
+    {
+      "id": "t453-post-aml-users-ldap-certificates",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/users/ldap/certificates",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 453
+    },
+    {
+      "id": "t454-get-aml-users-ldap-enabled",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users/ldap/enabled",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 454
+    },
+    {
+      "id": "t455-post-aml-users-ldap-keytab",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/users/ldap/keytab",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 455
+    },
+    {
+      "id": "t456-post-aml-users-ldap-test",
+      "method": "POST",
+      "operation_class": "config",
+      "path": "/aml/users/ldap/test",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 456
+    },
+    {
+      "id": "t457-post-aml-users-login",
+      "method": "POST",
+      "operation_class": "auth",
+      "path": "/aml/users/login",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 457
+    },
+    {
+      "id": "t459-delete-aml-users-login",
+      "method": "DELETE",
+      "operation_class": "auth",
+      "path": "/aml/users/login",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 459
+    },
+    {
+      "id": "t460-post-aml-users-login-mfa",
+      "method": "POST",
+      "operation_class": "auth",
+      "path": "/aml/users/login/mfa",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 460
+    },
+    {
+      "id": "t461-get-aml-users-login-mfa-type-key",
+      "method": "GET",
+      "operation_class": "auth",
+      "path": "/aml/users/login/mfa/{type}/key",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 461
+    },
+    {
+      "id": "t462-get-aml-users-login-mode",
+      "method": "GET",
+      "operation_class": "auth",
+      "path": "/aml/users/login/mode",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 462
+    },
+    {
+      "id": "t463-put-aml-users-login-mode",
+      "method": "PUT",
+      "operation_class": "auth",
+      "path": "/aml/users/login/mode",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 463
+    },
+    {
+      "id": "t464-get-aml-users-luiAccess",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users/luiAccess",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 464
+    },
+    {
+      "id": "t465-put-aml-users-luiAccess",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/users/luiAccess",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 465
+    },
+    {
+      "id": "t466-get-aml-users-luiAccess-mode",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users/luiAccess/mode",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 466
+    },
+    {
+      "id": "t467-get-aml-users-mfa",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users/mfa",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 467
+    },
+    {
+      "id": "t468-put-aml-users-mfa",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/users/mfa",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 468
+    },
+    {
+      "id": "t469-get-aml-users-reports-login",
+      "method": "GET",
+      "operation_class": "auth",
+      "path": "/aml/users/reports/login",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 469
+    },
+    {
+      "id": "t470-post-aml-users-reports-login-email",
+      "method": "POST",
+      "operation_class": "auth",
+      "path": "/aml/users/reports/login/email",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 470
+    },
+    {
+      "id": "t471-get-aml-users-service-mode",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users/service/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 471
+    },
+    {
+      "id": "t472-put-aml-users-service-mode",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/users/service/mode",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 472
+    },
+    {
+      "id": "t473-get-aml-users-sessions",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/users/sessions",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 473
+    },
+    {
+      "id": "t474-delete-aml-users-session-id",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/users/session/{id}",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 474
+    },
+    {
+      "id": "t475-get-aml-user",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/user",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 475
+    },
+    {
+      "id": "t476-get-aml-user-name",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/user/{name}",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 476
+    },
+    {
+      "id": "t477-put-aml-user-name",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/user/{name}",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 477
+    },
+    {
+      "id": "t478-delete-aml-user-name",
+      "method": "DELETE",
+      "operation_class": "config",
+      "path": "/aml/user/{name}",
+      "route_module": "openblade.api.routes_aml_auth",
+      "status": "native",
+      "table_id": 478
+    },
+    {
+      "id": "t479-get-aml-user-name-mfa",
+      "method": "GET",
+      "operation_class": "query",
+      "path": "/aml/user/{name}/mfa",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 479
+    },
+    {
+      "id": "t480-put-aml-user-admin-reset",
+      "method": "PUT",
+      "operation_class": "config",
+      "path": "/aml/user/admin/reset",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
+      "table_id": 480
+    }
+  ],
+  "matrix_file": "openblade/emulator_contract/quantum_i3_rev_h_matrix.json",
+  "status_counts": {
+    "fallback-shim": 325,
+    "missing": 0,
+    "native": 143
+  }
+}

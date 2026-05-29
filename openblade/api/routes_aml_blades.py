@@ -422,6 +422,13 @@ def _get_mgmt_blade_or_404(blade_id: str) -> dict[str, Any]:
     return blade
 
 
+def _get_mgmt_blade_by_serial_or_404(serial_number: str) -> dict[str, Any]:
+    for blade in aml_state.get_mgmt_blades().values():
+        if str(blade.get("serialNumber")) == serial_number:
+            return blade
+    raise HTTPException(status_code=404, detail="Management blade not found")
+
+
 def _get_drive_sled_or_404(sled_id: str) -> dict[str, Any]:
     sled = aml_state.get_drive_sled(sled_id)
     if sled is None:
@@ -861,6 +868,17 @@ async def get_library_blade_info(
 ) -> dict[str, list[dict[str, Any]]]:
     _ensure_state(context)
     return {"library": [_serialize_mgmt_blade(item).model_dump() for item in aml_state.get_mgmt_blades().values()]}
+
+
+@router.get("/devices/blade/library/{serialNumber}", response_model=MgmtBladeResponse)
+async def get_library_blade_by_serial_number(
+    serialNumber: str,
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> MgmtBladeResponse:
+    _ensure_state(context)
+    serial_number = _validate_identifier(serialNumber, field_name="Management blade serialNumber")
+    return MgmtBladeResponse(mgmtBlade=_serialize_mgmt_blade(_get_mgmt_blade_by_serial_or_404(serial_number)))
 
 
 @router.get("/devices/blades/windows", response_model=dict[str, list[dict[str, Any]]])

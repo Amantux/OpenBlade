@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 .ONESHELL:
-.PHONY: up down logs test test-unit test-integration seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware
+.PHONY: up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware
 
 # Start all services
 up:
@@ -14,6 +14,44 @@ down:
 # View logs
 logs:
 	docker compose logs -f
+
+# Start standalone emulator services from local Docker build assets
+emulator-up:
+	./scripts/emulator/run_standalone_stack.sh up
+
+emulator-down:
+	./scripts/emulator/run_standalone_stack.sh down
+
+emulator-logs:
+	./scripts/emulator/run_standalone_stack.sh logs
+
+emulator-config:
+	./scripts/emulator/run_standalone_stack.sh config
+
+emulator-ps:
+	./scripts/emulator/run_standalone_stack.sh ps
+
+# Fleet stack: OpenBlade API/web + standalone emulators
+fleet-up:
+	./scripts/emulator/run_fleet_stack.sh up
+
+fleet-down:
+	./scripts/emulator/run_fleet_stack.sh down
+
+fleet-logs:
+	./scripts/emulator/run_fleet_stack.sh logs
+
+fleet-ps:
+	./scripts/emulator/run_fleet_stack.sh ps
+
+fleet-config:
+	./scripts/emulator/run_fleet_stack.sh config
+
+fleet-build:
+	./scripts/emulator/run_fleet_stack.sh build
+
+# Backward-compatible alias
+up-standalone: fleet-up
 
 # Run all tests (excluding hardware)
 test:

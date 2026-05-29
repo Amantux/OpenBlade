@@ -19,6 +19,18 @@ from openblade.catalog.models import AmlUser
 router = APIRouter()
 
 _SUPPORTED_DRIVE_TYPES: dict[str, dict[str, Any]] = {
+    "LTO-7": {
+        "name": "LTO-7",
+        "description": "IBM LTO-7 half-height tape drive",
+        "speeds": ["250MB/s", "300MB/s"],
+        "generations": ["LTO-6", "LTO-7"],
+    },
+    "LTO-8": {
+        "name": "LTO-8",
+        "description": "IBM LTO-8 half-height tape drive",
+        "speeds": ["300MB/s", "360MB/s"],
+        "generations": ["LTO-7", "LTO-8"],
+    },
     "LTO-9": {
         "name": "LTO-9",
         "description": "IBM LTO-9 half-height tape drive",

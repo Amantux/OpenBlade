@@ -22,6 +22,30 @@ router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 _MEDIA_TYPE_CATALOG: dict[str, dict[str, Any]] = {
+    "LTO-7": {
+        "name": "LTO-7",
+        "description": "LTO Ultrium 7 data cartridge",
+        "capacity": "6 TB / 15 TB compressed",
+        "generations": ["LTO-7"],
+    },
+    "LTO-7-CLN": {
+        "name": "LTO-7-CLN",
+        "description": "LTO Ultrium 7 cleaning cartridge",
+        "capacity": "N/A",
+        "generations": ["LTO-7"],
+    },
+    "LTO-8": {
+        "name": "LTO-8",
+        "description": "LTO Ultrium 8 data cartridge",
+        "capacity": "12 TB / 30 TB compressed",
+        "generations": ["LTO-7", "LTO-8"],
+    },
+    "LTO-8-CLN": {
+        "name": "LTO-8-CLN",
+        "description": "LTO Ultrium 8 cleaning cartridge",
+        "capacity": "N/A",
+        "generations": ["LTO-8"],
+    },
     "LTO-9": {
         "name": "LTO-9",
         "description": "LTO Ultrium 9 data cartridge",

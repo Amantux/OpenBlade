@@ -1,5 +1,6 @@
 """Integration tests for AML diagnostics endpoints (task-013)."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -169,6 +170,94 @@ def test_magazines_list_returns_200(authed: TestClient) -> None:
 def test_magazine_detail_not_found(authed: TestClient) -> None:
     resp = authed.get("/aml/physicalLibrary/magazines/nonexistent")
     assert resp.status_code == 404
+
+
+def test_physical_elements_use_bay_coordinates_without_duplicates(authed: TestClient) -> None:
+    response = authed.get("/aml/physicalLibrary/elements")
+    assert response.status_code == 200
+
+    body = response.json()
+    elements = body["elementList"]["element"]
+    slot_coordinates = [str(item["coordinate"]) for item in elements if item.get("type") == "slot"]
+    assert len(slot_coordinates) == 50
+    assert len(slot_coordinates) == len(set(slot_coordinates))
+    assert sum(1 for coordinate in slot_coordinates if coordinate.startswith("1,1,")) == 25
+    assert sum(1 for coordinate in slot_coordinates if coordinate.startswith("1,2,")) == 25
+
+
+def test_magazine_slots_expose_library_coordinates(authed: TestClient) -> None:
+    response = authed.get("/aml/magazine/MAG-1/slots")
+    assert response.status_code == 200
+
+    slots = response.json()["slotList"]["slot"]
+    assert len(slots) == 25
+    first = slots[0]
+    assert first["address"] == "MAG-1,1"
+    assert first["libraryCoordinate"] == "1,1,1"
+    assert re.fullmatch(r"[A-Z0-9]{8}", str(first.get("barcode", "") or "EMPTY000")) is not None
+
+
+def test_magazine_slots_match_media_coordinates(authed: TestClient) -> None:
+    media_response = authed.get("/aml/media")
+    assert media_response.status_code == 200
+    media_items = media_response.json()["mediaList"]["media"]
+    media_by_coordinate = {
+        str(item["slotAddress"]): str(item["barcode"])
+        for item in media_items
+        if item.get("slotAddress")
+    }
+
+    for magazine_id in ("MAG-1", "MAG-2"):
+        slots_response = authed.get(f"/aml/magazine/{magazine_id}/slots")
+        assert slots_response.status_code == 200
+        slots = slots_response.json()["slotList"]["slot"]
+
+        occupied = 0
+        for slot in slots:
+            coordinate = str(slot["libraryCoordinate"])
+            expected_barcode = media_by_coordinate.get(coordinate)
+            assert slot.get("barcode") == expected_barcode
+            assert slot.get("state") == ("occupied" if expected_barcode else "empty")
+            if expected_barcode:
+                occupied += 1
+
+        magazine_response = authed.get(f"/aml/magazine/{magazine_id}")
+        assert magazine_response.status_code == 200
+        assert int(magazine_response.json()["magazine"]["occupiedSlots"]) == occupied
+
+
+def test_cleaning_media_covers_all_drive_generations(authed: TestClient) -> None:
+    drives_response = authed.get("/aml/drives")
+    assert drives_response.status_code == 200
+    drives = drives_response.json()["driveList"]["drive"]
+
+    media_response = authed.get("/aml/media")
+    assert media_response.status_code == 200
+    media_items = media_response.json()["mediaList"]["media"]
+
+    drive_counts: dict[str, int] = {}
+    for drive in drives:
+        drive_type = str(drive["type"])
+        drive_counts[drive_type] = drive_counts.get(drive_type, 0) + 1
+
+    cleaning_counts: dict[str, int] = {}
+    for media in media_items:
+        media_type = str(media.get("type", ""))
+        if not media_type.endswith("-CLN"):
+            continue
+        cleaning_counts[media_type] = cleaning_counts.get(media_type, 0) + 1
+
+    for drive_type, count in drive_counts.items():
+        assert cleaning_counts.get(f"{drive_type}-CLN", 0) >= count
+
+    reports_response = authed.get("/aml/drives/reports/cleaning")
+    assert reports_response.status_code == 200
+    reports = reports_response.json()["driveCleaningList"]["driveCleaning"]
+    report_serials = [str(item["serialNumber"]) for item in reports]
+    assert len(report_serials) == len(drives)
+    assert len(set(report_serials)) == len(drives)
+    for serial in report_serials:
+        assert serial.startswith("DRV-")
 
 
 # ---------------------------------------------------------------------------
