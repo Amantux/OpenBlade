@@ -5,125 +5,86 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-_DATA_MEDIA: list[dict[str, Any]] = [
-    {
-        "barcode": f"VOL{slot:03d}L9",
-        "type": "LTO-9",
-        "partition": "partition1",
-        "slotAddress": f"1,1,{slot if slot <= 10 else slot + 1}",
-        "mockSlotId": slot if slot <= 10 else slot + 1,
-        "role": "data",
-        "poolName": [
-            "Critical Projects",
-            "Critical Projects",
-            "Cold Storage",
-            "Cold Storage",
-            "General Archive",
-            "General Archive",
-            "General Archive",
-            "Media Cache",
-            "Media Cache",
-            "Cold Storage",
-            "General Archive",
-            "Critical Projects",
-        ][slot - 1],
-        "usedBytes": [
-            1_950_000_000,
-            3_250_000_000,
-            5_100_000_000,
-            620_000_000,
-            8_450_000_000,
-            2_760_000_000,
-            11_200_000_000,
-            420_000_000,
-            1_300_000_000,
-            7_800_000_000,
-            4_480_000_000,
-            960_000_000,
-        ][slot - 1],
-        "capacityBytes": 18_000_000_000,
-        "metadata": {
-            "dataset": [
-                "Project Alpha",
-                "Media Archive 2024",
-                "Cold Tier Samples",
-                "Backup Set A",
-                "General Archive Batch 1",
-                "General Archive Batch 2",
-                "Operations Snapshots",
-                "Cache Staging",
-                "Media Cache Export",
-                "Deep Archive Index",
-                "Compliance Retention",
-                "Project Delta",
-            ][slot - 1],
-            "owner": [
-                "engineering",
-                "media",
-                "operations",
-                "backup",
-                "archive",
-                "archive",
-                "ops",
-                "cache",
-                "cache",
-                "records",
-                "compliance",
-                "engineering",
-            ][slot - 1],
-            "retentionClass": [
-                "critical",
-                "critical",
-                "cold",
-                "backup",
-                "standard",
-                "standard",
-                "standard",
-                "cache",
-                "cache",
-                "cold",
-                "standard",
-                "critical",
-            ][slot - 1],
-        },
-        "loadCount": [132, 118, 71, 94, 156, 88, 167, 59, 63, 143, 104, 128][slot - 1],
-        "errorCount": [0, 1, 0, 0, 2, 0, 1, 0, 0, 1, 0, 0][slot - 1],
-        "lastLoaded": [
-            "2024-01-21T09:15:00Z",
-            "2024-01-22T14:05:00Z",
-            "2024-01-19T07:40:00Z",
-            "2024-01-20T18:10:00Z",
-            "2024-01-22T04:30:00Z",
-            "2024-01-18T12:20:00Z",
-            "2024-01-23T02:05:00Z",
-            "2024-01-17T21:55:00Z",
-            "2024-01-16T08:12:00Z",
-            "2024-01-21T23:45:00Z",
-            "2024-01-20T10:00:00Z",
-            "2024-01-22T16:50:00Z",
-        ][slot - 1],
-    }
-    for slot in range(1, 13)
-]
+_TOTAL_SLOTS = 50
+_DATA_TAPE_COUNT = 28
+_CLEANING_SLOT_IDS = (49, 50)
+_SLOTS_PER_BAY = _TOTAL_SLOTS // 2
 
-_CLEANING_MEDIA: list[dict[str, Any]] = [
-    {
-        "barcode": f"CLN{slot:03d}L9",
-        "type": "LTO-9-CLN",
-        "partition": None,
-        "slotAddress": f"1,2,{slot}",
-        "mockSlotId": 18 + slot,
-        "role": "cleaning",
-        "poolName": "Cleaning Pool",
-        "usedBytes": 0,
-        "capacityBytes": 0,
-        "metadata": {"cleaningCyclesRemaining": 40 - (slot * 6), "owner": "library"},
-        "loadCount": 18 + (slot * 4),
-        "errorCount": 0,
-        "lastLoaded": f"2024-01-2{slot}T05:30:00Z",
-    }
-    for slot in range(1, 3)
-]
+
+def _slot_address(slot_id: int) -> str:
+    bay = 1 if slot_id <= _SLOTS_PER_BAY else 2
+    bay_slot = slot_id if bay == 1 else slot_id - _SLOTS_PER_BAY
+    return f"1,{bay},{bay_slot}"
+
+
+def _tape_type(slot: int) -> str:
+    return "LTO-7" if slot <= 18 else "LTO-8"
+
+
+def _tape_capacity_bytes(tape_type: str) -> int:
+    return 6_000_000_000_000 if tape_type == "LTO-7" else 12_000_000_000_000
+
+
+def _build_data_media() -> list[dict[str, Any]]:
+    pools = ("Critical Projects", "General Archive", "Cold Storage", "Media Cache")
+    owners = ("engineering", "media", "operations", "backup")
+    retention = ("critical", "standard", "cold", "backup")
+    media: list[dict[str, Any]] = []
+    for slot in range(1, _DATA_TAPE_COUNT + 1):
+        tape_type = _tape_type(slot)
+        capacity_bytes = _tape_capacity_bytes(tape_type)
+        utilization = 0.24 + ((slot * 11) % 52) / 100
+        used_bytes = int(capacity_bytes * utilization)
+        media.append(
+            {
+                # Keep existing barcode pattern to remain compatible with seeded demo data/tests.
+                "barcode": f"VOL{slot:03d}L9",
+                "type": tape_type,
+                "partition": "partition1",
+                "slotAddress": _slot_address(slot),
+                "mockSlotId": slot,
+                "role": "data",
+                "poolName": pools[(slot - 1) % len(pools)],
+                "usedBytes": used_bytes,
+                "capacityBytes": capacity_bytes,
+                "metadata": {
+                    "dataset": f"Dataset {slot:03d}",
+                    "owner": owners[(slot - 1) % len(owners)],
+                    "retentionClass": retention[(slot - 1) % len(retention)],
+                },
+                "loadCount": 60 + (slot * 3),
+                "errorCount": 1 if slot % 9 == 0 else 0,
+                "lastLoaded": f"2024-01-{10 + (slot % 18):02d}T{2 + (slot % 20):02d}:{(slot * 7) % 60:02d}:00Z",
+            }
+        )
+    return media
+
+
+def _build_cleaning_media() -> list[dict[str, Any]]:
+    cleaning: list[dict[str, Any]] = []
+    for index, slot_id in enumerate(_CLEANING_SLOT_IDS, start=1):
+        cleaning.append(
+            {
+                "barcode": f"CLN{index:03d}L9",
+                "type": "LTO-7-CLN" if index == 1 else "LTO-8-CLN",
+                "partition": None,
+                "slotAddress": _slot_address(slot_id),
+                "mockSlotId": slot_id,
+                "role": "cleaning",
+                "poolName": "Cleaning Pool",
+                "usedBytes": 0,
+                "capacityBytes": 0,
+                "metadata": {"cleaningCyclesRemaining": 36 - (index * 6), "owner": "library"},
+                "loadCount": 18 + (index * 4),
+                "errorCount": 0,
+                "lastLoaded": f"2024-01-{20 + index:02d}T05:30:00Z",
+            }
+        )
+    return cleaning
+
+
+_DATA_MEDIA = _build_data_media()
+_CLEANING_MEDIA = _build_cleaning_media()
 
 _SCALAR_I3_DEFAULT: dict[str, Any] = {
     "library": {
@@ -138,11 +99,11 @@ _SCALAR_I3_DEFAULT: dict[str, Any] = {
     "drives": [
         {
             "id": "DRV-001",
-            "serial": "IBM-LTO9-001",
-            "model": "IBM LTO-9 HH",
-            "type": "LTO-9",
+            "serial": "IBM-LTO7-001",
+            "model": "IBM LTO-7 HH",
+            "type": "LTO-7",
             "location": "1,1,1",
-            "firmware": "H9A3",
+            "firmware": "G7A3",
             "status": "online",
             "state": "idle",
             "loadCount": 143,
@@ -151,11 +112,11 @@ _SCALAR_I3_DEFAULT: dict[str, Any] = {
         },
         {
             "id": "DRV-002",
-            "serial": "IBM-LTO9-002",
-            "model": "IBM LTO-9 HH",
-            "type": "LTO-9",
+            "serial": "IBM-LTO7-002",
+            "model": "IBM LTO-7 HH",
+            "type": "LTO-7",
             "location": "1,1,2",
-            "firmware": "H9A3",
+            "firmware": "G7A3",
             "status": "online",
             "state": "idle",
             "loadCount": 97,
@@ -164,11 +125,11 @@ _SCALAR_I3_DEFAULT: dict[str, Any] = {
         },
         {
             "id": "DRV-003",
-            "serial": "IBM-LTO9-003",
-            "model": "IBM LTO-9 HH",
-            "type": "LTO-9",
-            "location": "1,1,3",
-            "firmware": "H9A2",
+            "serial": "IBM-LTO8-001",
+            "model": "IBM LTO-8 HH",
+            "type": "LTO-8",
+            "location": "1,2,1",
+            "firmware": "H8B2",
             "status": "online",
             "state": "idle",
             "loadCount": 61,
@@ -181,7 +142,7 @@ _SCALAR_I3_DEFAULT: dict[str, Any] = {
         "id": "PART-001",
         "status": "online",
         "type": "data",
-        "slotCount": max(item["mockSlotId"] for item in [*_DATA_MEDIA, *_CLEANING_MEDIA]),
+        "slotCount": _TOTAL_SLOTS,
         "ieSlotCount": 2,
         "cleaningSlots": len(_CLEANING_MEDIA),
         "slotAddresses": [item["slotAddress"] for item in _DATA_MEDIA],
@@ -207,11 +168,11 @@ _SCALAR_I3_DEFAULT: dict[str, Any] = {
     ],
     "ltfsSections": [
         {
-            "sectionNumber": slot,
-            "name": f"VOL{slot:03d}L9",
+            "sectionNumber": section_number,
+            "name": str(media["barcode"]),
             "status": "unmounted",
             "mounted": False,
-            "mountPoint": f"/ltfs/VOL{slot:03d}L9",
+            "mountPoint": f"/ltfs/{media['barcode']}",
             "fileSystem": "LTFS 2.4",
             "partitionName": "partition1",
             "readOnly": False,
@@ -221,9 +182,11 @@ _SCALAR_I3_DEFAULT: dict[str, Any] = {
                 {"serialNumber": "DRV-002", "state": "available", "role": "secondary"},
                 {"serialNumber": "DRV-003", "state": "available", "role": "auxiliary"},
             ],
-            "media": [{"barcode": f"VOL{slot:03d}L9", "state": "cataloged", "type": "LTO-9"}],
+            "media": [
+                {"barcode": str(media["barcode"]), "state": "cataloged", "type": str(media["type"])}
+            ],
         }
-        for slot in range(1, 13)
+        for section_number, media in enumerate(_DATA_MEDIA, start=1)
     ],
 }
 
