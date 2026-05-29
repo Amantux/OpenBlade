@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -13,14 +12,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from openblade.api import aml_state
-from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
-from openblade.bootstrap import AppContext, get_context
-from openblade.catalog.models import AmlUser
 from openblade.api.aml_state import (
     get_aml_audit_log,
     get_aml_callhome_config,
     get_aml_debug_config,
     get_aml_email_config,
+    get_aml_emulator_latency_config,
     get_aml_ha_config,
     get_aml_network_config,
     get_aml_proxy_config,
@@ -28,12 +25,17 @@ from openblade.api.aml_state import (
     get_aml_services,
     get_aml_snmp_config,
     get_aml_syslog_config,
+    get_aml_system_backup_status,
     get_aml_system_config,
     get_aml_system_preferences,
     get_aml_system_security,
     get_aml_system_started_at,
+    set_aml_emulator_latency_config,
     set_aml_system_preferences,
 )
+from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
+from openblade.bootstrap import AppContext, get_context
+from openblade.catalog.models import AmlUser
 
 router = APIRouter()
 
@@ -649,6 +651,27 @@ class PerfHistory(BaseModel):
 
 class PerfHistoryResponse(BaseModel):
     perfHistory: PerfHistory
+
+
+class EmulatorLatencyProfileMs(BaseModel):
+    instant: int
+    realistic: int
+    hardware: int
+
+
+class EmulatorLatencyConfig(BaseModel):
+    profile: str
+    profileMs: dict[str, EmulatorLatencyProfileMs]
+
+
+class EmulatorLatencyConfigResponse(BaseModel):
+    emulatorLatency: EmulatorLatencyConfig
+
+
+class EmulatorLatencyUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    profile: str | None = None
+    profileMs: dict[str, EmulatorLatencyProfileMs] | None = None
 
 
 class HAStatus(BaseModel):
@@ -2650,6 +2673,45 @@ async def get_performance_history(
     ]
     samples.reverse()
     return PerfHistoryResponse(perfHistory=PerfHistory(samples=[PerfSample.model_validate(item) for item in samples]))
+
+
+@router.get("/system/emulator/latency", response_model=EmulatorLatencyConfigResponse)
+async def get_emulator_latency(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> EmulatorLatencyConfigResponse:
+    _ensure_state(context)
+    _ = current_user
+    return EmulatorLatencyConfigResponse(
+        emulatorLatency=EmulatorLatencyConfig.model_validate(get_aml_emulator_latency_config())
+    )
+
+
+@router.put("/system/emulator/latency", response_model=EmulatorLatencyConfigResponse)
+async def update_emulator_latency(
+    payload: EmulatorLatencyUpdate,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> EmulatorLatencyConfigResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    current = get_aml_emulator_latency_config()
+    updated = dict(current)
+    if payload.profile is not None:
+        normalized = payload.profile.strip().lower()
+        if normalized not in {"instant", "realistic", "hardware", "custom"}:
+            raise HTTPException(status_code=400, detail="Invalid latency profile")
+        updated["profile"] = normalized
+    if payload.profileMs is not None:
+        updated["profileMs"] = {
+            key: value.model_dump()
+            for key, value in payload.profileMs.items()
+        }
+    stored = set_aml_emulator_latency_config(updated)
+    _record_audit(current_user, "update", "system/emulator/latency")
+    return EmulatorLatencyConfigResponse(
+        emulatorLatency=EmulatorLatencyConfig.model_validate(stored)
+    )
 
 
 # HA

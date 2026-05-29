@@ -116,6 +116,20 @@ class AMLState:
         "locale": "en_US",
         "dateFormat": "YYYY-MM-DD",
         "temperatureUnit": "celsius",
+        "emulatorLatency": {
+            "profile": "instant",
+            "profileMs": {
+                "auth": {"instant": 0, "realistic": 100, "hardware": 500},
+                "inventory": {"instant": 0, "realistic": 2000, "hardware": 45000},
+                "mount": {"instant": 0, "realistic": 2000, "hardware": 15000},
+                "unmount": {"instant": 0, "realistic": 1500, "hardware": 10000},
+                "move": {"instant": 0, "realistic": 1500, "hardware": 8000},
+                "format": {"instant": 0, "realistic": 8000, "hardware": 300000},
+                "query": {"instant": 0, "realistic": 150, "hardware": 1200},
+                "config": {"instant": 0, "realistic": 400, "hardware": 3000},
+                "diagnostic": {"instant": 0, "realistic": 1500, "hardware": 90000},
+            },
+        },
     })
     aml_network_config: dict[str, Any] = field(default_factory=lambda: {
         "interfaces": {
@@ -293,16 +307,7 @@ class AMLState:
     aml_notifications: dict[str, dict[str, Any]] = field(default_factory=dict)
     aml_log_level: dict[str, Any] = field(default_factory=lambda: _default_aml_log_level())
     aml_event_subscriptions: list[dict[str, Any]] = field(default_factory=list)
-    aml_inventory_status: dict[str, Any] = field(
-        default_factory=lambda: {
-            "state": "idle",
-            "startTime": None,
-            "completedTime": "2024-01-15T06:00:00Z",
-            "progress": 100,
-            "elementsScanned": 72,
-            "elementsTotal": 72,
-        }
-    )
+    aml_inventory_status: dict[str, Any] = field(default_factory=lambda: _default_aml_inventory_status())
     aml_import_status: dict[str, Any] = field(
         default_factory=lambda: {"state": "idle", "startTime": None, "completedTime": None}
     )
@@ -419,6 +424,20 @@ def _default_aml_licenses() -> dict[str, dict[str, Any]]:
             "feature": "partitions",
             "expiry": None,
         },
+    }
+
+
+def _default_aml_inventory_status() -> dict[str, Any]:
+    config = scalar_i3_default_config()
+    partition = config["partition"]
+    elements_total = int(partition["slotCount"]) + len(config["drives"]) + int(partition["ieSlotCount"])
+    return {
+        "state": "idle",
+        "startTime": None,
+        "completedTime": "2024-01-15T06:00:00Z",
+        "progress": 100,
+        "elementsScanned": elements_total,
+        "elementsTotal": elements_total,
     }
 
 
@@ -1080,13 +1099,14 @@ def _default_mgmt_blades() -> dict[str, dict[str, Any]]:
 
 
 def _default_drive_sleds() -> dict[str, dict[str, Any]]:
+    drive_ids = [str(drive["id"]) for drive in scalar_i3_default_config()["drives"]]
     return {
         "SLED-1": {
             "id": "SLED-1",
             "serialNumber": "SLD0001",
             "model": "Drive Sled 4-Bay",
             "status": "online",
-            "drives": ["DRV-001", "DRV-002"],
+            "drives": drive_ids,
         }
     }
 
@@ -1151,16 +1171,43 @@ def _default_aml_robots() -> dict[str, dict[str, Any]]:
 
 
 def _default_aml_towers() -> dict[str, dict[str, Any]]:
+    config = scalar_i3_default_config()
+    total_slots = int(config["partition"]["slotCount"])
+    slots_per_tower = total_slots // 2
+    drives_by_bay: dict[int, list[str]] = {1: [], 2: []}
+    occupied_by_bay: dict[int, int] = {1: 0, 2: 0}
+
+    for drive in config["drives"]:
+        parts = str(drive.get("location", "1,1,1")).split(",")
+        bay = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+        drives_by_bay.setdefault(bay, []).append(str(drive["id"]))
+
+    for media in config["media"]:
+        parts = str(media.get("slotAddress", "1,1,1")).split(",")
+        bay = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+        occupied_by_bay[bay] = occupied_by_bay.get(bay, 0) + 1
+
     return {
         "TWR-1": {
             "id": "TWR-1",
             "serialNumber": "TWR0001",
             "model": "Scalar i3 Base Module",
             "status": "online",
-            "slots": 50,
-            "occupiedSlots": 12,
-            "drives": ["DRV-001", "DRV-002"],
-        }
+            "bay": 1,
+            "slots": slots_per_tower,
+            "occupiedSlots": occupied_by_bay.get(1, 0),
+            "drives": sorted(drives_by_bay.get(1, [])),
+        },
+        "TWR-2": {
+            "id": "TWR-2",
+            "serialNumber": "TWR0002",
+            "model": "Scalar i3 Expansion Module",
+            "status": "online",
+            "bay": 2,
+            "slots": total_slots - slots_per_tower,
+            "occupiedSlots": occupied_by_bay.get(2, 0),
+            "drives": sorted(drives_by_bay.get(2, [])),
+        },
     }
 
 
@@ -1180,15 +1227,31 @@ def _default_aml_ie_stations() -> dict[str, dict[str, Any]]:
 
 
 def _default_aml_magazines() -> dict[str, dict[str, Any]]:
+    config = scalar_i3_default_config()
+    data_media = [item for item in config["media"] if item.get("role") != "cleaning"]
+    bay_barcodes: dict[int, list[str]] = {1: [], 2: []}
+    for media in data_media:
+        parts = str(media.get("slotAddress", "1,1,1")).split(",")
+        bay = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+        bay_barcodes.setdefault(bay, []).append(str(media["barcode"]))
+
     return {
         "MAG-1": {
             "id": "MAG-1",
             "location": "TWR-1,col1,row1",
             "status": "online",
             "slotCount": 10,
-            "occupiedSlots": 3,
-            "tapes": ["VOL001L9", "VOL002L9", "VOL003L9"],
-        }
+            "occupiedSlots": min(3, len(bay_barcodes.get(1, []))),
+            "tapes": bay_barcodes.get(1, [])[:3],
+        },
+        "MAG-2": {
+            "id": "MAG-2",
+            "location": "TWR-2,col1,row1",
+            "status": "online",
+            "slotCount": 10,
+            "occupiedSlots": min(3, len(bay_barcodes.get(2, []))),
+            "tapes": bay_barcodes.get(2, [])[:3],
+        },
     }
 
 
@@ -1581,6 +1644,22 @@ def get_aml_system_config() -> dict[str, Any]:
 
 def set_aml_system_config(v: dict[str, Any]) -> None:
     _STATE.aml_system_config = v
+
+
+def get_aml_emulator_latency_config() -> dict[str, Any]:
+    config = _STATE.aml_system_config.get("emulatorLatency")
+    if isinstance(config, dict):
+        return deepcopy(config)
+    return {
+        "profile": "instant",
+        "profileMs": {},
+    }
+
+
+def set_aml_emulator_latency_config(config: dict[str, Any]) -> dict[str, Any]:
+    stored = deepcopy(config)
+    _STATE.aml_system_config["emulatorLatency"] = stored
+    return deepcopy(stored)
 
 
 def get_aml_network_config() -> dict[str, Any]:

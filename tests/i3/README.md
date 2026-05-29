@@ -3,6 +3,12 @@
 This test suite validates OpenBlade's control plane against either the built-in
 emulated Quantum i3 or a real physical Quantum Scalar i3 tape library.
 
+Default emulator profile:
+- 50 slots across 2 bays
+- 3 drives (2x LTO-7, 1x LTO-8)
+- 30 occupied slots (~60% full)
+- Default login: `admin` / `password`
+
 ## Quick start (emulator)
 
 ```bash
@@ -68,6 +74,12 @@ python3 -m pytest tests/i3/ -m i3 -v --tb=short
 | `test_11_diagnostics.py` | Health, events, firmware, RAS tickets |
 | `test_12_multi_library.py` | Library switch, scoped inventory, header routing |
 | `test_13_ui_scenarios.py` | Scenario tests matching UI workflows |
+| `test_14_emulator_profile.py` | Deterministic default i3 profile invariants |
+| `test_15_manual_matrix_contract.py` | Manual-derived endpoint matrix integrity and 5-case minimum checks |
+
+Manual-derived compliance matrix source:
+- `openblade/emulator_contract/quantum_i3_rev_h_matrix.json`
+- generated via `tools/emulator_spec/build_manual_matrix.py`
 
 ## Running from the UI
 

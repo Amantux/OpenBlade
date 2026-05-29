@@ -1,0 +1,52 @@
+name: i3-emulator-compliance
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  i3-emulator-suite:
+    name: i3-emulator-${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: core
+            tests: "tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_03_changer.py tests/i3/test_04_drives.py tests/i3/test_05_media.py tests/i3/test_14_emulator_profile.py tests/i3/test_15_manual_matrix_contract.py"
+          - suite: operations
+            tests: "tests/i3/test_06_operations.py tests/i3/test_07_ltfs.py tests/i3/test_08_archive_cycle.py tests/i3/test_09_restore_cycle.py"
+          - suite: system
+            tests: "tests/i3/test_10_fault_scenarios.py tests/i3/test_11_diagnostics.py tests/i3/test_12_multi_library.py tests/i3/test_13_ui_scenarios.py"
+    env:
+      I3_TEST_MODE: emulator
+      I3_TIMING_PROFILE: instant
+      I3_AML_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      - run: nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
+      - name: Wait for API health
+        run: |
+          python - <<'PY'
+          import time
+          import urllib.request
+          for _ in range(60):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2) as response:
+                      if response.status == 200:
+                          raise SystemExit(0)
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("API did not become healthy in time")
+          PY
+      - run: pytest ${{ matrix.tests }} -q --tb=short
