@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenBlade i3 Emulator UI</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main>
+    <h1>Quantum i3 Emulator Status</h1>
+    <section class="card controls">
+      <h2>Connection</h2>
+      <div class="grid">
+        <label>API base URL
+          <input id="api-base-url" type="text" spellcheck="false">
+        </label>
+        <label>Proxy prefix
+          <select id="proxy-prefix">
+            <option value="/library-1">/library-1</option>
+            <option value="/library-2">/library-2</option>
+            <option value="/library-3">/library-3</option>
+            <option value="">(none/direct)</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid">
+        <label>Username
+          <input id="username" type="text" value="admin" autocomplete="username">
+        </label>
+        <label>Password
+          <input id="password" type="password" value="password" autocomplete="current-password">
+        </label>
+      </div>
+      <div class="grid">
+        <label>Bearer token
+          <input id="token" type="text" spellcheck="false" placeholder="Optional. Set automatically after login">
+        </label>
+        <label class="checkbox">
+          <input id="use-basic-auth" type="checkbox">
+          Use HTTP Basic auth when token is empty
+        </label>
+      </div>
+      <div class="actions">
+        <button id="login-button" type="button">Login</button>
+        <button id="refresh-button" type="button">Refresh</button>
+        <button id="clear-token-button" type="button">Clear Token</button>
+      </div>
+      <p id="status-line" class="status neutral">Ready.</p>
+    </section>
+
+    <section class="card">
+      <h2>Library summary</h2>
+      <dl id="library-summary" class="summary-grid"></dl>
+    </section>
+
+    <section class="card">
+      <h2>Drives summary</h2>
+      <p id="drives-summary" class="meta"></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Drive</th>
+            <th>Status</th>
+            <th>Loaded</th>
+            <th>Barcode</th>
+          </tr>
+        </thead>
+        <tbody id="drives-table-body">
+          <tr><td colspan="4">No data.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Slot layout</h2>
+      <p id="slot-summary" class="meta"></p>
+      <div id="slot-grid" class="slot-grid"></div>
+    </section>
+
+    <section class="card">
+      <h2>Magazine layout</h2>
+      <p id="magazine-summary" class="meta"></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Magazine</th>
+            <th>Bay</th>
+            <th>Slots</th>
+            <th>Occupied</th>
+            <th>Coordinate range</th>
+            <th>Barcode rule</th>
+          </tr>
+        </thead>
+        <tbody id="magazines-table-body">
+          <tr><td colspan="6">No data.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Supported APIs</h2>
+      <p class="meta">
+        Docs:
+        <a id="docs-link" href="#" target="_blank" rel="noreferrer">/docs</a> ·
+        <a id="redoc-link" href="#" target="_blank" rel="noreferrer">/redoc</a> ·
+        <a id="openapi-link" href="#" target="_blank" rel="noreferrer">/openapi.json</a>
+      </p>
+      <div class="docs-controls">
+        <label>View
+          <select id="docs-mode">
+            <option value="docs">Swagger UI</option>
+            <option value="redoc">ReDoc</option>
+          </select>
+        </label>
+      </div>
+      <iframe id="api-docs-frame" class="docs-frame" title="FastAPI Docs"></iframe>
+    </section>
+
+    <section class="card">
+      <h2>API playground</h2>
+      <p class="meta">Try endpoints directly against the emulator with current auth settings.</p>
+      <div class="playground-grid">
+        <label>Method
+          <select id="playground-method">
+            <option>GET</option>
+            <option>POST</option>
+            <option>PUT</option>
+            <option>PATCH</option>
+            <option>DELETE</option>
+          </select>
+        </label>
+        <label class="playground-path">Path
+          <input id="playground-path" type="text" value="/aml/library" spellcheck="false">
+        </label>
+        <button id="playground-send" type="button">Send</button>
+      </div>
+      <label>JSON body (optional)
+        <textarea id="playground-body" rows="6" spellcheck="false">{}</textarea>
+      </label>
+      <pre id="playground-response" class="response-box">No request sent.</pre>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

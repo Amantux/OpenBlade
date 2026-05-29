@@ -18,6 +18,7 @@ from openblade.api.aml_state import (
     get_aml_debug_config,
     get_aml_email_config,
     get_aml_emulator_latency_config,
+    get_aml_emulator_latency_metrics,
     get_aml_ha_config,
     get_aml_network_config,
     get_aml_proxy_config,
@@ -30,6 +31,7 @@ from openblade.api.aml_state import (
     get_aml_system_preferences,
     get_aml_system_security,
     get_aml_system_started_at,
+    reset_aml_emulator_latency_metrics,
     set_aml_emulator_latency_config,
     set_aml_system_preferences,
 )
@@ -69,7 +71,6 @@ def _volume_response_payload(volume: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-
 def _backup_status_payload(backup_status: dict[str, Any]) -> dict[str, Any]:
     return {
         "lastBackup": backup_status.get("lastBackup"),
@@ -77,7 +78,6 @@ def _backup_status_payload(backup_status: dict[str, Any]) -> dict[str, Any]:
         "size": int(backup_status.get("size", 0)),
         "status": str(backup_status.get("status", backup_status.get("state", "idle"))),
     }
-
 
 
 def _update_status_payload(update_status: dict[str, Any]) -> dict[str, Any]:
@@ -90,11 +90,9 @@ def _update_status_payload(update_status: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-
 def _diagnostics_payload(diag: dict[str, Any]) -> dict[str, Any]:
     timestamp = diag.get("timestamp") or diag.get("lastRun") or _iso(_now())
     return {"timestamp": str(timestamp), "tests": list(diag.get("tests", []))}
-
 
 
 def _support_bundle_payload(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -110,7 +108,6 @@ def _support_bundle_payload(bundle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-
 def _certificate_summary(cert: dict[str, Any]) -> dict[str, Any]:
     expiry = cert.get("expiry")
     if expiry is None and cert.get("notAfter") is not None:
@@ -123,17 +120,16 @@ def _certificate_summary(cert: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-
 def _default_certificate_index(certificates: list[dict[str, Any]]) -> int:
     return next(
         (
             idx
             for idx, cert in enumerate(certificates)
-            if cert.get("id") in _DEFAULT_CERTIFICATE_IDS or cert.get("name") in _DEFAULT_CERTIFICATE_NAMES
+            if cert.get("id") in _DEFAULT_CERTIFICATE_IDS
+            or cert.get("name") in _DEFAULT_CERTIFICATE_NAMES
         ),
         0 if certificates else -1,
     )
-
 
 
 def _sync_default_certificate(cert_info: dict[str, Any]) -> None:
@@ -660,6 +656,7 @@ class EmulatorLatencyProfileMs(BaseModel):
 
 
 class EmulatorLatencyConfig(BaseModel):
+    enabled: bool
     profile: str
     profileMs: dict[str, EmulatorLatencyProfileMs]
 
@@ -670,8 +667,38 @@ class EmulatorLatencyConfigResponse(BaseModel):
 
 class EmulatorLatencyUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    enabled: bool | None = None
     profile: str | None = None
     profileMs: dict[str, EmulatorLatencyProfileMs] | None = None
+
+
+class EmulatorLatencyStat(BaseModel):
+    min: int | None = None
+    max: int | None = None
+    avg: float
+    total: int
+    last: int
+
+
+class EmulatorLatencyEndpointMetric(BaseModel):
+    method: str
+    endpoint: str
+    count: int
+    lastStatusCode: int
+    statusCodes: dict[str, int]
+    durationMs: EmulatorLatencyStat
+    simulatedDelayMs: EmulatorLatencyStat
+
+
+class EmulatorLatencyMetrics(BaseModel):
+    capturedRequests: int
+    durationMs: EmulatorLatencyStat
+    simulatedDelayMs: EmulatorLatencyStat
+    endpoints: list[EmulatorLatencyEndpointMetric]
+
+
+class EmulatorLatencyMetricsResponse(BaseModel):
+    emulatorLatencyMetrics: EmulatorLatencyMetrics
 
 
 class HAStatus(BaseModel):
@@ -1153,10 +1180,14 @@ def _ws_result(summary: str) -> WSResultCode:
     return WSResultCode(summary=summary)
 
 
-
-def _job_response(job_type: str, message: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+def _job_response(
+    job_type: str, message: str, metadata: dict[str, Any] | None = None
+) -> dict[str, Any]:
     job_id = str(uuid4())
-    aml_state.set_aml_job(job_id, {"type": job_type, "status": "queued", "result": message, "metadata": metadata or {}})
+    aml_state.set_aml_job(
+        job_id,
+        {"type": job_type, "status": "queued", "result": message, "metadata": metadata or {}},
+    )
     return {"job_id": job_id, "status": "queued", "message": message}
 
 
@@ -1187,7 +1218,13 @@ def _formatted_uptime(seconds: int) -> str:
 
 
 def _timezone_offset(value: str) -> str:
-    offsets = {"UTC": "+00:00", "America/New_York": "-05:00", "America/Los_Angeles": "-08:00", "Europe/London": "+00:00", "Asia/Tokyo": "+09:00"}
+    offsets = {
+        "UTC": "+00:00",
+        "America/New_York": "-05:00",
+        "America/Los_Angeles": "-08:00",
+        "Europe/London": "+00:00",
+        "Asia/Tokyo": "+09:00",
+    }
     return offsets.get(value, "+00:00")
 
 
@@ -1212,7 +1249,6 @@ def _extract_payload(payload: dict[str, Any] | None, key: str) -> dict[str, Any]
     return payload
 
 
-
 def _model_updates(payload: BaseModel, key: str) -> dict[str, Any]:
     data = payload.model_dump(by_alias=True, exclude_none=True, exclude_unset=True)
     nested = data.get(key)
@@ -1221,16 +1257,23 @@ def _model_updates(payload: BaseModel, key: str) -> dict[str, Any]:
     return data
 
 
-
-def _merge_validated_model(model_cls: type[BaseModel], current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+def _merge_validated_model(
+    model_cls: type[BaseModel], current: dict[str, Any], updates: dict[str, Any]
+) -> dict[str, Any]:
     try:
-        validated = model_cls.model_validate({**current, **{key: value for key, value in updates.items() if value is not None}})
+        validated = model_cls.model_validate(
+            {**current, **{key: value for key, value in updates.items() if value is not None}}
+        )
     except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()
+        ) from exc
     return validated.model_dump(by_alias=True)
 
 
-def _record_audit(current_user: AmlUser | None, action: str, resource: str, *, result: str = "success") -> None:
+def _record_audit(
+    current_user: AmlUser | None, action: str, resource: str, *, result: str = "success"
+) -> None:
     get_aml_audit_log().append(
         {
             "timestamp": _iso(_now()),
@@ -1266,7 +1309,9 @@ def _get_service_or_404(name: str) -> dict[str, Any]:
     return service
 
 
-def _get_volume_or_404(name: str, volumes: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+def _get_volume_or_404(
+    name: str, volumes: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
     current_volumes = aml_state.get_aml_system_storage_volumes() if volumes is None else volumes
     volume = current_volumes.get(name)
     if volume is None:
@@ -1284,17 +1329,30 @@ def _system_mem_usage() -> int:
 
 def _system_disk_usage() -> int:
     return max(
-        (_volume_response_payload(volume)["percent"] for volume in aml_state.get_aml_system_storage_volumes().values()),
+        (
+            _volume_response_payload(volume)["percent"]
+            for volume in aml_state.get_aml_system_storage_volumes().values()
+        ),
         default=0,
     )
 
 
 def _system_network_health() -> str:
-    return "good" if all(item.get("status") == "up" for item in get_aml_network_config()["interfaces"].values()) else "warning"
+    return (
+        "good"
+        if all(
+            item.get("status") == "up" for item in get_aml_network_config()["interfaces"].values()
+        )
+        else "warning"
+    )
 
 
 def _service_health() -> str:
-    return "good" if all(item.get("status") == "running" for item in get_aml_services().values()) else "warning"
+    return (
+        "good"
+        if all(item.get("status") == "running" for item in get_aml_services().values())
+        else "warning"
+    )
 
 
 def _export_config() -> dict[str, Any]:
@@ -1324,7 +1382,12 @@ def _reset_system_defaults() -> None:
             "temperatureUnit": "celsius",
         }
     )
-    get_aml_network_config()["dns"] = {"primary": "8.8.8.8", "secondary": "8.8.4.4", "search": ["local"], "domain": "local"}
+    get_aml_network_config()["dns"] = {
+        "primary": "8.8.8.8",
+        "secondary": "8.8.4.4",
+        "search": ["local"],
+        "domain": "local",
+    }
     get_aml_network_config()["ntp"] = {
         "enabled": True,
         "servers": ["pool.ntp.org", "time.cloudflare.com"],
@@ -1373,8 +1436,23 @@ def _reset_system_defaults() -> None:
             "severity": "warning",
         }
     )
-    get_aml_ha_config().update({"enabled": False, "role": "standalone", "partner": None, "state": "active", "lastFailover": None})
-    get_aml_callhome_config().update({"enabled": False, "endpoint": "https://callhome.quantum.com", "interval": 3600, "lastContact": None})
+    get_aml_ha_config().update(
+        {
+            "enabled": False,
+            "role": "standalone",
+            "partner": None,
+            "state": "active",
+            "lastFailover": None,
+        }
+    )
+    get_aml_callhome_config().update(
+        {
+            "enabled": False,
+            "endpoint": "https://callhome.quantum.com",
+            "interval": 3600,
+            "lastContact": None,
+        }
+    )
     get_aml_debug_config().update({"logLevel": "INFO", "debugMode": False, "traceEnabled": False})
     get_aml_system_preferences().update(
         {
@@ -1384,8 +1462,22 @@ def _reset_system_defaults() -> None:
             "auditLog": True,
         }
     )
-    get_aml_remote_config().update({"ssh": {"enabled": True, "port": 22}, "vnc": {"enabled": False, "port": 5900}, "rdp": {"enabled": False}})
-    get_aml_proxy_config().update({"enabled": False, "host": "", "port": 8080, "user": "", "noProxy": ["localhost", "127.0.0.1"]})
+    get_aml_remote_config().update(
+        {
+            "ssh": {"enabled": True, "port": 22},
+            "vnc": {"enabled": False, "port": 5900},
+            "rdp": {"enabled": False},
+        }
+    )
+    get_aml_proxy_config().update(
+        {
+            "enabled": False,
+            "host": "",
+            "port": 8080,
+            "user": "",
+            "noProxy": ["localhost", "127.0.0.1"],
+        }
+    )
 
 
 # Network configuration
@@ -1412,7 +1504,11 @@ async def list_network_interfaces(
     context: AppContext = Depends(get_context),
 ) -> InterfaceListResponse:
     _ensure_state(context)
-    return InterfaceListResponse(interfaceList=InterfaceListResource(interface=[Interface.model_validate(item) for item in _network_interfaces()]))
+    return InterfaceListResponse(
+        interfaceList=InterfaceListResource(
+            interface=[Interface.model_validate(item) for item in _network_interfaces()]
+        )
+    )
 
 
 @router.get("/network/interface/{name}", response_model=InterfaceResponse)
@@ -1423,7 +1519,11 @@ async def get_network_interface(
 ) -> InterfaceResponse:
     _ensure_state(context)
     interface = _get_interface_or_404(name)
-    return InterfaceResponse(interface=Interface.model_validate({key: value for key, value in interface.items() if key != "enabled"}))
+    return InterfaceResponse(
+        interface=Interface.model_validate(
+            {key: value for key, value in interface.items() if key != "enabled"}
+        )
+    )
 
 
 @router.put("/network/interface/{name}", response_model=InterfaceResponse)
@@ -1441,7 +1541,11 @@ async def update_network_interface(
         if field in updates and updates[field] is not None:
             interface[field] = updates[field]
     _record_audit(current_user, "update", f"network/interface/{name}")
-    return InterfaceResponse(interface=Interface.model_validate({key: value for key, value in interface.items() if key != "enabled"}))
+    return InterfaceResponse(
+        interface=Interface.model_validate(
+            {key: value for key, value in interface.items() if key != "enabled"}
+        )
+    )
 
 
 @router.post("/network/interface/{name}/enable", response_model=WSResultCode)
@@ -1492,7 +1596,9 @@ async def update_dns_config(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "dnsConfig")
-    get_aml_network_config()["dns"].update({key: value for key, value in updates.items() if value is not None})
+    get_aml_network_config()["dns"].update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "network/dns")
     return DNSConfigResponse(dnsConfig=DNSConfig.model_validate(get_aml_network_config()["dns"]))
 
@@ -1503,7 +1609,11 @@ async def get_routing_table(
     context: AppContext = Depends(get_context),
 ) -> RouteListResponse:
     _ensure_state(context)
-    return RouteListResponse(routeList=RouteListResource(route=[Route.model_validate(item) for item in get_aml_network_config()["routes"]]))
+    return RouteListResponse(
+        routeList=RouteListResource(
+            route=[Route.model_validate(item) for item in get_aml_network_config()["routes"]]
+        )
+    )
 
 
 @router.post("/network/routing", response_model=WSResultCode)
@@ -1518,7 +1628,11 @@ async def add_route(
     destination = str(route.get("destination", "")).strip()
     if not destination:
         raise HTTPException(status_code=400, detail="Destination is required")
-    get_aml_network_config()["routes"] = [item for item in get_aml_network_config()["routes"] if item.get("destination") != destination]
+    get_aml_network_config()["routes"] = [
+        item
+        for item in get_aml_network_config()["routes"]
+        if item.get("destination") != destination
+    ]
     get_aml_network_config()["routes"].append(
         {
             "destination": destination,
@@ -1571,8 +1685,12 @@ async def update_ntp_config(
         get_aml_network_config()["ntp"]["servers"] = list(updates["servers"])
     if "enabled" in updates and updates["enabled"] is not None:
         get_aml_network_config()["ntp"]["enabled"] = bool(updates["enabled"])
-    get_aml_network_config()["ntp"]["status"] = "synced" if get_aml_network_config()["ntp"].get("enabled") else "disabled"
-    get_aml_network_config()["ntp"]["lastSync"] = _iso(_now()) if get_aml_network_config()["ntp"].get("enabled") else None
+    get_aml_network_config()["ntp"]["status"] = (
+        "synced" if get_aml_network_config()["ntp"].get("enabled") else "disabled"
+    )
+    get_aml_network_config()["ntp"]["lastSync"] = (
+        _iso(_now()) if get_aml_network_config()["ntp"].get("enabled") else None
+    )
     _record_audit(current_user, "update", "network/ntp")
     return NTPConfigResponse(ntpConfig=NTPConfig.model_validate(get_aml_network_config()["ntp"]))
 
@@ -1698,7 +1816,9 @@ async def get_system_info(
     context: AppContext = Depends(get_context),
 ) -> SystemDetailResponse:
     _ensure_state(context)
-    total_disk = sum(volume["total"] for volume in aml_state.get_aml_system_storage_volumes().values())
+    total_disk = sum(
+        volume["total"] for volume in aml_state.get_aml_system_storage_volumes().values()
+    )
     return SystemDetailResponse(
         systemDetail=SystemDetail(
             os="Linux",
@@ -1719,7 +1839,15 @@ async def get_system_version(
     context: AppContext = Depends(get_context),
 ) -> VersionInfoResponse:
     _ensure_state(context)
-    return VersionInfoResponse(versionInfo=VersionInfo(firmware=_FIRMWARE_VERSION, software=_SOFTWARE_VERSION, api=_API_VERSION, buildDate=_BUILD_DATE, buildNumber=_BUILD_NUMBER))
+    return VersionInfoResponse(
+        versionInfo=VersionInfo(
+            firmware=_FIRMWARE_VERSION,
+            software=_SOFTWARE_VERSION,
+            api=_API_VERSION,
+            buildDate=_BUILD_DATE,
+            buildNumber=_BUILD_NUMBER,
+        )
+    )
 
 
 @router.get("/system/status", response_model=SystemStatusResponse)
@@ -1733,8 +1861,18 @@ async def get_system_status(
     disk = "warning" if _system_disk_usage() >= 80 else "good"
     network = _system_network_health()
     services = _service_health()
-    overall = "failed" if "failed" in {cpu, memory, disk, network, services} else "warning" if "warning" in {cpu, memory, disk, network, services} else "good"
-    return SystemStatusResponse(systemStatus=SystemStatus(overall=overall, cpu=cpu, memory=memory, disk=disk, network=network, services=services))
+    overall = (
+        "failed"
+        if "failed" in {cpu, memory, disk, network, services}
+        else "warning"
+        if "warning" in {cpu, memory, disk, network, services}
+        else "good"
+    )
+    return SystemStatusResponse(
+        systemStatus=SystemStatus(
+            overall=overall, cpu=cpu, memory=memory, disk=disk, network=network, services=services
+        )
+    )
 
 
 @router.get("/system/uptime", response_model=UptimeInfoResponse)
@@ -1745,7 +1883,11 @@ async def get_system_uptime(
     _ensure_state(context)
     seconds = _uptime_seconds()
     boot_time = _iso(_now() - timedelta(seconds=seconds))
-    return UptimeInfoResponse(uptimeInfo=UptimeInfo(seconds=seconds, formatted=_formatted_uptime(seconds), bootTime=boot_time))
+    return UptimeInfoResponse(
+        uptimeInfo=UptimeInfo(
+            seconds=seconds, formatted=_formatted_uptime(seconds), bootTime=boot_time
+        )
+    )
 
 
 # System configuration (static routes first)
@@ -1830,7 +1972,9 @@ async def update_system_config(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "systemConfig")
-    get_aml_system_config().update({key: value for key, value in updates.items() if value is not None})
+    get_aml_system_config().update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "system/config")
     return SystemConfigResponse(systemConfig=SystemConfig.model_validate(get_aml_system_config()))
 
@@ -1841,7 +1985,9 @@ async def get_hostname(
     context: AppContext = Depends(get_context),
 ) -> HostnameResponse:
     _ensure_state(context)
-    return HostnameResponse(hostname=HostnameValue(value=str(get_aml_system_config().get("hostname", "openblade-1"))))
+    return HostnameResponse(
+        hostname=HostnameValue(value=str(get_aml_system_config().get("hostname", "openblade-1")))
+    )
 
 
 @router.put("/system/hostname", response_model=HostnameResponse)
@@ -1868,7 +2014,9 @@ async def get_timezone(
 ) -> TimezoneResponse:
     _ensure_state(context)
     timezone_value = str(get_aml_system_config().get("timezone", "UTC"))
-    return TimezoneResponse(timezone=TimezoneValue(value=timezone_value, offset=_timezone_offset(timezone_value)))
+    return TimezoneResponse(
+        timezone=TimezoneValue(value=timezone_value, offset=_timezone_offset(timezone_value))
+    )
 
 
 @router.put("/system/timezone", response_model=TimezoneResponse)
@@ -1885,7 +2033,12 @@ async def update_timezone(
         raise HTTPException(status_code=400, detail="Timezone is required")
     get_aml_system_config()["timezone"] = value.strip()
     _record_audit(current_user, "update", "system/timezone")
-    return TimezoneResponse(timezone=TimezoneValue(value=get_aml_system_config()["timezone"], offset=_timezone_offset(get_aml_system_config()["timezone"])))
+    return TimezoneResponse(
+        timezone=TimezoneValue(
+            value=get_aml_system_config()["timezone"],
+            offset=_timezone_offset(get_aml_system_config()["timezone"]),
+        )
+    )
 
 
 @router.get("/system/time", response_model=SystemTimeResponse)
@@ -1895,7 +2048,14 @@ async def get_system_time(
 ) -> SystemTimeResponse:
     _ensure_state(context)
     utc_value = _current_utc()
-    return SystemTimeResponse(systemTime=SystemTime(utc=_iso(utc_value), local=_local_time_string(utc_value), timezone=str(get_aml_system_config().get("timezone", "UTC")), ntp=bool(get_aml_network_config()["ntp"].get("enabled", False))))
+    return SystemTimeResponse(
+        systemTime=SystemTime(
+            utc=_iso(utc_value),
+            local=_local_time_string(utc_value),
+            timezone=str(get_aml_system_config().get("timezone", "UTC")),
+            ntp=bool(get_aml_network_config()["ntp"].get("enabled", False)),
+        )
+    )
 
 
 @router.put("/system/time", response_model=WSResultCode)
@@ -1923,7 +2083,14 @@ async def get_locale(
     context: AppContext = Depends(get_context),
 ) -> LocaleResponse:
     _ensure_state(context)
-    return LocaleResponse(locale=LocaleConfig(language=str(get_aml_system_config().get("locale", "en_US")), dateFormat=str(get_aml_system_config().get("dateFormat", "YYYY-MM-DD")), timeFormat="HH:mm:ss", temperatureUnit=str(get_aml_system_config().get("temperatureUnit", "celsius"))))
+    return LocaleResponse(
+        locale=LocaleConfig(
+            language=str(get_aml_system_config().get("locale", "en_US")),
+            dateFormat=str(get_aml_system_config().get("dateFormat", "YYYY-MM-DD")),
+            timeFormat="HH:mm:ss",
+            temperatureUnit=str(get_aml_system_config().get("temperatureUnit", "celsius")),
+        )
+    )
 
 
 @router.put("/system/locale", response_model=LocaleResponse)
@@ -1943,7 +2110,14 @@ async def update_locale(
         get_aml_system_config()["temperatureUnit"] = updates["temperatureUnit"]
     time_format = updates.get("timeFormat", "HH:mm:ss")
     _record_audit(current_user, "update", "system/locale")
-    return LocaleResponse(locale=LocaleConfig(language=str(get_aml_system_config().get("locale", "en_US")), dateFormat=str(get_aml_system_config().get("dateFormat", "YYYY-MM-DD")), timeFormat=str(time_format), temperatureUnit=str(get_aml_system_config().get("temperatureUnit", "celsius"))))
+    return LocaleResponse(
+        locale=LocaleConfig(
+            language=str(get_aml_system_config().get("locale", "en_US")),
+            dateFormat=str(get_aml_system_config().get("dateFormat", "YYYY-MM-DD")),
+            timeFormat=str(time_format),
+            temperatureUnit=str(get_aml_system_config().get("temperatureUnit", "celsius")),
+        )
+    )
 
 
 # Security/TLS
@@ -1953,7 +2127,9 @@ async def get_security_config(
     context: AppContext = Depends(get_context),
 ) -> SecurityConfigResponse:
     _ensure_state(context)
-    return SecurityConfigResponse(securityConfig=SecurityConfig.model_validate(get_aml_system_security()))
+    return SecurityConfigResponse(
+        securityConfig=SecurityConfig.model_validate(get_aml_system_security())
+    )
 
 
 @router.put("/system/security", response_model=SecurityConfigResponse)
@@ -1965,9 +2141,13 @@ async def update_security_config(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "securityConfig")
-    get_aml_system_security().update({key: value for key, value in updates.items() if value is not None})
+    get_aml_system_security().update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "system/security")
-    return SecurityConfigResponse(securityConfig=SecurityConfig.model_validate(get_aml_system_security()))
+    return SecurityConfigResponse(
+        securityConfig=SecurityConfig.model_validate(get_aml_system_security())
+    )
 
 
 @router.get("/system/security/certificate", response_model=CertInfoResponse)
@@ -1992,7 +2172,9 @@ async def upload_security_certificate(
     if data:
         cert_info.update({key: value for key, value in data.items() if value is not None})
     aml_state.set_aml_system_cert_info(cert_info)
-    get_aml_system_security()["certExpiry"] = str(cert_info.get("notAfter", "2025-12-31T23:59:59Z"))[:10]
+    get_aml_system_security()["certExpiry"] = str(
+        cert_info.get("notAfter", "2025-12-31T23:59:59Z")
+    )[:10]
     _sync_default_certificate(cert_info)
     _record_audit(current_user, "upload", "system/security/certificate")
     return _ws_result("Certificate updated")
@@ -2007,14 +2189,16 @@ async def generate_security_certificate(
     _require_admin(current_user)
     now = _now()
     cert_info = aml_state.get_aml_system_cert_info()
-    cert_info.update({
-        "subject": f"CN={get_aml_system_config().get('hostname', 'openblade-1')},O=OpenBlade",
-        "issuer": "CN=OpenBlade Self-Signed CA",
-        "notBefore": _iso(now),
-        "notAfter": _iso(now + timedelta(days=365)),
-        "fingerprint": now.strftime("%H:%M:%S:%f"),
-        "status": "active",
-    })
+    cert_info.update(
+        {
+            "subject": f"CN={get_aml_system_config().get('hostname', 'openblade-1')},O=OpenBlade",
+            "issuer": "CN=OpenBlade Self-Signed CA",
+            "notBefore": _iso(now),
+            "notAfter": _iso(now + timedelta(days=365)),
+            "fingerprint": now.strftime("%H:%M:%S:%f"),
+            "status": "active",
+        }
+    )
     aml_state.set_aml_system_cert_info(cert_info)
     get_aml_system_security()["certExpiry"] = str(cert_info["notAfter"])[:10]
     _sync_default_certificate(cert_info)
@@ -2041,7 +2225,9 @@ async def update_snmp_config(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "snmpConfig")
-    get_aml_snmp_config().update({key: value for key, value in updates.items() if value is not None})
+    get_aml_snmp_config().update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "system/snmp")
     return SNMPConfigResponse(snmpConfig=SNMPConfig.model_validate(get_aml_snmp_config()))
 
@@ -2055,7 +2241,15 @@ async def test_snmp(
     _require_admin(current_user)
     host = get_aml_snmp_config().get("trapHosts", ["127.0.0.1"])
     traps = aml_state.get_aml_system_recent_traps()
-    traps.insert(0, {"timestamp": _iso(_now()), "oid": "1.3.6.1.4.1.3764.1", "value": "OpenBlade SNMP test", "host": host[0] if host else "127.0.0.1"})
+    traps.insert(
+        0,
+        {
+            "timestamp": _iso(_now()),
+            "oid": "1.3.6.1.4.1.3764.1",
+            "value": "OpenBlade SNMP test",
+            "host": host[0] if host else "127.0.0.1",
+        },
+    )
     aml_state.set_aml_system_recent_traps(traps[:20])
     _record_audit(current_user, "test", "system/snmp")
     return _ws_result("Sent SNMP test trap")
@@ -2068,7 +2262,9 @@ async def list_snmp_traps(
 ) -> TrapListResponse:
     _ensure_state(context)
     return TrapListResponse(
-        trapList=TrapListResource(trap=[Trap.model_validate(item) for item in aml_state.get_aml_system_recent_traps()])
+        trapList=TrapListResource(
+            trap=[Trap.model_validate(item) for item in aml_state.get_aml_system_recent_traps()]
+        )
     )
 
 
@@ -2091,7 +2287,9 @@ async def update_email_config(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "emailConfig")
-    get_aml_email_config().update({key: value for key, value in updates.items() if value is not None})
+    get_aml_email_config().update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "system/email")
     return EmailConfigResponse(emailConfig=EmailConfig.model_validate(get_aml_email_config()))
 
@@ -2126,7 +2324,9 @@ async def update_syslog_config(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "syslogConfig")
-    get_aml_syslog_config().update({key: value for key, value in updates.items() if value is not None})
+    get_aml_syslog_config().update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "system/syslog")
     return SyslogConfigResponse(syslogConfig=SyslogConfig.model_validate(get_aml_syslog_config()))
 
@@ -2188,7 +2388,9 @@ async def get_storage_volume(
     context: AppContext = Depends(get_context),
 ) -> VolumeResponse:
     _ensure_state(context)
-    return VolumeResponse(volume=Volume.model_validate(_volume_response_payload(_get_volume_or_404(volume))))
+    return VolumeResponse(
+        volume=Volume.model_validate(_volume_response_payload(_get_volume_or_404(volume)))
+    )
 
 
 # Services
@@ -2198,7 +2400,11 @@ async def list_services(
     context: AppContext = Depends(get_context),
 ) -> ServiceListResponse:
     _ensure_state(context)
-    return ServiceListResponse(serviceList=ServiceListResource(service=[Service.model_validate(item) for item in get_aml_services().values()]))
+    return ServiceListResponse(
+        serviceList=ServiceListResource(
+            service=[Service.model_validate(item) for item in get_aml_services().values()]
+        )
+    )
 
 
 @router.get("/system/service/{name}", response_model=ServiceResponse)
@@ -2220,7 +2426,9 @@ async def start_service(
     _ensure_state(context)
     _require_admin(current_user)
     service = _get_service_or_404(name)
-    service.update({"status": "running", "pid": service.get("pid") or int(time.time()) % 100000, "uptime": 0})
+    service.update(
+        {"status": "running", "pid": service.get("pid") or int(time.time()) % 100000, "uptime": 0}
+    )
     _record_audit(current_user, "start", f"system/service/{name}")
     return _ws_result(f"Started service {name}")
 
@@ -2261,7 +2469,9 @@ async def get_backup_status(
 ) -> BackupStatusResponse:
     _ensure_state(context)
     return BackupStatusResponse(
-        backupStatus=BackupStatus.model_validate(_backup_status_payload(aml_state.get_aml_system_backup_status()))
+        backupStatus=BackupStatus.model_validate(
+            _backup_status_payload(aml_state.get_aml_system_backup_status())
+        )
     )
 
 
@@ -2321,7 +2531,10 @@ async def get_backup_history(
     _ensure_state(context)
     return BackupListResponse(
         backupList=BackupListResource(
-            backup=[BackupItem.model_validate(item) for item in aml_state.get_aml_system_backup_history()]
+            backup=[
+                BackupItem.model_validate(item)
+                for item in aml_state.get_aml_system_backup_history()
+            ]
         )
     )
 
@@ -2334,7 +2547,11 @@ async def get_updates(
 ) -> UpdateListResponse:
     _ensure_state(context)
     return UpdateListResponse(
-        updateList=UpdateListResource(update=[Update.model_validate(item) for item in aml_state.get_aml_system_available_updates()])
+        updateList=UpdateListResource(
+            update=[
+                Update.model_validate(item) for item in aml_state.get_aml_system_available_updates()
+            ]
+        )
     )
 
 
@@ -2369,7 +2586,9 @@ async def get_update_status(
 ) -> UpdateStatusResponse:
     _ensure_state(context)
     return UpdateStatusResponse(
-        updateStatus=UpdateStatusInfo.model_validate(_update_status_payload(aml_state.get_aml_system_update_status()))
+        updateStatus=UpdateStatusInfo.model_validate(
+            _update_status_payload(aml_state.get_aml_system_update_status())
+        )
     )
 
 
@@ -2380,7 +2599,15 @@ async def get_system_license(
     context: AppContext = Depends(get_context),
 ) -> SystemLicenseResponse:
     _ensure_state(context)
-    return SystemLicenseResponse(systemLicense=SystemLicense(serialNumber=_serial_number(context), model=_SYSTEM_MODEL, tier="base", features=[item.get("feature", "base") for item in aml_state.list_aml_licenses()], expiry=None))
+    return SystemLicenseResponse(
+        systemLicense=SystemLicense(
+            serialNumber=_serial_number(context),
+            model=_SYSTEM_MODEL,
+            tier="base",
+            features=[item.get("feature", "base") for item in aml_state.list_aml_licenses()],
+            expiry=None,
+        )
+    )
 
 
 # HTTPS/Certificates
@@ -2392,7 +2619,10 @@ async def list_certificates(
     _ensure_state(context)
     return CertListResponse(
         certList=CertListResource(
-            cert=[Certificate.model_validate(_certificate_summary(item)) for item in aml_state.get_aml_system_certificates()]
+            cert=[
+                Certificate.model_validate(_certificate_summary(item))
+                for item in aml_state.get_aml_system_certificates()
+            ]
         )
     )
 
@@ -2437,7 +2667,9 @@ async def delete_certificate(
     _ensure_state(context)
     _require_admin(current_user)
     certificates = aml_state.get_aml_system_certificates()
-    remaining = [item for item in certificates if item.get("name") != name and item.get("id") != name]
+    remaining = [
+        item for item in certificates if item.get("name") != name and item.get("id") != name
+    ]
     if len(remaining) == len(certificates):
         raise HTTPException(status_code=404, detail="Certificate not found")
     aml_state.set_aml_system_certificates(remaining)
@@ -2517,7 +2749,9 @@ async def get_full_diagnostics_results(
 ) -> DiagResultResponse:
     _ensure_state(context)
     return DiagResultResponse(
-        diagResult=DiagResult.model_validate(_diagnostics_payload(aml_state.get_aml_system_last_diagnostics()))
+        diagResult=DiagResult.model_validate(
+            _diagnostics_payload(aml_state.get_aml_system_last_diagnostics())
+        )
     )
 
 
@@ -2546,7 +2780,9 @@ async def get_support_info(
 ) -> SupportInfoResponse:
     _ensure_state(context)
     return SupportInfoResponse(
-        support=SupportInfo.model_validate(_support_bundle_payload(aml_state.get_aml_system_support_bundle()))
+        support=SupportInfo.model_validate(
+            _support_bundle_payload(aml_state.get_aml_system_support_bundle())
+        )
     )
 
 
@@ -2591,7 +2827,9 @@ async def update_debug_info(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "debugInfo")
-    get_aml_debug_config().update({key: value for key, value in updates.items() if value is not None})
+    get_aml_debug_config().update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "system/debug")
     return DebugInfoResponse(debugInfo=DebugInfo.model_validate(get_aml_debug_config()))
 
@@ -2615,7 +2853,9 @@ async def update_preferences(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "preferences")
-    set_aml_system_preferences(_merge_validated_model(Preferences, get_aml_system_preferences(), updates))
+    set_aml_system_preferences(
+        _merge_validated_model(Preferences, get_aml_system_preferences(), updates)
+    )
     _record_audit(current_user, "update", "system/preferences")
     return PreferencesResponse(preferences=Preferences.model_validate(get_aml_system_preferences()))
 
@@ -2636,7 +2876,11 @@ async def get_audit_log(
         records = [item for item in records if item.get("user") == user]
     if action is not None:
         records = [item for item in records if item.get("action") == action]
-    return AuditListResponse(auditList=AuditListResource(audit=[AuditItem.model_validate(item) for item in records[offset : offset + limit]]))
+    return AuditListResponse(
+        auditList=AuditListResource(
+            audit=[AuditItem.model_validate(item) for item in records[offset : offset + limit]]
+        )
+    )
 
 
 @router.delete("/system/audit", response_model=WSResultCode)
@@ -2657,7 +2901,15 @@ async def get_performance_metrics(
     context: AppContext = Depends(get_context),
 ) -> PerfMetricsResponse:
     _ensure_state(context)
-    return PerfMetricsResponse(perfMetrics=PerfMetrics(cpu=_system_cpu_usage(), memory=_system_mem_usage(), disk=_system_disk_usage(), network=12, libraryOps=5))
+    return PerfMetricsResponse(
+        perfMetrics=PerfMetrics(
+            cpu=_system_cpu_usage(),
+            memory=_system_mem_usage(),
+            disk=_system_disk_usage(),
+            network=12,
+            libraryOps=5,
+        )
+    )
 
 
 @router.get("/system/performance/history", response_model=PerfHistoryResponse)
@@ -2668,11 +2920,18 @@ async def get_performance_history(
     _ensure_state(context)
     now = _now()
     samples = [
-        {"timestamp": _iso(now - timedelta(minutes=idx * 5)), "cpu": 15 + idx, "memory": 40 + idx, "disk": 28 + idx}
+        {
+            "timestamp": _iso(now - timedelta(minutes=idx * 5)),
+            "cpu": 15 + idx,
+            "memory": 40 + idx,
+            "disk": 28 + idx,
+        }
         for idx in range(6)
     ]
     samples.reverse()
-    return PerfHistoryResponse(perfHistory=PerfHistory(samples=[PerfSample.model_validate(item) for item in samples]))
+    return PerfHistoryResponse(
+        perfHistory=PerfHistory(samples=[PerfSample.model_validate(item) for item in samples])
+    )
 
 
 @router.get("/system/emulator/latency", response_model=EmulatorLatencyConfigResponse)
@@ -2697,20 +2956,61 @@ async def update_emulator_latency(
     _require_admin(current_user)
     current = get_aml_emulator_latency_config()
     updated = dict(current)
+    if payload.enabled is not None:
+        updated["enabled"] = payload.enabled
     if payload.profile is not None:
         normalized = payload.profile.strip().lower()
         if normalized not in {"instant", "realistic", "hardware", "custom"}:
             raise HTTPException(status_code=400, detail="Invalid latency profile")
         updated["profile"] = normalized
     if payload.profileMs is not None:
-        updated["profileMs"] = {
-            key: value.model_dump()
-            for key, value in payload.profileMs.items()
-        }
+        updated["profileMs"] = {key: value.model_dump() for key, value in payload.profileMs.items()}
     stored = set_aml_emulator_latency_config(updated)
     _record_audit(current_user, "update", "system/emulator/latency")
     return EmulatorLatencyConfigResponse(
         emulatorLatency=EmulatorLatencyConfig.model_validate(stored)
+    )
+
+
+@router.get("/system/emulator/latency/metrics", response_model=EmulatorLatencyMetricsResponse)
+async def get_emulator_latency_metrics(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> EmulatorLatencyMetricsResponse:
+    _ensure_state(context)
+    _ = current_user
+    return EmulatorLatencyMetricsResponse(
+        emulatorLatencyMetrics=EmulatorLatencyMetrics.model_validate(
+            get_aml_emulator_latency_metrics()
+        )
+    )
+
+
+@router.get("/system/emulator/latency/metrics/export", response_model=EmulatorLatencyMetricsResponse)
+async def export_emulator_latency_metrics(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> EmulatorLatencyMetricsResponse:
+    _ensure_state(context)
+    _ = current_user
+    return EmulatorLatencyMetricsResponse(
+        emulatorLatencyMetrics=EmulatorLatencyMetrics.model_validate(
+            get_aml_emulator_latency_metrics()
+        )
+    )
+
+
+@router.post("/system/emulator/latency/metrics/reset", response_model=EmulatorLatencyMetricsResponse)
+async def reset_emulator_latency_metrics(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> EmulatorLatencyMetricsResponse:
+    _ensure_state(context)
+    _require_admin(current_user)
+    metrics = reset_aml_emulator_latency_metrics()
+    _record_audit(current_user, "update", "system/emulator/latency/metrics")
+    return EmulatorLatencyMetricsResponse(
+        emulatorLatencyMetrics=EmulatorLatencyMetrics.model_validate(metrics)
     )
 
 
@@ -2746,7 +3046,9 @@ async def failover_ha(
     _ensure_state(context)
     _require_admin(current_user)
     get_aml_ha_config()["lastFailover"] = _iso(_now())
-    get_aml_ha_config()["role"] = "secondary" if get_aml_ha_config().get("role") == "primary" else "primary"
+    get_aml_ha_config()["role"] = (
+        "secondary" if get_aml_ha_config().get("role") == "primary" else "primary"
+    )
     get_aml_ha_config()["state"] = "active"
     _record_audit(current_user, "failover", "system/ha")
     return _ws_result("HA failover completed")
@@ -2771,7 +3073,9 @@ async def get_callhome_config(
     context: AppContext = Depends(get_context),
 ) -> CallHomeConfigResponse:
     _ensure_state(context)
-    return CallHomeConfigResponse(callHomeConfig=CallHomeConfig.model_validate(get_aml_callhome_config()))
+    return CallHomeConfigResponse(
+        callHomeConfig=CallHomeConfig.model_validate(get_aml_callhome_config())
+    )
 
 
 @router.put("/system/callhome", response_model=CallHomeConfigResponse)
@@ -2783,9 +3087,13 @@ async def update_callhome_config(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "callHomeConfig")
-    get_aml_callhome_config().update({key: value for key, value in updates.items() if value is not None})
+    get_aml_callhome_config().update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "system/callhome")
-    return CallHomeConfigResponse(callHomeConfig=CallHomeConfig.model_validate(get_aml_callhome_config()))
+    return CallHomeConfigResponse(
+        callHomeConfig=CallHomeConfig.model_validate(get_aml_callhome_config())
+    )
 
 
 @router.post("/system/callhome/test", response_model=WSResultCode)
@@ -2821,7 +3129,13 @@ async def update_remote_config(
     updates = _model_updates(payload, "remoteConfig")
     for key in ("ssh", "vnc", "rdp"):
         if key in updates and isinstance(updates[key], dict):
-            get_aml_remote_config().setdefault(key, {}).update({inner_key: inner_value for inner_key, inner_value in updates[key].items() if inner_value is not None})
+            get_aml_remote_config().setdefault(key, {}).update(
+                {
+                    inner_key: inner_value
+                    for inner_key, inner_value in updates[key].items()
+                    if inner_value is not None
+                }
+            )
     _record_audit(current_user, "update", "system/remote")
     return RemoteConfigResponse(remoteConfig=RemoteConfig.model_validate(get_aml_remote_config()))
 
@@ -2845,6 +3159,8 @@ async def update_proxy_config(
     _ensure_state(context)
     _require_admin(current_user)
     updates = _model_updates(payload, "proxyConfig")
-    get_aml_proxy_config().update({key: value for key, value in updates.items() if value is not None})
+    get_aml_proxy_config().update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
     _record_audit(current_user, "update", "system/proxy")
     return ProxyConfigResponse(proxyConfig=ProxyConfig.model_validate(get_aml_proxy_config()))

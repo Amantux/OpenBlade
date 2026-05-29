@@ -1,9 +1,38 @@
 {
   "name": "openblade-i3-emulator-contract",
   "version": "0.1.0",
+  "contract_schema_version": "1.0.0",
+  "service_boundary": {
+    "delivery_model": "external-repository-image",
+    "source_repository": "https://github.com/Amantux/openblade-i3-emulator",
+    "transport": "http",
+    "health_endpoint": "/health",
+    "aml_base_path": "/api/aml"
+  },
   "image": {
     "repository": "ghcr.io/amantux/openblade-i3-emulator",
-    "tag_strategy": "semantic-version-or-sha"
+    "default_tag": "0.1.0",
+    "tag_strategy": "semantic-version-or-sha",
+    "pinning_policy": "openblade-default-must-be-versioned"
+  },
+  "client_contract": {
+    "image_override_env": "OPENBLADE_EMULATOR_IMAGE",
+    "controller_emulator_urls_env": "OPENBLADE_EMULATOR_URLS",
+    "required_healthcheck": "/health",
+    "compatibility_scope": "manual-documented-apis-only"
+  },
+  "standalone_packaging": {
+    "compose_file": "deploy/emulator/docker-compose.standalone.yml",
+    "runner_script": "scripts/emulator/run_standalone_stack.sh",
+    "runtime_env_example": "openblade/emulator_contract/standalone-runtime.env.example",
+    "integration_seed_hook": "make seed-libraries"
+  },
+  "compatibility_policy": {
+    "contract_semver": "0.1.x",
+    "supported_image_tags": "semantic-version-or-sha",
+    "api_compatibility_guarantee": "manual-documented-apis-stable-within-contract-line",
+    "breaking_change_requires": "contract-version-bump-and-policy-review",
+    "openblade_mismatch_behavior": "fail-fast-before-running-tests"
   },
   "runtime_env": {
     "LIBRARY_ID": "string",
@@ -12,10 +41,64 @@
     "EMULATOR_SLOT_COUNT": "integer",
     "EMULATOR_DRIVE_COUNT": "integer",
     "EMULATOR_OCCUPANCY_PERCENT": "integer",
-    "EMULATOR_LATENCY_PROFILE": "instant|realistic|hardware|custom"
+    "EMULATOR_LATENCY_PROFILE": "instant|realistic|hardware|custom",
+    "OPENBLADE_SCALAR_API_ONLY": "true|false"
   },
   "latency_profiles": ["instant", "realistic", "hardware", "custom"],
   "manual_matrix_file": "openblade/emulator_contract/quantum_i3_rev_h_matrix.json",
   "scope_policy": "manual-documented-apis-only",
-  "minimum_cases_per_endpoint": 5
+  "minimum_cases_per_endpoint": 5,
+  "cross_repo_contract": {
+    "contract_line": "0.1.x",
+    "versioning_policy": {
+      "default_image_tag_must_match_contract_version": true,
+      "contract_line_compatibility": "openblade-and-emulator-must-share-contract-line",
+      "non_breaking_changes": [
+        "adding-new-manual-documented-endpoints",
+        "adding-optional-response-fields",
+        "adding-new-compatible-latency-profile-targets"
+      ],
+      "breaking_changes": [
+        "removing-or-renaming-health-or-base-endpoints",
+        "changing-documented-response-shapes-or-error-codes",
+        "requiring-new-runtime-env-fields-without-defaults"
+      ]
+    },
+    "api_compatibility_guarantees": {
+      "required_endpoints": ["/health", "/aml/"],
+      "manual_scope": "manual-documented-apis-only",
+      "matrix_minimum_case_count": 5
+    },
+    "required_artifacts": {
+      "contract_file": "openblade/emulator_contract/contract.json",
+      "manual_matrix_file": "openblade/emulator_contract/quantum_i3_rev_h_matrix.json",
+      "compose_file": "docker-compose.yml",
+      "workflow_files": [
+        ".github/workflows/emulator-change-gates.yml",
+        ".github/workflows/i3-emulator-compliance.yml"
+      ]
+    },
+    "ci_contract_checks": [
+      {
+        "id": "cross-repo-contract-metadata",
+        "workflow_file": ".github/workflows/emulator-change-gates.yml",
+        "command": "python3 tools/emulator_spec/validate_cross_repo_contract.py"
+      },
+      {
+        "id": "cross-repo-contract-metadata",
+        "workflow_file": ".github/workflows/i3-emulator-compliance.yml",
+        "command": "python3 tools/emulator_spec/validate_cross_repo_contract.py"
+      },
+      {
+        "id": "manual-matrix-generated-suite-gate",
+        "workflow_file": ".github/workflows/emulator-change-gates.yml",
+        "command": "tests/i3/test_16_manual_matrix_generated_suites.py"
+      },
+      {
+        "id": "manual-matrix-generated-suite-gate",
+        "workflow_file": ".github/workflows/i3-emulator-compliance.yml",
+        "command": "tests/i3/test_16_manual_matrix_generated_suites.py"
+      }
+    ]
+  }
 }

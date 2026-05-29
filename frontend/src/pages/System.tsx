@@ -219,9 +219,16 @@ export default function System() {
         <Card>
           <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Quick links</div>
           <div className="mt-4 grid gap-3 text-sm text-slate-300">
-            <Link to="/gateway" className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-slate-100 hover:bg-quantum-north">Protocol Gateway</Link>
-            <Link to="/storage/shares" className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-slate-100 hover:bg-quantum-north">File Sharing</Link>
+            <Link to="/system/test-runner" className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-slate-100 hover:bg-quantum-north">Test Runner</Link>
             <Link to="/admin/safety" className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-slate-100 hover:bg-quantum-north">Safety Checks</Link>
+            <a
+              href="http://localhost:5174/docs"
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-slate-100 hover:bg-quantum-north"
+            >
+              Emulator Swagger Docs
+            </a>
             <div className="rounded-md border border-quantum-border bg-quantum-sidebar px-4 py-3 text-xs text-slate-400">CORS origins: {configSummary.cors_origins.join(', ')}</div>
           </div>
         </Card>

@@ -113,7 +113,7 @@ jobs:
                   time.sleep(1)
           raise SystemExit("API did not become healthy in time")
           PY
-      - run: pytest tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_03_changer.py tests/i3/test_12_multi_library.py -q --tb=short
+      - run: pytest tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_03_changer.py tests/i3/test_12_multi_library.py tests/i3/test_14_emulator_profile.py -q --tb=short
 
   frontend-build-test:
     name: frontend-build-test

@@ -6,7 +6,6 @@ import {
   Layers3,
   Network,
   Search,
-  ServerCog,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
@@ -53,25 +52,8 @@ const sections: NavSection[] = [
     items: [
       { label: 'Dashboard', to: '/', end: true },
       { label: 'Fleet Overview', to: '/libraries' },
+      { label: 'Test Runner', to: '/system/test-runner' },
       { label: 'System Health', to: '/system/health' },
-    ],
-  },
-  {
-    id: 'nas',
-    label: 'NAS',
-    icon: ServerCog,
-    items: [
-      { label: 'File Station', to: '/nas/file-station', group: 'Files & Access' },
-      { label: 'File Browser', to: '/nas/browser', group: 'Files & Access' },
-      { label: 'Shares', to: '/nas/shares', group: 'Files & Access' },
-      { label: 'Virtual Pools', to: '/nas/pools', group: 'Files & Access' },
-      { label: 'Restore Queue', to: '/nas/restore-queue', group: 'Files & Access' },
-      { label: 'Archive Planning', to: '/nas/archive-planning', group: 'Archive' },
-      { label: 'Storage Policies', to: '/nas/policies', group: 'Ingest' },
-      { label: 'Cache Drives', to: '/nas/cache-drives', group: 'Ingest' },
-      { label: 'Source Streaming', to: '/nas/source-streaming', group: 'Ingest' },
-      { label: 'Protocol Gateway', to: '/nas/gateway', group: 'Files & Access' },
-      { label: 'Dataset Details', to: '/storage/dataset-details', group: 'Archive' },
     ],
   },
   {

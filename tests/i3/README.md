@@ -22,6 +22,35 @@ I3_TIMING_PROFILE=instant python3 -m pytest tests/i3/ -m i3 -q
 I3_TIMING_PROFILE=realistic python3 -m pytest tests/i3/ -m i3 -v
 ```
 
+When running the OpenBlade control plane in compose, configure controller-to-
+emulator routing with `OPENBLADE_EMULATOR_URLS` (for example:
+`http://emulator-1:8010,http://emulator-2:8010,http://emulator-3:8010`).
+
+## Emulator launch + runtime configuration
+
+```bash
+# Validate resolved standalone emulator config
+make emulator-config
+
+# Launch standalone emulator stack from contract-pinned image
+make emulator-up
+
+# Override profile/latency/runtime values via env file
+cp openblade/emulator_contract/standalone-runtime.env.example ./emulator.runtime.env
+EMULATOR_ENV_FILE=./emulator.runtime.env make emulator-up
+```
+
+Runtime knobs are defined by the emulator contract and standalone compose stack:
+`EMULATOR_PROFILE`, `EMULATOR_SLOT_COUNT`, `EMULATOR_DRIVE_COUNT`,
+`EMULATOR_OCCUPANCY_PERCENT`, and `EMULATOR_LATENCY_PROFILE`.
+
+## Latency controls (test-side vs emulator-side)
+
+| Control | Used by | Values | Default |
+|---|---|---|---|
+| `I3_TIMING_PROFILE` | test waits/assert tolerances in `tests/i3/timing.py` | `instant`, `realistic`, `hardware` | `instant` in emulator mode, `hardware` in real mode |
+| `EMULATOR_LATENCY_PROFILE` | standalone emulator container behavior | `instant`, `realistic`, `hardware`, `custom` | `instant` |
+
 ## Targeting a real Quantum i3
 
 ```bash
@@ -76,10 +105,37 @@ python3 -m pytest tests/i3/ -m i3 -v --tb=short
 | `test_13_ui_scenarios.py` | Scenario tests matching UI workflows |
 | `test_14_emulator_profile.py` | Deterministic default i3 profile invariants |
 | `test_15_manual_matrix_contract.py` | Manual-derived endpoint matrix integrity and 5-case minimum checks |
+| `test_16_manual_matrix_generated_suites.py` | Generated endpoint suites enforcing endpoint/return-state coverage depth |
 
 Manual-derived compliance matrix source:
 - `openblade/emulator_contract/quantum_i3_rev_h_matrix.json`
 - generated via `tools/emulator_spec/build_manual_matrix.py`
+
+## Manual matrix + generated suite workflow
+
+```bash
+# Rebuild matrix from a latest manual text export
+python3 tools/emulator_spec/build_manual_matrix.py \
+  --input /path/to/quantum_webservices.txt \
+  --output openblade/emulator_contract/quantum_i3_rev_h_matrix.json
+
+# Validate contract metadata and matrix/linkage invariants
+python3 tools/emulator_spec/validate_cross_repo_contract.py
+
+# Validate matrix policy + generated suite coverage policy
+python3 -m pytest tests/i3/test_15_manual_matrix_contract.py tests/i3/test_16_manual_matrix_generated_suites.py -q
+```
+
+Boundary policy is explicit: parity checks cover **manual-documented APIs only**
+(`scope=manual-documented-apis-only`). Undocumented vendor endpoints are out of
+scope until added to the manual matrix/contract policy.
+
+## CI gates (emulator parity and contract)
+
+| Workflow | Triggers | Enforcement |
+|---|---|---|
+| `.github/workflows/emulator-change-gates.yml` | `pull_request` and `push` to `master` when emulator-related paths change (`openblade/simulator/**`, AML API route/state/latency files, `openblade/emulator_contract/**`, `tools/emulator_spec/**`, `tests/i3/**`, latency integration tests, `docker-compose.yml`), plus `workflow_dispatch` | Runs contract validator, matrix contract/generation suites, latency integration tests, and deterministic default profile assertions (`test_14`) |
+| `.github/workflows/i3-emulator-compliance.yml` | Same path filters and manual dispatch as above | Runs contract validator, then full i3 suite shards (`core`, `operations`, `system`) including matrix contract/generation tests |
 
 ## Running from the UI
 

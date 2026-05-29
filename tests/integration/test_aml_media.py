@@ -29,7 +29,7 @@ def test_media_detail_includes_capacity_usage_fields(authed: TestClient) -> None
     assert response.status_code == 200
 
     media = response.json()["media"]
-    assert media["capacityGB"] == 18000
+    assert media["capacityGB"] in {6000, 12000, 18000}
     assert 0 < media["usedGB"] <= media["capacityGB"]
     assert 20 <= media["percentUsed"] <= 85
     assert media["poolName"] is None

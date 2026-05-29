@@ -5,7 +5,6 @@ import { getCatalogStatus, getLibraryStatus, getPublicHealth } from '../api/cata
 import { getAmlSummary, getDashboardStats } from '../api/dashboard';
 import { getEvents, getRasTickets } from '../api/health';
 import { listTapeOperations } from '../api/safety';
-import { listHydrationJobs } from '../api/virtualFs';
 import InformationPanel from '../components/panels/InformationPanel';
 import NorthPanel from '../components/panels/NorthPanel';
 import OperationsPanel from '../components/panels/OperationsPanel';
@@ -90,7 +89,6 @@ export default function Dashboard() {
   const catalogStatusQuery = useQuery({ queryKey: ['dashboard', 'catalog-status'], queryFn: getCatalogStatus, refetchInterval: 30_000 });
   const libraryStatusQuery = useQuery({ queryKey: ['dashboard', 'library-status', 'all'], queryFn: getLibraryStatus, refetchInterval: 30_000 });
   const recentTapeOpsQuery = useQuery({ queryKey: ['dashboard', 'recent-tape-ops'], queryFn: () => listTapeOperations(5), refetchInterval: 30_000 });
-  const hydrationJobsQuery = useQuery({ queryKey: ['dashboard', 'hydration-jobs'], queryFn: listHydrationJobs, refetchInterval: 30_000 });
   const [selectedPartitionId, setSelectedPartitionId] = useState<string>();
 
   const inventory = inventoryQuery.data ?? EMPTY_INVENTORY;
@@ -100,7 +98,6 @@ export default function Dashboard() {
   const slots = inventory.slots.map(normalizeSlot).sort((left, right) => left.element - right.element);
   const drives = inventory.drives.map(normalizeDrive);
   const activeJobs = jobs.filter((job) => ['PENDING', 'RUNNING'].includes(getJobState(job)));
-  const activeHydrationJobs = (hydrationJobsQuery.data ?? []).filter((job) => ['queued', 'running'].includes(job.status)).length;
   const recentTapeOps = recentTapeOpsQuery.data ?? [];
 
   const partitionRows = useMemo<PartitionRow[]>(() => {
@@ -216,18 +213,27 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Hydration Queue</div>
-          {hydrationJobsQuery.isLoading ? <div className="mt-4 text-sm text-slate-400">Loading jobs…</div> : null}
-          {hydrationJobsQuery.isError ? <div className="mt-4 text-sm text-red-300">Unable to load /virtual/jobs.</div> : null}
-          {!hydrationJobsQuery.isError ? (
-            <>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <div className="text-3xl font-semibold text-slate-100">{activeHydrationJobs}</div>
-                <Badge variant={activeHydrationJobs > 0 ? 'blue' : 'gray'}>{activeHydrationJobs > 0 ? 'Active' : 'Idle'}</Badge>
-              </div>
-              <div className="mt-2 text-sm text-slate-400">{hydrationJobsQuery.data?.length ?? 0} total hydration job(s).</div>
-            </>
-          ) : null}
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">i3 Compliance</div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div className="text-3xl font-semibold text-slate-100">Ready</div>
+            <Badge variant="blue">Test Mode</Badge>
+          </div>
+          <div className="mt-2 text-sm text-slate-400">
+            Launch matrix-driven emulator validation and inspect endpoint support docs.
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link to="/system/test-runner" className="rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-xs text-slate-200 hover:bg-quantum-north">
+              Open Test Runner
+            </Link>
+            <a
+              href="http://localhost:5174"
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border border-quantum-border bg-quantum-sidebar px-3 py-2 text-xs text-slate-200 hover:bg-quantum-north"
+            >
+              Open Emulator UI
+            </a>
+          </div>
         </Card>
       </div>
 
@@ -320,23 +326,28 @@ export default function Dashboard() {
         </div>
 
         <Card>
-          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Hydration Queue</div>
-          <h2 className="mt-1 text-lg font-semibold text-slate-100">Restore Activity</h2>
+          <div className="text-xs uppercase tracking-[0.22em] text-slate-500">i3 Testing Access</div>
+          <h2 className="mt-1 text-lg font-semibold text-slate-100">Compliance and API tooling</h2>
           <div className="mt-4 space-y-3">
-            {(hydrationJobsQuery.data ?? []).slice(0, 5).map((job) => (
-              <div key={job.job_id} className="rounded-md border border-quantum-border bg-quantum-panel px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate font-semibold text-slate-100">{job.paths[0] ?? job.job_id}</div>
-                    <div className="mt-1 text-sm text-slate-400">{job.completed_files}/{job.total_files} files</div>
-                  </div>
-                  <Badge variant={job.status === 'completed' ? 'green' : job.status === 'failed' ? 'red' : 'blue'}>{job.status.toUpperCase()}</Badge>
-                </div>
-              </div>
-            ))}
-            {(hydrationJobsQuery.data ?? []).length === 0 ? (
-              <div className="rounded-md border border-dashed border-quantum-border px-4 py-6 text-sm text-slate-400">No hydration jobs reported.</div>
-            ) : null}
+            <Link to="/system/test-runner" className="block rounded-md border border-quantum-border bg-quantum-panel px-4 py-3 text-sm text-slate-100 hover:bg-quantum-north">
+              Launch the browser test runner
+            </Link>
+            <a
+              href="http://localhost:5174/docs"
+              target="_blank"
+              rel="noreferrer"
+              className="block rounded-md border border-quantum-border bg-quantum-panel px-4 py-3 text-sm text-slate-100 hover:bg-quantum-north"
+            >
+              Open emulator Swagger docs
+            </a>
+            <a
+              href="http://localhost:5174"
+              target="_blank"
+              rel="noreferrer"
+              className="block rounded-md border border-quantum-border bg-quantum-panel px-4 py-3 text-sm text-slate-100 hover:bg-quantum-north"
+            >
+              Open emulator operator console
+            </a>
           </div>
         </Card>
       </div>
@@ -505,12 +516,11 @@ export default function Dashboard() {
               catalogStatusQuery.refetch(),
               libraryStatusQuery.refetch(),
               recentTapeOpsQuery.refetch(),
-              hydrationJobsQuery.refetch(),
             ]),
             variant: 'primary',
           },
           { label: 'Fleet Overview', onClick: () => void navigate('/libraries'), variant: 'secondary' },
-          { label: 'Open NAS', onClick: () => void navigate('/nas/file-station'), variant: 'secondary' },
+          { label: 'Run i3 Tests', onClick: () => void navigate('/system/test-runner'), variant: 'secondary' },
           { label: 'Open Catalog', onClick: () => void navigate('/catalog'), variant: 'secondary' },
           { label: 'System Health', onClick: () => void navigate('/system/health'), variant: 'secondary' },
         ]}

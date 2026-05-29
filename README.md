@@ -21,10 +21,23 @@ gunicorn openblade.api.wsgi:application
 ```
 
 ## Multi-Library Setup
-- Start the API, frontend, and three emulator-backed library instances with `make up`
+- Start the API + frontend with `make up`
+- Start the standalone Quantum i3 emulators with `make emulator-up`
+- Start both together with `make fleet-up`
 - Seed catalog records for `library-1`, `library-2`, and `library-3` with `make seed-libraries`
 - Emulator ports map as `8010=library-1`, `8011=library-2`, and `8012=library-3`
+- Override controller-to-emulator targets with `OPENBLADE_EMULATOR_URLS` (comma-separated URLs)
 - Add a fourth or fifth library later by calling `POST /api/libraries` with a new `name` and `emulator_url`
+
+### Standalone emulator service workflow (external image)
+- Validate standalone emulator compose config with `make emulator-config`
+- Start standalone emulator services (external image + deterministic i3 defaults) with `make emulator-up`
+- Build full fleet assets with `make fleet-build`
+- Run OpenBlade API/web against standalone emulator services with `make fleet-up`
+- Override runtime values with `EMULATOR_ENV_FILE=/path/to/env make emulator-up` using `openblade/emulator_contract/standalone-runtime.env.example` as the template
+- Access the standalone Quantum i3 UI at `http://localhost:5174` (or `http://localhost:${EMULATOR_UI_PORT}` if overridden)
+- Override UI proxy targets with `EMULATOR_UI_TARGET_LIBRARY{1,2,3}_URL` in the standalone env file
+- Override OpenBlade controller routing with `OPENBLADE_EMULATOR_URLS` when targeting the standalone emulator endpoints
 
 ## Safety defaults
 - Mock backend is the default
