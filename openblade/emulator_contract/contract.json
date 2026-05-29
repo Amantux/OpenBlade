@@ -1,0 +1,21 @@
+{
+  "name": "openblade-i3-emulator-contract",
+  "version": "0.1.0",
+  "image": {
+    "repository": "ghcr.io/amantux/openblade-i3-emulator",
+    "tag_strategy": "semantic-version-or-sha"
+  },
+  "runtime_env": {
+    "LIBRARY_ID": "string",
+    "LIBRARY_NAME": "string",
+    "EMULATOR_PROFILE": "scalar-i3-50-3",
+    "EMULATOR_SLOT_COUNT": "integer",
+    "EMULATOR_DRIVE_COUNT": "integer",
+    "EMULATOR_OCCUPANCY_PERCENT": "integer",
+    "EMULATOR_LATENCY_PROFILE": "instant|realistic|hardware|custom"
+  },
+  "latency_profiles": ["instant", "realistic", "hardware", "custom"],
+  "manual_matrix_file": "openblade/emulator_contract/quantum_i3_rev_h_matrix.json",
+  "scope_policy": "manual-documented-apis-only",
+  "minimum_cases_per_endpoint": 5
+}
