@@ -5,6 +5,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from openblade.simulator.i3_config import scalar_i3_default_config
+
 pytestmark = pytest.mark.i3
 
 
@@ -25,6 +27,9 @@ def test_default_inventory_matches_quantum_i3_profile(
     i3_client: httpx.Client,
     auth_headers: dict[str, str],
 ) -> None:
+    expected_profile = scalar_i3_default_config()
+    expected_total_media = len(expected_profile["media"])
+
     inventory_response = i3_client.get("/aml/library/inventory", headers=auth_headers)
     assert inventory_response.status_code == 200
     inventory = inventory_response.json()
@@ -36,13 +41,13 @@ def test_default_inventory_matches_quantum_i3_profile(
 
     assert len(slots) == 50
     assert len(drives) == 3
-    assert occupied_slots + loaded_drives == 30
+    assert occupied_slots + loaded_drives == expected_total_media
 
     library_response = i3_client.get("/aml/library", headers=auth_headers)
     assert library_response.status_code == 200
     library = library_response.json()["library"]
     assert library["slotsTotal"] == 50
-    assert 0 <= library["slotsOccupied"] <= 30
+    assert 0 <= library["slotsOccupied"] <= expected_total_media
     assert library["slotsEmpty"] == 50 - library["slotsOccupied"]
 
 
@@ -67,10 +72,13 @@ def test_default_media_has_mixed_lto_generations(
     i3_client: httpx.Client,
     auth_headers: dict[str, str],
 ) -> None:
+    expected_profile = scalar_i3_default_config()
+    expected_total_media = len(expected_profile["media"])
+
     response = i3_client.get("/aml/media", headers=auth_headers)
     assert response.status_code == 200
     media = _media_from_payload(response.json())
-    assert len(media) == 30
+    assert len(media) == expected_total_media
 
     media_types = {str(item.get("type")) for item in media}
     assert "LTO-7" in media_types
