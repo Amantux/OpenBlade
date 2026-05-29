@@ -34,7 +34,10 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      - run: nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
+      - run: |
+          rm -f /tmp/openblade-i3-compliance.db
+          OPENBLADE_BACKEND=mock OPENBLADE_DB_URL=sqlite:////tmp/openblade-i3-compliance.db \
+            nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
       - name: Wait for API health
         run: |
           python - <<'PY'
