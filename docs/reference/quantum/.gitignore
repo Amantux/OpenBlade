@@ -1,0 +1,8 @@
+# Copyrighted Quantum vendor documentation — reference only, DO NOT commit to this
+# public repo (© Quantum Corporation, all rights reserved). Kept locally per-dev.
+*.pdf
+*.txt
+
+# Committable in this dir: README.md and fetch.sh (pointers, not the content).
+!README.md
+!fetch.sh
