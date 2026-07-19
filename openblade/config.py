@@ -39,6 +39,13 @@ class OpenBladeConfig:
     hardware_dry_run: bool = False
     changer_device: str | None = None
     drive_devices: tuple[str, ...] = ()
+    # Robotics transport for BackendMode.REAL: "scsi" (mtx/host changer) or
+    # "webservices" (drive robotics over a real Scalar i3 AML Web Services API).
+    robotics_transport: str = "scsi"
+    scalar_url: str | None = None
+    scalar_user: str = "admin"
+    scalar_password: str = ""
+    scalar_verify_tls: bool = True
     emulator_urls: tuple[str, ...] = _DEFAULT_EMULATOR_URLS
     emulator_latency_profile: str = "instant"
     emulator_latency_enabled: bool = True
@@ -107,6 +114,11 @@ def load_config() -> OpenBladeConfig:
         hardware_dry_run=os.environ.get("OPENBLADE_HARDWARE_DRY_RUN", "false").lower() == "true",
         changer_device=os.environ.get("OPENBLADE_CHANGER_DEVICE") or None,
         drive_devices=drive_devices,
+        robotics_transport=os.environ.get("OPENBLADE_ROBOTICS_TRANSPORT", "scsi").strip().lower(),
+        scalar_url=os.environ.get("OPENBLADE_SCALAR_URL") or None,
+        scalar_user=os.environ.get("OPENBLADE_SCALAR_USER", "admin"),
+        scalar_password=os.environ.get("OPENBLADE_SCALAR_PASSWORD", ""),
+        scalar_verify_tls=_env_bool("OPENBLADE_SCALAR_VERIFY_TLS", default=True),
         emulator_urls=_load_emulator_urls(),
         emulator_latency_profile=_load_emulator_latency_profile(),
         emulator_latency_enabled=_load_emulator_latency_enabled(),
