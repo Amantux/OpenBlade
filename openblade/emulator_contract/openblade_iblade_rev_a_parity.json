@@ -1,0 +1,490 @@
+{
+  "matrix_id": "openblade-iblade-rev-a-parity",
+  "matrix_version": "1.1.0",
+  "source": {
+    "title": "Scalar LTFS and Windows iBlade Web Services Interface",
+    "revision": "6-68634-01 Rev A",
+    "published": "2017-09",
+    "vendor": "Quantum",
+    "document_type": "web-services-manual"
+  },
+  "source_metadata": {
+    "tracking_owner": "openblade",
+    "updated_for_todo": "openblade-parity-f0-matrix",
+    "notes": [
+      "Feature indices follow the existing OpenBlade parity backlog numbering, not a contiguous range",
+      "Matrix focuses on interface-level parity suitable for implementation planning and CI traceability"
+    ]
+  },
+  "parity_mode": "strict-interface",
+  "parity_mode_notes": [
+    "Target parity is endpoint shape, auth behavior, and deterministic simulator semantics",
+    "Firmware-accurate side effects and legacy XML/CSV wire formats are tracked as explicit gaps"
+  ],
+  "naming_schema": "openblade-parity-fNN-<feature-slug>",
+  "reserved_feature_indices": [
+    17
+  ],
+  "status_scale": [
+    "implemented",
+    "partial",
+    "missing"
+  ],
+  "features": [
+    {
+      "id": "openblade-parity-f01-uri-gateway",
+      "legacy_id": "openblade-parity-f1-uri-gateway",
+      "feature": "Blade URI shape and section routing",
+      "guide_surface": [
+        "/aml/devices/blade/{ltfs|windows}/{sectionNumber}/..."
+      ],
+      "openblade_surface": [
+        "/iblade/*",
+        "/aml/devices/blade/ltfs/{sectionNumber}",
+        "/aml/devices/blades/windows"
+      ],
+      "status": "partial",
+      "gaps": [
+        "No strict /aml/devices/blade/windows/{sectionNumber} resource family",
+        "Rev A blade sub-resource URI families are only partially represented in AML routes"
+      ],
+      "implementation_trace_hints": [
+        "openblade/api/main.py:183-203",
+        "openblade/api/routes_aml_advanced.py:955-1053",
+        "openblade/api/routes_aml_blades.py:884-890"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_get_endpoints_return_expected_schema",
+        "tests/integration/test_aml_advanced.py::test_missing_advanced_resources_return_404"
+      ]
+    },
+    {
+      "id": "openblade-parity-f02-auth-content",
+      "legacy_id": "openblade-parity-f2-auth-content",
+      "feature": "Auth, roles, and content negotiation",
+      "guide_surface": [
+        "Role-gated resources with XML/JSON behavior"
+      ],
+      "openblade_surface": [
+        "AML session cookie auth",
+        "iBlade stateful routes guarded with require_auth",
+        "JSON-first request/response models"
+      ],
+      "status": "partial",
+      "gaps": [
+        "No Accept-header based XML/JSON content negotiation for iBlade responses",
+        "Legacy Rev A XML response envelopes are not emulated on iBlade endpoints"
+      ],
+      "implementation_trace_hints": [
+        "openblade/api/routes_aml_auth.py:317",
+        "openblade/api/routes_iblade.py:390-1219"
+      ],
+      "test_trace_hints": [
+        "tests/integration/test_aml_auth.py::test_login_success_sets_cookie",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_get_endpoints_return_expected_schema"
+      ]
+    },
+    {
+      "id": "openblade-parity-f03-drives",
+      "legacy_id": "openblade-parity-f3-drives",
+      "feature": "Drives",
+      "guide_surface": [
+        "GET /nas-drives"
+      ],
+      "openblade_surface": [
+        "GET /iblade/nas-drives"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:426-433",
+        "openblade/api/aml_state.py:3749"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_get_endpoints_return_expected_schema",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_nas_drives_empty_behavior_matches_alias_and_strict",
+        "tests/integration/test_aml_drives.py::test_list_drives_returns_drives"
+      ]
+    },
+    {
+      "id": "openblade-parity-f04-hosts",
+      "legacy_id": "openblade-parity-f4-hosts",
+      "feature": "Host list and host IP CRUD",
+      "guide_surface": [
+        "GET/PUT /hosts",
+        "GET/POST/DELETE /hosts/{ip}"
+      ],
+      "openblade_surface": [
+        "GET /iblade/hosts",
+        "PUT /iblade/hosts",
+        "GET /iblade/hosts/{ip}",
+        "POST /iblade/hosts/{ip}",
+        "DELETE /iblade/hosts/{ip}"
+      ],
+      "status": "partial",
+      "gaps": [
+        "Guide reboot-required signaling is not modeled in host update responses",
+        "Guide defaulting behavior for host fields is simplified in simulator state mutations"
+      ],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:493-581",
+        "openblade/api/aml_state.py:3025-3044"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_host_ip_crud"
+      ]
+    },
+    {
+      "id": "openblade-parity-f05-jobs",
+      "legacy_id": "openblade-parity-f5-jobs",
+      "feature": "Jobs",
+      "guide_surface": [
+        "GET /jobs",
+        "PUT /jobs",
+        "PUT /jobs/{id}"
+      ],
+      "openblade_surface": [
+        "GET /iblade/jobs",
+        "PUT /iblade/jobs",
+        "PUT /iblade/jobs/{job_id}"
+      ],
+      "status": "partial",
+      "gaps": [
+        "Rev A transition rules beyond cancel are not fully modeled",
+        "Guide request-shape variants are narrowed to typed OpenBlade update payloads"
+      ],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:202-244",
+        "openblade/api/routes_iblade.py:584-643"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_jobs_list_and_update"
+      ]
+    },
+    {
+      "id": "openblade-parity-f06-media",
+      "legacy_id": "openblade-parity-f6-media",
+      "feature": "Media",
+      "guide_surface": [
+        "GET/PUT /lto-media",
+        "GET/PUT /lto_media/{barcode}"
+      ],
+      "openblade_surface": [
+        "GET /iblade/lto-media",
+        "PUT /iblade/lto-media",
+        "GET /iblade/lto_media/{barcode}",
+        "PUT /iblade/lto-media/{barcode}"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:532-586",
+        "openblade/api/routes_iblade.py:1268-1325"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_lto_media_batch_updates_are_atomic_on_transition_errors",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_lto_media_requires_documented_state_transition_order",
+        "tests/integration/test_aml_media.py::test_media_detail_includes_capacity_usage_fields"
+      ]
+    },
+    {
+      "id": "openblade-parity-f07-messages",
+      "legacy_id": "openblade-parity-f7-messages",
+      "feature": "Messages",
+      "guide_surface": [
+        "GET/PUT /messages",
+        "GET/PUT /messages/{id}"
+      ],
+      "openblade_surface": [
+        "GET /iblade/messages",
+        "PUT /iblade/messages",
+        "GET /iblade/messages/{message_id}",
+        "PUT /iblade/messages/{message_id}",
+        "DELETE /iblade/messages/{message_id}"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:1194-1257",
+        "openblade/api/aml_state.py:3081-3099"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_messages_put_close_requires_closed_by_and_keeps_delete_alias",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_messages_bulk_put_is_atomic_and_supports_alias_fields"
+      ]
+    },
+    {
+      "id": "openblade-parity-f08-network",
+      "legacy_id": "openblade-parity-f8-network",
+      "feature": "Network",
+      "guide_surface": [
+        "GET /network",
+        "PUT /network/configuration/{port}/{version}"
+      ],
+      "openblade_surface": [
+        "GET /iblade/network",
+        "PUT /iblade/network",
+        "PUT /iblade/network/configuration/{port}/{version}"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:653-686",
+        "openblade/api/routes_iblade.py:1504-1534",
+        "openblade/api/aml_state.py:3047-3055"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_network_configuration_path_updates_and_validates"
+      ]
+    },
+    {
+      "id": "openblade-parity-f09-operations",
+      "legacy_id": "openblade-parity-f9-operations",
+      "feature": "Volume-group operations",
+      "guide_surface": [
+        "assign",
+        "merge",
+        "prepare-export",
+        "repair",
+        "replicate",
+        "safe-repair"
+      ],
+      "openblade_surface": [
+        "POST /iblade/operations/assignment",
+        "POST /iblade/operations/merge",
+        "POST /iblade/operations/prepare-export",
+        "POST /iblade/operations/repair",
+        "POST /iblade/operations/volume-groups/{assign|merge|prepare-export|repair|replicate|safe-repair}",
+        "POST /iblade/operations/replicate",
+        "POST /iblade/operations/safe-repair"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:1858-2123"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_post_operation_endpoints_queue_jobs",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_operation_preconditions_are_enforced_on_alias_and_strict_paths",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_operations_reject_non_integer_group_indices"
+      ]
+    },
+    {
+      "id": "openblade-parity-f10-reference",
+      "legacy_id": "openblade-parity-f10-reference",
+      "feature": "Reference resources",
+      "guide_surface": [
+        "product metadata resource",
+        "state/reason/reference code tables"
+      ],
+      "openblade_surface": [
+        "GET /iblade/product",
+        "GET /iblade/product/{element}",
+        "GET /iblade/{states|volstates|vgstates|jobstates|opstates|reasons|vgreasons}",
+        "GET /iblade/{states|volstates|vgstates|jobstates|opstates|reasons|vgreasons}/{code}"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:193-245",
+        "openblade/api/routes_iblade.py:603-671",
+        "openblade/api/routes_iblade.py:1010-1017"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_get_endpoints_return_expected_schema",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_enumerations_are_non_empty"
+      ]
+    },
+    {
+      "id": "openblade-parity-f11-reports",
+      "legacy_id": "openblade-parity-f11-reports",
+      "feature": "Reports",
+      "guide_surface": [
+        "configuration/media/media-count/volume-groups report endpoints",
+        "email report dispatch endpoints"
+      ],
+      "openblade_surface": [
+        "GET /iblade/reports/configuration",
+        "POST /iblade/reports/configuration/email",
+        "GET /iblade/reports/media",
+        "POST /iblade/reports/media/email",
+        "GET /iblade/reports/media-count",
+        "POST /iblade/reports/media-count/email",
+        "GET /iblade/reports/volume-groups",
+        "POST /iblade/reports/volume-groups/email"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:253-307",
+        "openblade/api/routes_iblade.py:680-773"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_get_endpoints_return_expected_schema",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_post_operation_endpoints_queue_jobs"
+      ]
+    },
+    {
+      "id": "openblade-parity-f12-status",
+      "legacy_id": "openblade-parity-f12-status",
+      "feature": "Status resources",
+      "guide_surface": [
+        "GET /status/io",
+        "GET /status/open-messages",
+        "GET /status/system/open-messages"
+      ],
+      "openblade_surface": [
+        "GET /iblade/status/io",
+        "GET /iblade/status/open-messages",
+        "GET /iblade/status/system/open-messages"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:753-768",
+        "openblade/api/routes_iblade.py:1204-1228"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_status_io_reflects_active_jobs_and_loaded_drives",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_status_open_messages_tracks_ack_flow"
+      ]
+    },
+    {
+      "id": "openblade-parity-f13-system",
+      "legacy_id": "openblade-parity-f13-system",
+      "feature": "System",
+      "guide_surface": [
+        "settings",
+        "snapshot",
+        "reboot",
+        "fwupgrade",
+        "restore",
+        "factory-defaults",
+        "clear-to-ship"
+      ],
+      "openblade_surface": [
+        "GET/PUT /iblade/system/settings",
+        "GET/PUT /iblade/system/settings/{settingname}",
+        "POST /iblade/system/snapshot",
+        "POST /iblade/system/save-configuration",
+        "POST /iblade/system/restore-configuration",
+        "POST /iblade/system/fwupgrade",
+        "POST /iblade/system/reboot",
+        "POST /iblade/system/factory-defaults",
+        "POST /iblade/system/clear-to-ship",
+        "GET /iblade/system/extended-snapshot"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:803-947",
+        "openblade/api/aml_state.py:3058-3066"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_get_endpoints_return_expected_schema",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_post_operation_endpoints_queue_jobs"
+      ]
+    },
+    {
+      "id": "openblade-parity-f14-volume-groups",
+      "legacy_id": "openblade-parity-f14-volume-groups",
+      "feature": "Volume groups",
+      "guide_surface": [
+        "GET/PUT/DELETE /volume-groups*",
+        "POST /volume_groups"
+      ],
+      "openblade_surface": [
+        "GET /iblade/volume-groups",
+        "PUT /iblade/volume-groups",
+        "GET /iblade/volume-groups/{index}",
+        "PUT /iblade/volume-groups/{index}",
+        "DELETE /iblade/volume-groups/{index}",
+        "POST /iblade/volume_groups"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_iblade.py:1120-1219",
+        "openblade/api/aml_state.py:3069-3099"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_volume_groups_create_and_delete",
+        "tests/unit/test_iblade_endpoints.py::test_iblade_get_endpoints_return_expected_schema"
+      ]
+    },
+    {
+      "id": "openblade-parity-f15-windows-surface",
+      "legacy_id": "openblade-parity-f15-windows-surface",
+      "feature": "Windows blade surface",
+      "guide_surface": [
+        "GET /aml/devices/blades/windows",
+        "GET/DELETE /aml/devices/blade/windows/{sectionNumber}",
+        "strict blade URI routing for Windows sections"
+      ],
+      "openblade_surface": [
+        "GET /aml/devices/blades/windows",
+        "GET /aml/devices/blade/windows/{sectionNumber}",
+        "DELETE /aml/devices/blade/windows/{sectionNumber}",
+        "/aml/devices/blade/windows/{sectionNumber}/iblade* strict gateway aliases"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/api/routes_aml_blades.py:911-953",
+        "openblade/api/routes_iblade.py:295-323"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_strict_windows_section_validation_differs_from_ltfs",
+        "tests/unit/test_iblade_endpoints.py::test_windows_blade_section_endpoints_support_get_and_delete"
+      ]
+    },
+    {
+      "id": "openblade-parity-f16-mode-controls",
+      "legacy_id": "openblade-parity-f16-mode-controls",
+      "feature": "Strict parity vs OpenBlade-extended mode controls",
+      "guide_surface": [
+        "strict-interface mode excludes OpenBlade-only compatibility extensions",
+        "extended mode preserves OpenBlade additions"
+      ],
+      "openblade_surface": [
+        "OPENBLADE_IBLADE_COMPAT_MODE={strict|extended}",
+        "strict mode gating for strict-blade alias routing",
+        "strict mode system-settings and extended-snapshot constraints"
+      ],
+      "status": "implemented",
+      "gaps": [],
+      "implementation_trace_hints": [
+        "openblade/config.py:16-123",
+        "openblade/api/main.py:143-165",
+        "openblade/api/routes_iblade.py:103-1234"
+      ],
+      "test_trace_hints": [
+        "tests/unit/test_iblade_endpoints.py::test_iblade_mode_controls_switch_strict_vs_extended_behavior"
+      ]
+    },
+    {
+      "id": "openblade-parity-f18-observability",
+      "legacy_id": "openblade-parity-f18-observability",
+      "feature": "Prometheus and Grafana observability",
+      "guide_surface": [
+        "Not explicitly defined in Rev A; OpenBlade parity hardening requirement"
+      ],
+      "openblade_surface": [
+        "AML emulator latency metrics endpoints (JSON export)"
+      ],
+      "status": "missing",
+      "gaps": [
+        "No Prometheus scrape endpoint for controller/runtime metrics",
+        "No repository-managed Grafana dashboards for iBlade/AML health and throughput parity tracking",
+        "No alert profile matrix for parity regressions/degraded simulator states"
+      ],
+      "implementation_trace_hints": [
+        "openblade/api/aml_latency.py",
+        "openblade/api/routes_aml_system.py:2975-3011"
+      ],
+      "test_trace_hints": [
+        "tests/integration/test_aml_emulator_latency.py::test_latency_metrics_capture_and_export_for_aml_and_iblade"
+      ]
+    }
+  ]
+}
