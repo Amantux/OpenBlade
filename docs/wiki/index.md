@@ -68,6 +68,8 @@ tags: [ ... ]
 - **Incidents:** [`incident-schema.json`](incidents/incident-schema.json) · [known failure patterns](incidents/known-failure-patterns.md)
 - **Decisions:** [ADRs](decisions/)
 
+- **Reports & validation:** [Executive summary](reports/executive-summary.md) · [Build & startup validation](reports/build-and-startup-validation.md) · [Test matrix](testing/test-matrix.md) · [Findings](reports/findings.md) · [Changes made](reports/changes-made.md) · [Remaining work](reports/remaining-work.md) · [Readiness score](reports/readiness-score.md) · [Commands](development/commands.md)
+
 ## Agent contract (summary)
 
 The deployed operations agent MUST, per [agent/operating-model.md](agent/operating-model.md):
