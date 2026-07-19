@@ -35,6 +35,7 @@ from openblade.api import (
     routes_aml_physical,
     routes_aml_system,
     routes_archive,
+    routes_assistant,
     routes_catalog,
     routes_dashboard,
     routes_health,
@@ -166,6 +167,7 @@ async def apply_aml_emulator_latency(request: Request, call_next: object) -> Res
 
 
 app.include_router(routes_health.router, tags=["health"])
+app.include_router(routes_assistant.router, prefix="/assistant", tags=["assistant"])
 app.include_router(routes_inventory.router, prefix="/inventory", tags=["inventory"])
 app.include_router(routes_tapes.router, prefix="/cartridges", tags=["cartridges"])
 app.include_router(routes_volume_groups.router, prefix="/volume-groups", tags=["volume-groups"])

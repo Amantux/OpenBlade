@@ -7,6 +7,12 @@ services:
       OPENBLADE_BACKEND: mock
       OPENBLADE_DB_URL: sqlite:////data/openblade.db
       OPENBLADE_EMULATOR_URLS: ${OPENBLADE_EMULATOR_URLS:-http://host.docker.internal:8010,http://host.docker.internal:8011,http://host.docker.internal:8012}
+      # AI assistant (optional): point at any OpenAI-compatible endpoint to enable
+      # the in-UI helper. Left blank -> assistant stays disabled.
+      OPENBLADE_ASSISTANT_BASE_URL: ${OPENBLADE_ASSISTANT_BASE_URL:-}
+      OPENBLADE_ASSISTANT_MODEL: ${OPENBLADE_ASSISTANT_MODEL:-}
+      OPENBLADE_ASSISTANT_API_KEY: ${OPENBLADE_ASSISTANT_API_KEY:-}
+      OPENBLADE_ASSISTANT_ENABLED: ${OPENBLADE_ASSISTANT_ENABLED:-}
     volumes:
       - openblade-data:/data
     ports:
