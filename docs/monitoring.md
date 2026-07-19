@@ -15,9 +15,15 @@ close that gap:
   unix time the payload was generated. `time() - heartbeat` stays ~0 on healthy
   scrapes and grows only when the body is stale (proxy cache, wedged exporter).
 - **Rule ↔ metric verification** — `tests/integration/test_operability_alerts.py`
-  asserts every `openblade_*` metric named in any alert rule is one the exporter
-  actually declares/emits, so a renamed or typo'd metric can't ship an alert that
-  silently never fires. It guards the parity rules too.
+  asserts every `openblade_*` metric **and every exact-match label selector**
+  (e.g. `{queue="active"}`) named in any alert rule matches a series the exporter
+  actually emits, so neither a renamed metric nor a typo'd label can ship an alert
+  that silently never fires. The fixture seeds representative state (a job, a
+  mount) so data-dependent series are present to check against. It guards the
+  parity rules too. Caveat: the `up{job=...}` selectors in the fleet/control-plane
+  alerts depend on the operator's scrape labels (below) and are verified by that
+  convention, not by this test. Adding `promtool check rules` to CI is a
+  recommended follow-up for PromQL-syntax validation.
 
 ## Alert rules
 
