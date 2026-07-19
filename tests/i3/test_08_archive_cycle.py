@@ -1,10 +1,8 @@
 """test_08_archive_cycle.py — Full archive workflow: plan → write → verify → catalog."""
 from __future__ import annotations
 
-import pytest
 import httpx
-
-from tests.i3.timing import wait_for_op
+import pytest
 
 pytestmark = pytest.mark.i3
 

@@ -109,8 +109,8 @@ class TapeMetadataWriter:
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
-        self._backend_write = getattr(backend, "write_bytes")
-        self._backend_read = getattr(backend, "read_bytes")
+        self._backend_write = backend.write_bytes
+        self._backend_read = backend.read_bytes
 
     def write_tape_json(self, barcode: str, tape_json: TapeJson) -> None:
         """Serialize and write /.openblade/tape.json to the simulated tape."""

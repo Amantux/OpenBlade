@@ -97,7 +97,7 @@ def _build_pytest_command(run_id: str, req: TestRunRequest) -> list[str]:
         "-v",
         "--tb=short",
         "--no-header",
-        f"--json-report",
+        "--json-report",
         f"--json-report-file=/tmp/i3-run-{run_id}.json",
     ]
     pattern = _module_pattern(req.modules)

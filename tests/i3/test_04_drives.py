@@ -1,8 +1,8 @@
 """test_04_drives.py — Drive health and status transition tests."""
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 pytestmark = pytest.mark.i3
 

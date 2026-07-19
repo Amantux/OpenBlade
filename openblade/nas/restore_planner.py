@@ -6,7 +6,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from math import ceil
 from pathlib import PurePosixPath
-from typing import Optional
 
 from openblade.nas.service import NasService
 from openblade.nas.types import NasFileRecord, NasFileState, PolicyType, RestorePlanRequest
@@ -15,7 +14,7 @@ from openblade.nas.types import NasFileRecord, NasFileState, PolicyType, Restore
 @dataclass
 class RestorePlan:
     job_id: str
-    pool_id: Optional[str]
+    pool_id: str | None
     requested_paths: list[str]
     destination: str
     priority: int

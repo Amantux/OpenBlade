@@ -1,8 +1,6 @@
 """REST API for managing the OpenBlade protocol gateway (SFTP/SCP)."""
 from __future__ import annotations
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -15,13 +13,13 @@ router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 class CredentialCreate(BaseModel):
     username: str
     password: str
-    allowed_paths: Optional[List[InboxPath]] = None
+    allowed_paths: list[InboxPath] | None = None
 
 
 class CredentialUpdate(BaseModel):
-    password: Optional[str] = None
-    enabled: Optional[bool] = None
-    allowed_paths: Optional[List[InboxPath]] = None
+    password: str | None = None
+    enabled: bool | None = None
+    allowed_paths: list[InboxPath] | None = None
 
 
 class GatewayConfigResponse(BaseModel):

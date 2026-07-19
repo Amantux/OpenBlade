@@ -1,8 +1,8 @@
 """test_11_diagnostics.py — Health, events, firmware, RAS tickets."""
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 pytestmark = pytest.mark.i3
 

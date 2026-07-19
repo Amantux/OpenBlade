@@ -6,10 +6,21 @@ import collections
 import os
 import string
 import time
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import pyotp
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,7 +70,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def no_auth(endpoint: F) -> F:
-    setattr(endpoint, "no_auth", True)
+    endpoint.no_auth = True
     return endpoint
 
 

@@ -210,7 +210,7 @@ class HealthService:
         started_at = time.perf_counter()
         try:
             inventory = self.library.inventory() if hasattr(self.library, "inventory") else None
-            drive_count = len(inventory.drives) if inventory is not None else len(getattr(self.library, "drives"))
+            drive_count = len(inventory.drives) if inventory is not None else len(self.library.drives)
             status = HealthStatus.OK if drive_count > 0 else HealthStatus.DEGRADED
             message = "Library connected." if drive_count > 0 else "Library connected but no drives available."
             return ComponentHealth(

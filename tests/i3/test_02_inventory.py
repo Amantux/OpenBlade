@@ -4,8 +4,8 @@ Covers: slot counts, drive states, media list, physical map endpoint.
 """
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 from tests.i3.timing import wait_for_op
 

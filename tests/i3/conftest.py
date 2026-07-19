@@ -13,13 +13,11 @@ from __future__ import annotations
 
 import os
 from collections.abc import Generator
-from typing import Any
 
 import httpx
 import pytest
 
 from tests.i3.timing import get_profile, get_profile_name
-
 
 # ---------------------------------------------------------------------------
 # Markers

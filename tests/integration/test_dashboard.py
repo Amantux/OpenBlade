@@ -41,7 +41,7 @@ def _prepare_archive(client: TestClient, tmp_path: Path) -> int:
     assert dry_run.status_code == 200
     token = dry_run.json()["token"]
     assert client.post("/volume-groups/", json={"name": "photos"}).status_code == 201
-    assert client.post(f"/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
+    assert client.post("/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
     assert (
         client.post(
             "/cartridges/format/confirm",

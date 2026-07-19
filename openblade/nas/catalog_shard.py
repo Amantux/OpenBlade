@@ -56,7 +56,7 @@ class CatalogShard(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     @model_validator(mode="after")
-    def sync_totals(self) -> "CatalogShard":
+    def sync_totals(self) -> CatalogShard:
         self.file_count = len(self.files)
         self.total_bytes = sum(file.size for file in self.files)
         return self

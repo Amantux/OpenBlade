@@ -9,7 +9,12 @@ from openblade.api.routes_aml_auth import require_auth
 from openblade.catalog.db import get_catalog_repository
 from openblade.catalog.models import AmlUser
 from openblade.catalog.repository import CatalogRepository
-from openblade.nas.types import HydrationJob, HydrationRequest, VirtualDirectoryListing, VirtualFileEntry
+from openblade.nas.types import (
+    HydrationJob,
+    HydrationRequest,
+    VirtualDirectoryListing,
+    VirtualFileEntry,
+)
 from openblade.nas.virtual_fs import VirtualFilesystem
 
 logger = structlog.get_logger(__name__)

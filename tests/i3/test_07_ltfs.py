@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import time
 
-import pytest
 import httpx
+import pytest
 
-from tests.i3.timing import wait_for_op, assert_within_tolerance
+from tests.i3.timing import assert_within_tolerance, wait_for_op
 
 pytestmark = pytest.mark.i3
 

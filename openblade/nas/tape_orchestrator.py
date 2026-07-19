@@ -321,8 +321,8 @@ class TapeOperationOrchestrator:
     @staticmethod
     def _operation_result(result: Any, fallback: dict[str, Any]) -> dict[str, Any]:
         if hasattr(result, "success") and hasattr(result, "details"):
-            payload = dict(getattr(result, "details") or {})
-            payload.setdefault("success", bool(getattr(result, "success")))
+            payload = dict(result.details or {})
+            payload.setdefault("success", bool(result.success))
             payload.setdefault("message", str(getattr(result, "message", "")))
             for key, value in fallback.items():
                 payload.setdefault(key, value)

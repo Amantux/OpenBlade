@@ -58,8 +58,10 @@ from openblade.simulator.changer import MockChanger
 from openblade.simulator.drive import MockDrive
 from openblade.simulator.fault_injection import (
     FaultInjector,
-    FaultType as InjectedFaultType,
     SimulatorFaultError,
+)
+from openblade.simulator.fault_injection import (
+    FaultType as InjectedFaultType,
 )
 from openblade.simulator.faults import FaultConfig, FaultType
 

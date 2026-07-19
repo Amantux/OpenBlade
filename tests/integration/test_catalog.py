@@ -178,7 +178,7 @@ def test_catalog_shards_endpoint_returns_shard_metadata(client: TestClient, tmp_
     assert len(barcodes) == 2
     assert client.post("/volume-groups/", json={"name": "photos"}).status_code == 201
     for barcode in barcodes:
-        assert client.post(f"/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
+        assert client.post("/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
         _format_tape(client, barcode)
 
     source = tmp_path / "source"

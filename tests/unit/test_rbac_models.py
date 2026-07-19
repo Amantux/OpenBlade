@@ -6,7 +6,6 @@ from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
 from openblade.nas.types import RbacPermission, RbacUserRecord, UserSummary
 
-
 NOW = "2024-01-01T00:00:00Z"
 LATER = "2024-01-02T00:00:00Z"
 
