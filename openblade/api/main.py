@@ -142,6 +142,33 @@ async def bind_active_library_context(request: Request, call_next: object) -> Re
 
 
 @app.middleware("http")
+async def apply_iblade_strict_uri_gateway(request: Request, call_next: object) -> Response:
+    context = get_context()
+    compat_mode = getattr(context.config, "iblade_compat_mode", "extended")
+    strict_interface = str(getattr(compat_mode, "value", compat_mode)).lower() == "strict"
+    try:
+        alias = routes_iblade.resolve_strict_blade_uri_alias(
+            request.method,
+            request.url.path,
+            strict_interface=strict_interface,
+        )
+    except HTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_aml_error_payload(exc.status_code, exc.detail),
+        )
+    if alias is None:
+        return await call_next(request)  # type: ignore[operator]
+
+    blade_type, section_number, strict_alias_path = alias
+    request.scope["path"] = strict_alias_path
+    request.scope["raw_path"] = strict_alias_path.encode("utf-8")
+    request.scope["openblade_blade_type"] = blade_type
+    request.scope["openblade_blade_section_number"] = section_number
+    return await call_next(request)  # type: ignore[operator]
+
+
+@app.middleware("http")
 async def apply_aml_emulator_latency(request: Request, call_next: object) -> Response:
     if not should_capture_latency_metrics(request.url.path):
         return await call_next(request)  # type: ignore[operator]
@@ -155,7 +182,17 @@ async def apply_aml_emulator_latency(request: Request, call_next: object) -> Res
         return response
     finally:
         route = request.scope.get("route")
-        endpoint = str(getattr(route, "path", request.url.path))
+        route_path = str(getattr(route, "path", "") or "")
+        url_path = request.url.path
+        if route_path and route_path != url_path:
+            # route.path is router-relative (missing the include_router prefix);
+            # restore the mount prefix from the full URL path while keeping the
+            # {param} template so parametrized routes still group together.
+            depth = route_path.count("/")
+            prefix = url_path.rsplit("/", depth)[0] if depth else url_path
+            endpoint = f"{prefix}{route_path}"
+        else:
+            endpoint = route_path or url_path
         capture_request_latency_metric(
             method=request.method,
             endpoint=endpoint,
@@ -251,7 +288,10 @@ async def enforce_scalar_api_scope(request: Request, call_next: object) -> Respo
     if path.startswith("/aml") or path.startswith("/iblade"):
         if aml_scope.is_matrix_endpoint(request.method, path):
             return await call_next(request)  # type: ignore[operator]
-        return JSONResponse(status_code=404, content=_aml_error_payload(404, "Endpoint not available in matrix scope"))
+        return JSONResponse(
+            status_code=404,
+            content=_aml_error_payload(404, "Endpoint not available in matrix scope"),
+        )
 
     return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
@@ -413,7 +453,9 @@ def _filtered_scalar_openapi(schema: dict[str, object]) -> dict[str, object]:
     }
     allowed_paths = allowed_matrix_paths | {"/health"}
     schema["paths"] = {
-        path: value for path, value in paths.items() if aml_scope.normalize_aml_path(path) in allowed_paths
+        path: value
+        for path, value in paths.items()
+        if aml_scope.normalize_aml_path(path) in allowed_paths
     }
     return _prune_unreferenced_components(schema)
 

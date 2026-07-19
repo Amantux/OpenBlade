@@ -340,6 +340,19 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _record_drive_cleaning_report(serial_number: str, cleaned_at: str) -> None:
+    media_barcode = aml_state.get_aml_drive_cleaning_media(serial_number) or "CLN000L9"
+    aml_state.append_aml_drive_cleaning_report(
+        {
+            "serialNumber": serial_number,
+            "lastCleaned": cleaned_at,
+            "mediaBarcode": media_barcode,
+            "useCount": aml_state.next_aml_drive_cleaning_use_count(media_barcode),
+            "expired": False,
+        }
+    )
+
+
 
 def _parse_timestamp(value: str | None) -> datetime | None:
     if not value:
@@ -1203,6 +1216,7 @@ async def clean_drives(
                 "lastCleaned": cleaned_at,
             },
         )
+        _record_drive_cleaning_report(drive_name, cleaned_at)
         aml_state.set_aml_drive_operation_task(
             f"{drive_name}-{uuid4().hex[:8]}",
             {
@@ -1248,6 +1262,7 @@ async def clean_drives_compat(
                 "lastCleaned": cleaned_at,
             },
         )
+        _record_drive_cleaning_report(drive_name, cleaned_at)
         aml_state.set_aml_drive_operation_task(
             f"{drive_name}-{uuid4().hex[:8]}",
             {

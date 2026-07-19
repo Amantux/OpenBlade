@@ -1,14 +1,27 @@
 import asyncio
-import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
-from openblade.api.nas_config import export_dataset, get_dataset_manifest, get_dataset_report, verify_dataset
-from openblade.bootstrap import create_context, reset_context
+from openblade.api.nas_config import (
+    export_dataset,
+    get_dataset_manifest,
+    get_dataset_report,
+    verify_dataset,
+)
+from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
 from openblade.nas.fuse_hook import FuseHook
 from openblade.nas.service import NasService
-from openblade.nas.types import DatasetStatus, IngestMode, NasDataset, NasFileRecord, NasFileState, NasPool, StoragePolicy
-from openblade.nas.types import PolicyType
+from openblade.nas.types import (
+    DatasetStatus,
+    IngestMode,
+    NasDataset,
+    NasFileRecord,
+    NasFileState,
+    NasPool,
+    PolicyType,
+    StoragePolicy,
+)
 
 
 def make_nas_service(tmp_path: Path) -> NasService:
@@ -135,15 +148,24 @@ def test_get_dataset_detail_policy_name_is_looked_up(tmp_path: Path) -> None:
     assert detail["policy_name"] == policy.name
 
 
-def test_verify_seeds_checksums_for_files_without_checksum(tmp_path: Path) -> None:
+def test_verify_seeds_checksums_for_files_without_checksum(tmp_path: Path, monkeypatch) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
     record = seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="docs/a.txt", checksum_sha256=None)
+    expected = "verified-tape-checksum"
+
+    context = get_context()
+
+    def fake_stat(_handle, _path):
+        return SimpleNamespace(checksum_sha256=expected)
+
+    monkeypatch.setattr(context.ltfs, "mount", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(context.ltfs, "stat", fake_stat)
+    monkeypatch.setattr(context.ltfs, "unmount", lambda _handle: None)
 
     result = asyncio.run(verify_dataset(dataset.id, service))
     updated = service.get_file_record(record.id)
-    expected = hashlib.sha256(f"docs/a.txt:{record.tape_barcode}".encode()).hexdigest()
 
     assert result["files_verified"] == 1
     assert result["files_corrupt"] == 0
@@ -152,7 +174,7 @@ def test_verify_seeds_checksums_for_files_without_checksum(tmp_path: Path) -> No
     assert updated is not None and updated.checksum_sha256 == expected
 
 
-def test_verify_marks_corrupt_file_when_checksum_mismatches(tmp_path: Path) -> None:
+def test_verify_marks_corrupt_file_when_checksum_mismatches(tmp_path: Path, monkeypatch) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
@@ -163,6 +185,14 @@ def test_verify_marks_corrupt_file_when_checksum_mismatches(tmp_path: Path) -> N
         relative_path="docs/a.txt",
         checksum_sha256="mismatch",
     )
+    context = get_context()
+    monkeypatch.setattr(context.ltfs, "mount", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        context.ltfs,
+        "stat",
+        lambda _handle, _path: SimpleNamespace(checksum_sha256="actual-checksum"),
+    )
+    monkeypatch.setattr(context.ltfs, "unmount", lambda _handle: None)
 
     result = asyncio.run(verify_dataset(dataset.id, service))
     updated = service.get_file_record(record.id)

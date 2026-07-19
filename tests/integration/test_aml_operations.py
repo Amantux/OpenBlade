@@ -214,6 +214,27 @@ def test_start_cleaning(authed: TestClient) -> None:
     assert resp.status_code in {200, 422}
 
 
+def test_start_cleaning_updates_drive_cleaning_report(authed: TestClient) -> None:
+    before_response = authed.get("/aml/drives/reports/cleaning")
+    assert before_response.status_code == 200
+    before_reports = before_response.json()["driveCleaningList"]["driveCleaning"]
+    target_before = next(item for item in before_reports if str(item["serialNumber"]) == "DRV-001")
+
+    clean_response = authed.post("/aml/operations/clean", json={"clean": {"drives": ["DRV-001"]}})
+    assert clean_response.status_code == 200
+    assert clean_response.json()["code"] == 0
+
+    after_response = authed.get("/aml/drives/reports/cleaning")
+    assert after_response.status_code == 200
+    after_reports = after_response.json()["driveCleaningList"]["driveCleaning"]
+    target_matches = [item for item in after_reports if str(item["serialNumber"]) == "DRV-001"]
+    assert len(target_matches) == 1
+
+    target_after = target_matches[0]
+    assert str(target_after["mediaBarcode"]) == str(target_before["mediaBarcode"])
+    assert int(target_after["useCount"]) == int(target_before["useCount"]) + 1
+
+
 # ---------------------------------------------------------------------------
 # Import / Export
 # ---------------------------------------------------------------------------

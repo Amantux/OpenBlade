@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -322,6 +323,60 @@ def test_ingest_file_records_have_checksums(tmp_path: Path) -> None:
     records = service.list_file_records(job.dataset_id)
     assert records
     assert all(record.checksum_sha256 for record in records)
+
+
+def test_large_file_ingest_and_verify_dataset(tmp_path: Path) -> None:
+    service, cache_root = _setup_service(tmp_path)
+    service.upsert_cache_drive(
+        CacheDriveConfig(
+            id="cache-1",
+            name="Cache 1",
+            root_path=str(cache_root),
+            max_bytes=20_000_000,
+            min_free_bytes=0,
+        )
+    )
+    large_content = b"X" * 8_388_608
+    source = _write_file(cache_root / "dataset" / "large.bin", large_content)
+    plan = register_archive_plan(
+        ArchivePlan(
+            plan_id="plan-large",
+            ingest_mode=IngestMode.CACHE_DRIVE,
+            source_path=str(cache_root / "dataset"),
+            pool="pool-1",
+            volume_group="vg-1",
+            files=[source],
+            total_files=1,
+            total_bytes=len(large_content),
+            tape_assignments=[
+                TapeAssignment(
+                    barcode="VOL001L9",
+                    files=["large.bin"],
+                    estimated_bytes=len(large_content),
+                )
+            ],
+        )
+    )
+    job = start_ingest_job(
+        plan=plan,
+        dataset_name="dataset-large",
+        pool_id="pool-1",
+        nas_service=service,
+        cache_drive_id="cache-1",
+    )
+
+    result = _run_job(service, job.job_id)
+
+    assert result.status is DatasetStatus.ARCHIVED
+    records = service.list_file_records(job.dataset_id)
+    assert len(records) == 1
+    assert records[0].checksum_sha256 == hashlib.sha256(large_content).hexdigest()
+
+    verify_response = client.post(f"/nas/datasets/{job.dataset_id}/verify")
+    assert verify_response.status_code == 200
+    verify_body = verify_response.json()
+    assert verify_body["files_verified"] == 1
+    assert verify_body["files_corrupt"] == 0
 
 
 def test_ingest_endpoint_returns_job_id(tmp_path: Path) -> None:

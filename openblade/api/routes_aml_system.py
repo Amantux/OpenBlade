@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from openblade.api import aml_state
@@ -31,6 +31,13 @@ from openblade.api.aml_state import (
     get_aml_system_preferences,
     get_aml_system_security,
     get_aml_system_started_at,
+    get_aml_system_storage_volumes,
+    list_aml_drive_cleaning_reports,
+    list_aml_drives,
+    list_aml_job_history,
+    list_aml_jobs,
+    list_aml_media,
+    list_aml_mounts,
     reset_aml_emulator_latency_metrics,
     set_aml_emulator_latency_config,
     set_aml_system_preferences,
@@ -1353,6 +1360,299 @@ def _service_health() -> str:
         if all(item.get("status") == "running" for item in get_aml_services().values())
         else "warning"
     )
+
+
+def _prometheus_label_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def _prometheus_line(
+    name: str, value: int | float, labels: dict[str, str] | None = None
+) -> str:
+    if labels:
+        rendered_labels = ",".join(
+            f'{key}="{_prometheus_label_value(label)}"' for key, label in sorted(labels.items())
+        )
+        return f"{name}{{{rendered_labels}}} {value}"
+    return f"{name} {value}"
+
+
+def _operation_class_from_endpoint(endpoint: str) -> str:
+    normalized = endpoint.strip().lower()
+    if not normalized:
+        return "unknown"
+    segments = [segment for segment in normalized.split("/") if segment]
+    if not segments:
+        return "unknown"
+    if segments[0] == "iblade" and len(segments) >= 2:
+        return segments[1]
+    if segments[0] == "aml" and len(segments) >= 2:
+        return segments[1]
+    return segments[0]
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _job_bytes(job: dict[str, Any]) -> int:
+    metadata = job.get("metadata")
+    if not isinstance(metadata, dict):
+        return 0
+    for key in ("bytes", "bytesWritten", "bytesRead", "bytesArchived", "bytesRestored", "sizeBytes"):
+        value = metadata.get(key)
+        if isinstance(value, (int, float)):
+            return int(value)
+    return 0
+
+
+def _build_prometheus_metrics_payload() -> str:
+    lines = [
+        "# HELP openblade_system_uptime_seconds OpenBlade API uptime in seconds.",
+        "# TYPE openblade_system_uptime_seconds gauge",
+        _prometheus_line("openblade_system_uptime_seconds", _uptime_seconds()),
+        "# HELP openblade_component_status Component status (1=healthy/running, 0=degraded/stopped).",
+        "# TYPE openblade_component_status gauge",
+    ]
+    lines.append(
+        _prometheus_line(
+            "openblade_component_status",
+            1 if _system_network_health() == "good" else 0,
+            {"component": "network"},
+        )
+    )
+    lines.append(
+        _prometheus_line(
+            "openblade_component_status",
+            1 if _service_health() == "good" else 0,
+            {"component": "services"},
+        )
+    )
+    for name, service in sorted(get_aml_services().items()):
+        lines.append(
+            _prometheus_line(
+                "openblade_component_status",
+                1 if str(service.get("status", "")).lower() == "running" else 0,
+                {"component": f"service:{name}"},
+            )
+        )
+
+    lines.extend(
+        [
+            "# HELP openblade_iblade_request_total Captured iBlade/AML request count by endpoint and method.",
+            "# TYPE openblade_iblade_request_total counter",
+            "# HELP openblade_iblade_request_duration_ms Request duration stats (avg/min/max) by endpoint.",
+            "# TYPE openblade_iblade_request_duration_ms gauge",
+            "# HELP openblade_iblade_request_simulated_delay_ms Simulated latency stats (avg/min/max) by endpoint.",
+            "# TYPE openblade_iblade_request_simulated_delay_ms gauge",
+        ]
+    )
+
+    latency_metrics = get_aml_emulator_latency_metrics()
+    lines.append(
+        _prometheus_line(
+            "openblade_iblade_request_total",
+            int(latency_metrics.get("capturedRequests", 0)),
+            {"endpoint": "__all__", "method": "ALL", "operation_class": "all"},
+        )
+    )
+    for endpoint_metric in latency_metrics.get("endpoints", []):
+        if not isinstance(endpoint_metric, dict):
+            continue
+        endpoint = str(endpoint_metric.get("endpoint", ""))
+        method = str(endpoint_metric.get("method", "GET")).upper()
+        labels = {
+            "endpoint": endpoint or "__unknown__",
+            "method": method,
+            "operation_class": _operation_class_from_endpoint(endpoint),
+        }
+        lines.append(
+            _prometheus_line(
+                "openblade_iblade_request_total",
+                int(endpoint_metric.get("count", 0)),
+                labels,
+            )
+        )
+        duration_ms = endpoint_metric.get("durationMs", {})
+        simulated_ms = endpoint_metric.get("simulatedDelayMs", {})
+        if isinstance(duration_ms, dict):
+            for stat_name in ("avg", "min", "max"):
+                value = duration_ms.get(stat_name)
+                if isinstance(value, (int, float)):
+                    lines.append(
+                        _prometheus_line(
+                            "openblade_iblade_request_duration_ms",
+                            float(value),
+                            {**labels, "stat": stat_name},
+                        )
+                    )
+        if isinstance(simulated_ms, dict):
+            for stat_name in ("avg", "min", "max"):
+                value = simulated_ms.get(stat_name)
+                if isinstance(value, (int, float)):
+                    lines.append(
+                        _prometheus_line(
+                            "openblade_iblade_request_simulated_delay_ms",
+                            float(value),
+                            {**labels, "stat": stat_name},
+                        )
+                    )
+
+    lines.extend(
+        [
+            "# HELP openblade_jobs_state_total Number of jobs by state and source queue.",
+            "# TYPE openblade_jobs_state_total gauge",
+            "# HELP openblade_transfer_activity_total Transfer activity counters.",
+            "# TYPE openblade_transfer_activity_total gauge",
+            "# HELP openblade_transfer_throughput_files_per_second Recent archive/restore throughput in files/sec.",
+            "# TYPE openblade_transfer_throughput_files_per_second gauge",
+            "# HELP openblade_transfer_throughput_bytes_per_second Recent archive/restore throughput in bytes/sec.",
+            "# TYPE openblade_transfer_throughput_bytes_per_second gauge",
+        ]
+    )
+    active_jobs = list_aml_jobs()
+    history_jobs = list_aml_job_history()
+    state_counts: dict[tuple[str, str], int] = {}
+    for queue, jobs in (("active", active_jobs), ("history", history_jobs)):
+        for job in jobs:
+            state = str(job.get("status", "unknown")).lower()
+            key = (queue, state)
+            state_counts[key] = state_counts.get(key, 0) + 1
+    for (queue, state), count in sorted(state_counts.items()):
+        lines.append(
+            _prometheus_line(
+                "openblade_jobs_state_total",
+                count,
+                {"queue": queue, "state": state},
+            )
+        )
+
+    now = _now()
+    window_seconds = 300
+    window_start = now - timedelta(seconds=window_seconds)
+    active_mounts = sum(
+        1
+        for mount in list_aml_mounts()
+        if str(mount.get("state", "")).lower() in {"mounted", "active"}
+    )
+    lines.append(
+        _prometheus_line(
+            "openblade_transfer_activity_total",
+            active_mounts,
+            {"metric": "active_mounts"},
+        )
+    )
+    for op_name in ("archive", "restore"):
+        recent_jobs: list[dict[str, Any]] = []
+        for job in history_jobs:
+            if str(job.get("type", "")).lower() != op_name:
+                continue
+            completed_time = _parse_timestamp(job.get("completedTime"))
+            if completed_time is None or completed_time < window_start:
+                continue
+            recent_jobs.append(job)
+        files_per_second = len(recent_jobs) / window_seconds
+        bytes_per_second = sum(_job_bytes(job) for job in recent_jobs) / window_seconds
+        lines.append(
+            _prometheus_line(
+                "openblade_transfer_throughput_files_per_second",
+                round(files_per_second, 6),
+                {"operation": op_name},
+            )
+        )
+        lines.append(
+            _prometheus_line(
+                "openblade_transfer_throughput_bytes_per_second",
+                round(bytes_per_second, 6),
+                {"operation": op_name},
+            )
+        )
+
+    lines.extend(
+        [
+            "# HELP openblade_media_utilization_percent Media utilization percent for data media.",
+            "# TYPE openblade_media_utilization_percent gauge",
+            "# HELP openblade_media_capacity_bytes Media capacity and used bytes for data media.",
+            "# TYPE openblade_media_capacity_bytes gauge",
+            "# HELP openblade_drive_state_total Drive state counters.",
+            "# TYPE openblade_drive_state_total gauge",
+            "# HELP openblade_cleaning_media_total Cleaning media and expiration counters.",
+            "# TYPE openblade_cleaning_media_total gauge",
+        ]
+    )
+    data_media = [
+        media
+        for media in list_aml_media()
+        if not str(media.get("barcode", "")).upper().startswith("CLN")
+        and "CLN" not in str(media.get("type", "")).upper()
+    ]
+    total_capacity_bytes = sum(int(media.get("capacityBytes", 0)) for media in data_media)
+    total_used_bytes = sum(int(media.get("usedBytes", 0)) for media in data_media)
+    utilization_percent = (
+        round((total_used_bytes / total_capacity_bytes) * 100, 3) if total_capacity_bytes > 0 else 0.0
+    )
+    lines.append(_prometheus_line("openblade_media_utilization_percent", utilization_percent))
+    lines.append(
+        _prometheus_line(
+            "openblade_media_capacity_bytes", total_capacity_bytes, {"metric": "total_capacity"}
+        )
+    )
+    lines.append(
+        _prometheus_line("openblade_media_capacity_bytes", total_used_bytes, {"metric": "total_used"})
+    )
+
+    drive_state_counts: dict[str, int] = {}
+    for drive in list_aml_drives():
+        state = str(drive.get("state", drive.get("status", "unknown"))).lower()
+        drive_state_counts[state] = drive_state_counts.get(state, 0) + 1
+    for drive_state, count in sorted(drive_state_counts.items()):
+        lines.append(_prometheus_line("openblade_drive_state_total", count, {"state": drive_state}))
+
+    cleaning_reports = list_aml_drive_cleaning_reports()
+    lines.append(
+        _prometheus_line(
+            "openblade_cleaning_media_total",
+            len(cleaning_reports),
+            {"metric": "assigned_reports"},
+        )
+    )
+    lines.append(
+        _prometheus_line(
+            "openblade_cleaning_media_total",
+            sum(1 for report in cleaning_reports if bool(report.get("expired", False))),
+            {"metric": "expired_reports"},
+        )
+    )
+
+    used_volumes = get_aml_system_storage_volumes()
+    lines.extend(
+        [
+            "# HELP openblade_storage_volume_usage_percent Storage usage percent by logical volume.",
+            "# TYPE openblade_storage_volume_usage_percent gauge",
+        ]
+    )
+    for volume_name, volume in sorted(used_volumes.items()):
+        payload = _volume_response_payload(volume)
+        lines.append(
+            _prometheus_line(
+                "openblade_storage_volume_usage_percent",
+                payload["percent"],
+                {"volume": volume_name},
+            )
+        )
+
+    return "\n".join(lines) + "\n"
 
 
 def _export_config() -> dict[str, Any]:
@@ -2997,6 +3297,19 @@ async def export_emulator_latency_metrics(
         emulatorLatencyMetrics=EmulatorLatencyMetrics.model_validate(
             get_aml_emulator_latency_metrics()
         )
+    )
+
+
+@router.get("/system/emulator/latency/metrics/prometheus")
+async def export_emulator_latency_metrics_prometheus(
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> Response:
+    _ensure_state(context)
+    _ = current_user
+    return Response(
+        content=_build_prometheus_metrics_payload(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
     )
 
 

@@ -164,6 +164,34 @@ def test_latency_metrics_capture_and_export_for_aml_and_iblade(authed: TestClien
     assert export_response.json() == metrics_response.json()
 
 
+def test_latency_metrics_prometheus_export_requires_auth(client: TestClient) -> None:
+    response = client.get("/aml/system/emulator/latency/metrics/prometheus")
+    assert response.status_code == 401
+
+
+def test_latency_metrics_prometheus_export_includes_core_metric_families(
+    authed: TestClient,
+) -> None:
+    reset_response = authed.post("/aml/system/emulator/latency/metrics/reset")
+    assert reset_response.status_code == 200
+
+    version_response = authed.get("/aml/system/version")
+    iblade_response = authed.get("/iblade/states")
+    assert version_response.status_code == 200
+    assert iblade_response.status_code == 200
+
+    response = authed.get("/aml/system/emulator/latency/metrics/prometheus")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain; version=0.0.4")
+    payload = response.text
+    assert "openblade_system_uptime_seconds" in payload
+    assert "openblade_component_status{component=\"network\"}" in payload
+    assert "openblade_iblade_request_total{endpoint=\"/iblade/states\",method=\"GET\"" in payload
+    assert "openblade_transfer_throughput_files_per_second{operation=\"archive\"}" in payload
+    assert "openblade_media_utilization_percent" in payload
+    assert "openblade_cleaning_media_total{metric=\"assigned_reports\"}" in payload
+
+
 def test_latency_metrics_reset_clears_metrics(authed: TestClient) -> None:
     reset_response = authed.post("/aml/system/emulator/latency/metrics/reset")
     assert reset_response.status_code == 200

@@ -1201,10 +1201,12 @@ class CatalogRepository:
         return PathMappingRecord.model_validate(self._path_mapping_to_dict(row))
 
     def search_path_mappings(self, req: PathMappingSearchRequest) -> list[PathMappingRecord]:
-        """Filter path mappings. Supports prefix, pool_id, dataset_id, barcode, file_state."""
+        """Filter path mappings by prefix/contains, pool_id, dataset_id, barcode, or file_state."""
         stmt = select(PathMapping)
         if req.prefix:
             stmt = stmt.where(PathMapping.logical_path.startswith(req.prefix))
+        if req.contains:
+            stmt = stmt.where(PathMapping.logical_path.ilike(f"%{req.contains}%"))
         if req.pool_id:
             stmt = stmt.where(PathMapping.pool_id == req.pool_id)
         if req.dataset_id:

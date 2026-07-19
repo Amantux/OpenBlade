@@ -53,6 +53,7 @@ class IngestJob(BaseModel):
     bytes_written: int = 0
     current_tape: str | None = None
     errors: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
     cancel_requested: bool = False
     partial_success: bool = False
     cache_drive_id: str | None = None

@@ -118,6 +118,9 @@ class NasService:
             and self.repository.get_nas_policy(share.default_policy_id) is None
         ):
             raise ValueError(f"Policy {share.default_policy_id} not found")
+        for pool_id in share.pool_ids:
+            if self.repository.get_nas_pool(pool_id) is None:
+                raise ValueError(f"Pool {pool_id} not found")
         row = self.repository.upsert_nas_share(share.path, share.model_dump(mode="json"))
         return self._share_from_row(row)
 
@@ -452,4 +455,3 @@ class NasService:
                 description="Virtualized namespace spanning archive content.",
             ),
         ]
-

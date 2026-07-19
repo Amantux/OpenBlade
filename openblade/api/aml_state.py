@@ -179,14 +179,10 @@ def _update_latency_stats(stats: dict[str, Any], value_ms: int, *, count: int) -
     previous_min = stats.get("min")
     previous_max = stats.get("max")
     stats["min"] = (
-        normalized_value
-        if previous_min is None
-        else min(int(previous_min), normalized_value)
+        normalized_value if previous_min is None else min(int(previous_min), normalized_value)
     )
     stats["max"] = (
-        normalized_value
-        if previous_max is None
-        else max(int(previous_max), normalized_value)
+        normalized_value if previous_max is None else max(int(previous_max), normalized_value)
     )
     total = int(stats.get("total", 0)) + normalized_value
     stats["total"] = total
@@ -617,6 +613,9 @@ class AMLState:
     aml_system_manual_time_utc: str | None = None
     aml_ltfs_sections: dict[str, dict[str, Any]] = field(
         default_factory=lambda: _default_aml_ltfs_sections()
+    )
+    aml_windows_sections: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: _default_aml_windows_sections()
     )
     aml_iscsi_blades: dict[str, dict[str, Any]] = field(
         default_factory=lambda: _default_aml_iscsi_blades()
@@ -1548,7 +1547,8 @@ def _default_aml_magazines() -> dict[str, dict[str, Any]]:
         slot_count = bay_slot_counts.get(bay, 0)
         slot_addresses = [f"1,{bay},{index}" for index in range(1, slot_count + 1)]
         ordered_barcodes = [
-            barcode for _, barcode in sorted(bay_media_by_slot.get(bay, []), key=lambda item: item[0])
+            barcode
+            for _, barcode in sorted(bay_media_by_slot.get(bay, []), key=lambda item: item[0])
         ]
         return {
             "id": f"MAG-{bay}",
@@ -1573,6 +1573,20 @@ def _default_aml_ltfs_sections() -> dict[str, dict[str, Any]]:
     return {
         str(section["sectionNumber"]): deepcopy(section)
         for section in scalar_i3_default_config()["ltfsSections"]
+    }
+
+
+def _default_aml_windows_sections() -> dict[str, dict[str, Any]]:
+    return {
+        "1": {
+            "sectionNumber": 1,
+            "id": "WIN-1",
+            "hostname": "windows-gateway",
+            "status": "online",
+            "role": "gateway",
+            "enabled": True,
+            "lastChanged": "2024-01-15T10:00:00Z",
+        }
     }
 
 
@@ -1748,37 +1762,99 @@ def _default_aml_supported_media() -> list[dict[str, Any]]:
     ]
 
 
-def _default_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
-    config = scalar_i3_default_config()
+def _is_lto_drive_type(value: str) -> bool:
+    return value.strip().upper().startswith("LTO-")
+
+
+def _is_cleaning_media_type(value: str) -> bool:
+    return value.strip().upper().endswith("-CLN")
+
+
+def _deterministic_cleaning_barcode(seed: int) -> str:
+    return f"CLN{900 + seed:03d}L9"
+
+
+def _cleaning_media_inventory_from_config(config: dict[str, Any]) -> list[dict[str, str]]:
+    inventory: list[dict[str, str]] = []
+    for media in config.get("media", []):
+        barcode = str(media.get("barcode", "")).strip()
+        media_type = str(media.get("type", "")).strip().upper()
+        role = str(media.get("role", "")).strip().lower()
+        if not barcode:
+            continue
+        if role != "cleaning" and not _is_cleaning_media_type(media_type):
+            continue
+        inventory.append({"barcode": barcode, "type": media_type})
+    return sorted(inventory, key=lambda item: item["barcode"])
+
+
+def _assign_cleaning_barcodes_to_lto_drives(
+    drives: list[dict[str, Any]], cleaning_media: list[dict[str, str]]
+) -> dict[str, str]:
     cleaning_by_type: dict[str, list[str]] = {}
     fallback_cleaning: list[str] = []
-    for media in config["media"]:
-        if str(media.get("role", "data")) != "cleaning":
-            continue
+    for media in cleaning_media:
         barcode = str(media.get("barcode", "")).strip()
-        media_type = str(media.get("type", "")).strip()
+        media_type = str(media.get("type", "")).strip().upper()
         if not barcode:
             continue
         fallback_cleaning.append(barcode)
         if media_type:
             cleaning_by_type.setdefault(media_type, []).append(barcode)
 
+    assigned: dict[str, str] = {}
+    consumed: set[str] = set()
+    synthetic_seed = 1
+    for drive in sorted(drives, key=lambda item: str(item.get("id", ""))):
+        drive_id = str(drive.get("id", "")).strip()
+        drive_type = str(drive.get("type", "")).strip().upper()
+        if not drive_id or not _is_lto_drive_type(drive_type):
+            continue
+
+        preferred_type = f"{drive_type}-CLN"
+        media_barcode: str | None = next(
+            (
+                candidate
+                for candidate in cleaning_by_type.get(preferred_type, [])
+                if candidate not in consumed
+            ),
+            None,
+        )
+        if media_barcode is None:
+            media_barcode = next(
+                (candidate for candidate in fallback_cleaning if candidate not in consumed), None
+            )
+        if media_barcode is None:
+            while True:
+                candidate = _deterministic_cleaning_barcode(synthetic_seed)
+                synthetic_seed += 1
+                if candidate not in consumed:
+                    media_barcode = candidate
+                    break
+
+        consumed.add(media_barcode)
+        assigned[drive_id] = media_barcode
+
+    return assigned
+
+
+def _default_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
+    config = scalar_i3_default_config()
+    cleaning_media = _cleaning_media_inventory_from_config(config)
+    assignments = _assign_cleaning_barcodes_to_lto_drives(config.get("drives", []), cleaning_media)
+
     reports: list[dict[str, Any]] = []
-    for drive in config["drives"]:
-        drive_serial = str(drive.get("id", ""))
-        cleaning_type = f"{str(drive.get('type', '')).strip()}-CLN"
-        candidates = cleaning_by_type.get(cleaning_type, [])
-        if candidates:
-            media_barcode = candidates.pop(0)
-            if media_barcode in fallback_cleaning:
-                fallback_cleaning.remove(media_barcode)
-        else:
-            media_barcode = fallback_cleaning.pop(0) if fallback_cleaning else None
+    for drive in sorted(config.get("drives", []), key=lambda item: str(item.get("id", ""))):
+        drive_id = str(drive.get("id", "")).strip()
+        drive_type = str(drive.get("type", "")).strip()
+        if not drive_id or not _is_lto_drive_type(drive_type):
+            continue
+        media_barcode = assignments.get(drive_id)
         if media_barcode is None:
             continue
         reports.append(
             {
-                "serialNumber": drive_serial,
+                "serialNumber": drive_id,
                 "lastCleaned": str(drive.get("lastCleaned", "2024-01-10T08:00:00Z")),
                 "mediaBarcode": media_barcode,
                 "useCount": 0,
@@ -3039,6 +3115,11 @@ def upsert_iblade_host(host: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(current)
 
 
+def delete_iblade_host(host_id: str) -> dict[str, Any] | None:
+    host = _STATE.iblade_hosts.pop(host_id, None)
+    return deepcopy(host) if host is not None else None
+
+
 def get_iblade_network_config() -> dict[str, Any]:
     return deepcopy(_STATE.iblade_network_config)
 
@@ -3086,11 +3167,21 @@ def update_iblade_volume_group(index: int | str, updates: dict[str, Any]) -> dic
 
 def replace_iblade_volume_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     _STATE.iblade_volume_groups = {}
+    seen_indexes: set[int] = set()
     for offset, item in enumerate(groups, start=1):
         current = deepcopy(item)
-        current["index"] = offset
+        try:
+            index = int(current.get("index", offset))
+        except (TypeError, ValueError):
+            index = offset
+        if index <= 0 or index in seen_indexes:
+            index = offset
+            while index in seen_indexes:
+                index += 1
+        seen_indexes.add(index)
+        current["index"] = index
         current["mediaCount"] = len(current.get("tapes", []))
-        _STATE.iblade_volume_groups[offset] = current
+        _STATE.iblade_volume_groups[index] = current
     return list_iblade_volume_groups()
 
 
@@ -3965,7 +4056,80 @@ def set_aml_cleaning_status(status: dict[str, Any]) -> dict[str, Any]:
     return get_aml_cleaning_status()
 
 
+def _cleaning_media_inventory_from_state() -> list[dict[str, str]]:
+    inventory: list[dict[str, str]] = []
+    for media in _STATE.aml_media.values():
+        barcode = str(media.get("barcode", "")).strip()
+        media_type = str(media.get("type", "")).strip().upper()
+        if not barcode:
+            continue
+        if not _is_cleaning_media_type(media_type) and not barcode.upper().startswith("CLN"):
+            continue
+        inventory.append({"barcode": barcode, "type": media_type})
+    return sorted(inventory, key=lambda item: item["barcode"])
+
+
+def get_aml_drive_cleaning_assignments() -> dict[str, str]:
+    drives = [
+        {"id": drive_id, "type": str(drive.get("type", "")).strip().upper()}
+        for drive_id, drive in sorted(_STATE.aml_drives.items())
+    ]
+    return _assign_cleaning_barcodes_to_lto_drives(drives, _cleaning_media_inventory_from_state())
+
+
+def get_aml_drive_cleaning_media(serial_number: str) -> str | None:
+    normalized = serial_number.strip()
+    if not normalized:
+        return None
+    assignment = get_aml_drive_cleaning_assignments().get(normalized)
+    if assignment:
+        return assignment
+    for report in list_aml_drive_cleaning_reports():
+        if str(report.get("serialNumber", "")).strip() != normalized:
+            continue
+        media_barcode = str(report.get("mediaBarcode", "")).strip()
+        if media_barcode:
+            return media_barcode
+    return None
+
+
+def next_aml_drive_cleaning_use_count(media_barcode: str) -> int:
+    normalized = media_barcode.strip()
+    if not normalized:
+        return 1
+    matching = [
+        int(report.get("useCount", 0))
+        for report in _STATE.aml_drive_cleaning_reports
+        if str(report.get("mediaBarcode", "")).strip() == normalized
+    ]
+    return (max(matching) if matching else 0) + 1
+
+
+def _sync_aml_drive_cleaning_reports() -> None:
+    assignments = get_aml_drive_cleaning_assignments()
+    existing_by_serial = {
+        str(report.get("serialNumber", "")).strip(): report
+        for report in _STATE.aml_drive_cleaning_reports
+        if str(report.get("serialNumber", "")).strip()
+    }
+    synchronized: list[dict[str, Any]] = []
+    for serial_number, media_barcode in sorted(assignments.items()):
+        drive = _STATE.aml_drives.get(serial_number, {})
+        existing = existing_by_serial.get(serial_number, {})
+        synchronized.append(
+            {
+                "serialNumber": serial_number,
+                "lastCleaned": existing.get("lastCleaned", drive.get("lastCleaned")),
+                "mediaBarcode": media_barcode,
+                "useCount": int(existing.get("useCount", 0)),
+                "expired": bool(existing.get("expired", False)),
+            }
+        )
+    _STATE.aml_drive_cleaning_reports = synchronized
+
+
 def list_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
+    _sync_aml_drive_cleaning_reports()
     return [
         deepcopy(item)
         for item in sorted(
@@ -3978,6 +4142,13 @@ def list_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
 
 def append_aml_drive_cleaning_report(report: dict[str, Any]) -> dict[str, Any]:
     stored = deepcopy(report)
+    serial_number = str(stored.get("serialNumber", "")).strip()
+    if serial_number:
+        _STATE.aml_drive_cleaning_reports = [
+            existing
+            for existing in _STATE.aml_drive_cleaning_reports
+            if str(existing.get("serialNumber", "")).strip() != serial_number
+        ]
     _STATE.aml_drive_cleaning_reports.append(stored)
     return deepcopy(stored)
 
@@ -4441,6 +4612,30 @@ def update_aml_ltfs_section(
         if value is not None:
             section[key] = value
     return get_aml_ltfs_section(section_number)
+
+
+def list_aml_windows_sections() -> list[dict[str, Any]]:
+    return [
+        deepcopy(item)
+        for _, item in sorted(_STATE.aml_windows_sections.items(), key=lambda entry: int(entry[0]))
+    ]
+
+
+def get_aml_windows_section(section_number: int | str) -> dict[str, Any] | None:
+    section = _STATE.aml_windows_sections.get(str(section_number))
+    return deepcopy(section) if section is not None else None
+
+
+def update_aml_windows_section(
+    section_number: int | str, updates: dict[str, Any]
+) -> dict[str, Any] | None:
+    section = _STATE.aml_windows_sections.get(str(section_number))
+    if section is None:
+        return None
+    for key, value in deepcopy(updates).items():
+        if value is not None:
+            section[key] = value
+    return get_aml_windows_section(section_number)
 
 
 def get_aml_iscsi_blade(serial_number: str) -> dict[str, Any] | None:

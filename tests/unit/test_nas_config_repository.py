@@ -9,6 +9,7 @@ from openblade.nas.service import NasService
 from openblade.nas.types import (
     CacheDriveConfig,
     EvictionPolicy,
+    NasPool,
     NasShareDefinition,
     PolicyType,
     ShardStrategy,
@@ -114,18 +115,27 @@ def test_share_listing_returns_seeded_defaults(tmp_path: Path) -> None:
 
 def test_share_crud_round_trip(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
+    service.upsert_pool(NasPool(id="pool-a", name="Pool A"))
+    service.upsert_pool(NasPool(id="pool-b", name="Pool B"))
     share = service.upsert_share(
         NasShareDefinition(
             path="/openblade/custom-share",
             name="Custom Share",
             share_type="pool",
             default_policy_id="balanced",
+            pool_ids=["pool-a", "pool-b"],
+            folder_mappings=[
+                {"folder_path": "/custom/reports", "pool_id": "pool-a", "access_mode": "read_only"},
+                {"folder_path": "/custom/ops", "pool_id": "pool-b", "access_mode": "read_write"},
+            ],
             writable=True,
             description="Custom NAS pool share.",
         )
     )
 
     assert service.get_share(share.path) == share
+    assert share.pool_ids == ["pool-a", "pool-b"]
+    assert len(share.folder_mappings) == 2
     assert share in service.get_nas_shares()
     assert service.delete_share(share.path) is True
     assert service.get_share(share.path) is None
@@ -141,6 +151,20 @@ def test_share_rejects_nonexistent_policy(tmp_path: Path) -> None:
                 name="Bad Share",
                 share_type="pool",
                 default_policy_id="missing-policy",
+            )
+        )
+
+
+def test_share_rejects_nonexistent_pool(tmp_path: Path) -> None:
+    service = make_nas_service(tmp_path)
+
+    with pytest.raises(ValueError, match="missing-pool"):
+        service.upsert_share(
+            NasShareDefinition(
+                path="/openblade/bad-pool-share",
+                name="Bad Pool Share",
+                share_type="pool",
+                pool_ids=["missing-pool"],
             )
         )
 

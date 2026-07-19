@@ -237,6 +237,26 @@ def test_search_barcode_filter_matches_json_round_trip(tmp_path: Path) -> None:
     assert results[0].all_barcodes == ["TAPE001", "TAPE002"]
 
 
+def test_search_contains_filter_returns_matches(tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    service.bulk_record_files(
+        PathMappingBulkUpsertRequest(
+            entries=[
+                PathMappingRecord(logical_path="/archive/reports/2026-q1.pdf", pool_id="pool-a"),
+                PathMappingRecord(logical_path="/archive/reports/2026-q2.pdf", pool_id="pool-a"),
+                PathMappingRecord(logical_path="/archive/media/trailer.mov", pool_id="pool-a"),
+            ]
+        )
+    )
+
+    results = service.search(PathMappingSearchRequest(contains="reports"))
+
+    assert [record.logical_path for record in results] == [
+        "/archive/reports/2026-q1.pdf",
+        "/archive/reports/2026-q2.pdf",
+    ]
+
+
 
 def test_bulk_record_files_returns_correct_count(tmp_path: Path) -> None:
     service = make_service(tmp_path)
@@ -359,6 +379,26 @@ def test_post_path_mapping_route_returns_valid_body() -> None:
     assert response.json()["primary_barcode"] == payload["primary_barcode"]
 
 
+def test_post_path_mapping_search_route_supports_contains_filter() -> None:
+    _login(client)
+    entries = [
+        {"logical_path": "/api/project/docs/spec-a.txt", "pool_id": "pool-a"},
+        {"logical_path": "/api/project/docs/spec-b.txt", "pool_id": "pool-a"},
+        {"logical_path": "/api/project/media/demo.mov", "pool_id": "pool-a"},
+    ]
+    for entry in entries:
+        response = client.post("/nas/path-mappings", json=entry)
+        assert response.status_code == 200
+
+    response = client.post("/nas/path-mappings/search", json={"contains": "docs", "limit": 50})
+
+    assert response.status_code == 200
+    assert [record["logical_path"] for record in response.json()] == [
+        "/api/project/docs/spec-a.txt",
+        "/api/project/docs/spec-b.txt",
+    ]
+
+
 def test_post_path_mapping_route_rejects_anonymous() -> None:
     """Unauthenticated requests must be rejected (hotfix Beta)."""
     anon = TestClient(app)  # fresh client — no session cookie
@@ -392,4 +432,3 @@ def test_remove_unknown_path_returns_false(tmp_path: Path) -> None:
     """PathMappingService.remove on unknown path returns False (Gamma edge-case)."""
     service = make_service(tmp_path)
     assert service.remove("/not/here.txt", "") is False
-

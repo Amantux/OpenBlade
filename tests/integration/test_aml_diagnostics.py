@@ -260,6 +260,62 @@ def test_cleaning_media_covers_all_drive_generations(authed: TestClient) -> None
         assert serial.startswith("DRV-")
 
 
+def test_drive_cleaning_reports_cover_each_lto_drive_deterministically(authed: TestClient) -> None:
+    drives_response = authed.get("/aml/drives")
+    assert drives_response.status_code == 200
+    drives = drives_response.json()["driveList"]["drive"]
+    expected_lto_serials = [
+        f"DRV-{index:03d}"
+        for index, drive in enumerate(drives, start=1)
+        if str(drive.get("type", "")).upper().startswith("LTO-")
+    ]
+
+    reports_response = authed.get("/aml/drives/reports/cleaning")
+    assert reports_response.status_code == 200
+    reports = reports_response.json()["driveCleaningList"]["driveCleaning"]
+    reports_by_serial = {str(item["serialNumber"]): item for item in reports}
+    assert sorted(reports_by_serial) == expected_lto_serials
+
+    media_response = authed.get("/aml/media")
+    assert media_response.status_code == 200
+    media_by_barcode = {
+        str(item["barcode"]): str(item.get("type", ""))
+        for item in media_response.json()["mediaList"]["media"]
+    }
+
+    for serial in expected_lto_serials:
+        drive_response = authed.get(f"/aml/drive/{serial}")
+        assert drive_response.status_code == 200
+        drive_type = str(drive_response.json()["drive"]["type"])
+        report = reports_by_serial[serial]
+        media_barcode = str(report["mediaBarcode"])
+        assert media_barcode.startswith("CLN")
+        if media_barcode in media_by_barcode:
+            assert media_by_barcode[media_barcode] == f"{drive_type}-CLN"
+
+
+def test_start_drive_cleaning_updates_existing_report_for_target_drive(authed: TestClient) -> None:
+    before_response = authed.get("/aml/drives/reports/cleaning")
+    assert before_response.status_code == 200
+    before_reports = before_response.json()["driveCleaningList"]["driveCleaning"]
+    target_serial = str(before_reports[0]["serialNumber"])
+    target_before = next(item for item in before_reports if str(item["serialNumber"]) == target_serial)
+
+    clean_response = authed.post(f"/aml/drive/{target_serial}/operations/clean")
+    assert clean_response.status_code == 200
+    assert clean_response.json()["code"] == 0
+
+    after_response = authed.get("/aml/drives/reports/cleaning")
+    assert after_response.status_code == 200
+    after_reports = after_response.json()["driveCleaningList"]["driveCleaning"]
+    target_matches = [item for item in after_reports if str(item["serialNumber"]) == target_serial]
+    assert len(target_matches) == 1
+
+    target_after = target_matches[0]
+    assert str(target_after["mediaBarcode"]) == str(target_before["mediaBarcode"])
+    assert int(target_after["useCount"]) == int(target_before["useCount"]) + 1
+
+
 # ---------------------------------------------------------------------------
 # Diagnostics tests — route ordering regression
 # ---------------------------------------------------------------------------

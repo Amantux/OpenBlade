@@ -311,3 +311,24 @@ def test_balanced_small_many_files_no_shard() -> None:
     assert len(plan.tape_assignments) == 1
     assert plan.estimated_parallelism == 1
     assert not any("sharded mode" in warning.message for warning in plan.capacity_warnings)
+
+
+def test_noncritical_sharded_flags_oversized_shards() -> None:
+    files = ["dataset/a.bin", "dataset/b.bin"]
+    plan = ArchivePlanner().plan(
+        ArchivePlanRequest(
+            policy_type=PolicyType.NONCRITICAL_SHARDED,
+            shard_strategy=ShardStrategy.ROUND_ROBIN,
+            shard_size_bytes=GB,
+            files=files,
+            file_sizes={path: 2 * GB for path in files},
+            available_tapes=["TAPE001", "TAPE002"],
+            tape_capacities={"TAPE001": 12 * TB, "TAPE002": 12 * TB},
+            max_parallelism=2,
+        )
+    )
+
+    assert plan.is_safe_to_enqueue is True
+    assert plan.shard_size_bytes == GB
+    assert len(plan.tape_assignments) == 2
+    assert any("exceed configured shard_size_bytes" in warning.message for warning in plan.capacity_warnings)

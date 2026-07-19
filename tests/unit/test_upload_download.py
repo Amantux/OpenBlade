@@ -10,8 +10,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from openblade.api.main import app
-from openblade.bootstrap import create_context, reset_context
+from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
+from openblade.nas.service import NasService
+from openblade.nas.types import NasPool, NasShareDefinition
 
 
 @pytest.fixture()
@@ -116,6 +118,72 @@ def test_list_pool_files(client: TestClient, admin_auth_headers: dict[str, str])
     data = response.json()
     assert "files" in data
     assert isinstance(data["files"], list)
+
+
+def test_push_to_share_queues_ingest_job_and_cleans_staging(
+    client: TestClient,
+    admin_auth_headers: dict[str, str],
+) -> None:
+    service = NasService(get_context().catalog)
+    service.upsert_pool(NasPool(id="1", name="Pool 1", default_policy_id="balanced"))
+    service.upsert_share(
+        NasShareDefinition(
+            path="/shares/pool-1",
+            name="Pool 1 Share",
+            share_type="pool",
+            pool_ids=["1"],
+            default_policy_id="balanced",
+        )
+    )
+
+    content = b"push-to-share-content"
+    upload = client.post(
+        "/api/pools/1/upload",
+        files={"file": ("push.txt", io.BytesIO(content), "text/plain")},
+        headers=admin_auth_headers,
+    )
+    assert upload.status_code == 200
+    file_id = upload.json()["file_id"]
+
+    push = client.post(
+        "/api/pools/1/push-to-share",
+        json={"share_path": "/shares/pool-1", "file_ids": [file_id]},
+        headers=admin_auth_headers,
+    )
+    assert push.status_code == 202
+    payload = push.json()
+    assert payload["pushed_files"] == 1
+    assert payload["pool_id"] == "1"
+    assert payload["share_path"] == "/shares/pool-1"
+
+    status_response = client.get(f"/nas/ingest/{payload['job_id']}", headers=admin_auth_headers)
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] in {"archived", "failed", "cancelled"}
+
+    listing = client.get("/api/pools/1/files", headers=admin_auth_headers)
+    assert listing.status_code == 200
+    assert file_id not in [entry["file_id"] for entry in listing.json()["files"]]
+
+
+def test_push_to_share_rejects_unknown_share(
+    client: TestClient,
+    admin_auth_headers: dict[str, str],
+) -> None:
+    content = b"share-not-found"
+    upload = client.post(
+        "/api/pools/1/upload",
+        files={"file": ("missing-share.txt", io.BytesIO(content), "text/plain")},
+        headers=admin_auth_headers,
+    )
+    assert upload.status_code == 200
+    file_id = upload.json()["file_id"]
+
+    push = client.post(
+        "/api/pools/1/push-to-share",
+        json={"share_path": "/shares/unknown", "file_ids": [file_id]},
+        headers=admin_auth_headers,
+    )
+    assert push.status_code == 404
 
 
 def test_upload_requires_auth(client: TestClient) -> None:

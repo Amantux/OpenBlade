@@ -11,6 +11,10 @@ class IBladeModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class StrictIBladeModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class CodeDescription(IBladeModel):
     code: str
     description: str
@@ -27,6 +31,13 @@ class IBladeMessage(IBladeModel):
     acknowledged: bool
 
 
+class IBladeNasDrive(IBladeModel):
+    serialNumber: str
+    model: str
+    status: str
+    state: str
+
+
 class IBladeHost(IBladeModel):
     id: str
     hostname: str
@@ -34,6 +45,18 @@ class IBladeHost(IBladeModel):
     wwn: str
     connection_type: str
     state: str
+    # iBlade WS Rev A models host adds/updates as requiring a reboot ("The system
+    # must be rebooted before the change will take effect"). Signalled per-response
+    # on mutating operations; default False on reads.
+    reboot_required: bool = False
+
+
+class IBladeHostUpdate(IBladeModel):
+    id: str | None = None
+    hostname: str | None = None
+    wwn: str | None = None
+    connection_type: str | None = None
+    state: str | None = None
 
 
 class IBladeNetworkConfig(IBladeModel):
@@ -81,6 +104,30 @@ class IBladeJobResponse(IBladeModel):
     message: str
 
 
+class IBladeJob(IBladeModel):
+    id: str
+    type: str
+    status: str
+    opened: str
+    closed: str | None = None
+    description: str
+    progress: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class IBladeJobUpdate(IBladeModel):
+    id: str
+    job_state: str | int
+
+
+class IBladeJobsUpdateRequest(IBladeModel):
+    jobs: list[IBladeJobUpdate] = Field(default_factory=list)
+
+
+class IBladeJobStateUpdate(IBladeModel):
+    job_state: str | int
+
+
 class IBladeVolumeGroup(IBladeModel):
     index: int
     name: str
@@ -94,3 +141,52 @@ class IBladeVolumeGroup(IBladeModel):
 class IBladeSetting(IBladeModel):
     name: str
     value: Any
+
+
+class IBladeNetworkUpdate(StrictIBladeModel):
+    hostname: str | None = None
+    management_ip: str | None = None
+    subnet_mask: str | None = None
+    gateway: str | None = None
+    dns: list[str] | None = None
+    mtu: int | None = Field(default=None, ge=576, le=9000, strict=True)
+    vlan: int | None = Field(default=None, ge=1, le=4094, strict=True)
+    bondMode: str | None = None
+
+
+class IBladeMessageCloseRequest(StrictIBladeModel):
+    closed_by: str = Field(min_length=1)
+
+
+class IBladeMessagesCloseRequest(StrictIBladeModel):
+    closed_by: str = Field(min_length=1)
+    ids: list[str] = Field(default_factory=list)
+    close_all: bool = False
+
+
+class IBladeAssignmentOperationRequest(StrictIBladeModel):
+    index: int = Field(default=1, ge=1, strict=True)
+    tapes: list[str] = Field(default_factory=list)
+    barcodes: list[str] = Field(default_factory=list)
+
+
+class IBladeMergeOperationRequest(StrictIBladeModel):
+    source: int = Field(default=1, ge=1, strict=True)
+    destination: int = Field(default=2, ge=1, strict=True)
+
+
+class IBladePrepareExportOperationRequest(StrictIBladeModel):
+    index: int = Field(default=1, ge=1, strict=True)
+
+
+class IBladeRepairOperationRequest(StrictIBladeModel):
+    index: int = Field(default=1, ge=1, strict=True)
+
+
+class IBladeReplicateOperationRequest(StrictIBladeModel):
+    source: int = Field(default=1, ge=1, strict=True)
+    destination: int = Field(default=2, ge=1, strict=True)
+
+
+class IBladeSafeRepairOperationRequest(StrictIBladeModel):
+    index: int = Field(default=1, ge=1, strict=True)
