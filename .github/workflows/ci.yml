@@ -115,7 +115,9 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: pytest tests/unit -q --tb=short
       - run: pytest tests/integration/test_library_commands.py -q --tb=short
-      - run: pytest tests/safety/test_safety_regression.py -q --tb=short
+      # Whole safety suite (was only test_safety_regression.py) so the SAFETY_003
+      # import guard is enforced and cannot silently rot again.
+      - run: pytest tests/safety -q --tb=short
 
   api-aml-integration:
     name: api-aml-integration
