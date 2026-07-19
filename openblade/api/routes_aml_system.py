@@ -1422,6 +1422,13 @@ def _build_prometheus_metrics_payload() -> str:
         "# HELP openblade_system_uptime_seconds OpenBlade API uptime in seconds.",
         "# TYPE openblade_system_uptime_seconds gauge",
         _prometheus_line("openblade_system_uptime_seconds", _uptime_seconds()),
+        # Freshness heartbeat: the wall-clock time this payload was produced. A monitor
+        # can alert on `time() - openblade_metrics_heartbeat_timestamp_seconds` to catch
+        # frozen/cached telemetry even when the endpoint still answers 200 (the metrics
+        # are in-memory, so a stale body reads healthy without this).
+        "# HELP openblade_metrics_heartbeat_timestamp_seconds Unix time this metrics payload was generated.",
+        "# TYPE openblade_metrics_heartbeat_timestamp_seconds gauge",
+        _prometheus_line("openblade_metrics_heartbeat_timestamp_seconds", round(time.time(), 3)),
         "# HELP openblade_component_status Component status (1=healthy/running, 0=degraded/stopped).",
         "# TYPE openblade_component_status gauge",
     ]

@@ -1,0 +1,58 @@
+# Operability alerts — make the monitoring itself trustworthy.
+#
+# These complement openblade-parity-alerts.yml. They answer "can we trust that a
+# green board means the system is actually up and its telemetry is live?" — the
+# failure mode where an endpoint still answers 200 but the data behind it is
+# frozen, or a fleet member has silently dropped off.
+#
+# Expected scrape-target `job` label convention (set in your prometheus.yml
+# scrape_configs; not shipped in this repo):
+#   job="openblade-control-plane"  -> the OpenBlade API / emulator control plane
+#   job="openblade-emulator"       -> each i3 emulator fleet member (one target each)
+# Both scrape /aml/system/emulator/latency/metrics/prometheus (auth as configured).
+groups:
+  - name: openblade-operability-alerts
+    rules:
+      # A fleet emulator's scrape target is unreachable — it is offline, not merely idle.
+      - alert: OpenBladeFleetOffline
+        expr: up{job="openblade-emulator"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: OpenBlade emulator fleet member offline
+          description: "Fleet member {{ $labels.instance }} has failed scrapes for 2m (up == 0)."
+
+      # The control plane itself is unreachable.
+      - alert: OpenBladeControlPlaneDown
+        expr: up{job="openblade-control-plane"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: OpenBlade control plane down
+          description: "Control-plane target {{ $labels.instance }} has failed scrapes for 2m."
+
+      # The endpoint answers, but its self-reported freshness heartbeat is not
+      # advancing — telemetry is frozen/cached and cannot be trusted. Metrics are
+      # in-memory, so a stale body otherwise reads as healthy.
+      - alert: OpenBladeTelemetryStale
+        expr: time() - openblade_metrics_heartbeat_timestamp_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpenBlade telemetry is stale
+          description: "Metrics heartbeat on {{ $labels.instance }} is older than 5m — telemetry may be frozen or cached."
+
+      # Uptime just reset: an in-memory-telemetry restart wiped metric history
+      # (known SPOF — durable telemetry is a follow-up). Surfaces the reset so a
+      # dashboard drop isn't misread as a real regression.
+      - alert: OpenBladeTelemetryReset
+        expr: openblade_system_uptime_seconds < 120
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: OpenBlade telemetry reset on restart
+          description: "{{ $labels.instance }} restarted <2m ago; in-memory metrics history was lost."
