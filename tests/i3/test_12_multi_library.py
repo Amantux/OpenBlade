@@ -1,8 +1,8 @@
 """test_12_multi_library.py — Multi-library routing via X-OpenBlade-Library-Id header."""
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 pytestmark = pytest.mark.i3
 

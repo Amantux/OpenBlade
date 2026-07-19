@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from openblade.bootstrap import AppContext, get_context
@@ -66,8 +66,8 @@ async def ltfs_format(payload: dict, context: AppContext = Depends(get_context))
     if confirm:
         extras["confirmed_format"] = True
         extras["operator_note"] = payload.get("operatorNote")
-    from openblade.nas.types import TapeOpRequest, TapeOpType
     from openblade.nas.tape_orchestrator import execute_tape_request
+    from openblade.nas.types import TapeOpRequest, TapeOpType
 
     req = TapeOpRequest(op_type=TapeOpType.FORMAT, barcode=barcode, extras=extras)
     record = execute_tape_request(None, context.library, context.ltfs, req)
@@ -82,9 +82,9 @@ async def ltfs_mount(payload: dict, context: AppContext = Depends(get_context)) 
     # Try to ensure the cartridge is loaded to a drive first (best-effort)
     drive_id = payload.get("driveId")
     try:
+        from openblade.domain.models import MountMode
         from openblade.nas.tape_orchestrator import execute_tape_request
         from openblade.nas.types import TapeOpRequest, TapeOpType
-        from openblade.domain.models import MountMode
 
         # If driveId provided, attempt a load operation so ltfs.mount will find it
         if drive_id is not None:

@@ -1,8 +1,8 @@
 """test_05_media.py — Cartridge lifecycle, pool assignment, state transitions."""
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 pytestmark = pytest.mark.i3
 

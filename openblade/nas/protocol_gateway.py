@@ -15,7 +15,6 @@ import socket
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional
 
 
 class GatewayStatus(str, Enum):
@@ -46,7 +45,7 @@ def _parse_enabled(value: str | None, default: bool = True) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
 
 
-def _normalize_allowed_paths(allowed_paths: Optional[List[str]]) -> List[str]:
+def _normalize_allowed_paths(allowed_paths: list[str] | None) -> list[str]:
     if not allowed_paths:
         return [InboxPath.GENERAL.value]
     normalized: list[str] = []
@@ -72,7 +71,7 @@ def _normalize_gateway_path(path: str) -> str:
     return normalized
 
 
-def _match_inbox_prefix(path: str, candidates: List[str]) -> Optional[str]:
+def _match_inbox_prefix(path: str, candidates: list[str]) -> str | None:
     normalized = _normalize_gateway_path(path)
     for candidate in sorted((_normalize_gateway_path(item) for item in candidates), key=len, reverse=True):
         if normalized == candidate or normalized.startswith(f"{candidate}/"):
@@ -84,15 +83,15 @@ def _match_inbox_prefix(path: str, candidates: List[str]) -> Optional[str]:
 class GatewayCredential:
     username: str
     _hashed_password: str
-    allowed_paths: List[str] = field(default_factory=lambda: [InboxPath.GENERAL.value])
+    allowed_paths: list[str] = field(default_factory=lambda: [InboxPath.GENERAL.value])
     enabled: bool = True
     created_at: datetime = field(default_factory=datetime.utcnow)
-    last_seen_at: Optional[datetime] = None
+    last_seen_at: datetime | None = None
 
     @classmethod
     def create(
-        cls, username: str, password: str, allowed_paths: Optional[List[str]] = None
-    ) -> "GatewayCredential":
+        cls, username: str, password: str, allowed_paths: list[str] | None = None
+    ) -> GatewayCredential:
         """Create a credential with a salted password hash."""
         return cls(
             username=username,
@@ -132,20 +131,20 @@ class GatewaySession:
     username: str
     remote_addr: str
     connected_at: datetime
-    disconnected_at: Optional[datetime] = None
+    disconnected_at: datetime | None = None
     bytes_uploaded: int = 0
     files_uploaded: int = 0
     errors: int = 0
-    uploads: List[GatewayUpload] = field(default_factory=list)
+    uploads: list[GatewayUpload] = field(default_factory=list)
 
 
 class ProtocolGateway:
     """In-process protocol gateway manager for emulated SFTP/SCP ingest."""
 
     def __init__(self):
-        self._credentials: Dict[str, GatewayCredential] = {}
-        self._sessions: List[GatewaySession] = []
-        self._last_error: Optional[str] = None
+        self._credentials: dict[str, GatewayCredential] = {}
+        self._sessions: list[GatewaySession] = []
+        self._last_error: str | None = None
         self._bind_host = os.environ.get("OPENBLADE_SFTP_HOST", "0.0.0.0")
         self._bind_port = int(os.environ.get("OPENBLADE_SFTP_PORT", "2222"))
         self._max_sessions = int(os.environ.get("OPENBLADE_SFTP_MAX_SESSIONS", "10"))
@@ -168,7 +167,7 @@ class ProtocolGateway:
         }
 
     def add_credential(
-        self, username: str, password: str, allowed_paths: Optional[List[str]] = None
+        self, username: str, password: str, allowed_paths: list[str] | None = None
     ) -> GatewayCredential:
         if username in self._credentials:
             raise ValueError(f"Credential for {username!r} already exists")
@@ -182,10 +181,10 @@ class ProtocolGateway:
     def update_credential(
         self,
         username: str,
-        password: Optional[str] = None,
-        enabled: Optional[bool] = None,
-        allowed_paths: Optional[List[str]] = None,
-    ) -> Optional[GatewayCredential]:
+        password: str | None = None,
+        enabled: bool | None = None,
+        allowed_paths: list[str] | None = None,
+    ) -> GatewayCredential | None:
         cred = self._credentials.get(username)
         if not cred:
             return None
@@ -197,7 +196,7 @@ class ProtocolGateway:
             cred.allowed_paths = _normalize_allowed_paths(allowed_paths)
         return cred
 
-    def authenticate(self, username: str, password: str) -> Optional[GatewayCredential]:
+    def authenticate(self, username: str, password: str) -> GatewayCredential | None:
         """Authenticate a gateway user. Returns credential or None."""
         cred = self._credentials.get(username)
         if not cred or not cred.enabled:
@@ -279,12 +278,12 @@ class ProtocolGateway:
         session.files_uploaded = max(session.files_uploaded, files_uploaded)
         session.errors = errors
 
-    def list_sessions(self, active_only: bool = False) -> List[GatewaySession]:
+    def list_sessions(self, active_only: bool = False) -> list[GatewaySession]:
         if active_only:
             return [s for s in self._sessions if s.disconnected_at is None]
         return list(self._sessions)
 
-    def list_credentials(self) -> List[dict]:
+    def list_credentials(self) -> list[dict]:
         return [
             {
                 "username": c.username,
@@ -351,7 +350,7 @@ class ProtocolGateway:
             "last_error": self._last_error,
         }
 
-    def _get_session(self, session_id: str) -> Optional[GatewaySession]:
+    def _get_session(self, session_id: str) -> GatewaySession | None:
         for session in self._sessions:
             if session.session_id == session_id:
                 return session

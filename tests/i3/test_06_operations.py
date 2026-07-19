@@ -1,8 +1,8 @@
 """test_06_operations.py — Move wizard, IE door, and operation queue."""
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 from tests.i3.timing import wait_for_op
 

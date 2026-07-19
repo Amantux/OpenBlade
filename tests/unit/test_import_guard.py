@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import openblade.safety.import_guard as import_guard
-from openblade.safety.import_guard import GuardResult, GuardViolation, SAFETY_003, format_report, scan_directory, scan_file
+from openblade.safety.import_guard import (
+    SAFETY_003,
+    GuardResult,
+    GuardViolation,
+    format_report,
+    scan_directory,
+    scan_file,
+)
 
 
 def _write_file(root: Path, relative_path: str, content: str) -> Path:

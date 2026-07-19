@@ -1,8 +1,8 @@
 """test_10_fault_scenarios.py — Fault injection: drive failure, jam, partial restore."""
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 pytestmark = pytest.mark.i3
 

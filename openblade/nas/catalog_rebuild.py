@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 from uuid import uuid4
 
 from openblade.catalog.repository import CatalogRepository
-from openblade.nas.catalog_shard import CatalogShard, CatalogShardDatasetEntry, CatalogShardFileEntry, CatalogShardWriter
+from openblade.nas.catalog_shard import (
+    CatalogShard,
+    CatalogShardWriter,
+)
 from openblade.nas.ltfs_manifest import TapeMetadataWriter
 from openblade.nas.manifest_validator import ManifestValidator
 from openblade.nas.path_mapping import PathMappingService

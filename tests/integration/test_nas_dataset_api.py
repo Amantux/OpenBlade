@@ -8,7 +8,16 @@ from openblade.api.main import app
 from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
 from openblade.nas.service import NasService
-from openblade.nas.types import DatasetStatus, IngestMode, NasDataset, NasFileRecord, NasFileState, NasPool, PolicyType, StoragePolicy
+from openblade.nas.types import (
+    DatasetStatus,
+    IngestMode,
+    NasDataset,
+    NasFileRecord,
+    NasFileState,
+    NasPool,
+    PolicyType,
+    StoragePolicy,
+)
 
 client = TestClient(app)
 
@@ -106,7 +115,7 @@ def test_get_dataset_manifest_returns_200_with_shard_map() -> None:
 
 def test_post_verify_returns_200_with_checksums() -> None:
     dataset_id = seed_dataset_bundle()
-    expected = hashlib.sha256("docs/a.txt:VOL001L9".encode()).hexdigest()
+    expected = hashlib.sha256(b"docs/a.txt:VOL001L9").hexdigest()
 
     response = client.post(f"/nas/datasets/{dataset_id}/verify")
 

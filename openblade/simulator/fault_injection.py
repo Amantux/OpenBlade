@@ -126,7 +126,7 @@ class FaultInjector:
         with self._lock:
             return [self._copy_spec(tracked.spec) for tracked in self._faults if not tracked.exhausted()]
 
-    def __enter__(self) -> "FaultInjector":
+    def __enter__(self) -> FaultInjector:
         """Activate faults for a context-managed block."""
         return self
 
