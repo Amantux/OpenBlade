@@ -29,6 +29,7 @@ from openblade.api import (
     routes_aml_library,
     routes_aml_matrix_fallback,
     routes_aml_media,
+    routes_aml_move_medium,
     routes_aml_operations,
     routes_aml_partitions,
     routes_aml_physical,
@@ -199,6 +200,7 @@ app.include_router(routes_aml_partitions.router, prefix="/aml", tags=["aml-parti
 app.include_router(routes_aml_physical.router, prefix="/aml", tags=["aml-physical"])
 app.include_router(routes_aml_media.router, prefix="/aml", tags=["aml-media"])
 app.include_router(routes_aml_operations.router, prefix="/aml", tags=["aml-operations"])
+app.include_router(routes_aml_move_medium.router, prefix="/aml", tags=["aml-operations"])
 app.include_router(routes_aml_system.router, prefix="/aml", tags=["aml-system"])
 app.include_router(routes_proxy.router)
 app.include_router(routes_upload.router)

@@ -6,8 +6,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 1
     },
     {
@@ -15,8 +15,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/access/devices",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 2
     },
     {
@@ -24,8 +24,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/access/groups",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 3
     },
     {
@@ -33,8 +33,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/access/group/{name}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 4
     },
     {
@@ -42,8 +42,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/access/group/{name}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 5
     },
     {
@@ -51,8 +51,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/access/group/{name}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 6
     },
     {
@@ -60,8 +60,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/access/group/{name}/device",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 7
     },
     {
@@ -69,8 +69,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/access/group/{name}/device",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 8
     },
     {
@@ -78,8 +78,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/access/group/{name}/device/{serialNumber}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 9
     },
     {
@@ -87,8 +87,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/access/group/{name}/devices",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 10
     },
     {
@@ -96,8 +96,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/access/group/{name}/devices",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 11
     },
     {
@@ -105,8 +105,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/access/group/{name}/hosts",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 12
     },
     {
@@ -123,8 +123,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/access/host/{WWPN}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 14
     },
     {
@@ -132,8 +132,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/access/host/{WWPN}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 15
     },
     {
@@ -141,8 +141,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/access/host/{WWPN}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 16
     },
     {
@@ -150,8 +150,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/access/hosts",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 17
     },
     {
@@ -159,8 +159,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/access/hosts",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 18
     },
     {
@@ -168,8 +168,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/access/licenses",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 19
     },
     {
@@ -177,8 +177,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/access/licenses",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 20
     },
     {
@@ -186,8 +186,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/access/license/{serialNumber}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 21
     },
     {
@@ -195,8 +195,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/access/license/{serialNumber}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 22
     },
     {
@@ -204,8 +204,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/access/license/{serialNumber}",
-      "route_module": "openblade.api.routes_aml_access",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 23
     },
     {
@@ -240,8 +240,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blades/ethernet",
-      "route_module": "openblade.api.routes_aml_blades",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 27
     },
     {
@@ -303,8 +303,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blades/fibreChannel",
-      "route_module": "openblade.api.routes_aml_blades",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 34
     },
     {
@@ -321,8 +321,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blades/fibreChannel/hpf",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 36
     },
     {
@@ -402,8 +402,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blade/fibreChannel/{serialNumber}/hpf",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 45
     },
     {
@@ -411,8 +411,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/devices/blade/fibreChannel/{serialNumber}/hpf",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 46
     },
     {
@@ -420,8 +420,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/devices/blade/fibreChannel/{serialNumber}/hpf/intervention",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 47
     },
     {
@@ -501,8 +501,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blade/fibreChannel/{serialNumber}/ports",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 56
     },
     {
@@ -519,8 +519,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blade/fibreChannel/{serialNumber}/zoning",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 58
     },
     {
@@ -528,8 +528,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/devices/blade/fibreChannel/{serialNumber}/zoning",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 59
     },
     {
@@ -537,8 +537,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blades/firmware",
-      "route_module": "openblade.api.routes_aml_firmware",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 60
     },
     {
@@ -546,8 +546,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/devices/blades/firmware",
-      "route_module": "openblade.api.routes_aml_firmware",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 61
     },
     {
@@ -555,8 +555,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blades/library",
-      "route_module": "openblade.api.routes_aml_blades",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 62
     },
     {
@@ -564,8 +564,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blade/library/{serialNumber}",
-      "route_module": "openblade.api.routes_aml_blades",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 63
     },
     {
@@ -573,8 +573,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blades/ltfs",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 64
     },
     {
@@ -582,8 +582,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blade/ltfs/{sectionNumber}",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 65
     },
     {
@@ -600,8 +600,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/blades/windows",
-      "route_module": "openblade.api.routes_aml_blades",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 67
     },
     {
@@ -762,8 +762,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/robot/{name}",
-      "route_module": "openblade.api.routes_aml_physical",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 85
     },
     {
@@ -771,8 +771,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/devices/robot/{name}/state",
-      "route_module": "openblade.api.routes_aml_physical",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 86
     },
     {
@@ -780,8 +780,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/devices/robot/{name}/state",
-      "route_module": "openblade.api.routes_aml_physical",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 87
     },
     {
@@ -789,8 +789,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/devices/robot/{name}/park",
-      "route_module": "openblade.api.routes_aml_physical",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 88
     },
     {
@@ -951,8 +951,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drives",
-      "route_module": "openblade.api.routes_aml_drives",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 106
     },
     {
@@ -960,8 +960,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/drives/firmware/image/{name}",
-      "route_module": "openblade.api.routes_aml_firmware",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 107
     },
     {
@@ -969,8 +969,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drives/firmware/images",
-      "route_module": "openblade.api.routes_aml_firmware",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 108
     },
     {
@@ -978,8 +978,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/drives/firmware/images",
-      "route_module": "openblade.api.routes_aml_firmware",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 109
     },
     {
@@ -996,8 +996,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/drives/firmware/operations/update",
-      "route_module": "openblade.api.routes_aml_drives",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 111
     },
     {
@@ -1005,8 +1005,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drives/logs",
-      "route_module": "openblade.api.routes_aml_drives",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 112
     },
     {
@@ -1041,8 +1041,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drives/ports",
-      "route_module": "openblade.api.routes_aml_drives",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 116
     },
     {
@@ -1050,8 +1050,8 @@
       "method": "POST",
       "operation_class": "power",
       "path": "/aml/drives/powerCycle",
-      "route_module": "openblade.api.routes_aml_drives",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 117
     },
     {
@@ -1059,8 +1059,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drives/reports/activity",
-      "route_module": "openblade.api.routes_aml_drives",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 118
     },
     {
@@ -1077,8 +1077,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drives/reports/cleaning",
-      "route_module": "openblade.api.routes_aml_diagnostics",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 120
     },
     {
@@ -1086,8 +1086,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/drives/reports/cleaning/email",
-      "route_module": "openblade.api.routes_aml_diagnostics",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 121
     },
     {
@@ -1095,8 +1095,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drives/reports/utilization",
-      "route_module": "openblade.api.routes_aml_drives",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 122
     },
     {
@@ -1113,8 +1113,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drive/{serialNumber}",
-      "route_module": "openblade.api.routes_aml_drives",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 124
     },
     {
@@ -1131,8 +1131,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/drive/{serialNumber}/dataPath",
-      "route_module": "openblade.api.routes_aml_advanced",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 126
     },
     {
@@ -1140,8 +1140,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drive/{serialNumber}/operations/clean",
-      "route_module": "openblade.api.routes_aml_diagnostics",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 127
     },
     {
@@ -1149,8 +1149,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/drive/{serialNumber}/operations/clean",
-      "route_module": "openblade.api.routes_aml_diagnostics",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 128
     },
     {
@@ -1158,8 +1158,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/drive/{serialNumber}/operations/clean/{id}",
-      "route_module": "openblade.api.routes_aml_diagnostics",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 129
     },
     {
@@ -1365,8 +1365,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/media",
-      "route_module": "openblade.api.routes_aml_media",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 152
     },
     {
@@ -1491,8 +1491,8 @@
       "method": "GET",
       "operation_class": "move",
       "path": "/aml/media/operations/moveMedium/maxAllowed",
-      "route_module": "openblade.api.routes_aml_media",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 166
     },
     {
@@ -1599,8 +1599,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/media/reports/usage",
-      "route_module": "openblade.api.routes_aml_media",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 178
     },
     {
@@ -1626,8 +1626,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partitions",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 181
     },
     {
@@ -1644,8 +1644,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partitions/policy/activeVault",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 183
     },
     {
@@ -1662,8 +1662,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partitions/policy/autoImport",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 185
     },
     {
@@ -1671,8 +1671,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partitions/policy/autoExport",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 186
     },
     {
@@ -1680,8 +1680,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partitions/policy/driveCleaning",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 187
     },
     {
@@ -1689,8 +1689,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partitions/policy/edlm",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 188
     },
     {
@@ -1707,8 +1707,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partitions/policy/ekm",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 190
     },
     {
@@ -1743,8 +1743,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partitions/reports/utilization",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 194
     },
     {
@@ -1761,8 +1761,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/partition/{name}",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 196
     },
     {
@@ -1770,8 +1770,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/partition/{name}",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 197
     },
     {
@@ -1779,8 +1779,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/partition/{name}",
-      "route_module": "openblade.api.routes_aml_partitions",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 198
     },
     {
@@ -2202,8 +2202,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 245
     },
     {
@@ -2211,8 +2211,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/physicalLibrary",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 246
     },
     {
@@ -2220,8 +2220,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/elements",
-      "route_module": "openblade.api.routes_aml_diagnostics",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 247
     },
     {
@@ -2229,8 +2229,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/environment",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 248
     },
     {
@@ -2238,8 +2238,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/environment/email",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 249
     },
     {
@@ -2247,8 +2247,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/i3-i6/modules",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 250
     },
     {
@@ -2256,8 +2256,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/mode",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 251
     },
     {
@@ -2265,8 +2265,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/mode",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 252
     },
     {
@@ -2274,8 +2274,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/operations",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 253
     },
     {
@@ -2283,8 +2283,8 @@
       "method": "GET",
       "operation_class": "inventory",
       "path": "/aml/physicalLibrary/operations/inventory",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 254
     },
     {
@@ -2292,8 +2292,8 @@
       "method": "POST",
       "operation_class": "inventory",
       "path": "/aml/physicalLibrary/operations/inventory",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 255
     },
     {
@@ -2301,8 +2301,8 @@
       "method": "GET",
       "operation_class": "inventory",
       "path": "/aml/physicalLibrary/operations/inventory/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 256
     },
     {
@@ -2310,8 +2310,8 @@
       "method": "DELETE",
       "operation_class": "inventory",
       "path": "/aml/physicalLibrary/operations/inventory/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 257
     },
     {
@@ -2319,8 +2319,8 @@
       "method": "GET",
       "operation_class": "power",
       "path": "/aml/physicalLibrary/operations/shutdown",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 258
     },
     {
@@ -2328,8 +2328,8 @@
       "method": "POST",
       "operation_class": "power",
       "path": "/aml/physicalLibrary/operations/shutdown",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 259
     },
     {
@@ -2337,8 +2337,8 @@
       "method": "GET",
       "operation_class": "power",
       "path": "/aml/physicalLibrary/operations/shutdown/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 260
     },
     {
@@ -2346,8 +2346,8 @@
       "method": "DELETE",
       "operation_class": "power",
       "path": "/aml/physicalLibrary/operations/shutdown/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 261
     },
     {
@@ -2355,8 +2355,8 @@
       "method": "GET",
       "operation_class": "reboot",
       "path": "/aml/physicalLibrary/operations/reboot",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 262
     },
     {
@@ -2364,8 +2364,8 @@
       "method": "POST",
       "operation_class": "reboot",
       "path": "/aml/physicalLibrary/operations/reboot",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 263
     },
     {
@@ -2373,8 +2373,8 @@
       "method": "GET",
       "operation_class": "reboot",
       "path": "/aml/physicalLibrary/operations/reboot/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 264
     },
     {
@@ -2382,8 +2382,8 @@
       "method": "DELETE",
       "operation_class": "reboot",
       "path": "/aml/physicalLibrary/operations/reboot/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 265
     },
     {
@@ -2391,8 +2391,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/operations/reset",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 266
     },
     {
@@ -2400,8 +2400,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/operations/reset",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 267
     },
     {
@@ -2409,8 +2409,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/operations/reset/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 268
     },
     {
@@ -2418,8 +2418,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/operations/reset/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 269
     },
     {
@@ -2427,8 +2427,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/operations/teach",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 270
     },
     {
@@ -2436,8 +2436,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/operations/teach",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 271
     },
     {
@@ -2445,8 +2445,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/operations/teach/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 272
     },
     {
@@ -2454,8 +2454,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/operations/teach/{id}",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 273
     },
     {
@@ -2463,8 +2463,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/quattro/modules",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 274
     },
     {
@@ -2472,8 +2472,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/subset/configuration",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 275
     },
     {
@@ -2481,8 +2481,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/subset/remoteAccess",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 276
     },
     {
@@ -2490,8 +2490,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/subset/resources",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 277
     },
     {
@@ -2499,8 +2499,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/subset/settings",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 278
     },
     {
@@ -2508,8 +2508,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/segments",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 280
     },
     {
@@ -2517,8 +2517,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/segments/amp",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 281
     },
     {
@@ -2526,8 +2526,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/segments/amp",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 282
     },
     {
@@ -2535,8 +2535,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/segments/cleaning",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 283
     },
     {
@@ -2544,8 +2544,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/segments/cleaning",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 284
     },
     {
@@ -2553,8 +2553,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/physicalLibrary/segments/cleaning",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 285
     },
     {
@@ -2562,8 +2562,8 @@
       "method": "POST",
       "operation_class": "inventory",
       "path": "/aml/physicalLibrary/segments/operations/inventory",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 286
     },
     {
@@ -2571,8 +2571,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/physicalLibrary/status",
-      "route_module": "openblade.api.routes_aml_library",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 287
     },
     {
@@ -3795,8 +3795,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/system/sensors",
-      "route_module": "openblade.api.routes_aml_system",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 433
     },
     {
@@ -3804,8 +3804,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/system/snapshot",
-      "route_module": "openblade.api.routes_aml_system",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 434
     },
     {
@@ -3822,8 +3822,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/system/software",
-      "route_module": "openblade.api.routes_aml_system",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 436
     },
     {
@@ -3921,8 +3921,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/users",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 447
     },
     {
@@ -3930,8 +3930,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/users",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 448
     },
     {
@@ -3939,8 +3939,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/users/ldap",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 449
     },
     {
@@ -3948,8 +3948,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/users/ldap",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 450
     },
     {
@@ -3966,8 +3966,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/users/ldap/certificates",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 452
     },
     {
@@ -3975,8 +3975,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/users/ldap/certificates",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 453
     },
     {
@@ -3984,8 +3984,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/users/ldap/enabled",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 454
     },
     {
@@ -3993,8 +3993,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/users/ldap/keytab",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 455
     },
     {
@@ -4002,8 +4002,8 @@
       "method": "POST",
       "operation_class": "config",
       "path": "/aml/users/ldap/test",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 456
     },
     {
@@ -4011,8 +4011,8 @@
       "method": "POST",
       "operation_class": "auth",
       "path": "/aml/users/login",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 457
     },
     {
@@ -4020,8 +4020,8 @@
       "method": "DELETE",
       "operation_class": "auth",
       "path": "/aml/users/login",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 459
     },
     {
@@ -4029,8 +4029,8 @@
       "method": "POST",
       "operation_class": "auth",
       "path": "/aml/users/login/mfa",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 460
     },
     {
@@ -4038,8 +4038,8 @@
       "method": "GET",
       "operation_class": "auth",
       "path": "/aml/users/login/mfa/{type}/key",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 461
     },
     {
@@ -4047,8 +4047,8 @@
       "method": "GET",
       "operation_class": "auth",
       "path": "/aml/users/login/mode",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 462
     },
     {
@@ -4056,8 +4056,8 @@
       "method": "PUT",
       "operation_class": "auth",
       "path": "/aml/users/login/mode",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 463
     },
     {
@@ -4065,8 +4065,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/users/luiAccess",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 464
     },
     {
@@ -4074,8 +4074,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/users/luiAccess",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 465
     },
     {
@@ -4083,8 +4083,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/users/luiAccess/mode",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 466
     },
     {
@@ -4092,8 +4092,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/users/mfa",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 467
     },
     {
@@ -4101,8 +4101,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/users/mfa",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 468
     },
     {
@@ -4110,8 +4110,8 @@
       "method": "GET",
       "operation_class": "auth",
       "path": "/aml/users/reports/login",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 469
     },
     {
@@ -4146,8 +4146,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/users/sessions",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 473
     },
     {
@@ -4173,8 +4173,8 @@
       "method": "GET",
       "operation_class": "query",
       "path": "/aml/user/{name}",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 476
     },
     {
@@ -4182,8 +4182,8 @@
       "method": "PUT",
       "operation_class": "config",
       "path": "/aml/user/{name}",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 477
     },
     {
@@ -4191,8 +4191,8 @@
       "method": "DELETE",
       "operation_class": "config",
       "path": "/aml/user/{name}",
-      "route_module": "openblade.api.routes_aml_auth",
-      "status": "native",
+      "route_module": "openblade.api.routes_aml_matrix_fallback",
+      "status": "fallback-shim",
       "table_id": 478
     },
     {
@@ -4216,8 +4216,8 @@
   ],
   "matrix_file": "openblade/emulator_contract/quantum_i3_rev_h_matrix.json",
   "status_counts": {
-    "fallback-shim": 325,
+    "fallback-shim": 468,
     "missing": 0,
-    "native": 143
+    "native": 0
   }
 }
