@@ -54,3 +54,15 @@ jobs:
 
       - name: Verify disaster-recovery restore path (isolated copy, never production data)
         run: python scripts/restore_verify.py
+
+      - name: Deployment pipeline promotes a valid config (precheck + in-process postcheck)
+        run: python scripts/deploy.py --skip-deploy
+
+      - name: Deployment pipeline refuses an unsafe production config (negative control)
+        run: |
+          if OPENBLADE_ENV=production python scripts/deploy.py --skip-deploy; then
+            echo "::error::deploy pipeline PROMOTED an unsafe production profile — gate is broken"
+            exit 1
+          else
+            echo "unsafe production profile correctly not promoted"
+          fi
