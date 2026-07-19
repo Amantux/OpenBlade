@@ -537,7 +537,9 @@ function init() {
   elements.token.addEventListener("change", () => {
     state.token = elements.token.value.trim();
   });
+  elements.baseUrl.addEventListener("input", updateDocsLinks);
   elements.baseUrl.addEventListener("change", updateDocsLinks);
+  elements.prefix.addEventListener("input", updateDocsLinks);
   elements.prefix.addEventListener("change", updateDocsLinks);
   if (elements.docsMode) {
     elements.docsMode.addEventListener("change", updateDocsLinks);
