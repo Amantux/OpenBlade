@@ -63,8 +63,6 @@ def _postcheck_in_process() -> StageResult:
 
 
 def _postcheck_live(base_url: str) -> StageResult:
-    from openblade.topology import REQUIRED_ENDPOINTS
-
     def probe(method: str, path: str) -> int:
         req = urllib.request.Request(base_url.rstrip("/") + path, method=method)
         try:
@@ -75,12 +73,13 @@ def _postcheck_live(base_url: str) -> StageResult:
         except Exception:  # noqa: BLE001 - unreachable target is a failing probe
             return 599
 
-    findings = verify_topology(probe=probe, context=_AllWired(), emulator_urls=[base_url])
-    # A live probe cannot introspect the in-process AppContext; only endpoint reachability
-    # is meaningful here, so context checks are satisfied by _AllWired.
+    # A live probe cannot introspect the remote AppContext, so context checks are
+    # satisfied by _AllWired and only endpoint reachability is meaningful. Pass no
+    # emulator URLs so the fleet check surfaces its honest "unverified" warning
+    # rather than falsely reporting the remote fleet as configured.
+    findings = verify_topology(probe=probe, context=_AllWired(), emulator_urls=[])
     ok = is_healthy_topology(findings)
     blocking = [f.code for f in findings if f.severity == "blocking"]
-    _ = REQUIRED_ENDPOINTS
     return StageResult(Stage.POSTCHECK, ok, "live topology OK" if ok else f"blocking: {blocking}", findings=blocking)
 
 
@@ -100,6 +99,12 @@ def main(argv: list[str]) -> int:
     args = ap.parse_args(argv)
 
     cmd = None if (args.skip_deploy or not args.deploy_cmd) else shlex.split(args.deploy_cmd)
+    if not args.base_url and os.environ.get("OPENBLADE_ENV", "").strip().lower() == "production":
+        print(
+            "warning: in-process postcheck boots the app against OPENBLADE_DB_URL on this host; "
+            "pass --base-url to verify a real deployment instead.",
+            file=sys.stderr,
+        )
     postcheck = (lambda: _postcheck_live(args.base_url)) if args.base_url else _postcheck_in_process
 
     report = run_deploy_pipeline(precheck=_precheck, deploy=lambda: _deploy(cmd), postcheck=postcheck)

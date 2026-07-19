@@ -34,8 +34,8 @@ jobs:
           cache: "pip"
       - run: pip install -e '.[dev]'
 
-      - name: Operability unit tests (config validation, topology, DR)
-        run: pytest tests/unit/test_config_validation.py tests/unit/test_topology.py tests/unit/test_dr.py -q --tb=short
+      - name: Operability unit tests (config validation, topology, DR, deploy)
+        run: pytest tests/unit/test_config_validation.py tests/unit/test_topology.py tests/unit/test_dr.py tests/unit/test_deploy.py -q --tb=short
 
       - name: Validate configuration (dev profile must be deployable)
         run: python scripts/validate_config.py
@@ -66,3 +66,14 @@ jobs:
           else
             echo "unsafe production profile correctly not promoted"
           fi
+
+      - name: Deployment pipeline promotes a valid production config (positive control)
+        # Guards against a regression that always-refuses: a fully-secret production
+        # config with a temp DB must promote (in-process postcheck, no production data).
+        env:
+          OPENBLADE_ENV: production
+          OPENBLADE_ADMIN_PASSWORD: ci-strong-admin
+          OPENBLADE_SERVICE_PASSWORD: ci-strong-service
+          OPENBLADE_SERVICE_TOKEN: ci-strong-token
+          OPENBLADE_DB_URL: sqlite:////tmp/openblade-ci-deploy.db
+        run: python scripts/deploy.py --skip-deploy
