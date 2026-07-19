@@ -6,6 +6,7 @@ import hashlib
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import structlog
 
@@ -358,13 +359,39 @@ class AppContext:
     restore_service: RestoreService
 
 
-def _create_real_backends(config: OpenBladeConfig) -> tuple[RealLibraryBackend, RealLTFSBackend]:
+def _create_scalar_http_library(config: OpenBladeConfig) -> LibraryBackend:
+    """Build the Web Services robotics backend for a real Scalar i3 AML endpoint."""
+    import httpx
+
+    from openblade.domain.errors import RealHardwareDisabledError
+    from openblade.hardware.scalar_http import ScalarHttpLibraryBackend, ScalarHttpSession
+
+    if not config.scalar_url:
+        raise RealHardwareDisabledError(
+            "OPENBLADE_ROBOTICS_TRANSPORT=webservices requires OPENBLADE_SCALAR_URL"
+        )
+    client = httpx.Client(
+        base_url=config.scalar_url, verify=config.scalar_verify_tls, timeout=30.0
+    )
+    session = ScalarHttpSession(
+        client, username=config.scalar_user, password=config.scalar_password
+    )
+    return ScalarHttpLibraryBackend(session)
+
+
+def _create_real_backends(config: OpenBladeConfig) -> tuple[LibraryBackend, LTFSBackend]:
     guard = require_real_hardware(config)
     runner = SafeRunner(dry_run=config.hardware_dry_run)
-    discovery = discover_library(runner, guard)
-    library = RealLibraryBackend(config=config, runner=runner, discovery=discovery)
+    library: LibraryBackend
+    if config.robotics_transport == "webservices":
+        library = _create_scalar_http_library(config)
+    else:
+        discovery = discover_library(runner, guard)
+        library = RealLibraryBackend(config=config, runner=runner, discovery=discovery)
     ltfs = RealLTFSBackend(
-        library=library,
+        # RealLTFSBackend uses the library's find_drive_by_barcode / drive_device /
+        # set_drive_mount_state, which both backends provide structurally.
+        library=cast(RealLibraryBackend, library),
         guard=guard,
         runner=runner,
         mount_root=Path(config.ltfs_mount_root),
