@@ -1,0 +1,134 @@
+{
+  "title": "OpenBlade iBlade Parity Overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "API Uptime (s)",
+      "targets": [
+        {
+          "expr": "openblade_system_uptime_seconds",
+          "legendFormat": "uptime"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Queue Depth",
+      "targets": [
+        {
+          "expr": "sum(openblade_jobs_state_total{queue=\"active\",state=~\"pending|active|queued\"})",
+          "legendFormat": "active-queue"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Request Count by Operation Class",
+      "targets": [
+        {
+          "expr": "sum by (operation_class) (openblade_iblade_request_total)",
+          "legendFormat": "{{operation_class}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Request Duration Avg (ms)",
+      "targets": [
+        {
+          "expr": "openblade_iblade_request_duration_ms{stat=\"avg\"}",
+          "legendFormat": "{{method}} {{endpoint}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Archive/Restore Throughput (files/s)",
+      "targets": [
+        {
+          "expr": "openblade_transfer_throughput_files_per_second",
+          "legendFormat": "{{operation}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Media Utilization (%)",
+      "targets": [
+        {
+          "expr": "openblade_media_utilization_percent",
+          "legendFormat": "media-utilization"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Cleaning Report Signals",
+      "targets": [
+        {
+          "expr": "openblade_cleaning_media_total",
+          "legendFormat": "{{metric}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

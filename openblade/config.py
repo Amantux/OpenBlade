@@ -13,6 +13,11 @@ class BackendMode(str, Enum):
     REAL = "real"
 
 
+class IBladeCompatibilityMode(str, Enum):
+    STRICT = "strict"
+    EXTENDED = "extended"
+
+
 _DEFAULT_HOME = Path.home() / ".openblade"
 _DEFAULT_EMULATOR_URLS = (
     "http://localhost:8010",
@@ -50,6 +55,7 @@ class OpenBladeConfig:
     emulator_latency_profile: str = "instant"
     emulator_latency_enabled: bool = True
     scalar_api_only: bool = False
+    iblade_compat_mode: IBladeCompatibilityMode = IBladeCompatibilityMode.EXTENDED
 
 
 def _env_bool(name: str, *, default: bool = False) -> bool:
@@ -88,6 +94,15 @@ def _load_emulator_latency_enabled() -> bool:
     return _env_bool("EMULATOR_LATENCY_ENABLED", default=True)
 
 
+def _load_iblade_compat_mode() -> IBladeCompatibilityMode:
+    raw = os.environ.get("OPENBLADE_IBLADE_COMPAT_MODE", "extended").strip().lower()
+    if raw in {"strict", "strict-interface"}:
+        return IBladeCompatibilityMode.STRICT
+    if raw in {"extended", "openblade-extended"}:
+        return IBladeCompatibilityMode.EXTENDED
+    return IBladeCompatibilityMode.EXTENDED
+
+
 def load_config() -> OpenBladeConfig:
     backend_str = os.environ.get("OPENBLADE_BACKEND", "mock").lower()
     try:
@@ -123,4 +138,5 @@ def load_config() -> OpenBladeConfig:
         emulator_latency_profile=_load_emulator_latency_profile(),
         emulator_latency_enabled=_load_emulator_latency_enabled(),
         scalar_api_only=_env_bool("OPENBLADE_SCALAR_API_ONLY", default=False),
+        iblade_compat_mode=_load_iblade_compat_mode(),
     )

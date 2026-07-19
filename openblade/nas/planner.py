@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import posixpath
 from datetime import datetime, timezone
-from typing import Optional
 
 from openblade.nas.types import (
     ArchivePlan,
@@ -39,6 +38,7 @@ class ArchivePlanner:
             copies_required=request.copies,
             verify_before_archive=request.verify_before_archive,
             verify_after_archive=request.verify_after_archive,
+            shard_size_bytes=request.shard_size_bytes,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -158,6 +158,9 @@ class ArchivePlanner:
         remaining = {barcode: self._tape_capacity(request, barcode) for barcode in tapes}
         assignments: dict[str, TapeAssignment] = {}
         tape_positions = {barcode: index for index, barcode in enumerate(tapes)}
+        shard_size_bytes = request.shard_size_bytes if request.shard_size_bytes is not None else None
+        shard_fill_bytes = {barcode: 0 for barcode in tapes}
+        oversized_shard_files: list[str] = []
 
         def get_assignment(barcode: str) -> TapeAssignment:
             assignment = assignments.get(barcode)
@@ -173,15 +176,29 @@ class ArchivePlanner:
 
         def assign_file(preferred_tape: str, file_path: str) -> bool:
             size = self._file_size(request, file_path)
+            if shard_size_bytes is not None and size > shard_size_bytes:
+                oversized_shard_files.append(file_path)
             ordered_choices = [preferred_tape, *[tape for tape in tapes if tape != preferred_tape]]
-            for barcode in ordered_choices:
-                if remaining[barcode] < size:
-                    continue
-                assignment = get_assignment(barcode)
-                assignment.files.append(self._make_relative(file_path, request.source_path))
-                assignment.estimated_bytes += size
-                remaining[barcode] -= size
-                return True
+            for attempt in range(2):
+                for barcode in ordered_choices:
+                    if remaining[barcode] < size:
+                        continue
+                    if (
+                        shard_size_bytes is not None
+                        and shard_fill_bytes[barcode] > 0
+                        and (shard_fill_bytes[barcode] + size) > shard_size_bytes
+                    ):
+                        continue
+                    assignment = get_assignment(barcode)
+                    assignment.files.append(self._make_relative(file_path, request.source_path))
+                    assignment.estimated_bytes += size
+                    remaining[barcode] -= size
+                    if shard_size_bytes is not None:
+                        shard_fill_bytes[barcode] += size
+                    return True
+                if shard_size_bytes is not None and attempt == 0:
+                    for barcode in shard_fill_bytes:
+                        shard_fill_bytes[barcode] = 0
             self._block_plan(plan, f"Insufficient tape capacity for file {file_path}")
             return False
 
@@ -238,6 +255,18 @@ class ArchivePlanner:
         plan.tape_assignments = ordered_assignments
         plan.estimated_parallelism = min(len(ordered_assignments), request.max_parallelism)
         plan.estimated_tape_swaps = 0
+        if oversized_shard_files and shard_size_bytes is not None:
+            sample = ", ".join(self._make_relative(path, request.source_path) for path in oversized_shard_files[:3])
+            if len(oversized_shard_files) > 3:
+                sample += ", ..."
+            self._add_capacity_warning(
+                plan,
+                (
+                    f"{len(oversized_shard_files)} file(s) exceed configured shard_size_bytes "
+                    f"({shard_size_bytes}) and were assigned as oversized shards: {sample}"
+                ),
+                field="shard_size_bytes",
+            )
         plan.is_safe_to_enqueue = len(plan.enqueue_blockers) == 0
 
     def _plan_balanced(self, request: ArchivePlanRequest, plan: ArchivePlan) -> None:
@@ -326,13 +355,13 @@ class ArchivePlanner:
             consumed += size
         return len(files)
 
-    def _make_relative(self, filepath: str, source_path: Optional[str]) -> str:
+    def _make_relative(self, filepath: str, source_path: str | None) -> str:
         if source_path and filepath.startswith(source_path):
             rel = filepath[len(source_path):]
             return rel.lstrip("/")
         return filepath.lstrip("/")
 
-    def _relative_files(self, files: list[str], source_path: Optional[str]) -> list[str]:
+    def _relative_files(self, files: list[str], source_path: str | None) -> list[str]:
         return [self._make_relative(file_path, source_path) for file_path in files]
 
     def _is_scratch_tape(self, barcode: str) -> bool:

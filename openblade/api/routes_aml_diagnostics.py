@@ -252,17 +252,11 @@ def _get_drive_task_or_404(serial_number: str, task_type: str, task_id: str) -> 
     return task
 
 
-def _cleaning_media_barcode() -> str:
-    for media in aml_state.list_aml_media():
-        if "CLN" in str(media.get("type", "")) or "CLN" in str(media.get("barcode", "")):
-            return str(media.get("barcode"))
+def _cleaning_media_barcode(serial_number: str) -> str:
+    media_barcode = aml_state.get_aml_drive_cleaning_media(serial_number)
+    if media_barcode is not None:
+        return media_barcode
     return "CLN000L9"
-
-
-def _next_cleaning_use_count(media_barcode: str) -> int:
-    reports = aml_state.list_aml_drive_cleaning_reports()
-    matching = [int(report.get("useCount", 0)) for report in reports if report.get("mediaBarcode") == media_barcode]
-    return (max(matching) if matching else 0) + 1
 
 
 def _create_drive_task(
@@ -419,7 +413,7 @@ async def start_drive_cleaning(
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
     drive = _get_drive_or_404(serial_number)
     cleaned_at = _timestamp()
-    media_barcode = _cleaning_media_barcode()
+    media_barcode = _cleaning_media_barcode(serial_number)
     aml_state.update_aml_drive(
         serial_number,
         {
@@ -436,7 +430,7 @@ async def start_drive_cleaning(
             "serialNumber": serial_number,
             "lastCleaned": cleaned_at,
             "mediaBarcode": media_barcode,
-            "useCount": _next_cleaning_use_count(media_barcode),
+            "useCount": aml_state.next_aml_drive_cleaning_use_count(media_barcode),
             "expired": False,
         }
     )

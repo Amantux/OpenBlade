@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from openblade.api import aml_state
 from openblade.api.main import app
 from openblade.bootstrap import create_context, reset_context
 from openblade.config import OpenBladeConfig
@@ -30,8 +31,10 @@ def test_create_and_get_policy() -> None:
         "policy_type": "balanced",
         "copies_required": 2,
         "allow_sharding": True,
+        "shard_size_bytes": 1048576,
         "max_parallelism": 3,
         "shard_strategy": "capacity_weighted",
+        "auto_clean_before_archive": True,
     }
 
     create_response = client.post("/nas/policies", json=payload)
@@ -41,6 +44,7 @@ def test_create_and_get_policy() -> None:
     assert get_response.status_code == 200
     assert get_response.json()["id"] == payload["id"]
     assert get_response.json()["copies_required"] == payload["copies_required"]
+    assert get_response.json()["shard_size_bytes"] == payload["shard_size_bytes"]
     assert get_response.json()["shard_strategy"] == payload["shard_strategy"]
 
 
@@ -128,6 +132,32 @@ def test_update_source_stream_config() -> None:
     assert response.json()["allow_partial_dataset_success"] is True
 
 
+def test_archive_plan_inherits_shard_size_from_policy() -> None:
+    policy_payload = {
+        "id": "shard-policy",
+        "name": "Shard Policy",
+        "policy_type": "noncritical_sharded",
+        "allow_sharding": True,
+        "shard_size_bytes": 2048,
+        "max_parallelism": 2,
+        "shard_strategy": "round_robin",
+    }
+    assert client.post("/nas/policies", json=policy_payload).status_code in {200, 201}
+
+    response = client.post(
+        "/nas/archive-plan",
+        json={
+            "policy_id": "shard-policy",
+            "files": ["dataset/a.bin", "dataset/b.bin"],
+            "file_sizes": {"dataset/a.bin": 1024, "dataset/b.bin": 1024},
+            "available_tapes": ["VOL001L9", "VOL002L9"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["shard_size_bytes"] == 2048
+
+
 def test_list_shares_returns_seeded_defaults() -> None:
     response = client.get("/nas/shares")
 
@@ -148,3 +178,101 @@ def test_create_share_with_invalid_policy_returns_400() -> None:
 
     assert response.status_code == 400
     assert "missing-policy" in response.json()["detail"]
+
+
+def test_create_share_with_folder_mappings_and_pools() -> None:
+    for pool in (
+        {"id": "pool-a", "name": "Pool A"},
+        {"id": "pool-b", "name": "Pool B"},
+    ):
+        assert client.post("/nas/pools", json=pool).status_code in {200, 201}
+
+    payload = {
+        "path": "/openblade/finance",
+        "name": "Finance",
+        "share_type": "pool",
+        "pool_ids": ["pool-a", "pool-b"],
+        "folder_mappings": [
+            {"folder_path": "/finance/reports", "pool_id": "pool-a", "access_mode": "read_only"},
+            {"folder_path": "/finance/ops", "pool_id": "pool-b", "access_mode": "read_write"},
+        ],
+        "writable": True,
+    }
+
+    response = client.post("/nas/shares", json=payload)
+
+    assert response.status_code in {200, 201}
+    body = response.json()
+    assert body["pool_ids"] == ["pool-a", "pool-b"]
+    assert len(body["folder_mappings"]) == 2
+
+
+def test_create_share_with_unknown_pool_mapping_returns_400() -> None:
+    payload = {
+        "path": "/openblade/unknown-pool",
+        "name": "Unknown Pool Share",
+        "share_type": "pool",
+        "pool_ids": ["missing-pool"],
+        "folder_mappings": [
+            {"folder_path": "/unknown/path", "pool_id": "missing-pool", "access_mode": "read_only"}
+        ],
+    }
+
+    response = client.post("/nas/shares", json=payload)
+
+    assert response.status_code == 400
+    assert "missing-pool" in response.json()["detail"]
+
+
+def test_ingest_start_auto_cleans_required_drives() -> None:
+    drives = aml_state.list_aml_drives()
+    assert drives
+    target_drive = drives[0]
+    serial_number = str(target_drive["serialNumber"])
+    baseline_cleaning_count = int(target_drive.get("cleaningCount", 0))
+    updated = aml_state.update_aml_drive(
+        "DRV-001",
+        {
+            "cleaningRequired": True,
+            "state": "cleaning_required",
+            "loadCount": int(target_drive.get("loadCount", 0)) + 120,
+        },
+    )
+    assert updated is not None
+
+    plan_response = client.post(
+        "/nas/archive-plan",
+        json={
+            "policy_type": "balanced",
+            "ingest_mode": "source_stream",
+            "files": ["dataset/large.bin"],
+            "file_sizes": {"dataset/large.bin": 8_388_608},
+            "available_tapes": ["VOL001L9"],
+        },
+    )
+    assert plan_response.status_code == 200
+    plan_id = plan_response.json()["plan_id"]
+
+    ingest_response = client.post(
+        "/nas/ingest/start",
+        json={
+            "plan_id": plan_id,
+            "dataset_name": "auto-clean-dataset",
+            "auto_clean_drives": True,
+        },
+    )
+
+    assert ingest_response.status_code == 200
+    updated_drive = next(
+        (
+            drive
+            for drive in aml_state.list_aml_drives()
+            if str(drive.get("serialNumber", "")).replace("-", "").upper()
+            == serial_number.replace("-", "").upper()
+        ),
+        None,
+    )
+    assert updated_drive is not None
+    assert bool(updated_drive.get("cleaningRequired", False)) is False
+    assert int(updated_drive.get("cleaningCount", 0)) == baseline_cleaning_count + 1
+    assert updated_drive.get("lastCleaned")

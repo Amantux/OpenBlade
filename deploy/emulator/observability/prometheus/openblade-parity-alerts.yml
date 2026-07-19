@@ -1,0 +1,47 @@
+groups:
+  - name: openblade-parity-alerts
+    rules:
+      - alert: OpenBladeServiceDegraded
+        expr: openblade_component_status < 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpenBlade component degraded
+          description: "Component {{ $labels.component }} is reporting a degraded status."
+
+      - alert: OpenBladeQueueStalled
+        expr: sum(openblade_jobs_state_total{queue="active",state=~"pending|active|queued"}) > 0 and sum(openblade_transfer_activity_total{metric="active_mounts"}) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Queue appears stalled
+          description: "Jobs are queued or active, but no transfer mounts are active."
+
+      - alert: OpenBladeHighLatency
+        expr: max(openblade_iblade_request_duration_ms{stat="avg"}) > 1500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: iBlade request latency elevated
+          description: "Average request latency has exceeded 1500ms."
+
+      - alert: OpenBladeLowThroughput
+        expr: sum(openblade_transfer_throughput_files_per_second) < 0.001
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: Archive/restore throughput is low
+          description: "Aggregate file throughput is near zero for an extended window."
+
+      - alert: OpenBladeCleaningExpired
+        expr: openblade_cleaning_media_total{metric="expired_reports"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Cleaning media expiration detected
+          description: "At least one drive cleaning assignment is expired."

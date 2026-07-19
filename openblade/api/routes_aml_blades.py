@@ -289,6 +289,22 @@ class FanResponse(BaseModel):
     fan: Fan
 
 
+class WindowsBladeSection(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sectionNumber: int
+    id: str
+    hostname: str
+    status: str
+    role: str
+    enabled: bool = True
+    lastChanged: str | None = None
+
+
+class WindowsBladeSectionResponse(BaseModel):
+    windowsBlade: WindowsBladeSection
+
+
 class BladeStatus(BaseModel):
     id: str
     status: str
@@ -383,6 +399,10 @@ def _serialize_fan(item: dict[str, Any]) -> Fan:
     return Fan.model_validate(item)
 
 
+def _serialize_windows_section(item: dict[str, Any]) -> WindowsBladeSection:
+    return WindowsBladeSection.model_validate(item)
+
+
 def _health_from_status(status_value: str) -> str:
     normalized = status_value.strip().lower()
     if normalized in {"failed", "fault", "offline", "critical"}:
@@ -429,6 +449,13 @@ def _get_mgmt_blade_by_serial_or_404(serial_number: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Management blade not found")
 
 
+def _get_windows_section_or_404(section_number: int) -> dict[str, Any]:
+    section = aml_state.get_aml_windows_section(section_number)
+    if section is None:
+        raise HTTPException(status_code=404, detail="Windows blade section not found")
+    return section
+
+
 def _get_drive_sled_or_404(sled_id: str) -> dict[str, Any]:
     sled = aml_state.get_drive_sled(sled_id)
     if sled is None:
@@ -465,25 +492,41 @@ def _validate_patch(payload: BaseModel, *, identifier_field: str = "id") -> dict
 
 def _eth_status_response(blade: dict[str, Any]) -> BladeStatusResponse:
     return BladeStatusResponse(
-        bladeStatus=BladeStatus(id=str(blade["id"]), status=str(blade["status"]), health=_health_from_status(str(blade["status"])))
+        bladeStatus=BladeStatus(
+            id=str(blade["id"]),
+            status=str(blade["status"]),
+            health=_health_from_status(str(blade["status"])),
+        )
     )
 
 
 def _fc_status_response(blade: dict[str, Any]) -> BladeStatusResponse:
     return BladeStatusResponse(
-        bladeStatus=BladeStatus(id=str(blade["id"]), status=str(blade["status"]), health=_health_from_status(str(blade["status"])))
+        bladeStatus=BladeStatus(
+            id=str(blade["id"]),
+            status=str(blade["status"]),
+            health=_health_from_status(str(blade["status"])),
+        )
     )
 
 
 def _mgmt_status_response(blade: dict[str, Any]) -> BladeStatusResponse:
     return BladeStatusResponse(
-        bladeStatus=BladeStatus(id=str(blade["id"]), status=str(blade["status"]), health=_health_from_status(str(blade["status"])))
+        bladeStatus=BladeStatus(
+            id=str(blade["id"]),
+            status=str(blade["status"]),
+            health=_health_from_status(str(blade["status"])),
+        )
     )
 
 
 def _drive_sled_status_response(sled: dict[str, Any]) -> BladeStatusResponse:
     return BladeStatusResponse(
-        bladeStatus=BladeStatus(id=str(sled["id"]), status=str(sled["status"]), health=_health_from_status(str(sled["status"])))
+        bladeStatus=BladeStatus(
+            id=str(sled["id"]),
+            status=str(sled["status"]),
+            health=_health_from_status(str(sled["status"])),
+        )
     )
 
 
@@ -532,7 +575,11 @@ async def list_eth_ports(
     _ensure_state(context)
     blade_id = _validate_identifier(id, field_name="Ethernet blade id")
     blade = _get_eth_blade_or_404(blade_id)
-    return EthPortListResponse(ethPortList=EthPortListResource(port=[_serialize_eth_port(item) for item in blade.get("ports", [])]))
+    return EthPortListResponse(
+        ethPortList=EthPortListResource(
+            port=[_serialize_eth_port(item) for item in blade.get("ports", [])]
+        )
+    )
 
 
 @router.get("/devices/ethBlade/{id}/port/{portId}", response_model=EthPortResponse)
@@ -544,7 +591,11 @@ async def get_eth_port(
 ) -> EthPortResponse:
     _ensure_state(context)
     blade = _get_eth_blade_or_404(_validate_identifier(id, field_name="Ethernet blade id"))
-    port = _get_port_or_404(blade.get("ports", []), _validate_identifier(portId, field_name="Ethernet port id"), detail="Ethernet port not found")
+    port = _get_port_or_404(
+        blade.get("ports", []),
+        _validate_identifier(portId, field_name="Ethernet port id"),
+        detail="Ethernet port not found",
+    )
     return EthPortResponse(ethPort=_serialize_eth_port(port))
 
 
@@ -588,7 +639,9 @@ async def get_eth_blade_status(
     context: AppContext = Depends(get_context),
 ) -> BladeStatusResponse:
     _ensure_state(context)
-    return _eth_status_response(_get_eth_blade_or_404(_validate_identifier(id, field_name="Ethernet blade id")))
+    return _eth_status_response(
+        _get_eth_blade_or_404(_validate_identifier(id, field_name="Ethernet blade id"))
+    )
 
 
 @router.get("/devices/fcBlades", response_model=FcBladeListResponse)
@@ -636,7 +689,11 @@ async def list_fc_ports(
     _ensure_state(context)
     blade_id = _validate_identifier(id, field_name="FC blade id")
     blade = _get_fc_blade_or_404(blade_id)
-    return FcPortListResponse(fcPortList=FcPortListResource(port=[_serialize_fc_port(item) for item in blade.get("ports", [])]))
+    return FcPortListResponse(
+        fcPortList=FcPortListResource(
+            port=[_serialize_fc_port(item) for item in blade.get("ports", [])]
+        )
+    )
 
 
 @router.get("/devices/fcBlade/{id}/port/{portId}", response_model=FcPortResponse)
@@ -648,7 +705,11 @@ async def get_fc_port(
 ) -> FcPortResponse:
     _ensure_state(context)
     blade = _get_fc_blade_or_404(_validate_identifier(id, field_name="FC blade id"))
-    port = _get_port_or_404(blade.get("ports", []), _validate_identifier(portId, field_name="FC port id"), detail="FC port not found")
+    port = _get_port_or_404(
+        blade.get("ports", []),
+        _validate_identifier(portId, field_name="FC port id"),
+        detail="FC port not found",
+    )
     return FcPortResponse(fcPort=_serialize_fc_port(port))
 
 
@@ -692,7 +753,9 @@ async def get_fc_blade_status(
     context: AppContext = Depends(get_context),
 ) -> BladeStatusResponse:
     _ensure_state(context)
-    return _fc_status_response(_get_fc_blade_or_404(_validate_identifier(id, field_name="FC blade id")))
+    return _fc_status_response(
+        _get_fc_blade_or_404(_validate_identifier(id, field_name="FC blade id"))
+    )
 
 
 @router.get("/devices/mgmtBlades", response_model=MgmtBladeListResponse)
@@ -728,7 +791,9 @@ async def put_mgmt_blade(
     blade_id = _validate_identifier(id, field_name="Management blade id")
     _get_mgmt_blade_or_404(blade_id)
     blade = aml_state.update_mgmt_blade(blade_id, _validate_patch(payload.mgmtBlade))
-    return MgmtBladeResponse(mgmtBlade=_serialize_mgmt_blade(blade or _get_mgmt_blade_or_404(blade_id)))
+    return MgmtBladeResponse(
+        mgmtBlade=_serialize_mgmt_blade(blade or _get_mgmt_blade_or_404(blade_id))
+    )
 
 
 @router.post("/devices/mgmtBlade/{id}/failover", response_model=WSResultCode)
@@ -752,7 +817,9 @@ async def get_mgmt_blade_status(
     context: AppContext = Depends(get_context),
 ) -> BladeStatusResponse:
     _ensure_state(context)
-    return _mgmt_status_response(_get_mgmt_blade_or_404(_validate_identifier(id, field_name="Management blade id")))
+    return _mgmt_status_response(
+        _get_mgmt_blade_or_404(_validate_identifier(id, field_name="Management blade id"))
+    )
 
 
 @router.get("/devices/driveSleds", response_model=DriveSledListResponse)
@@ -788,7 +855,9 @@ async def put_drive_sled(
     sled_id = _validate_identifier(id, field_name="Drive sled id")
     _get_drive_sled_or_404(sled_id)
     sled = aml_state.update_drive_sled(sled_id, _validate_patch(payload.driveSled))
-    return DriveSledResponse(driveSled=_serialize_drive_sled(sled or _get_drive_sled_or_404(sled_id)))
+    return DriveSledResponse(
+        driveSled=_serialize_drive_sled(sled or _get_drive_sled_or_404(sled_id))
+    )
 
 
 @router.get("/devices/driveSled/{id}/status", response_model=BladeStatusResponse)
@@ -798,7 +867,9 @@ async def get_drive_sled_status(
     context: AppContext = Depends(get_context),
 ) -> BladeStatusResponse:
     _ensure_state(context)
-    return _drive_sled_status_response(_get_drive_sled_or_404(_validate_identifier(id, field_name="Drive sled id")))
+    return _drive_sled_status_response(
+        _get_drive_sled_or_404(_validate_identifier(id, field_name="Drive sled id"))
+    )
 
 
 @router.get("/devices/powerSupplies", response_model=PowerSupplyListResponse)
@@ -849,7 +920,11 @@ async def get_ethernet_blade_info(
     context: AppContext = Depends(get_context),
 ) -> dict[str, list[dict[str, Any]]]:
     _ensure_state(context)
-    return {"ethernet": [_serialize_eth_blade(item).model_dump() for item in aml_state.get_eth_blades().values()]}
+    return {
+        "ethernet": [
+            _serialize_eth_blade(item).model_dump() for item in aml_state.get_eth_blades().values()
+        ]
+    }
 
 
 @router.get("/devices/blades/fibreChannel", response_model=dict[str, list[dict[str, Any]]])
@@ -858,7 +933,11 @@ async def get_fibre_channel_blade_info(
     context: AppContext = Depends(get_context),
 ) -> dict[str, list[dict[str, Any]]]:
     _ensure_state(context)
-    return {"fibreChannel": [_serialize_fc_blade(item).model_dump() for item in aml_state.get_fc_blades().values()]}
+    return {
+        "fibreChannel": [
+            _serialize_fc_blade(item).model_dump() for item in aml_state.get_fc_blades().values()
+        ]
+    }
 
 
 @router.get("/devices/blades/library", response_model=dict[str, list[dict[str, Any]]])
@@ -867,7 +946,12 @@ async def get_library_blade_info(
     context: AppContext = Depends(get_context),
 ) -> dict[str, list[dict[str, Any]]]:
     _ensure_state(context)
-    return {"library": [_serialize_mgmt_blade(item).model_dump() for item in aml_state.get_mgmt_blades().values()]}
+    return {
+        "library": [
+            _serialize_mgmt_blade(item).model_dump()
+            for item in aml_state.get_mgmt_blades().values()
+        ]
+    }
 
 
 @router.get("/devices/blade/library/{serialNumber}", response_model=MgmtBladeResponse)
@@ -878,7 +962,9 @@ async def get_library_blade_by_serial_number(
 ) -> MgmtBladeResponse:
     _ensure_state(context)
     serial_number = _validate_identifier(serialNumber, field_name="Management blade serialNumber")
-    return MgmtBladeResponse(mgmtBlade=_serialize_mgmt_blade(_get_mgmt_blade_by_serial_or_404(serial_number)))
+    return MgmtBladeResponse(
+        mgmtBlade=_serialize_mgmt_blade(_get_mgmt_blade_by_serial_or_404(serial_number))
+    )
 
 
 @router.get("/devices/blades/windows", response_model=dict[str, list[dict[str, Any]]])
@@ -887,7 +973,42 @@ async def get_windows_blade_info(
     context: AppContext = Depends(get_context),
 ) -> dict[str, list[dict[str, Any]]]:
     _ensure_state(context)
-    return {"windows": [{"id": "WIN-1", "hostname": "windows-gateway", "status": "online", "role": "gateway"}]}
+    windows = [
+        _serialize_windows_section(item).model_dump()
+        for item in aml_state.list_aml_windows_sections()
+    ]
+    return {"windows": windows}
+
+
+@router.get("/devices/blade/windows/{sectionNumber}", response_model=WindowsBladeSectionResponse)
+async def get_windows_blade_section(
+    sectionNumber: int,
+    _: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> WindowsBladeSectionResponse:
+    _ensure_state(context)
+    if sectionNumber <= 0:
+        raise HTTPException(status_code=400, detail="sectionNumber must be a positive integer")
+    section = _get_windows_section_or_404(sectionNumber)
+    return WindowsBladeSectionResponse(windowsBlade=_serialize_windows_section(section))
+
+
+@router.delete("/devices/blade/windows/{sectionNumber}", response_model=WSResultCode)
+async def disable_windows_blade_section(
+    sectionNumber: int,
+    current_user: AmlUser = Depends(require_auth),
+    context: AppContext = Depends(get_context),
+) -> WSResultCode:
+    _ensure_state(context)
+    _require_admin(current_user)
+    if sectionNumber <= 0:
+        raise HTTPException(status_code=400, detail="sectionNumber must be a positive integer")
+    _get_windows_section_or_404(sectionNumber)
+    aml_state.update_aml_windows_section(
+        sectionNumber,
+        {"enabled": False, "status": "offline", "lastChanged": "2024-01-15T10:30:00Z"},
+    )
+    return _ws_result(f"Disabled windows blade section {sectionNumber}")
 
 
 @router.get("/devices", response_model=DeviceSummaryResponse)
@@ -961,11 +1082,35 @@ async def list_device_types(
 ) -> DeviceTypeListResponse:
     _ensure_state(context)
     device_types = [
-        DeviceType(name="ethernet-blade", count=len(aml_state.get_eth_blades()), description="Ethernet switch blades and their ports"),
-        DeviceType(name="fc-blade", count=len(aml_state.get_fc_blades()), description="Fibre Channel blades and their ports"),
-        DeviceType(name="management-blade", count=len(aml_state.get_mgmt_blades()), description="iBlade management controllers"),
-        DeviceType(name="drive-sled", count=len(aml_state.get_drive_sleds()), description="Drive sled and blade controller assemblies"),
-        DeviceType(name="power-supply", count=len(aml_state.get_power_supplies()), description="Blade-level power supply units"),
-        DeviceType(name="fan", count=len(aml_state.get_aml_fans()), description="Blade-level cooling fan modules"),
+        DeviceType(
+            name="ethernet-blade",
+            count=len(aml_state.get_eth_blades()),
+            description="Ethernet switch blades and their ports",
+        ),
+        DeviceType(
+            name="fc-blade",
+            count=len(aml_state.get_fc_blades()),
+            description="Fibre Channel blades and their ports",
+        ),
+        DeviceType(
+            name="management-blade",
+            count=len(aml_state.get_mgmt_blades()),
+            description="iBlade management controllers",
+        ),
+        DeviceType(
+            name="drive-sled",
+            count=len(aml_state.get_drive_sleds()),
+            description="Drive sled and blade controller assemblies",
+        ),
+        DeviceType(
+            name="power-supply",
+            count=len(aml_state.get_power_supplies()),
+            description="Blade-level power supply units",
+        ),
+        DeviceType(
+            name="fan",
+            count=len(aml_state.get_aml_fans()),
+            description="Blade-level cooling fan modules",
+        ),
     ]
     return DeviceTypeListResponse(typeList=DeviceTypeListResource(type=device_types))

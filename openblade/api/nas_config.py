@@ -2,27 +2,28 @@
 
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
+from openblade.api import aml_state
 from openblade.api.routes_aml_auth import AmlUser, require_auth
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
+from openblade.domain.models import MountMode
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
-from openblade.nas.catalog_rebuild_worker import CatalogRebuildWorker, SAFE_REBUILD_PREFLIGHT_ERROR
+from openblade.nas.catalog_rebuild_worker import SAFE_REBUILD_PREFLIGHT_ERROR, CatalogRebuildWorker
 from openblade.nas.catalog_shard import CatalogShardWriter
 from openblade.nas.fuse_hook import FuseHook
-from openblade.nas.ltfs_manifest import TapeMetadataWriter
-from openblade.nas.manifest_validator import ManifestValidator
 from openblade.nas.hydration import HydrationExecutor
 from openblade.nas.ingest import (
     IngestJob,
     StartIngestResponse,
+    _load_if_needed,
     cancel_ingest_job,
     get_archive_plan,
     get_ingest_job,
@@ -30,6 +31,8 @@ from openblade.nas.ingest import (
     run_ingest_job,
     start_ingest_job,
 )
+from openblade.nas.ltfs_manifest import TapeMetadataWriter
+from openblade.nas.manifest_validator import ManifestValidator
 from openblade.nas.path_mapping import PathMappingService
 from openblade.nas.planner import ArchivePlanner
 from openblade.nas.restore_planner import RestorePlan, RestorePlanner
@@ -220,6 +223,82 @@ def _report_payload(service: NasService, dataset_id: str) -> dict[str, object]:
     }
 
 
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _drive_needs_cleaning(drive: dict[str, object]) -> bool:
+    if bool(drive.get("cleaningRequired", False)):
+        return True
+    state = str(drive.get("state", "")).lower()
+    if state in {"cleaning_required", "cleaning-required", "needs_cleaning"}:
+        return True
+    threshold = int(drive.get("cleaningThreshold", 100))
+    load_count = int(drive.get("loadCount", 0))
+    cleaning_count = int(drive.get("cleaningCount", 0))
+    return load_count > 0 and (load_count - cleaning_count * 50) >= threshold
+
+
+def _auto_clean_required_drives() -> list[str]:
+    cleaned_serials: list[str] = []
+    cleaned_at = _utc_timestamp()
+    for index, drive in enumerate(aml_state.list_aml_drives(), start=1):
+        if not _drive_needs_cleaning(drive):
+            continue
+        serial_number = str(drive.get("serialNumber", "")).strip()
+        if not serial_number:
+            continue
+        raw_history = drive.get("history", [])
+        history = [item for item in raw_history if isinstance(item, dict)]
+        loaded_media = drive.get("loadedMedia") if isinstance(drive.get("loadedMedia"), dict) else None
+        media_barcode = str((loaded_media or {}).get("barcode") or "").strip() or None
+        history.insert(
+            0,
+            {
+                "timestamp": cleaned_at,
+                "type": "clean",
+                "media": media_barcode,
+                "result": "success",
+                "errorCode": None,
+            },
+        )
+        update_payload = {
+            "cleaningCount": int(drive.get("cleaningCount", 0)) + 1,
+            "lastCleaned": cleaned_at,
+            "cleaningRequired": False,
+            "state": "idle"
+            if str(drive.get("status", "online")).lower() == "online"
+            else str(drive.get("state", "idle")),
+            "history": history[:50],
+        }
+        updated_drive = aml_state.update_aml_drive(serial_number, update_payload)
+        if updated_drive is None and "-" in serial_number:
+            updated_drive = aml_state.update_aml_drive(serial_number.replace("-", ""), update_payload)
+        if updated_drive is None:
+            updated_drive = aml_state.update_aml_drive(f"DRV-{index:03d}", update_payload)
+        if updated_drive is None:
+            continue
+        aml_state.append_aml_drive_cleaning_report(
+            {
+                "driveId": str(updated_drive.get("serialNumber") or serial_number),
+                "lastCleaned": cleaned_at,
+                "cleaningCount": int(drive.get("cleaningCount", 0)) + 1,
+                "autoTriggered": True,
+            }
+        )
+        cleaned_serials.append(str(updated_drive.get("serialNumber") or serial_number))
+    if cleaned_serials:
+        status_payload = aml_state.get_aml_cleaning_status()
+        status_payload.update(
+            {
+                "lastAutoCleanedAt": cleaned_at,
+                "lastAutoCleanedDrives": cleaned_serials,
+            }
+        )
+        aml_state.set_aml_cleaning_status(status_payload)
+    return cleaned_serials
+
+
 class ResolvePolicyRequest(BaseModel):
     directory: str
     share_id: str | None = None
@@ -230,6 +309,7 @@ class StartIngestRequest(BaseModel):
     dataset_name: str
     pool_id: str | None = None
     cache_drive_id: str | None = None
+    auto_clean_drives: bool = True
 
 
 class CancelIngestResponse(BaseModel):
@@ -276,24 +356,53 @@ async def get_dataset_manifest(dataset_id: str, service: NasService = Depends(ge
 
 @router.post("/datasets/{dataset_id}/verify")
 async def verify_dataset(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
-    _require_dataset(service, dataset_id)
+    dataset = _require_dataset(service, dataset_id)
+    context = get_context()
+    ltfs = context.ltfs
+    mounts: dict[str, tuple[object, int, int | None]] = {}
     files_verified = 0
     files_corrupt = 0
     files_updated = 0
     checksums: dict[str, str] = {}
 
-    for record in service.list_file_records(dataset_id):
-        expected = hashlib.sha256(f"{record.relative_path}:{record.tape_barcode}".encode()).hexdigest()
-        files_verified += 1
-        checksums[record.relative_path] = expected
-        if record.checksum_sha256 in {None, expected}:
-            updates = {"checksum_sha256": expected}
-            if record.checksum_sha256 is None:
-                files_updated += 1
-            service.upsert_file_record(record.model_copy(update=updates))
-            continue
-        files_corrupt += 1
-        service.upsert_file_record(record.model_copy(update={"status": NasFileState.CORRUPT}))
+    try:
+        for record in service.list_file_records(dataset_id):
+            if not record.tape_barcode:
+                checksums[record.relative_path] = ""
+                files_corrupt += 1
+                service.upsert_file_record(record.model_copy(update={"status": NasFileState.CORRUPT}))
+                continue
+
+            try:
+                handle = mounts.get(record.tape_barcode)
+                if handle is None:
+                    drive_id, slot_id = _load_if_needed(context.library, record.tape_barcode)
+                    ltfs_handle = ltfs.mount(record.tape_barcode, MountMode.READ_ONLY)
+                    mounts[record.tape_barcode] = (ltfs_handle, drive_id, slot_id)
+                    handle = mounts[record.tape_barcode]
+                tape_path = PurePosixPath("/") / dataset.name / record.relative_path
+                observed_checksum = ltfs.stat(handle[0], tape_path).checksum_sha256
+            except Exception:
+                checksums[record.relative_path] = ""
+                files_corrupt += 1
+                service.upsert_file_record(record.model_copy(update={"status": NasFileState.CORRUPT}))
+                continue
+
+            files_verified += 1
+            checksums[record.relative_path] = observed_checksum
+            if record.checksum_sha256 in {None, observed_checksum}:
+                updates = {"checksum_sha256": observed_checksum}
+                if record.checksum_sha256 is None:
+                    files_updated += 1
+                service.upsert_file_record(record.model_copy(update=updates))
+                continue
+            files_corrupt += 1
+            service.upsert_file_record(record.model_copy(update={"status": NasFileState.CORRUPT}))
+    finally:
+        for handle, drive_id, slot_id in mounts.values():
+            ltfs.unmount(handle)
+            if slot_id is not None:
+                context.library.unload(drive_id, slot_id)
 
     return {
         "dataset_id": dataset_id,
@@ -923,6 +1032,8 @@ async def archive_plan(
             updates["verify_before_archive"] = policy.verify_before_archive
         if "verify_after_archive" not in request.model_fields_set:
             updates["verify_after_archive"] = policy.verify_after_archive
+        if "shard_size_bytes" not in request.model_fields_set and policy.shard_size_bytes is not None:
+            updates["shard_size_bytes"] = policy.shard_size_bytes
         if "shard_strategy" not in request.model_fields_set and policy.shard_strategy is not None:
             updates["shard_strategy"] = policy.shard_strategy
         if "max_parallelism" not in request.model_fields_set:
@@ -959,6 +1070,14 @@ async def start_ingest(
                 detail=f"Cache drive {request.cache_drive_id} not found",
             )
     context = get_context()
+    cleaned_drives: list[str] = []
+    auto_clean_drives = request.auto_clean_drives
+    if auto_clean_drives and plan.policy_name:
+        policy = service.get_policy(plan.policy_name)
+        if policy is not None and not policy.auto_clean_before_archive:
+            auto_clean_drives = False
+    if auto_clean_drives:
+        cleaned_drives = _auto_clean_required_drives()
     job = start_ingest_job(
         plan=plan,
         dataset_name=request.dataset_name,
@@ -966,6 +1085,8 @@ async def start_ingest(
         nas_service=service,
         cache_drive_id=request.cache_drive_id,
     )
+    if cleaned_drives:
+        job.notes.append(f"Auto-cleaned drives before ingest: {', '.join(cleaned_drives)}")
     background_tasks.add_task(
         run_ingest_job,
         job.job_id,

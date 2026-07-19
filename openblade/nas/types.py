@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
-import uuid
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 
 class EffectivePolicySource(str, Enum):
@@ -310,8 +310,10 @@ class StoragePolicy(BaseModel):
     verify_after_archive: bool = True
     allow_spillover: bool = True
     allow_sharding: bool = False
+    shard_size_bytes: int | None = Field(default=None, ge=1)
     max_parallelism: int = Field(default=1, ge=1, le=16)
     shard_strategy: ShardStrategy | None = None
+    auto_clean_before_archive: bool = True
     manifest_strategy: str = "per_tape"
     cache_retention: EvictionPolicy = EvictionPolicy.AFTER_VERIFIED
     allow_source_delete: bool = False
@@ -410,6 +412,7 @@ class ArchivePlan(BaseModel):
     copies_required: int = 1
     verify_before_archive: bool = True
     verify_after_archive: bool = True
+    shard_size_bytes: int | None = None
 
     capacity_warnings: list[ArchivePlanWarning] = Field(default_factory=list)
     safety_warnings: list[ArchivePlanWarning] = Field(default_factory=list)
@@ -437,6 +440,7 @@ class ArchivePlanRequest(BaseModel):
     copies: int = Field(default=1, ge=1, le=4)
     verify_before_archive: bool = True
     verify_after_archive: bool = True
+    shard_size_bytes: int | None = Field(default=None, ge=1)
     shard_strategy: ShardStrategy | None = None
     max_parallelism: int = Field(default=1, ge=1, le=16)
 
@@ -514,6 +518,8 @@ class NasPool(BaseModel):
     mount_path: str | None = None
     virtual_mount_enabled: bool = True
     hydration_behavior: HydrationBehavior = HydrationBehavior.QUEUE
+    replication_factor: int = Field(default=1, ge=1, le=4)
+    backup_order_mode: Literal["sequential", "parallel"] = "sequential"
     cache_target_id: str | None = None
     restore_target_path: str = "/openblade/restore"
     access_mode: PoolAccessMode = PoolAccessMode.READ_ONLY
@@ -753,11 +759,34 @@ class NasRestoreJob(BaseModel):
     completed_at: str | None = None
 
 
+class ShareFolderMapping(BaseModel):
+    folder_path: str
+    pool_id: str
+    access_mode: PoolAccessMode = PoolAccessMode.READ_ONLY
+
+    @field_validator("folder_path", mode="before")
+    @classmethod
+    def validate_folder_path(cls, value: object) -> str:
+        folder_path = _strip_required_string(value, field_name="folder_path")
+        if not folder_path.startswith("/"):
+            raise ValueError("folder_path must start with '/'")
+        if ".." in folder_path.split("/"):
+            raise ValueError("folder_path must not contain '..' components")
+        return folder_path
+
+    @field_validator("pool_id", mode="before")
+    @classmethod
+    def validate_pool_id(cls, value: object) -> str:
+        return _strip_required_string(value, field_name="pool_id")
+
+
 class NasShareDefinition(BaseModel):
     path: str
     name: str = Field(max_length=64)
     share_type: Literal["inbox", "restore", "catalog", "virtual", "pool"]
     default_policy_id: str | None = None
+    pool_ids: list[str] = Field(default_factory=list)
+    folder_mappings: list[ShareFolderMapping] = Field(default_factory=list)
     writable: bool = False
     description: str = ""
 
@@ -780,6 +809,35 @@ class NasShareDefinition(BaseModel):
         if value is None:
             return None
         return _strip_required_string(value, field_name="default_policy_id")
+
+    @field_validator("pool_ids", mode="before")
+    @classmethod
+    def validate_pool_ids(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("pool_ids must be a list")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            pool_id = _strip_required_string(item, field_name="pool_id")
+            if pool_id in seen:
+                continue
+            seen.add(pool_id)
+            normalized.append(pool_id)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_folder_pool_membership(self) -> NasShareDefinition:
+        if not self.pool_ids and self.folder_mappings:
+            self.pool_ids = list(dict.fromkeys(item.pool_id for item in self.folder_mappings))
+        if not self.folder_mappings:
+            return self
+        known = set(self.pool_ids)
+        for mapping in self.folder_mappings:
+            if mapping.pool_id not in known:
+                raise ValueError(f"folder mapping references unknown pool_id {mapping.pool_id}")
+        return self
 
 
 class PathMappingRecord(BaseModel):
@@ -835,6 +893,7 @@ class PathMappingBulkUpsertRequest(BaseModel):
 
 class PathMappingSearchRequest(BaseModel):
     prefix: str = ""
+    contains: str = ""
     pool_id: str = ""
     dataset_id: str = ""
     barcode: str = ""
