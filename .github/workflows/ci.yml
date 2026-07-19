@@ -42,7 +42,9 @@ jobs:
               - 'tests/integration/test_aml_*.py'
               - 'tests/integration/test_multi_library.py'
               - 'tests/integration/test_library_commands.py'
+              - 'tests/integration/test_operability_alerts.py'
               - 'tests/unit/test_emulator_client_config.py'
+              - 'deploy/emulator/observability/**'
               - 'tools/emulator_spec/**'
             simulator:
               - 'openblade/simulator/**'
@@ -122,6 +124,7 @@ jobs:
           tests/integration/test_aml_*.py
           tests/integration/test_multi_library.py
           tests/integration/test_library_commands.py
+          tests/integration/test_operability_alerts.py
           tests/unit/test_emulator_client_config.py
           -q --tb=short
 
