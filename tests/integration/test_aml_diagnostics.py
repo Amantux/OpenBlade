@@ -176,20 +176,26 @@ def test_physical_elements_use_bay_coordinates_without_duplicates(authed: TestCl
     response = authed.get("/aml/physicalLibrary/elements")
     assert response.status_code == 200
 
+    from openblade.simulator.i3_config import scalar_i3_active_config
+
+    slot_total = int(scalar_i3_active_config()["partition"]["slotCount"])
+    bay1_slots = slot_total // 2
+    bay2_slots = slot_total - bay1_slots
+
     body = response.json()
     elements = body["elementList"]["element"]
     slot_coords = [item["coordinate"] for item in elements if item.get("type") == "slot"]
-    assert len(slot_coords) == 50
+    assert len(slot_coords) == slot_total
     # Full physical coordinate object (Web Services Figure 23), not a reduced string.
     assert all(
         isinstance(c, dict) and {"frame", "rack", "section", "column", "row", "type"} <= set(c)
         for c in slot_coords
     )
-    # Unique per (section, row); section = bay/module (25 slots per bay across 2 bays).
+    # Unique per (section, row); section = bay/module (slots split across 2 bays).
     keys = [(c["section"], c["row"]) for c in slot_coords]
     assert len(keys) == len(set(keys))
-    assert sum(1 for c in slot_coords if c["section"] == 1) == 25
-    assert sum(1 for c in slot_coords if c["section"] == 2) == 25
+    assert sum(1 for c in slot_coords if c["section"] == 1) == bay1_slots
+    assert sum(1 for c in slot_coords if c["section"] == 2) == bay2_slots
 
 
 def test_magazine_slots_expose_library_coordinates(authed: TestClient) -> None:
