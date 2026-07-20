@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from openblade.catalog.repository import CatalogRepository
-from openblade.simulator.library import MockLibraryBackend
+from openblade.domain.backends import LibraryBackend
 
 
 class InventoryService:
-    def __init__(self, library: MockLibraryBackend) -> None:
+    def __init__(self, library: LibraryBackend) -> None:
         self.library = library
 
     def snapshot(self):
         return self.library.inventory()
 
 
-def run_inventory_job(library: MockLibraryBackend, catalog: CatalogRepository) -> dict[str, object]:
+def run_inventory_job(library: LibraryBackend, catalog: CatalogRepository) -> dict[str, object]:
     """Sync library inventory into the cartridge catalog."""
     inventory = library.inventory()
     seen: set[str] = set()

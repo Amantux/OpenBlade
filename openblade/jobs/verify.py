@@ -7,11 +7,10 @@ from pathlib import Path, PurePosixPath
 
 from openblade.catalog.models import FileRecord
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.models import MountMode
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 
 def sha256sum(path: Path) -> str:
@@ -24,8 +23,8 @@ def sha256sum(path: Path) -> str:
 
 def _load_if_needed(
     catalog: CatalogRepository,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     barcode: str,
 ) -> tuple[int, int | None]:
     drive_id = library.find_drive_by_barcode(barcode)
@@ -54,8 +53,8 @@ def _load_if_needed(
 def run_verify_job(
     barcode: str,
     catalog: CatalogRepository,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
 ) -> dict[str, object]:
     """Mount a tape read-only and verify its archived catalog entries."""
     _, slot_id = _load_if_needed(catalog, library, ltfs, barcode)

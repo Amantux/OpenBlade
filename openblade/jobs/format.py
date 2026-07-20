@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.errors import BarcodeMismatchError, FormatRequiresConfirmationError
 from openblade.domain.models import OperationResult
 from openblade.domain.policies import DryRunPlan, FormatConfirmation, SafetyToken
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 
 class FormatService:
     def __init__(
         self,
         catalog: CatalogRepository,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
     ) -> None:
         self.catalog = catalog
         self.library = library
@@ -66,8 +65,8 @@ class FormatService:
 def run_format_job(
     barcode: str,
     confirmation: FormatConfirmation,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository | None = None,
 ) -> OperationResult:
     """Format tape. Requires FormatConfirmation with correct barcode."""
