@@ -105,6 +105,75 @@ jobs:
             test-results/i3-${{ matrix.suite }}.xml
             /tmp/openblade-api.log
 
+  i3-config-profiles:
+    # Boot the emulator once per supported i3 configuration and assert it behaves
+    # compliantly for that shape — the emulated i3 must behave like a real i3 across
+    # the range of valid configurations (drive count, LTO generation, slot/module
+    # scaling, partition count). EMULATOR_PROFILE is set at job level so both the
+    # booted server and the pytest process observe the same shape.
+    name: i3-config-${{ matrix.profile }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - scalar-i3-25-1
+          - scalar-i3-50-3
+          - scalar-i3-100-3
+          - scalar-i3-50-6
+          - scalar-i3-50-3-lto9
+    env:
+      I3_TEST_MODE: emulator
+      I3_TIMING_PROFILE: instant
+      I3_AML_URL: http://127.0.0.1:8000
+      EMULATOR_PROFILE: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      - run: python3 tools/emulator_spec/generate_matrix_endpoint_catalog.py
+      - run: |
+          rm -f /tmp/openblade-i3-profile.db
+          OPENBLADE_BACKEND=mock OPENBLADE_DB_URL=sqlite:////tmp/openblade-i3-profile.db \
+            nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
+      - name: Wait for API health
+        run: |
+          python - <<'PY'
+          import time
+          import urllib.request
+          for _ in range(60):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2) as response:
+                      if response.status == 200:
+                          raise SystemExit(0)
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("API did not become healthy in time")
+          PY
+      - run: mkdir -p test-results
+      - name: Run the i3 suite against the ${{ matrix.profile }} emulator
+        run: >
+          pytest
+          tests/i3/test_01_auth.py
+          tests/i3/test_02_inventory.py
+          tests/i3/test_03_changer.py
+          tests/i3/test_04_drives.py
+          tests/i3/test_05_media.py
+          tests/i3/test_14_emulator_profile.py
+          tests/i3/test_18_config_profiles.py
+          -q --tb=short --junitxml=test-results/i3-config-${{ matrix.profile }}.xml
+      - name: Upload i3 config-profile artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: i3-config-profile-${{ matrix.profile }}
+          path: |
+            test-results/i3-config-${{ matrix.profile }}.xml
+            /tmp/openblade-api.log
+
   aml-compatibility-suite:
     name: aml-compatibility
     runs-on: ubuntu-latest

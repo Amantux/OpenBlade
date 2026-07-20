@@ -21,7 +21,7 @@ from sqlalchemy import select
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.models import AmlUser
-from openblade.simulator.i3_config import scalar_i3_default_config
+from openblade.simulator.i3_config import scalar_i3_active_config
 
 _DEFAULT_ADMIN_PASSWORD = "password"
 _DEFAULT_SERVICE_PASSWORD = "service123"
@@ -715,7 +715,7 @@ def _default_aml_licenses() -> dict[str, dict[str, Any]]:
 
 
 def _default_aml_inventory_status() -> dict[str, Any]:
-    config = scalar_i3_default_config()
+    config = scalar_i3_active_config()
     partition = config["partition"]
     elements_total = (
         int(partition["slotCount"]) + len(config["drives"]) + int(partition["ieSlotCount"])
@@ -731,7 +731,7 @@ def _default_aml_inventory_status() -> dict[str, Any]:
 
 
 def _default_aml_partitions() -> dict[str, dict[str, Any]]:
-    config = scalar_i3_default_config()
+    config = scalar_i3_active_config()
     partition = config["partition"]
     drives = [str(drive["id"]) for drive in config["drives"]]
     data_media = [media for media in config["media"] if media.get("role") != "cleaning"]
@@ -874,7 +874,7 @@ def _default_aml_log_level() -> dict[str, Any]:
 
 def _default_aml_media() -> dict[str, dict[str, Any]]:
     media: dict[str, dict[str, Any]] = {}
-    for item in scalar_i3_default_config()["media"]:
+    for item in scalar_i3_active_config()["media"]:
         barcode = str(item["barcode"])
         is_cleaning = str(item.get("role", "data")) == "cleaning"
         capacity_bytes = int(item.get("capacityBytes", 18_000_000_000 if not is_cleaning else 0))
@@ -1012,7 +1012,7 @@ def _default_aml_media_pools() -> dict[str, dict[str, Any]]:
 
 def _default_aml_drives() -> dict[str, dict[str, Any]]:
     drives: dict[str, dict[str, Any]] = {}
-    for item in scalar_i3_default_config()["drives"]:
+    for item in scalar_i3_active_config()["drives"]:
         drive_id = str(item["id"])
         drives[drive_id] = {
             "serialNumber": str(item["serial"]),
@@ -1122,7 +1122,7 @@ def _default_iblade_system_settings() -> dict[str, Any]:
 def _default_iblade_volume_groups() -> dict[int, dict[str, Any]]:
     data_barcodes = [
         str(item["barcode"])
-        for item in scalar_i3_default_config()["media"]
+        for item in scalar_i3_active_config()["media"]
         if str(item.get("role", "data")) == "data"
     ]
     return {
@@ -1404,7 +1404,7 @@ def _default_mgmt_blades() -> dict[str, dict[str, Any]]:
 
 
 def _default_drive_sleds() -> dict[str, dict[str, Any]]:
-    drive_ids = [str(drive["id"]) for drive in scalar_i3_default_config()["drives"]]
+    drive_ids = [str(drive["id"]) for drive in scalar_i3_active_config()["drives"]]
     return {
         "SLED-1": {
             "id": "SLED-1",
@@ -1476,7 +1476,7 @@ def _default_aml_robots() -> dict[str, dict[str, Any]]:
 
 
 def _default_aml_towers() -> dict[str, dict[str, Any]]:
-    config = scalar_i3_default_config()
+    config = scalar_i3_active_config()
     total_slots = int(config["partition"]["slotCount"])
     slots_per_tower = total_slots // 2
     drives_by_bay: dict[int, list[str]] = {1: [], 2: []}
@@ -1518,7 +1518,7 @@ def _default_aml_towers() -> dict[str, dict[str, Any]]:
 
 def _default_aml_ie_stations() -> dict[str, dict[str, Any]]:
     stations: dict[str, dict[str, Any]] = {}
-    for item in scalar_i3_default_config()["ieStations"]:
+    for item in scalar_i3_active_config()["ieStations"]:
         slots = [deepcopy(slot) for slot in item["slots"]]
         stations[str(item["id"])] = {
             "id": str(item["id"]),
@@ -1532,7 +1532,7 @@ def _default_aml_ie_stations() -> dict[str, dict[str, Any]]:
 
 
 def _default_aml_magazines() -> dict[str, dict[str, Any]]:
-    config = scalar_i3_default_config()
+    config = scalar_i3_active_config()
     total_slots = int(config["partition"]["slotCount"])
     bay_slot_counts: dict[int, int] = {1: total_slots // 2, 2: total_slots - (total_slots // 2)}
     bay_media_by_slot: dict[int, list[tuple[int, str]]] = {1: [], 2: []}
@@ -1572,7 +1572,7 @@ def _default_aml_magazines() -> dict[str, dict[str, Any]]:
 def _default_aml_ltfs_sections() -> dict[str, dict[str, Any]]:
     return {
         str(section["sectionNumber"]): deepcopy(section)
-        for section in scalar_i3_default_config()["ltfsSections"]
+        for section in scalar_i3_active_config()["ltfsSections"]
     }
 
 
@@ -1839,7 +1839,7 @@ def _assign_cleaning_barcodes_to_lto_drives(
 
 
 def _default_aml_drive_cleaning_reports() -> list[dict[str, Any]]:
-    config = scalar_i3_default_config()
+    config = scalar_i3_active_config()
     cleaning_media = _cleaning_media_inventory_from_config(config)
     assignments = _assign_cleaning_barcodes_to_lto_drives(config.get("drives", []), cleaning_media)
 

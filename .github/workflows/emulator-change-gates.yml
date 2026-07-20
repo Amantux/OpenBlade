@@ -69,6 +69,7 @@ jobs:
       - run: >
           python -m pytest
           tests/i3/test_14_emulator_profile.py
+          tests/i3/test_18_config_profiles.py
           tests/i3/test_15_manual_matrix_contract.py
           tests/i3/test_16_manual_matrix_generated_suites.py
           tests/i3/test_17_matrix_endpoint_coverage.py

@@ -60,6 +60,17 @@ make emulator-ps
   `EMULATOR_OCCUPANCY_PERCENT`, `EMULATOR_LATENCY_PROFILE`, and
   `OPENBLADE_SCALAR_API_ONLY` (defaults to `true` in standalone compose).
 
+The **in-repo** app (`openblade.api.main:app`, backend=mock) now honors the shape
+knobs too, not just the separate published image: `EMULATOR_PROFILE` (a named profile
+such as `scalar-i3-50-3`, or the parsed `scalar-i3-<slots>-<drives>` form),
+`EMULATOR_SLOT_COUNT`, `EMULATOR_DRIVE_COUNT`, and `EMULATOR_OCCUPANCY_PERCENT`
+(per-field overrides). The shape is built by `openblade/simulator/i3_config.py`
+(`scalar_i3_active_config()`); an unset environment yields the canonical
+`scalar-i3-50-3` default, and an invalid configuration (e.g. more than 6 drives — the
+documented Scalar i3 maximum) fails fast at build time. So the emulated i3 behaves
+like a real i3 across the range of supported configurations, and the same `tests/i3`
+suite validates every shape.
+
 Standalone UI (`deploy/emulator/ui/*`, served by `emulator-ui`):
 - Bind env: `EMULATOR_UI_BIND_HOST` (default `0.0.0.0`)
 - Port env: `EMULATOR_UI_PORT` (default `5174`)
@@ -140,6 +151,12 @@ in pull requests and pushes to `master`, and also support manual dispatch:
   - Validates cross-repo contract metadata.
   - Runs sharded i3 emulator suites (`core`, `operations`, `system`) that include
     matrix contract/generated suite gates.
+  - Runs the `i3-config-<profile>` matrix: boots the emulator once per supported
+    configuration (`scalar-i3-25-1`, `-50-3`, `-100-3`, `-50-6`, `-50-3-lto9` —
+    covering drive count, slot/module scaling, and LTO generation) and runs the i3
+    suite against each, so every shape stays compliant. A multi-partition axis is not
+    yet shipped: the AML partition route serializer assumes a single partition, so a
+    2-partition profile awaits that (parity-gated) route work.
 
 ## Compatibility policy
 
