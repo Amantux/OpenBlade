@@ -9,14 +9,13 @@ from pathlib import Path, PurePosixPath
 
 from openblade.api import aml_state
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.verify import sha256sum
 from openblade.nas.tape_orchestrator import TapeOperationFailedError, execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ def _iter_source_files(source_path: Path) -> list[Path]:
     return sorted(path for path in source_path.rglob("*") if path.is_file())
 
 
-def _inventory_barcodes(library: MockLibraryBackend) -> list[str]:
+def _inventory_barcodes(library: LibraryBackend) -> list[str]:
     inventory = library.inventory()
     barcodes = [str(slot.barcode) for slot in inventory.slots if slot.barcode is not None]
     barcodes.extend(str(drive.barcode) for drive in inventory.drives if drive.barcode is not None)
@@ -56,8 +55,8 @@ def _is_cleaning_barcode(barcode: str) -> bool:
 
 def _choose_tape(
     catalog: CatalogRepository,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     volume_group_id: str,
     size_bytes: int,
 ) -> str:
@@ -140,8 +139,8 @@ def _mark_aml_drive_idle(barcode: str, drive_id: int, slot_id: int | None) -> No
 
 def _load_if_needed(
     catalog: CatalogRepository,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     barcode: str,
     job_id: str,
 ) -> tuple[int, int | None]:
@@ -177,8 +176,8 @@ def _load_if_needed(
 
 def run_archive_job(
     request: ArchiveRequest,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository,
     job_id: str,
 ) -> ArchiveResult:
@@ -340,8 +339,8 @@ def run_archive_job(
 class ArchiveService:
     def __init__(
         self,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
         catalog: CatalogRepository,
         queue: JobQueue,
     ) -> None:

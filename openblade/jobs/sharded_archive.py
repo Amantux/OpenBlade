@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.models import MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
@@ -23,8 +24,6 @@ from openblade.jobs.shard import (
 )
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +58,8 @@ def _archive_profile(mode: ShardMode) -> str:
 
 def run_sharded_archive(
     request: ShardedArchiveRequest,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository,
     scheduler: DriveScheduler,
     job_id: str,
@@ -167,8 +166,8 @@ class TapePhysicalStateError(RuntimeError):
 
 def _clean_unmount_and_unload(
     catalog: CatalogRepository,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     mounts: dict[str, object],
     handles: list[DriveHandle],
     loaded_slots: dict[int, int | None],
@@ -223,8 +222,8 @@ def _clean_unmount_and_unload(
 def _archive_stripe(
     files: list[Path],
     request: ShardedArchiveRequest,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository,
     scheduler: DriveScheduler,
     vg_id: str,
@@ -360,8 +359,8 @@ def _archive_stripe(
 def _archive_block_stripe(
     source_file: Path,
     request: ShardedArchiveRequest,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository,
     scheduler: DriveScheduler,
     scratch_dir: Path,
@@ -497,8 +496,8 @@ def _archive_block_stripe(
 
 def _load_barcode(
     catalog: CatalogRepository,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     handle: DriveHandle,
     job_id: str,
 ) -> tuple[int, int | None]:

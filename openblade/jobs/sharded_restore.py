@@ -12,14 +12,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError, FileNotFoundError
 from openblade.domain.models import MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import DEFAULT_BLOCK_SIZE, compute_checksum, reassemble_block_stripe
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +48,8 @@ def _latest_archived_instance(record: Any) -> Any | None:
 
 def run_sharded_restore(
     request: ShardedRestoreRequest,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository,
     scheduler: DriveScheduler,
     job_id: str,
@@ -140,8 +139,8 @@ def _restore_single(
     instance: Any,
     file_record: Any,
     request: ShardedRestoreRequest,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository,
     scheduler: DriveScheduler,
     scratch_dir: Path,
@@ -209,8 +208,8 @@ def _restore_sharded(
     file_record: Any,
     request: ShardedRestoreRequest,
     block_size: int,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository,
     scheduler: DriveScheduler,
     scratch_dir: Path,
@@ -296,8 +295,8 @@ def _restore_sharded(
 
 def _ensure_loaded(
     catalog: CatalogRepository,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     handle: DriveHandle,
     job_id: str,
 ) -> tuple[int, int | None]:

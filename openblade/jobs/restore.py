@@ -8,14 +8,13 @@ from pathlib import Path, PurePosixPath
 
 from openblade.api import aml_state
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.verify import sha256sum
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 
 @dataclass
@@ -85,8 +84,8 @@ def _mark_aml_drive_idle(barcode: str, drive_id: int, slot_id: int | None) -> No
 
 def _load_if_needed(
     catalog: CatalogRepository,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     barcode: str,
     job_id: str,
 ) -> tuple[int, int | None]:
@@ -116,8 +115,8 @@ def _load_if_needed(
 
 def run_restore_job(
     request: RestoreRequest,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     catalog: CatalogRepository,
     job_id: str,
 ) -> RestoreResult:
@@ -175,8 +174,8 @@ def run_restore_job(
 class RestoreService:
     def __init__(
         self,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
         catalog: CatalogRepository,
         queue: JobQueue,
     ) -> None:
