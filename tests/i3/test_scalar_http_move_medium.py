@@ -83,3 +83,56 @@ def test_load_into_nonexistent_drive_fails_gracefully(backend: ScalarHttpLibrary
     result = backend.load(slot_id, 9999)
 
     assert result.success is False  # returned, not raised
+
+
+def test_unload_returns_cartridge_to_the_specified_slot(
+    backend: ScalarHttpLibraryBackend,
+) -> None:
+    # Regression for the moveClass=8 unload path: the cartridge must land in the
+    # SPECIFIC target slot the client asked for, not merely "some" slot.
+    slot_id = _first_occupied_slot(backend)
+    drive_id = _first_empty_drive(backend)
+    barcode = backend.get_slot(slot_id).barcode
+    assert barcode is not None
+    assert backend.load(slot_id, drive_id).success  # source slot now empty
+
+    result = backend.unload(drive_id, slot_id)
+
+    assert result.success, result.message
+    landed = backend.get_slot(slot_id).barcode
+    assert landed is not None and landed.value == barcode.value
+    assert backend.find_drive_by_barcode(barcode.value) is None  # drive is empty
+
+
+def test_unload_rejects_a_drive_destination(backend: ScalarHttpLibraryBackend) -> None:
+    # moveClass=8 with a DRIVE destination must be rejected (slot/drive addresses
+    # overlap, so honoring it would silently misroute the cartridge).
+    slot_id = _first_occupied_slot(backend)
+    drive_id = _first_empty_drive(backend)
+    assert backend.load(slot_id, drive_id).success
+
+    body = {
+        "moveMedium": {
+            "sourceCoordinate": {"elementType": "drive", "elementAddress": drive_id},
+            "destinationCoordinate": {"elementType": "drive", "elementAddress": drive_id},
+            "moveClass": 8,
+        }
+    }
+    resp = backend._session.request("POST", "/aml/media/operations/moveMedium", json=body)
+    assert resp.status_code == 422
+
+
+def test_moveMedium_rejects_import_export_on_i3(backend: ScalarHttpLibraryBackend) -> None:
+    # A real i3/i6 does not support Import(2)/Export(4) moveClass; the emulator
+    # rejects them rather than silently doing a normal move.
+    slot_id = _first_occupied_slot(backend)
+    for move_class in (2, 4):
+        body = {
+            "moveMedium": {
+                "sourceCoordinate": {"elementType": "slot", "elementAddress": slot_id},
+                "destinationCoordinate": {"elementType": "slot", "elementAddress": slot_id},
+                "moveClass": move_class,
+            }
+        }
+        resp = backend._session.request("POST", "/aml/media/operations/moveMedium", json=body)
+        assert resp.status_code == 422, move_class

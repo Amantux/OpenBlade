@@ -8,12 +8,13 @@ simplified ``{elementAddress, elementType}`` and treats ``moveClass`` as a small
 magic integer. These models formalize the real structure so the convenient integer
 forms live only in the adapter boundary.
 
-IMPORTANT — values vs structure: the STRUCTURE here (coordinate fields, moveClass
-bit flags) mirrors the documented i3 shape. The exact wire VALUES for ``moveClass``
-are UNVERIFIED against a real appliance — the external review indicates the real
-"unload" value differs from the emulator's current ``3``. The wire mapping is
-centralized in :func:`MoveClass.from_wire`/:meth:`MoveClass.to_wire` so a captured
-compatibility case can certify/replace it without touching call sites.
+Values are from the Quantum Web Services manual (6-68185-01 Rev D); the moveClass
+bit values (8=Unload, 16=No-Eject, 32=Closest-slot; single-integer 3=Unload
+deprecated) and the coordinate shape are documented, not guessed — see
+docs/reference/i3-contract-notes.md. Parsing/serialization is centralized in
+:func:`MoveClass.from_wire`/:meth:`MoveClass.to_wire`. The doc is Rev D (2019) and
+the target firmware is 341G, so appliance-level certification of the exact numbers
+still awaits a capture; the compatibility corpus is wired to enforce it.
 """
 
 from __future__ import annotations
@@ -87,6 +88,15 @@ class MoveClass(IntFlag):
     @property
     def is_unload(self) -> bool:
         return bool(self & MoveClass.UNLOAD)
+
+    @property
+    def is_supported_on_i3(self) -> bool:
+        """Whether this move is supported on a Scalar i3/i6.
+
+        The Web Services manual marks Import(2) and Export(4) as "Currently not
+        supported" on i3/i6; Normal/Unload/No-Eject/Closest-slot are supported.
+        """
+        return not bool(self & (MoveClass.IMPORT | MoveClass.EXPORT))
 
     @classmethod
     def from_wire(cls, value: int) -> MoveClass:

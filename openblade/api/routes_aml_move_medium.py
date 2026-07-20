@@ -10,9 +10,9 @@ simplified OpenBlade dialect, NOT a certified match for a real i3:
   is a physical ``frame/rack/section/column/row`` + type keyed on a globally-unique
   SCSI element address. Modelling that faithfully is roadmap Phase 0
   (``ScalarCoordinate``).
-- ``moveClass`` is handled as small integers (0 = normal, 3 = unload-to-home). The
-  real contract is a bit field with different values (e.g. unload) — UNVERIFIED
-  against a capture.
+- ``moveClass`` is parsed as the documented bit field (0=Normal, 8=Unload,
+  16=No-Eject, 32=Closest-slot; the single-integer 3=Unload is deprecated but still
+  accepted) via ``MoveClass.from_wire`` — see docs/reference/i3-contract-notes.md.
 
 Because the emulator and the ``scalar_http`` client currently share these
 simplifications, client<->emulator tests passing does NOT prove i3 fidelity. That
@@ -79,6 +79,13 @@ async def move_medium(
     except (TypeError, ValueError):
         move_class = MoveClass.NORMAL
 
+    if not move_class.is_supported_on_i3:
+        # Import(2)/Export(4) are documented as not supported on Scalar i3/i6.
+        raise HTTPException(
+            status_code=422,
+            detail="moveClass import/export is not supported on Scalar i3/i6",
+        )
+
     source = _parse_coordinate(data.get("sourceCoordinate"))
     if source is None:
         raise HTTPException(
@@ -96,7 +103,13 @@ async def move_medium(
                 )
             # Real moveClass=8 unload takes the drive source only; if a destination
             # slot is supplied (client hint), honor it, else the library picks an
-            # empty/home slot (Web Services manual).
+            # empty/home slot (Web Services manual). Guard the destination type:
+            # slot and drive addresses overlap, so an accidental drive destination
+            # would otherwise silently misroute the cartridge.
+            if destination is not None and destination[0] != "slot":
+                raise HTTPException(
+                    status_code=422, detail="Unload destination must be a storage slot"
+                )
             target_slot = destination[1] if destination is not None else _first_empty_slot(context)
             result = context.library.unload(source_address, target_slot)
         elif destination is None:
