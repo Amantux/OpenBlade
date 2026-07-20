@@ -39,11 +39,14 @@ FORBIDDEN_PATTERNS: list[str] = [
     f"{_LIBRARY_PREFIX}find_drive_by_barcode(",
     f"{_LIBRARY_PREFIX}find_slot_by_barcode(",
     f"{_LIBRARY_PREFIX}inventory(",
-    # NB: only tape-qualified read/write are forbidden (ltfs.read_bytes/ltfs.write_bytes
-    # above). Bare ".read_bytes("/".write_bytes(" were removed: they matched ANY pathlib
-    # file I/O (e.g. hashing a SQLite backup in dr.py) with no relation to tape hardware,
-    # producing false positives while the accepted aliasing limitation already means the
-    # guard does not chase non-"ltfs."-named handles.
+    # Bare ".write_" + "bytes(" is kept: a direct tape WRITE via any handle is the
+    # destructive direction, and there are no legitimate bare-write call sites, so it
+    # stays a preventive net with zero false positives.
+    ".write_" + "bytes(",
+    # The bare ".read_bytes(" pattern was REMOVED: it matched ANY pathlib read (e.g.
+    # hashing a SQLite backup in dr.py, reading source files in nas/ingest.py) with no
+    # relation to tape hardware. Tape reads remain covered by "ltfs.read_bytes(" above,
+    # and reads are non-destructive, so dropping the over-broad net loses no real safety.
 ]
 
 ALLOWED_FILES: set[str] = {
