@@ -188,7 +188,7 @@ def _clean_unmount_and_unload(
         except Exception as exc:  # noqa: BLE001 - aggregated and re-raised below
             failures.append(f"unmount {barcode}: {exc}")
     for handle in handles:
-        slot_id = loaded_slots.get(handle.drive_id)
+        slot_id = loaded_slots.get(handle.physical)
         if slot_id is None:
             continue
         try:
@@ -202,14 +202,14 @@ def _clean_unmount_and_unload(
                 TapeOpRequest(
                     op_type=TapeOpType.UNLOAD,
                     barcode=handle.barcode,
-                    drive_id=handle.drive_id,
+                    drive_id=handle.physical,
                     slot_id=slot_id,
                     requested_by="sharded-archive",
                     job_id=job_id,
                 ),
                 raise_on_failed=True,
             )
-            loaded_slots.pop(handle.drive_id, None)
+            loaded_slots.pop(handle.physical, None)
         except Exception as exc:  # noqa: BLE001 - aggregated and re-raised below
             failures.append(f"unload {handle.barcode}: {exc}")
     if failures:
@@ -335,7 +335,7 @@ def _archive_stripe(
                 with suppress(Exception):
                     ltfs.unmount(mount)
             for handle in handles:
-                slot_id = loaded_slots.get(handle.drive_id)
+                slot_id = loaded_slots.get(handle.physical)
                 if slot_id is not None:
                     with suppress(Exception):
                         execute_tape_request(
@@ -345,7 +345,7 @@ def _archive_stripe(
                             TapeOpRequest(
                                 op_type=TapeOpType.UNLOAD,
                                 barcode=handle.barcode,
-                                drive_id=handle.drive_id,
+                                drive_id=handle.physical,
                                 slot_id=slot_id,
                                 requested_by="sharded-archive",
                                 job_id=job_id,
@@ -474,7 +474,7 @@ def _archive_block_stripe(
             with suppress(Exception):
                 ltfs.unmount(mount)
         for handle in handles:
-            slot_id = loaded_slots.get(handle.drive_id)
+            slot_id = loaded_slots.get(handle.physical)
             if slot_id is not None:
                 with suppress(Exception):
                     execute_tape_request(
@@ -484,7 +484,7 @@ def _archive_block_stripe(
                         TapeOpRequest(
                             op_type=TapeOpType.UNLOAD,
                             barcode=handle.barcode,
-                            drive_id=handle.drive_id,
+                            drive_id=handle.physical,
                             slot_id=slot_id,
                             requested_by="sharded-archive",
                             job_id=job_id,
@@ -503,8 +503,11 @@ def _load_barcode(
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
+        # Cartridge is already in a drive. Record it as the PHYSICAL drive without
+        # touching the scheduler lock key (handle.drive_id) — mutating that key would
+        # leak the reserved drive and free a drive the scheduler never held.
         if loaded_drive_id != handle.drive_id:
-            handle.drive_id = loaded_drive_id
+            handle.physical_drive_id = loaded_drive_id
         return loaded_drive_id, None
 
     inventory = library.inventory()

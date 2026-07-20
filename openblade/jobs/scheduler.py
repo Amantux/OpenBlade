@@ -13,9 +13,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DriveHandle:
+    # The scheduler lock key — the drive this lease reserves. IMMUTABLE for the
+    # lease's lifetime: release_drives() frees exactly this key, so mutating it
+    # would leak the reserved drive and free one the scheduler never held.
     drive_id: int
     barcode: str
+    # The drive the cartridge is physically in, when it differs from the reserved
+    # one (e.g. the tape was already loaded elsewhere). Physical tape ops target
+    # `physical`; the scheduler lock still tracks `drive_id`.
+    physical_drive_id: int | None = None
     _released: bool = field(default=False, init=False, repr=False)
+
+    @property
+    def physical(self) -> int:
+        """Drive to run physical ops against (falls back to the reserved drive)."""
+        return self.physical_drive_id if self.physical_drive_id is not None else self.drive_id
 
 
 class DriveScheduler:
