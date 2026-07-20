@@ -19,7 +19,7 @@ compatibility case can certify/replace it without touching call sites.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import IntFlag, auto
+from enum import IntFlag
 
 
 @dataclass(frozen=True)
@@ -64,19 +64,25 @@ class ScalarCoordinate:
             raise ValueError(f"invalid ScalarCoordinate dict: {data!r}") from exc
 
 
-class MoveClass(IntFlag):
-    """moveMedium classification, modeled as the documented bit field.
+# Deprecated single-integer "Unload" (Web Services manual marks moveClass=3 as
+# deprecated in favour of the bit field). The emulator historically used it; still
+# accepted on input for backward compatibility.
+_DEPRECATED_UNLOAD_WIRE = 3
 
-    NORMAL is the empty flag. IMPORT/EXPORT/UNLOAD/NO_EJECT are independent bits so
-    documented combinations compose (e.g. ``UNLOAD | NO_EJECT``). See the module
-    docstring: bit STRUCTURE is faithful; wire VALUES are certified separately.
+
+class MoveClass(IntFlag):
+    """moveMedium classification — the real documented bit field.
+
+    Values are from the Quantum Web Services manual (6-68185-01 Rev D); see
+    docs/reference/i3-contract-notes.md. Flags compose, e.g. ``24 = UNLOAD | NO_EJECT``.
     """
 
     NORMAL = 0
-    IMPORT = auto()
-    EXPORT = auto()
-    UNLOAD = auto()
-    NO_EJECT = auto()
+    IMPORT = 2
+    EXPORT = 4
+    UNLOAD = 8
+    NO_EJECT = 16
+    CLOSEST_SLOT = 32
 
     @property
     def is_unload(self) -> bool:
@@ -84,20 +90,20 @@ class MoveClass(IntFlag):
 
     @classmethod
     def from_wire(cls, value: int) -> MoveClass:
-        """Map an emulator-native moveClass integer to the structured flag."""
-        # Unknown integers fall back to NORMAL; callers needing strictness validate.
-        return _LEGACY_MOVECLASS_WIRE.get(int(value), cls.NORMAL)
+        """Parse a moveClass integer into the structured flag.
+
+        Accepts the real bit field (8=unload, 16=no-eject, 24=8+16, 32=closest, …)
+        and the deprecated single-integer ``3`` (=unload). Unknown bits are ignored.
+        """
+        value = int(value)
+        if value == _DEPRECATED_UNLOAD_WIRE:
+            return cls.UNLOAD
+        result = cls.NORMAL
+        for flag in (cls.IMPORT, cls.EXPORT, cls.UNLOAD, cls.NO_EJECT, cls.CLOSEST_SLOT):
+            if value & flag.value:
+                result |= flag
+        return result
 
     def to_wire(self) -> int:
-        """Map a structured flag back to the emulator-native integer."""
-        for wire, flag in _LEGACY_MOVECLASS_WIRE.items():
-            if self == flag:
-                return wire
-        return 0
-
-
-# The single certification point: OpenBlade emulator's CURRENT moveClass integers.
-# UNVERIFIED vs a real i3 (the external review indicates the real "unload" value is
-# a distinct bit value, not 3). Replace once a captured compatibility case certifies
-# the real mapping — no call site changes needed.
-_LEGACY_MOVECLASS_WIRE: dict[int, MoveClass] = {0: MoveClass.NORMAL, 3: MoveClass.UNLOAD}
+        """The documented integer for this flag (bit field). Unload -> 8, not the deprecated 3."""
+        return int(self)

@@ -33,15 +33,22 @@ def test_moveclass_is_a_composable_bit_field() -> None:
     assert not (MoveClass.IMPORT & MoveClass.EXPORT)
 
 
-def test_moveclass_wire_mapping_round_trips_current_emulator_values() -> None:
-    # Emulator-native values (0 normal, 3 unload) — the certification point.
+def test_moveclass_real_documented_bit_values() -> None:
+    # Values from the Web Services manual (Rev D): unload=8, no-eject=16, closest=32.
+    assert (MoveClass.IMPORT, MoveClass.EXPORT, MoveClass.UNLOAD, MoveClass.NO_EJECT,
+            MoveClass.CLOSEST_SLOT) == (2, 4, 8, 16, 32)
+    assert MoveClass.from_wire(8).is_unload
+    assert MoveClass.from_wire(8).to_wire() == 8  # sends 8, not the deprecated 3
+    assert MoveClass.from_wire(24) == (MoveClass.UNLOAD | MoveClass.NO_EJECT)  # 8+16
     assert MoveClass.from_wire(0) == MoveClass.NORMAL
-    assert MoveClass.from_wire(3).is_unload
-    assert MoveClass.from_wire(3).to_wire() == 3
     assert MoveClass.NORMAL.to_wire() == 0
 
 
-def test_moveclass_unknown_wire_value_falls_back_to_normal() -> None:
-    # An uncertified/unknown integer must not be silently treated as unload.
-    assert MoveClass.from_wire(8) == MoveClass.NORMAL
-    assert not MoveClass.from_wire(8).is_unload
+def test_moveclass_accepts_deprecated_unload_and_ignores_unknown_bits() -> None:
+    # The deprecated single-integer 3 (=unload) is still accepted on input.
+    assert MoveClass.from_wire(3).is_unload
+    # But its canonical wire form is the bit-field 8, not 3.
+    assert MoveClass.from_wire(3).to_wire() == 8
+    # An unknown bit (1) that maps to no flag must NOT be treated as unload.
+    assert MoveClass.from_wire(1) == MoveClass.NORMAL
+    assert not MoveClass.from_wire(1).is_unload
