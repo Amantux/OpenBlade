@@ -389,6 +389,18 @@ async def download_file(
     record = repo.get_nas_file_record(file_id)
     path = _resolve_file_path(file_id, record)
     if path is None:
+        if record is not None:
+            # The file exists in the catalog but is not staged/cached: it is offline
+            # on tape. Return an actionable 409 rather than a misleading 404 so a
+            # NAS client knows to hydrate it first, not that the file is gone.
+            state = str(record.get("status") or record.get("file_state") or "offline_on_tape")
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"File {file_id} is {state} (offline on tape). "
+                    "Hydrate it first (POST /virtual/hydrate), then download."
+                ),
+            )
         raise HTTPException(status_code=404, detail=f"File {file_id} not found")
     filename = _sanitize_filename(record.get("relative_path") if record else file_id)
     return FileResponse(path=path, filename=filename)
