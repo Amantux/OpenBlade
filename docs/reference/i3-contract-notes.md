@@ -13,7 +13,7 @@ Source it locally with `docs/reference/quantum/fetch.sh` to re-verify.
 A coordinate is an **object**, not a reduced string:
 
 ```
-{ "frame": 1, "rack": 1, "section": 2, "column": 1, "row": 1, "type": 4 }
+{ "frame": 1, "rack": 1, "section": 2, "column": 1, "row": 1, "type": 4 }  // example verbatim from the manual; type varies by element (storage slot = 2)
 ```
 
 - `section` — the module.

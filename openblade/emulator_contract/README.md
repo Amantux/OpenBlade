@@ -73,7 +73,7 @@ Standalone UI (`deploy/emulator/ui/*`, served by `emulator-ui`):
   - **Connection** (API base URL, proxy prefix, auth + token controls)
   - **Library summary** (library id/name/status and slot/media totals)
   - **Drives summary** (drive status + loaded cartridge table)
-  - **Slot + magazine layout** (Quantum-style `1,bay,slot` coordinates with magazine alignment)
+  - **Slot + magazine layout** (full `{frame,rack,section,column,row,type}` element coordinates per the Web Services manual, Figure 23)
   - **Supported APIs** (embedded FastAPI Swagger/ReDoc docs plus in-page request playground)
 
 When `OPENBLADE_SCALAR_API_ONLY=true`, only matrix-documented Quantum AML

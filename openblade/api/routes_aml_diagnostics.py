@@ -519,15 +519,11 @@ async def get_drive_unload_task(
     return TaskResponse(task=_serialize_task(_get_drive_task_or_404(serial_number, "unload", task_id)))
 
 
-@router.get("/physicalLibrary/elements", response_model=PhysicalLibraryElementListResponse)
-async def list_physical_library_elements(
-    _: AmlUser = Depends(require_auth),
-    context: AppContext = Depends(get_context),
-) -> PhysicalLibraryElementListResponse:
-    _ensure_state(context)
-    return PhysicalLibraryElementListResponse(elementList=PhysicalLibraryElementListResource(element=_build_physical_library_elements()))
-
-
+# NOTE: the list route GET /aml/physicalLibrary/elements is served by
+# routes_aml_library.get_library_elements (registered first in main.py). A second
+# list handler here was dead/shadowed and emitted a stale coordinate format; it was
+# removed to avoid divergence. The detail route below remains the sole handler for
+# /elements/{address}.
 @router.get("/physicalLibrary/elements/{address}", response_model=PhysicalLibraryElementResponse)
 async def get_physical_library_element(
     address: str,
