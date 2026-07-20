@@ -235,3 +235,41 @@ class TestSecurityBoundaries:
         assert client.get("/api/files/00000000-0000-4000-8000-000000000001/download").status_code in (401, 403)
         assert client.get("/api/pools/1/files").status_code in (401, 403)
         assert client.delete("/api/files/00000000-0000-4000-8000-000000000001").status_code in (401, 403)
+
+
+def test_download_offline_file_returns_409_with_hydrate_guidance(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
+    # NAS-experience coherence: an offline-on-tape file (record exists, nothing
+    # staged/cached) must return an actionable 409 telling the client to hydrate,
+    # not a misleading 404 that reads as "gone".
+    from pathlib import Path
+
+    from openblade.api import routes_upload as ru
+    from openblade.bootstrap import get_context
+
+    upload = client.post(
+        "/api/pools/integration-pool/upload",
+        files={"file": ("offline.txt", b"tape-resident bytes", "text/plain")},
+        headers=admin_auth_headers,
+    )
+    assert upload.status_code == 200
+    file_id = upload.json()["file_id"]
+    assert client.get(f"/api/files/{file_id}/download", headers=admin_auth_headers).status_code == 200
+
+    # Simulate the file going offline: drop every local copy, keep the catalog record.
+    record = get_context().catalog.get_nas_file_record(file_id)
+    candidates = [
+        ru._safe_resolve(ru._staging_dir(), file_id),
+        ru._safe_resolve(ru._restore_dir(), file_id),
+    ]
+    candidates += [
+        Path(str(record[key])) for key in ("cache_path", "source_path") if record and record.get(key)
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            candidate.unlink()
+
+    dl = client.get(f"/api/files/{file_id}/download", headers=admin_auth_headers)
+    assert dl.status_code == 409, dl.status_code
+    assert "hydrate" in dl.json()["detail"].lower()
