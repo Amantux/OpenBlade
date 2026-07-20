@@ -61,6 +61,56 @@ def _request(src: Path) -> ShardedArchiveRequest:
     )
 
 
+def test_load_helpers_do_not_mutate_scheduler_lock_key() -> None:
+    # Both the archive and restore load helpers must record the physical drive
+    # WITHOUT mutating handle.drive_id (the scheduler lock key freed on release).
+    from openblade.jobs.scheduler import DriveHandle
+    from openblade.jobs.sharded_archive import _load_barcode
+    from openblade.jobs.sharded_restore import _ensure_loaded
+
+    for helper in (_load_barcode, _ensure_loaded):
+        library, ltfs = _setup()
+        slot = library.find_slot_by_barcode(BARCODES[0])
+        assert slot is not None
+        library.load(slot, 1)  # cartridge physically in drive 1
+        handle = DriveHandle(drive_id=0, barcode=BARCODES[0])  # scheduler reserved drive 0
+        physical, _slot = helper(None, library, ltfs, handle, "job")  # already-loaded fast path
+        assert handle.drive_id == 0, f"{helper.__name__} mutated the scheduler lock key"
+        assert handle.physical == 1 and physical == 1
+
+
+def test_scheduler_lease_not_corrupted_when_tape_preloaded_elsewhere(tmp_path: Path) -> None:
+    # The scheduler reserves a drive (lock key); a cartridge already loaded in a
+    # DIFFERENT physical drive must not cause the reserved key to be mutated — that
+    # would leak the reserved drive and free one the scheduler never held.
+    library, ltfs = _setup()
+    catalog = _catalog()
+    scheduler = DriveScheduler(num_drives=2)
+
+    # Physically load lane-0's cartridge into drive 1 (the scheduler will reserve 0).
+    slot = library.find_slot_by_barcode(BARCODES[0])
+    assert slot is not None
+    library.load(slot, 1)
+    assert library.find_drive_by_barcode(BARCODES[0]) == 1
+
+    request = ShardedArchiveRequest(
+        source_path=_source(tmp_path, count=1),
+        volume_group_name="atom",
+        lane_barcodes=[BARCODES[0]],
+        mode=ShardMode.STRIPE,
+    )
+    job = catalog.create_job("archive", {})
+    result = run_sharded_archive(request, library, ltfs, catalog, scheduler, job.id)
+
+    assert not result.errors, result.errors
+    # The reserved drive (0) must be released; nothing leaked, nothing wrongly freed.
+    assert scheduler.available_count() == 2, scheduler.status()
+    # A subsequent job can still acquire every drive.
+    handles = scheduler.acquire_drives([BARCODES[0], BARCODES[1]], timeout=1.0)
+    assert len(handles) == 2
+    scheduler.release_drives(handles)
+
+
 def _raise(exc: Exception):
     def _fail(*args, **kwargs):
         raise exc

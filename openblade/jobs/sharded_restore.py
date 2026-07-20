@@ -266,7 +266,7 @@ def _restore_sharded(
             with suppress(Exception):
                 ltfs.unmount(mount)
         for handle in handles:
-            slot_id = loaded_slots.get(handle.drive_id)
+            slot_id = loaded_slots.get(handle.physical)
             if slot_id is not None:
                 with suppress(Exception):
                     execute_tape_request(
@@ -276,7 +276,7 @@ def _restore_sharded(
                         TapeOpRequest(
                             op_type=TapeOpType.UNLOAD,
                             barcode=handle.barcode,
-                            drive_id=handle.drive_id,
+                            drive_id=handle.physical,
                             slot_id=slot_id,
                             requested_by="sharded-restore",
                             job_id=job_id,
@@ -302,8 +302,10 @@ def _ensure_loaded(
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
+        # Record the physical drive without mutating the scheduler lock key
+        # (handle.drive_id); mutating it leaks the reserved drive on release.
         if loaded_drive_id != handle.drive_id:
-            handle.drive_id = loaded_drive_id
+            handle.physical_drive_id = loaded_drive_id
         return loaded_drive_id, None
 
     slot_id = library.find_slot_by_barcode(handle.barcode)
