@@ -27,7 +27,7 @@ from openblade.jobs.restore import RestoreService
 from openblade.jobs.worker import Worker
 from openblade.nas.service import NasService
 from openblade.nas.types import NasDataset, NasFileRecord, NasFileState, NasPool, StoragePolicy
-from openblade.simulator.i3_config import scalar_i3_data_barcodes
+from openblade.simulator.i3_config import scalar_i3_active_config
 from openblade.simulator.scenarios import scalar_i3_default
 
 structlog.configure()
@@ -207,7 +207,15 @@ def _seed_demo_catalog(catalog: CatalogRepository) -> None:
     if all(spec["dataset_id"] in existing_dataset_ids for spec in demo_specs):
         return
 
-    data_barcodes = set(scalar_i3_data_barcodes())
+    # Seed a demo cartridge only for barcodes the active emulator backend actually
+    # holds, so a small (low-occupancy) profile doesn't leave the catalog referencing
+    # cartridges absent from the library. Identical to the default barcode set for the
+    # default and all shipped profiles (their data tapes are a superset of the demo).
+    data_barcodes = {
+        str(item["barcode"])
+        for item in scalar_i3_active_config()["media"]
+        if str(item.get("role", "data")) != "cleaning"
+    }
     for spec in demo_specs:
         volume_group = catalog.create_volume_group(spec["volume_group"])
         tape_set = sorted({barcode for _, _, barcode in spec["files"]})

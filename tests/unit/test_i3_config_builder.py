@@ -41,7 +41,7 @@ def test_default_profile_shape() -> None:
     assert len(data) == 28
     assert len(cleaning) == 3
     assert config["partition"]["ieSlotCount"] == 2
-    assert "partitions" not in config  # single-partition profiles stay additive-key-free
+    assert "partitions" not in config  # every shipped profile is single-partition
 
 
 def test_default_rebuild_is_deterministic_and_independent() -> None:
@@ -56,6 +56,19 @@ def test_default_rebuild_is_deterministic_and_independent() -> None:
 
 def test_active_config_equals_default_without_env() -> None:
     assert scalar_i3_active_config() == scalar_i3_default_config()
+
+
+def test_named_default_profile_reproduces_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Selecting the default profile by name must reproduce the canonical default
+    # exactly — including the drive list (load counts etc.), not a regenerated one.
+    monkeypatch.setenv("EMULATOR_PROFILE", "scalar-i3-50-3")
+    assert scalar_i3_active_config() == scalar_i3_default_config()
+
+
+def test_non_integer_env_knob_names_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EMULATOR_SLOT_COUNT", "fifty")
+    with pytest.raises(ValueError, match="EMULATOR_SLOT_COUNT"):
+        scalar_i3_active_config()
 
 
 def test_data_barcodes_stay_default_bound(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -99,7 +112,6 @@ def test_env_parsed_profile_name(monkeypatch: pytest.MonkeyPatch) -> None:
         {"occupancy_percent": 101},
         {"slot_count": 2},  # < drive_count + 1
         {"drive_generation_mix": ("LTO-6", "LTO-7", "LTO-8")},  # unknown gen
-        {"partition_count": 9},  # > drive_count
     ],
 )
 def test_invalid_config_fails_fast(kwargs: dict) -> None:

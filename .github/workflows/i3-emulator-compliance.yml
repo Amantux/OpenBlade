@@ -122,7 +122,6 @@ jobs:
           - scalar-i3-100-3
           - scalar-i3-50-6
           - scalar-i3-50-3-lto9
-          - scalar-i3-50-4-p2
     env:
       I3_TEST_MODE: emulator
       I3_TIMING_PROFILE: instant

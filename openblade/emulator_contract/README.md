@@ -152,8 +152,11 @@ in pull requests and pushes to `master`, and also support manual dispatch:
   - Runs sharded i3 emulator suites (`core`, `operations`, `system`) that include
     matrix contract/generated suite gates.
   - Runs the `i3-config-<profile>` matrix: boots the emulator once per supported
-    configuration (`scalar-i3-25-1`, `-50-3`, `-100-3`, `-50-6`, `-50-3-lto9`,
-    `-50-4-p2`) and runs the i3 suite against each, so every shape stays compliant.
+    configuration (`scalar-i3-25-1`, `-50-3`, `-100-3`, `-50-6`, `-50-3-lto9` —
+    covering drive count, slot/module scaling, and LTO generation) and runs the i3
+    suite against each, so every shape stays compliant. A multi-partition axis is not
+    yet shipped: the AML partition route serializer assumes a single partition, so a
+    2-partition profile awaits that (parity-gated) route work.
 
 ## Compatibility policy
 

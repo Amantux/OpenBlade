@@ -56,7 +56,6 @@ class ScalarI3Profile:
     drive_generation_mix: tuple[str, ...]
     occupancy_percent: int
     ie_slot_count: int = 2
-    partition_count: int = 1
     # Optional canonical drive list (used by the default profile to stay
     # byte-identical to the historical literal). When None, drives are generated.
     drive_overrides: tuple[dict[str, Any], ...] | None = None
@@ -85,13 +84,6 @@ class ScalarI3Profile:
         if not 0 <= self.occupancy_percent <= 100:
             raise ValueError(
                 f"occupancy_percent must be in 0..100; got {self.occupancy_percent}"
-            )
-        if self.partition_count < 1:
-            raise ValueError(f"partition_count must be >= 1; got {self.partition_count}")
-        if self.partition_count > self.drive_count:
-            raise ValueError(
-                f"partition_count ({self.partition_count}) cannot exceed drive_count "
-                f"({self.drive_count}); each partition needs at least one drive"
             )
         if self.ie_slot_count < 0:
             raise ValueError(f"ie_slot_count must be >= 0; got {self.ie_slot_count}")
@@ -152,7 +144,6 @@ DEFAULT_PROFILE = ScalarI3Profile(
     # 60% of the 47 non-cleaning slots -> round(28.2) == 28 data tapes (unchanged).
     occupancy_percent=60,
     ie_slot_count=2,
-    partition_count=1,
     drive_overrides=_DEFAULT_DRIVES,
 )
 
@@ -183,13 +174,11 @@ NAMED_PROFILES: dict[str, ScalarI3Profile] = {
         drive_generation_mix=("LTO-9", "LTO-9", "LTO-9"),
         occupancy_percent=60,
     ),
-    "scalar-i3-50-4-p2": ScalarI3Profile(
-        profile_name="scalar-i3-50-4-p2",
-        slot_count=50,
-        drive_generation_mix=("LTO-7", "LTO-7", "LTO-8", "LTO-8"),
-        occupancy_percent=60,
-        partition_count=2,
-    ),
+    # NOTE: a multi-partition axis is intentionally NOT shipped yet — the AML partition
+    # route serializer (routes_aml_partitions._partition_slots) assumes a single
+    # partition over the absolute slot range, so a 2-partition library cannot be served
+    # over /aml faithfully until that (parity-gated) route work lands. Every shipped
+    # profile is single-partition.
 }
 
 
@@ -230,14 +219,6 @@ def _tape_generation_boundaries(profile: ScalarI3Profile, data_count: int) -> li
     return per_slot
 
 
-def _partition_name_for_slot(slot_id: int, profile: ScalarI3Profile) -> str:
-    if profile.partition_count == 1:
-        return "partition1"
-    per_partition = math.ceil(profile.slot_count / profile.partition_count)
-    index = min((slot_id - 1) // per_partition, profile.partition_count - 1)
-    return f"partition{index + 1}"
-
-
 def _build_data_media(profile: ScalarI3Profile) -> list[dict[str, Any]]:
     data_count = _data_tape_count(profile)
     per_slot_gen = _tape_generation_boundaries(profile, data_count)
@@ -252,7 +233,7 @@ def _build_data_media(profile: ScalarI3Profile) -> list[dict[str, Any]]:
                 # Keep existing barcode pattern to remain compatible with seeded demo data/tests.
                 "barcode": f"VOL{slot:03d}L9",
                 "type": tape_type,
-                "partition": _partition_name_for_slot(slot, profile),
+                "partition": "partition1",
                 "slotAddress": _slot_address(slot, profile.slot_count),
                 "mockSlotId": slot,
                 "role": "data",
@@ -345,27 +326,6 @@ def _build_partition(profile: ScalarI3Profile, data_media: list[dict[str, Any]],
     }
 
 
-def _build_partitions(profile: ScalarI3Profile, drives: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    per_partition_slots = math.ceil(profile.slot_count / profile.partition_count)
-    partitions: list[dict[str, Any]] = []
-    for index in range(profile.partition_count):
-        start = index * per_partition_slots + 1
-        end = min((index + 1) * per_partition_slots, profile.slot_count)
-        partition_drives = [d["id"] for i, d in enumerate(drives) if i % profile.partition_count == index]
-        partitions.append(
-            {
-                "name": f"partition{index + 1}",
-                "id": f"PART-{index + 1:03d}",
-                "status": "online",
-                "type": "data",
-                "slotCount": max(0, end - start + 1),
-                "ieSlotCount": profile.ie_slot_count,
-                "driveIds": partition_drives,
-            }
-        )
-    return partitions
-
-
 def _build_ie_stations(profile: ScalarI3Profile) -> list[dict[str, Any]]:
     return [
         {
@@ -439,10 +399,6 @@ def build_scalar_i3_config(profile: ScalarI3Profile) -> dict[str, Any]:
         "ieStations": _build_ie_stations(profile),
         "ltfsSections": _build_ltfs_sections(profile, data_media, drives),
     }
-    # The `partitions` list is additive and only present for multi-partition
-    # profiles, so single-partition (incl. default) output stays byte-identical.
-    if profile.partition_count > 1:
-        config["partitions"] = _build_partitions(profile, drives)
     return config
 
 
@@ -457,6 +413,13 @@ def scalar_i3_default_config() -> dict[str, Any]:
 _PROFILE_NAME_RE = re.compile(r"\Ascalar-i3-(\d+)-(\d+)(?:-.*)?\Z")
 
 
+def _parse_int_env(name: str, value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer; got {value!r}") from exc
+
+
 def _profile_from_env() -> ScalarI3Profile | None:
     """Build a profile from the contracted EMULATOR_* env knobs, or None if unset."""
     profile_name = os.environ.get("EMULATOR_PROFILE", "").strip()
@@ -466,12 +429,19 @@ def _profile_from_env() -> ScalarI3Profile | None:
     if not any((profile_name, slot_override, drive_override, occupancy_override)):
         return None
 
+    # A named profile with no per-field overrides is returned verbatim so its canonical
+    # drive list (drive_overrides) is preserved — selecting scalar-i3-50-3 must reproduce
+    # the byte-identical default, drive load counts and all.
+    if profile_name in NAMED_PROFILES and not any(
+        (slot_override, drive_override, occupancy_override)
+    ):
+        return NAMED_PROFILES[profile_name]
+
     base = DEFAULT_PROFILE
     slot_count = base.slot_count
     drive_count = base.drive_count
     occupancy = base.occupancy_percent
     ie_slot_count = base.ie_slot_count
-    partition_count = base.partition_count
     mix: tuple[str, ...] | None = None
 
     if profile_name:
@@ -482,7 +452,6 @@ def _profile_from_env() -> ScalarI3Profile | None:
             drive_count = named.drive_count
             occupancy = named.occupancy_percent
             ie_slot_count = named.ie_slot_count
-            partition_count = named.partition_count
             mix = named.drive_generation_mix
         else:
             match = _PROFILE_NAME_RE.match(profile_name)
@@ -496,11 +465,11 @@ def _profile_from_env() -> ScalarI3Profile | None:
 
     # Per-field env overrides win over the parsed/named profile.
     if slot_override:
-        slot_count = int(slot_override)
+        slot_count = _parse_int_env("EMULATOR_SLOT_COUNT", slot_override)
     if drive_override:
-        drive_count = int(drive_override)
+        drive_count = _parse_int_env("EMULATOR_DRIVE_COUNT", drive_override)
     if occupancy_override:
-        occupancy = int(occupancy_override)
+        occupancy = _parse_int_env("EMULATOR_OCCUPANCY_PERCENT", occupancy_override)
 
     # Derive the generation mix when a raw count changed it (extend LTO-7…LTO-8).
     if mix is None or len(mix) != drive_count:
@@ -512,7 +481,6 @@ def _profile_from_env() -> ScalarI3Profile | None:
         drive_generation_mix=mix,
         occupancy_percent=occupancy,
         ie_slot_count=ie_slot_count,
-        partition_count=min(partition_count, drive_count),
         drive_overrides=None,
     )
 

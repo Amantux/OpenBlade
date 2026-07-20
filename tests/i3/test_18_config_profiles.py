@@ -84,35 +84,25 @@ def test_named_profile_is_internally_consistent(name: str) -> None:
     # 6. Data media generations are all readable by some drive in the library.
     drive_generations = {str(d["type"]) for d in config["drives"]}
     assert {str(m["type"]) for m in data} <= drive_generations
-
-    # 7. Partition bookkeeping.
-    if profile.partition_count > 1:
-        partitions = config["partitions"]
-        assert len(partitions) == profile.partition_count
-        assert sum(p["slotCount"] for p in partitions) == profile.slot_count
-    else:
-        assert "partitions" not in config
     assert config["partition"]["ieSlotCount"] == profile.ie_slot_count
 
 
 @pytest.mark.parametrize(
-    "mix,slot_count,occupancy,partitions",
+    "mix,slot_count,occupancy",
     [
-        (("LTO-8",) * 7, 50, 60, 1),  # > 6 drives (exceeds i3 max)
-        ((), 50, 60, 1),  # 0 drives
-        (("LTO-7", "LTO-8"), 50, 101, 1),  # occupancy out of range
-        (("LTO-7", "LTO-8"), 2, 60, 1),  # slot_count < drive_count + 1
-        (("LTO-6", "LTO-8"), 50, 60, 1),  # unknown generation
-        (("LTO-7", "LTO-8"), 50, 60, 9),  # partitions > drives
+        (("LTO-8",) * 7, 50, 60),  # > 6 drives (exceeds i3 max)
+        ((), 50, 60),  # 0 drives
+        (("LTO-7", "LTO-8"), 50, 101),  # occupancy out of range
+        (("LTO-7", "LTO-8"), 2, 60),  # slot_count < drive_count + 1
+        (("LTO-6", "LTO-8"), 50, 60),  # unknown generation
     ],
 )
-def test_invalid_profile_fails_fast(mix, slot_count, occupancy, partitions) -> None:
+def test_invalid_profile_fails_fast(mix, slot_count, occupancy) -> None:
     profile = ScalarI3Profile(
         profile_name="invalid",
         slot_count=slot_count,
         drive_generation_mix=mix,
         occupancy_percent=occupancy,
-        partition_count=partitions,
     )
     with pytest.raises(ValueError):
         build_scalar_i3_config(profile)
@@ -141,8 +131,10 @@ def _restore_default_context() -> Iterator[None]:
 def test_running_app_reflects_selected_profile(
     profile_name: str,
     tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
+    # _restore_default_context is requested before monkeypatch so its finalizer runs
+    # AFTER monkeypatch reverts EMULATOR_PROFILE — the rebuilt default context is clean.
     _restore_default_context: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in _EMU_ENV:
         monkeypatch.delenv(name, raising=False)
