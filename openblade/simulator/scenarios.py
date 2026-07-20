@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 
 from openblade.domain.models import CartridgeState, DriveState, MountState
 from openblade.domain.policies import FormatConfirmation, SafetyToken
-from openblade.simulator.i3_config import scalar_i3_default_config
+from openblade.simulator.i3_config import scalar_i3_active_config
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockFileRecord, MockLTFSBackend
 
@@ -64,7 +64,7 @@ def one_drive_twenty_slots_five_cartridges() -> tuple[MockLibraryBackend, MockLT
 
 
 def scalar_i3_default() -> tuple[MockLibraryBackend, MockLTFSBackend]:
-    config = scalar_i3_default_config()
+    config = scalar_i3_active_config()
     partition = config["partition"]
     library = MockLibraryBackend(
         library_id=str(config["library"].get("mockLibraryId", "mock-i3-001")),
