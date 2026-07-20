@@ -223,3 +223,75 @@ jobs:
               yaml.safe_load(handle)
           print("Workflow YAML validation passed.")
           PY
+
+  # Single always-running aggregation gate. Make THIS the only required
+  # branch-protection check (plus operability-gate). It understands a valid
+  # `skipped` result from path-filtered jobs and fails on any real failure or
+  # cancellation, so branch protection no longer has to reason about skips.
+  # backend-lint / backend-typecheck are advisory (reported, never blocking).
+  ci-gate:
+    name: ci-gate
+    needs:
+      - backend-lint
+      - backend-typecheck
+      - backend-tests
+      - api-aml-integration
+      - i3-smoke
+      - frontend-build-test
+      - cicd-workflow-validate
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate required results
+        run: |
+          fail=0
+          check() {
+            case "$2" in
+              success|skipped) echo "OK    $1=$2" ;;
+              *) echo "FAIL  $1=$2"; fail=1 ;;
+            esac
+          }
+          check backend-tests        "${{ needs.backend-tests.result }}"
+          check api-aml-integration  "${{ needs.api-aml-integration.result }}"
+          check i3-smoke             "${{ needs.i3-smoke.result }}"
+          check frontend-build-test  "${{ needs.frontend-build-test.result }}"
+          check cicd-workflow-validate "${{ needs.cicd-workflow-validate.result }}"
+          echo "advisory (non-blocking): backend-lint=${{ needs.backend-lint.result }} backend-typecheck=${{ needs.backend-typecheck.result }}"
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::ci-gate: a required job failed or was cancelled"
+            exit 1
+          fi
+          echo "ci-gate: all required jobs passed or were validly skipped"
+
+  # Post-merge safety net: on push to master, run the WHOLE non-hardware suite
+  # (not the path-filtered subset) so selective-coverage gaps can't hide a
+  # regression the way the safety guard once rotted. Not a PR gate (skipped on PRs).
+  full-suite:
+    name: full-suite
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      I3_TIMING_PROFILE: instant
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      - run: nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
+      - run: |
+          python - <<'PY'
+          import time
+          import urllib.request
+          for _ in range(60):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2) as response:
+                      if response.status == 200:
+                          raise SystemExit(0)
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("API did not become healthy in time")
+          PY
+      - name: Full non-hardware suite (excludes real hardware, real i3, slow/stress)
+        run: pytest -m "not real_hardware and not real_i3 and not slow" -q --tb=short
