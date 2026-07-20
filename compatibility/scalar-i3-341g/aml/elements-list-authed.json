@@ -5,7 +5,13 @@
   "firmware": "341G",
   "auth": "admin",
   "manual_ref": "Web Services Guide Rev D, Table 212 (physicalLibrary/elements)",
-  "fidelity_notes": "SUSPECT COORDINATE SHAPE: with a session the emulator returns element coordinates as a reduced 3-tuple STRING (e.g. '1,1,1'), even though aml_state holds full {frame,rack,section,column,row,type} dicts. The real i3 exposes the full physical coordinate. Modeled now as ScalarCoordinate (openblade/domain/scalar_coordinate.py); applying it to this response is a wire change that must be certified against a capture + re-verified vs the i3 parity tests.",
-  "request": { "method": "GET", "path": "/aml/physicalLibrary/elements" },
-  "expected": { "status": 200, "json_contains": { } }
+  "fidelity_notes": "Element coordinates now return the FULL physical object {frame,rack,section,column,row,type} per the Web Services manual (Figure 23), matching ScalarCoordinate \u2014 the reduced 3-tuple string is gone. Values (section=bay/module mapping) are the emulator's geometry, not appliance-certified; the STRUCTURE is doc-faithful (see docs/reference/i3-contract-notes.md).",
+  "request": {
+    "method": "GET",
+    "path": "/aml/physicalLibrary/elements"
+  },
+  "expected": {
+    "status": 200,
+    "json_contains": {}
+  }
 }
