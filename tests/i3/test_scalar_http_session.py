@@ -63,3 +63,16 @@ def test_scalar_http_session_bad_credentials_raise(emulator_client: TestClient) 
         session.login()
 
     assert exc_info.value.status_code == 401
+
+
+def test_scalar_http_session_authenticates_via_cookie_not_bearer(
+    emulator_client: TestClient,
+) -> None:
+    # Real i3 fidelity: auth rides on the sessionID cookie, never an Authorization
+    # header. Guards against regressing to the emulator-only Bearer artifact.
+    session = _session(emulator_client)
+    session.login()
+
+    assert "Authorization" not in session._headers()
+    assert "sessionID" in emulator_client.cookies  # cookie jar carries the session
+    assert session.get_json("/aml/system/status")  # cookie-authenticated read works
