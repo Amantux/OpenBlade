@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from openblade.nas.restore_planner import RestorePlan
 from openblade.nas.service import NasService
@@ -157,19 +158,18 @@ class HydrationExecutor:
         self._set_file_status(record, NasFileState.HYDRATING)
         try:
             self._check_control_state(hydration_job, record)
-            simulated_content = self._simulate_content(record)
+            cache_path, content = self._materialize_content(record)
             self._check_control_state(hydration_job, record)
-            destination = str(PurePosixPath(hydration_job.restore_job.destination) / record.relative_path)
             restored = self._persist_file_record(
                 record.model_copy(
                     update={
                         "status": NasFileState.ONLINE_CACHED,
-                        "cache_path": destination,
+                        "cache_path": cache_path,
                     }
                 )
             )
             hydration_job.files_restored += 1
-            hydration_job.bytes_restored += len(simulated_content)
+            hydration_job.bytes_restored += len(content)
             self._update_status(
                 hydration_job.job_id,
                 RestoreJobStatus.RUNNING,
@@ -278,8 +278,43 @@ class HydrationExecutor:
         ]
 
     def _simulate_content(self, record: NasFileRecord) -> bytes:
+        """Load a file's content for hydration: the real archived bytes read back from
+        tape when the record has a tape location (so a restored file is byte-identical
+        to the original), else a placeholder for never-archived/simulated records.
+        This is the per-file content hook tests patch to inject behavior.
+        """
+        content = self._read_archived_bytes(record)
+        if content is not None:
+            return content
         barcode = record.tape_barcode or "<unknown>"
         return f"HYDRATED:{record.relative_path}:{barcode}".encode()
+
+    def _read_archived_bytes(self, record: NasFileRecord) -> bytes | None:
+        """Read the file's original bytes back from tape, or None if unavailable.
+
+        The tape path is derived the same way ingest wrote it: /<dataset name>/<relative
+        path> (NasFileRecord stores tape_barcode but not the path)."""
+        if not record.tape_barcode:
+            return None
+        dataset = self.service.get_dataset(record.dataset_id)
+        if dataset is None:
+            return None
+        tape_path = str(PurePosixPath("/") / dataset.name / record.relative_path)
+        try:
+            return self.ltfs.read_bytes(record.tape_barcode, tape_path)
+        except Exception:  # noqa: BLE001 - a tape read failure falls back to placeholder
+            return None
+
+    def _materialize_content(self, record: NasFileRecord) -> tuple[str, bytes]:
+        """Get the file's content and write a real cache file the download endpoint
+        can resolve (restore_dir/{file_id}). Returns (cache_path, content)."""
+        content = self._simulate_content(record)
+        cache_dir = Path(os.environ.get("OPENBLADE_RESTORE_DIR", "/tmp/openblade-restore"))
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / record.id
+        with cache_file.open("wb") as handle:  # download resolves restore_dir/{file_id}
+            handle.write(content)
+        return str(cache_file), content
 
     def _set_file_status(self, record: NasFileRecord, status: NasFileState) -> NasFileRecord:
         saved = self._persist_file_record(record.model_copy(update={"status": status}))
