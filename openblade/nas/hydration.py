@@ -164,13 +164,17 @@ class HydrationExecutor:
         self._set_file_status(record, NasFileState.HYDRATING)
         try:
             self._check_control_state(hydration_job, record)
-            cache_path, content = self._materialize_content(record)
+            content = self._materialize_content(record)
             self._check_control_state(hydration_job, record)
+            # cache_path is the logical restore destination the client requested; the
+            # downloadable bytes live at restore_dir/{id} (written by _materialize_content
+            # and resolved by the download endpoint independently of cache_path).
+            destination = str(PurePosixPath(hydration_job.restore_job.destination) / record.relative_path)
             restored = self._persist_file_record(
                 record.model_copy(
                     update={
                         "status": NasFileState.ONLINE_CACHED,
-                        "cache_path": cache_path,
+                        "cache_path": destination,
                     }
                 )
             )
@@ -312,9 +316,10 @@ class HydrationExecutor:
         except Exception:  # noqa: BLE001 - a tape read failure falls back to placeholder
             return None
 
-    def _materialize_content(self, record: NasFileRecord) -> tuple[str, bytes]:
-        """Get the file's content and write a real cache file the download endpoint
-        can resolve (restore_dir/{file_id}). Returns (cache_path, content)."""
+    def _materialize_content(self, record: NasFileRecord) -> bytes:
+        """Get the file's content, verify it against the recorded checksum, and write
+        a real cache file the download endpoint resolves at restore_dir/{file_id}.
+        Returns the content."""
         content = self._simulate_content(record)
         self._verify_restored_integrity(record, content)
         cache_dir = Path(os.environ.get("OPENBLADE_RESTORE_DIR", "/tmp/openblade-restore"))
@@ -322,7 +327,7 @@ class HydrationExecutor:
         cache_file = cache_dir / record.id
         with cache_file.open("wb") as handle:  # download resolves restore_dir/{file_id}
             handle.write(content)
-        return str(cache_file), content
+        return content
 
     @staticmethod
     def _verify_restored_integrity(record: NasFileRecord, content: bytes) -> None:
