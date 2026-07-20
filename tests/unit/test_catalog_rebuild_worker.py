@@ -454,3 +454,31 @@ def test_dry_run_first_raises_when_not_safe_to_enqueue(rebuild_env: dict[str, ob
 
     assert str(exc_info.value) == SAFE_REBUILD_PREFLIGHT_ERROR
     assert barcode not in str(exc_info.value)
+
+
+def test_rebuild_with_a_missing_tape_recovers_available_subset(
+    rebuild_env: dict[str, object],
+) -> None:
+    """DR with a MISSING tape (roadmap #11): rebuilding from only the tapes actually
+    available recovers their files and gracefully leaves the absent tape's files
+    unrecovered — no crash, run still completes."""
+    barcodes = rebuild_env["context"].library.get_all_barcodes()[:2]
+    seeded_one = _seed_tape(rebuild_env, barcodes[0])
+    seeded_two = _seed_tape(rebuild_env, barcodes[1])
+    _populate_catalog_from_seed(rebuild_env, seeded_one)
+    _populate_catalog_from_seed(rebuild_env, seeded_two)
+
+    session = rebuild_env["context"].catalog.session
+    session.query(PathMappingRow).delete()
+    session.query(NasFileRecordRow).delete()
+    session.query(NasDatasetRow).delete()
+    session.commit()
+
+    # Only tape 0 is available for the rebuild; tape 1 is "missing".
+    result = rebuild_env["worker"].auto_plan_and_execute([barcodes[0]], triggered_by="operator")
+
+    assert result.status is RebuildRunStatus.COMPLETED
+    assert result.files_recovered == 2  # tape 0's files only
+    assert rebuild_env["context"].catalog.get_nas_file_record(f"{barcodes[0]}-file-0") is not None
+    # The missing tape's records remain unrecovered — no silent fabrication, no crash.
+    assert rebuild_env["context"].catalog.get_nas_file_record(f"{barcodes[1]}-file-1") is None
