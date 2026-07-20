@@ -157,6 +157,65 @@ def run_sharded_archive(
     )
 
 
+class TapePhysicalStateError(RuntimeError):
+    """Unmount/unload failed after a write; physical state is unknown and needs reconciliation.
+
+    Raised on the commit path so a dirty or unknown physical state BLOCKS marking the
+    batch durable, instead of the failure being silently suppressed.
+    """
+
+
+def _clean_unmount_and_unload(
+    catalog: CatalogRepository,
+    library: MockLibraryBackend,
+    ltfs: MockLTFSBackend,
+    mounts: dict[str, object],
+    handles: list[DriveHandle],
+    loaded_slots: dict[int, int | None],
+    job_id: str,
+) -> None:
+    """Unmount every tape and unload every drive, raising on any failure.
+
+    On success, entries are removed from ``mounts``/``loaded_slots`` so a subsequent
+    best-effort ``finally`` cleanup does not act on already-released hardware. On any
+    failure the errors are aggregated and raised as TapePhysicalStateError so the
+    caller does NOT mark the batch archived.
+    """
+    failures: list[str] = []
+    for barcode, mount in list(mounts.items()):
+        try:
+            ltfs.unmount(mount)
+            mounts.pop(barcode, None)
+        except Exception as exc:  # noqa: BLE001 - aggregated and re-raised below
+            failures.append(f"unmount {barcode}: {exc}")
+    for handle in handles:
+        slot_id = loaded_slots.get(handle.drive_id)
+        if slot_id is None:
+            continue
+        try:
+            execute_tape_request(
+                catalog,
+                library,
+                ltfs,
+                TapeOpRequest(
+                    op_type=TapeOpType.UNLOAD,
+                    barcode=handle.barcode,
+                    drive_id=handle.drive_id,
+                    slot_id=slot_id,
+                    requested_by="sharded-archive",
+                    job_id=job_id,
+                ),
+            )
+            loaded_slots.pop(handle.drive_id, None)
+        except Exception as exc:  # noqa: BLE001 - aggregated and re-raised below
+            failures.append(f"unload {handle.barcode}: {exc}")
+    if failures:
+        raise TapePhysicalStateError(
+            "shards written but physical state is unknown (reconcile required): "
+            + "; ".join(failures)
+        )
+
+
 def _archive_stripe(
     files: list[Path],
     request: ShardedArchiveRequest,
@@ -189,6 +248,10 @@ def _archive_stripe(
         handles = scheduler.acquire_drives(batch_barcodes)
         mounts: dict[str, object] = {}
         loaded_slots: dict[int, int | None] = {}
+        # (main_instance_id, shard_instance_id, size_bytes) for shards written+verified
+        # this batch. Nothing here is marked archived until the WHOLE batch has verified
+        # and every tape has cleanly unmounted — the atomic commit boundary.
+        staged: list[tuple[str, str, int]] = []
         try:
             for handle in handles:
                 drive_id, slot_id = _load_barcode(catalog, library, ltfs, handle, job_id)
@@ -231,7 +294,6 @@ def _archive_stripe(
                         barcode=barcode,
                         tape_path=tape_path,
                     )
-                    catalog.mark_instance_archived(instance.id)
                     shard_record = catalog.create_file_record(
                         path=_shard_record_path(source_file, 0),
                         size_bytes=size_bytes,
@@ -248,11 +310,22 @@ def _archive_stripe(
                         barcode=barcode,
                         tape_path=tape_path,
                     )
-                    catalog.mark_instance_archived(shard_instance.id)
+                    # Created PENDING; not archived yet.
+                    staged.append((instance.id, shard_instance.id, size_bytes))
                     shard_group_ids.append(str(uuid.uuid4()))
-                    files_archived += 1
-                    bytes_archived += size_bytes
+
+            # Every shard in the batch wrote and checksum-verified. Cleanly unmount and
+            # unload BEFORE commit; a failed unmount raises and blocks the commit.
+            _clean_unmount_and_unload(catalog, library, ltfs, mounts, handles, loaded_slots, job_id)
+
+            # COMMIT: only now is the batch durable.
+            for instance_id, shard_instance_id, size_bytes in staged:
+                catalog.mark_instance_archived(instance_id)
+                catalog.mark_instance_archived(shard_instance_id)
+                files_archived += 1
+                bytes_archived += size_bytes
         except Exception as exc:  # noqa: BLE001
+            # Staged instances remain PENDING -> not exposed as archived; resumable.
             errors.append(str(exc))
         finally:
             for mount in mounts.values():
@@ -360,13 +433,15 @@ def _archive_block_stripe(
             shard_profile=_archive_profile(request.mode),
             parent_id=None,
         )
+        # All shards verified above. Create records/instances PENDING; do not mark
+        # archived until every tape has cleanly unmounted (atomic commit boundary).
+        staged: list[str] = []
         for spec in plan.shards:
             instance = catalog.create_file_instance(
                 file_record_id=file_record.id,
                 barcode=spec.barcode,
                 tape_path=spec.tape_path,
             )
-            catalog.mark_instance_archived(instance.id)
             shard_record = catalog.create_file_record(
                 path=_shard_record_path(source_file, spec.shard_index),
                 size_bytes=shard_sizes[spec.shard_index],
@@ -383,7 +458,14 @@ def _archive_block_stripe(
                 barcode=spec.barcode,
                 tape_path=spec.tape_path,
             )
-            catalog.mark_instance_archived(shard_instance.id)
+            staged.extend((instance.id, shard_instance.id))
+
+        # Clean unmount/unload BEFORE commit; a failed unmount raises and blocks it.
+        _clean_unmount_and_unload(catalog, library, ltfs, mounts, handles, loaded_slots, job_id)
+
+        # COMMIT: block-striped file is durable only when all shards are down.
+        for instance_id in staged:
+            catalog.mark_instance_archived(instance_id)
     finally:
         for mount in mounts.values():
             with suppress(Exception):
