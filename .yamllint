@@ -1,0 +1,9 @@
+# yamllint config for OpenBlade — catches real YAML errors (syntax, duplicate keys,
+# bad indentation) without flagging harmless style. Applied to CI workflows.
+extends: default
+rules:
+  line-length: disable        # workflow run: lines are legitimately long
+  document-start: disable     # GitHub workflows do not use '---'
+  comments-indentation: disable
+  truthy:
+    check-keys: false         # allow the GitHub Actions 'on:' key
