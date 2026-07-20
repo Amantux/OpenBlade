@@ -14,6 +14,7 @@ from openblade.api.routes_aml_auth import WSResultCode, _require_admin, require_
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
 from openblade.domain.models import CartridgeState, ChangerState, DriveState
+from openblade.domain.scalar_coordinate import ScalarCoordinate
 
 router = APIRouter()
 
@@ -72,7 +73,9 @@ class PhysicalLibraryUpdateRequest(BaseModel):
 class ElementResource(BaseModel):
     type: str
     address: int
-    coordinate: str | None = None
+    # Full physical coordinate object {frame,rack,section,column,row,type} per the
+    # Web Services manual (Figure 23) — no longer a reduced string.
+    coordinate: dict[str, int] | None = None
     state: str
     barcode: str | None = None
 
@@ -392,7 +395,17 @@ def _ws_result(summary: str) -> WSResultCode:
     return WSResultCode(summary=summary)
 
 
-def _slot_coordinate(slot_id: int) -> str:
+_STORAGE_ELEMENT_TYPE = 2  # Web Services manual: coordinate type 2 = storage
+
+
+def _slot_coordinate(slot_id: int) -> dict[str, int]:
+    """Full physical element coordinate for a storage slot.
+
+    The real i3 returns a coordinate OBJECT (frame/rack/section/column/row/type),
+    not a reduced string (Web Services Guide Rev D, Figure 23). The emulator maps
+    its tower/bay geometry onto that shape: section = bay/module, row = slot within
+    the module. See docs/reference/i3-contract-notes.md.
+    """
     remaining = slot_id
     towers = sorted(
         aml_state.get_aml_towers().values(),
@@ -402,9 +415,14 @@ def _slot_coordinate(slot_id: int) -> str:
         bay = int(tower.get("bay", 1))
         slots = int(tower.get("slots", 0))
         if remaining <= slots:
-            return f"1,{bay},{remaining}"
+            return ScalarCoordinate(
+                frame=1, rack=1, section=bay, column=1, row=remaining,
+                element_type=_STORAGE_ELEMENT_TYPE,
+            ).to_dict()
         remaining -= slots
-    return f"1,1,{slot_id}"
+    return ScalarCoordinate(
+        frame=1, rack=1, section=1, column=1, row=slot_id, element_type=_STORAGE_ELEMENT_TYPE
+    ).to_dict()
 
 
 def _serialize_task(item: dict[str, Any]) -> Task:
