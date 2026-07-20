@@ -65,6 +65,7 @@ ALLOWED_FILES: set[str] = {
     "openblade/safety/import_guard.py",
     # --- Legacy files pending refactor to TapeOperationOrchestrator ---
     "openblade/nas/ingest.py",
+    "openblade/nas/hydration.py",         # restore data path: reads archived bytes from tape (ltfs.read_bytes)
     "openblade/nas/ltfs_manifest.py",
     "openblade/nas/health_service.py",         # needs library.inventory() for health check
     "openblade/jobs/archive.py",

@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import re
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
+from openblade.domain.errors import ChecksumMismatchError
 from openblade.nas.restore_planner import RestorePlan
 from openblade.nas.service import NasService
+from openblade.nas.tape_paths import dataset_tape_path
 from openblade.nas.types import NasFileRecord, NasFileState, NasRestoreJob, RestoreJobStatus
 from openblade.simulator.ltfs_volume import MockLTFSBackend
+
+_SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 
 class _HydrationControlSignal(RuntimeError):
@@ -157,8 +164,11 @@ class HydrationExecutor:
         self._set_file_status(record, NasFileState.HYDRATING)
         try:
             self._check_control_state(hydration_job, record)
-            simulated_content = self._simulate_content(record)
+            content = self._materialize_content(record)
             self._check_control_state(hydration_job, record)
+            # cache_path is the logical restore destination the client requested; the
+            # downloadable bytes live at restore_dir/{id} (written by _materialize_content
+            # and resolved by the download endpoint independently of cache_path).
             destination = str(PurePosixPath(hydration_job.restore_job.destination) / record.relative_path)
             restored = self._persist_file_record(
                 record.model_copy(
@@ -169,7 +179,7 @@ class HydrationExecutor:
                 )
             )
             hydration_job.files_restored += 1
-            hydration_job.bytes_restored += len(simulated_content)
+            hydration_job.bytes_restored += len(content)
             self._update_status(
                 hydration_job.job_id,
                 RestoreJobStatus.RUNNING,
@@ -278,8 +288,66 @@ class HydrationExecutor:
         ]
 
     def _simulate_content(self, record: NasFileRecord) -> bytes:
+        """Load a file's content for hydration: the real archived bytes read back from
+        tape when the record has a tape location (so a restored file is byte-identical
+        to the original), else a placeholder for never-archived/simulated records.
+        This is the per-file content hook tests patch to inject behavior.
+        """
+        content = self._read_archived_bytes(record)
+        if content is not None:
+            return content
         barcode = record.tape_barcode or "<unknown>"
         return f"HYDRATED:{record.relative_path}:{barcode}".encode()
+
+    def _read_archived_bytes(self, record: NasFileRecord) -> bytes | None:
+        """Read the file's original bytes back from tape, or None if unavailable.
+
+        The tape path is derived by the shared ``dataset_tape_path`` helper that
+        ingest also uses, so the read key and the write key cannot drift apart
+        (NasFileRecord stores tape_barcode but not the path)."""
+        if not record.tape_barcode:
+            return None
+        dataset = self.service.get_dataset(record.dataset_id)
+        if dataset is None:
+            return None
+        tape_path = str(dataset_tape_path(dataset.name, record.relative_path))
+        try:
+            return self.ltfs.read_bytes(record.tape_barcode, tape_path)
+        except Exception:  # noqa: BLE001 - a tape read failure falls back to placeholder
+            return None
+
+    def _materialize_content(self, record: NasFileRecord) -> bytes:
+        """Get the file's content, verify it against the recorded checksum, and write
+        a real cache file the download endpoint resolves at restore_dir/{file_id}.
+        Returns the content."""
+        content = self._simulate_content(record)
+        self._verify_restored_integrity(record, content)
+        cache_dir = Path(os.environ.get("OPENBLADE_RESTORE_DIR", "/tmp/openblade-restore"))
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / record.id
+        with cache_file.open("wb") as handle:  # download resolves restore_dir/{file_id}
+            handle.write(content)
+        return content
+
+    @staticmethod
+    def _verify_restored_integrity(record: NasFileRecord, content: bytes) -> None:
+        """Fail the restore when materialized bytes don't match the recorded checksum.
+
+        This is the safety net that keeps a failed/placeholder tape read from being
+        served as a checksum-clean 200: if the tape read fell back to placeholder
+        bytes, they won't hash to the recorded digest, so the file is FAILED (the
+        caller's except marks it) rather than silently corrupt. Enforced only when
+        the record carries a real sha256 (production upload/ingest always do);
+        simulator records with sentinel checksums stay a pure record-state sim."""
+        expected = record.checksum_sha256
+        if not expected or not _SHA256_RE.match(expected):
+            return
+        actual = hashlib.sha256(content).hexdigest()
+        if actual != expected:
+            raise ChecksumMismatchError(
+                f"restored bytes for {record.relative_path} do not match the recorded "
+                f"checksum (tape read failed or data corrupt); refusing to serve"
+            )
 
     def _set_file_status(self, record: NasFileRecord, status: NasFileState) -> NasFileRecord:
         saved = self._persist_file_record(record.model_copy(update={"status": status}))

@@ -20,6 +20,8 @@ from openblade.api import routes_upload as ru
 from openblade.api.main import app
 from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
+from openblade.nas.service import NasService
+from openblade.nas.tape_paths import dataset_tape_path
 
 CONTENT = b"the quick brown fox jumps over the lazy dog" * 4
 CHECKSUM = hashlib.sha256(CONTENT).hexdigest()
@@ -90,23 +92,47 @@ def test_nas_journey_upload_download_and_offline_detection(
     assert "hydrate" in offline.json()["detail"].lower()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP: the NAS restore executor (HydrationExecutor) is a record-state "
-        "simulator — it marks the file online_cached but does not materialize a "
-        "downloadable copy (_simulate_content returns placeholder bytes and writes no "
-        "file), so download stays 409 after a 'successful' restore. Flip to a real "
-        "assertion when restore materializes content from tape."
-    ),
-    strict=True,
-)
+def _archive_to_tape_and_offline(file_id: str) -> str:
+    """Simulate a completed archive: write the real bytes onto a data tape at the
+    path ingest uses (/<dataset name>/<relative_path>), mark the record
+    offline_on_tape with that barcode, and drop every local copy. This is the state
+    a genuinely-offline NAS file is in — the only way back is a restore that reads
+    the bytes off tape. Returns the file's relative_path."""
+    ctx = get_context()
+    record = ctx.catalog.get_nas_file_record(file_id)
+    assert record is not None
+    dataset = NasService(ctx.catalog).get_dataset(str(record["dataset_id"]))
+    assert dataset is not None
+    rel_path = str(record["relative_path"])
+    barcode = next(b for b in ctx.library.get_all_barcodes() if not b.startswith("CLN"))
+    tape_path = str(dataset_tape_path(dataset.name, rel_path))  # same formula ingest uses
+
+    ctx.ltfs.write_bytes(barcode, tape_path, CONTENT)
+    ctx.catalog.upsert_nas_file_record(
+        {**record, "tape_barcode": barcode, "status": "offline_on_tape", "cache_path": None}
+    )
+    _drop_local_copies(file_id)
+    return rel_path
+
+
 def test_nas_journey_restore_makes_file_downloadable(
     client: TestClient, auth: dict[str, str]
 ) -> None:
-    """The full journey: after a restore/hydration job runs, the offline file must be
-    downloadable again with the ORIGINAL bytes. Currently xfails at the last step."""
-    file_id = _upload_then_offline(client, auth)
-    rel_path = get_context().catalog.get_nas_file_record(file_id)["relative_path"]
+    """The full journey: archive -> offline (409) -> restore -> the file is
+    downloadable again with the ORIGINAL bytes (matching checksum)."""
+    created = client.post("/nas/pools", json={"id": POOL, "name": "Journey Pool"}, headers=auth)
+    assert created.status_code in (200, 201), created.text
+    up = client.post(
+        f"/api/pools/{POOL}/upload",
+        files={"file": ("journey.bin", CONTENT, "application/octet-stream")},
+        headers=auth,
+    )
+    assert up.status_code == 200, up.text
+    file_id = up.json()["file_id"]
+
+    rel_path = _archive_to_tape_and_offline(file_id)
+    offline = client.get(f"/api/files/{file_id}/download", headers=auth)
+    assert offline.status_code == 409, offline.text
 
     req = client.post(
         f"/nas/pools/{POOL}/request-restore",
@@ -119,4 +145,4 @@ def test_nas_journey_restore_makes_file_downloadable(
 
     dl = client.get(f"/api/files/{file_id}/download", headers=auth)
     assert dl.status_code == 200, dl.text
-    assert hashlib.sha256(dl.content).hexdigest() == CHECKSUM
+    assert hashlib.sha256(dl.content).hexdigest() == CHECKSUM  # original bytes recovered
