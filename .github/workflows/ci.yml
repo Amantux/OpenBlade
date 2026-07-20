@@ -36,6 +36,8 @@ jobs:
               - 'tests/integration/test_library_commands.py'
               - 'tests/integration/test_sharded_archive_restore.py'
               - 'tests/integration/test_sharded_archive_atomicity.py'
+              - 'tests/compat/**'
+              - 'compatibility/**'
               - 'pyproject.toml'
             api:
               - 'openblade/api/**'
@@ -121,6 +123,8 @@ jobs:
       # integration suites were not run by any CI job before; wire them in so the
       # commit-atomicity guarantee is actually enforced.
       - run: pytest tests/integration/test_sharded_archive_restore.py tests/integration/test_sharded_archive_atomicity.py -q --tb=short
+      # Compatibility corpus differential harness (emulator vs recorded appliance/inferred cases).
+      - run: pytest tests/compat -q --tb=short
       # Whole safety suite (was only test_safety_regression.py) so the SAFETY_003
       # import guard is enforced and cannot silently rot again.
       - run: pytest tests/safety -q --tb=short
