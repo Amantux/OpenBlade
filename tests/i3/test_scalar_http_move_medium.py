@@ -120,3 +120,19 @@ def test_unload_rejects_a_drive_destination(backend: ScalarHttpLibraryBackend) -
     }
     resp = backend._session.request("POST", "/aml/media/operations/moveMedium", json=body)
     assert resp.status_code == 422
+
+
+def test_moveMedium_rejects_import_export_on_i3(backend: ScalarHttpLibraryBackend) -> None:
+    # A real i3/i6 does not support Import(2)/Export(4) moveClass; the emulator
+    # rejects them rather than silently doing a normal move.
+    slot_id = _first_occupied_slot(backend)
+    for move_class in (2, 4):
+        body = {
+            "moveMedium": {
+                "sourceCoordinate": {"elementType": "slot", "elementAddress": slot_id},
+                "destinationCoordinate": {"elementType": "slot", "elementAddress": slot_id},
+                "moveClass": move_class,
+            }
+        }
+        resp = backend._session.request("POST", "/aml/media/operations/moveMedium", json=body)
+        assert resp.status_code == 422, move_class

@@ -89,6 +89,15 @@ class MoveClass(IntFlag):
     def is_unload(self) -> bool:
         return bool(self & MoveClass.UNLOAD)
 
+    @property
+    def is_supported_on_i3(self) -> bool:
+        """Whether this move is supported on a Scalar i3/i6.
+
+        The Web Services manual marks Import(2) and Export(4) as "Currently not
+        supported" on i3/i6; Normal/Unload/No-Eject/Closest-slot are supported.
+        """
+        return not bool(self & (MoveClass.IMPORT | MoveClass.EXPORT))
+
     @classmethod
     def from_wire(cls, value: int) -> MoveClass:
         """Parse a moveClass integer into the structured flag.

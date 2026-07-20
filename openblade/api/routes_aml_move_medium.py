@@ -79,6 +79,13 @@ async def move_medium(
     except (TypeError, ValueError):
         move_class = MoveClass.NORMAL
 
+    if not move_class.is_supported_on_i3:
+        # Import(2)/Export(4) are documented as not supported on Scalar i3/i6.
+        raise HTTPException(
+            status_code=422,
+            detail="moveClass import/export is not supported on Scalar i3/i6",
+        )
+
     source = _parse_coordinate(data.get("sourceCoordinate"))
     if source is None:
         raise HTTPException(

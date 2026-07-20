@@ -52,3 +52,12 @@ def test_moveclass_accepts_deprecated_unload_and_ignores_unknown_bits() -> None:
     # An unknown bit (1) that maps to no flag must NOT be treated as unload.
     assert MoveClass.from_wire(1) == MoveClass.NORMAL
     assert not MoveClass.from_wire(1).is_unload
+
+
+def test_moveclass_i3_support_boundary() -> None:
+    # Import(2)/Export(4) are documented as not supported on i3/i6.
+    assert not MoveClass.from_wire(2).is_supported_on_i3  # import
+    assert not MoveClass.from_wire(4).is_supported_on_i3  # export
+    # Normal / Unload / No-Eject / Closest-slot are supported.
+    for value in (0, 8, 16, 24, 32, 40):
+        assert MoveClass.from_wire(value).is_supported_on_i3, value
