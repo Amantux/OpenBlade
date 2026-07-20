@@ -34,6 +34,8 @@ jobs:
               - 'tests/unit/**'
               - 'tests/safety/**'
               - 'tests/integration/test_library_commands.py'
+              - 'tests/integration/test_sharded_archive_restore.py'
+              - 'tests/integration/test_sharded_archive_atomicity.py'
               - 'pyproject.toml'
             api:
               - 'openblade/api/**'
@@ -115,6 +117,10 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: pytest tests/unit -q --tb=short
       - run: pytest tests/integration/test_library_commands.py -q --tb=short
+      # Sharded archive/restore durability (incl. the atomic-commit invariant) — these
+      # integration suites were not run by any CI job before; wire them in so the
+      # commit-atomicity guarantee is actually enforced.
+      - run: pytest tests/integration/test_sharded_archive_restore.py tests/integration/test_sharded_archive_atomicity.py -q --tb=short
       # Whole safety suite (was only test_safety_regression.py) so the SAFETY_003
       # import guard is enforced and cannot silently rot again.
       - run: pytest tests/safety -q --tb=short
