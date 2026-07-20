@@ -41,7 +41,17 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
+def _authenticate(client: TestClient) -> None:
+    # Logs in as admin; the emulator sets a sessionID cookie on the client (it
+    # supports both cookie-session and Bearer — see routes_aml_auth.py), so
+    # subsequent requests on the same client are authenticated.
+    resp = client.post("/aml/users/login", json={"name": "admin", "password": "password"})
+    assert resp.status_code == 200, f"corpus auth setup failed: {resp.status_code}"
+
+
 def _run(client: TestClient, case: dict):
+    if case.get("auth") == "admin":
+        _authenticate(client)
     req = case["request"]
     return client.request(req["method"], req["path"], json=req.get("json"), headers=req.get("headers"))
 

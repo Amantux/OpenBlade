@@ -1,0 +1,11 @@
+{
+  "id": "aml-logout-authed",
+  "profile": "scalar-i3-341g",
+  "source": "inferred",
+  "firmware": "341G",
+  "auth": "admin",
+  "manual_ref": "Web Services Guide Rev D §2.5 (logout)",
+  "fidelity_notes": "Emulator supports BOTH cookie-session (sessionID) and Bearer, with logout at POST /aml/auth/logout AND RESTful DELETE /aml/users/login, clearing the session cookie — closer to the real contract than the review assumed. Session-expiry, MFA, max-sessions, and default-password states remain unmodeled (roadmap Phase 5); certify the exact logout path/verb against a capture.",
+  "request": { "method": "POST", "path": "/aml/auth/logout" },
+  "expected": { "status": 200 }
+}

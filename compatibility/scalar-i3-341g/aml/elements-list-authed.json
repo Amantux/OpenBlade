@@ -1,0 +1,11 @@
+{
+  "id": "aml-physical-elements-authed",
+  "profile": "scalar-i3-341g",
+  "source": "inferred",
+  "firmware": "341G",
+  "auth": "admin",
+  "manual_ref": "Web Services Guide Rev D, Table 212 (physicalLibrary/elements)",
+  "fidelity_notes": "SUSPECT COORDINATE SHAPE: with a session the emulator returns element coordinates as a reduced 3-tuple STRING (e.g. '1,1,1'), even though aml_state holds full {frame,rack,section,column,row,type} dicts. The real i3 exposes the full physical coordinate. Modeled now as ScalarCoordinate (openblade/domain/scalar_coordinate.py); applying it to this response is a wire change that must be certified against a capture + re-verified vs the i3 parity tests.",
+  "request": { "method": "GET", "path": "/aml/physicalLibrary/elements" },
+  "expected": { "status": 200, "json_contains": { } }
+}
