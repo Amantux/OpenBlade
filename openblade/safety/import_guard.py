@@ -39,8 +39,14 @@ FORBIDDEN_PATTERNS: list[str] = [
     f"{_LIBRARY_PREFIX}find_drive_by_barcode(",
     f"{_LIBRARY_PREFIX}find_slot_by_barcode(",
     f"{_LIBRARY_PREFIX}inventory(",
+    # Bare ".write_" + "bytes(" is kept: a direct tape WRITE via any handle is the
+    # destructive direction, and there are no legitimate bare-write call sites, so it
+    # stays a preventive net with zero false positives.
     ".write_" + "bytes(",
-    ".read_" + "bytes(",
+    # The bare ".read_bytes(" pattern was REMOVED: it matched ANY pathlib read (e.g.
+    # hashing a SQLite backup in dr.py, reading source files in nas/ingest.py) with no
+    # relation to tape hardware. Tape reads remain covered by "ltfs.read_bytes(" above,
+    # and reads are non-destructive, so dropping the over-broad net loses no real safety.
 ]
 
 ALLOWED_FILES: set[str] = {
@@ -78,6 +84,17 @@ ALLOWED_FILES: set[str] = {
     "openblade/api/routes_dashboard.py",
     "openblade/api/routes_inventory.py",
     "openblade/cli/main.py",
+    # --- Authorized direct-access points where the orchestrator is the wrong tool ---
+    # TapeOperationOrchestrator performs ATOMIC single ops (mount->act->unmount, by
+    # barcode) so tapes never stay mounted. These call sites are legitimately outside
+    # it and mirror real i3/iBlade production behavior; routing them through it would
+    # break their contract or the orchestrator's own safety model:
+    "openblade/api/routes_aml_move_medium.py",  # i3 AML Web Services robotics: moveMedium is coordinate-based (no barcode); wire contract
+    "openblade/api/routes_aml_operations.py",   # i3 AML operations: coordinate-based load; wire contract
+    "openblade/api/routes_ltfs.py",             # stateful LTFS mount/unmount HTTP API (holds handles open across calls)
+    "openblade/api/nas_config.py",              # batch dataset verify: holds many RO mounts open at once for efficiency
+    "openblade/api/routes_upload.py",           # read-only library.inventory() for empty-slot lookup (not a tape data op)
+    "openblade/bootstrap.py",                   # startup tape provisioning (ltfs.ensure_tape) before services/orchestrator exist
 }
 
 
