@@ -35,6 +35,7 @@ from openblade.api.routes_aml_auth import (
 )
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
+from openblade.domain.scalar_coordinate import MoveClass
 
 router = APIRouter()
 
@@ -74,9 +75,9 @@ async def move_medium(
     data = raw if isinstance(raw, dict) else payload
 
     try:
-        move_class = int(data.get("moveClass", 0) or 0)
+        move_class = MoveClass.from_wire(int(data.get("moveClass", 0) or 0))
     except (TypeError, ValueError):
-        move_class = 0
+        move_class = MoveClass.NORMAL
 
     source = _parse_coordinate(data.get("sourceCoordinate"))
     if source is None:
@@ -88,10 +89,10 @@ async def move_medium(
     source_type, source_address = source
 
     try:
-        if move_class == 3 or (source_type == "drive" and destination is None):
+        if move_class.is_unload or (source_type == "drive" and destination is None):
             if source_type != "drive":
                 raise HTTPException(
-                    status_code=422, detail="Unload (moveClass 3) requires a drive source"
+                    status_code=422, detail="Unload move requires a drive source"
                 )
             result = context.library.unload(source_address, _first_empty_slot(context))
         elif destination is None:
