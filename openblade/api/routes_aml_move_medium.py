@@ -1,19 +1,24 @@
-"""AML ``moveMedium`` robotics endpoint (real Quantum i3 dialect).
+"""AML ``moveMedium`` robotics endpoint — OpenBlade-native APPROXIMATION, not certified.
 
 Quantum's Web Services move a cartridge with ``POST aml/media/operations/moveMedium``
-(Web Services Guide Rev D, Table 133) carrying a ``sourceCoordinate`` and
-``destinationCoordinate`` plus a ``moveClass`` (0 = normal, 3 = unload to home
-slot). OpenBlade's own emulator historically exposed ``/aml/operations/move``
-instead; this module adds the faithful ``moveMedium`` surface so the
-``scalar_http`` client (which must speak the real i3 dialect) can be developed and
-tested against the emulator, and so the emulator matches the parity matrix.
+(Web Services Guide Rev D, Table 133). This module exposes that path so the
+``scalar_http`` client can be developed against the emulator, BUT it is a
+simplified OpenBlade dialect, NOT a certified match for a real i3:
 
-Fidelity note: a real i3 coordinate keys on a globally-unique SCSI
-``elementAddress``. The emulator's element addresses are per-type (slot ids and
-drive ids overlap), so this endpoint accepts a coordinate object of
-``{elementAddress, elementType}`` where ``elementType`` disambiguates slot vs
-drive. Mapping to a real library's unified element-address space is a
-milestone-2 hardening item (tracked with the serial<->/dev/st correlation).
+- Coordinates are a simplified ``{elementAddress, elementType}`` object (element
+  addresses are per-type here; slot and drive ids overlap). A real i3 coordinate
+  is a physical ``frame/rack/section/column/row`` + type keyed on a globally-unique
+  SCSI element address. Modelling that faithfully is roadmap Phase 0
+  (``ScalarCoordinate``).
+- ``moveClass`` is handled as small integers (0 = normal, 3 = unload-to-home). The
+  real contract is a bit field with different values (e.g. unload) — UNVERIFIED
+  against a capture.
+
+Because the emulator and the ``scalar_http`` client currently share these
+simplifications, client<->emulator tests passing does NOT prove i3 fidelity. That
+is enforced only by the compatibility corpus (``compatibility/``, all cases still
+``inferred``). Do not treat this endpoint as strict AML parity until a real
+appliance capture certifies it.
 """
 
 from __future__ import annotations

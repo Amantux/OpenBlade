@@ -1,0 +1,10 @@
+{
+  "id": "aml-login-success",
+  "profile": "scalar-i3-341g",
+  "source": "inferred",
+  "firmware": "341G",
+  "manual_ref": "Web Services Guide Rev D §2.5 (users/login)",
+  "fidelity_notes": "Emulator returns a Bearer token in the body; the real i3 contract is cookie-session based (see roadmap Phase 5 auth fidelity). Certify against a capture.",
+  "request": { "method": "POST", "path": "/aml/users/login", "json": { "name": "admin", "password": "password" } },
+  "expected": { "status": 200, "json_contains": { "code": 0, "description": "OK" } }
+}
