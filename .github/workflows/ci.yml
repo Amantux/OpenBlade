@@ -38,6 +38,7 @@ jobs:
               - 'tests/integration/test_sharded_archive_atomicity.py'
               - 'tests/compat/**'
               - 'compatibility/**'
+              - 'tests/i3/test_scalar_http_*.py'
               - 'pyproject.toml'
             api:
               - 'openblade/api/**'
@@ -127,6 +128,8 @@ jobs:
       - run: pytest tests/compat -q --tb=short
       # Whole safety suite (was only test_safety_regression.py) so the SAFETY_003
       # import guard is enforced and cannot silently rot again.
+      # scalar_http real-i3 client contract tests (in-process via TestClient, no server).
+      - run: pytest tests/i3/test_scalar_http_session.py tests/i3/test_scalar_http_library_backend.py tests/i3/test_scalar_http_move_medium.py tests/i3/test_scalar_http_wiring.py -q --tb=short
       - run: pytest tests/safety -q --tb=short
 
   api-aml-integration:

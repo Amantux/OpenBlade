@@ -50,8 +50,9 @@ class ScalarHttpSession:
         """Establish a session. Raises ``ScalarHttpError`` on failure.
 
         The AML login accepts a JSON body and aliases ``username`` to ``name``; the
-        session cookie lands in the client cookie jar. The bearer token in the body
-        is captured as a fallback for clients whose jar is not shared across calls.
+        session cookie lands in the client cookie jar and authenticates every
+        subsequent request. The emulator also returns a token in the body — retained
+        for diagnostics only, NOT sent as a Bearer header (see ``_headers``).
         """
         response = self._client.post(
             self._login_path,
@@ -65,10 +66,12 @@ class ScalarHttpSession:
         self._logged_in = True
 
     def _headers(self) -> dict[str, str]:
-        headers = dict(_JSON_HEADERS)
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-        return headers
+        # Cookie-session only, to match the real i3: authentication rides on the
+        # ``sessionID`` cookie persisted in the client's cookie jar from login. We do
+        # NOT send an ``Authorization: Bearer`` header — that is an emulator-only
+        # artifact the appliance does not accept, and relying on it would let the
+        # client "work" against the emulator while diverging from the real contract.
+        return dict(_JSON_HEADERS)
 
     def request(
         self,
