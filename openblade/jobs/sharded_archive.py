@@ -193,6 +193,9 @@ def _clean_unmount_and_unload(
         if slot_id is None:
             continue
         try:
+            # raise_on_failed=True is essential: execute_tape_request otherwise
+            # SWALLOWS an unload failure (returns a FAILED record) and the batch would
+            # commit with a tape stuck in a drive. pop only on genuine success.
             execute_tape_request(
                 catalog,
                 library,
@@ -205,6 +208,7 @@ def _clean_unmount_and_unload(
                     requested_by="sharded-archive",
                     job_id=job_id,
                 ),
+                raise_on_failed=True,
             )
             loaded_slots.pop(handle.drive_id, None)
         except Exception as exc:  # noqa: BLE001 - aggregated and re-raised below

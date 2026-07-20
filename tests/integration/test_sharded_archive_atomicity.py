@@ -95,3 +95,20 @@ def test_unmount_failure_blocks_commit(tmp_path: Path, monkeypatch) -> None:
     assert result.errors  # dirty unmount surfaced as a failure
     assert result.files_archived == 0
     assert _archived_count(catalog) == 0  # data was written but the batch never committed
+
+
+def test_unload_failure_blocks_commit(tmp_path: Path, monkeypatch) -> None:
+    # Writes + unmount succeed, but the drive fails to UNLOAD. execute_tape_request
+    # swallows unload failures unless raise_on_failed=True, so this is the path that
+    # can wrongly commit a batch with a tape stuck in a drive. Must never commit.
+    library, ltfs = _setup()
+    catalog = _catalog()
+    scheduler = DriveScheduler(num_drives=2)
+    monkeypatch.setattr(library, "unload", _raise(RuntimeError("drive stuck")))
+
+    job = catalog.create_job("archive", {})
+    result = run_sharded_archive(_request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id)
+
+    assert result.errors  # stuck unload surfaced, not swallowed
+    assert result.files_archived == 0
+    assert _archived_count(catalog) == 0  # tape stuck in drive -> batch must not be durable
