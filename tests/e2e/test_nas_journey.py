@@ -21,6 +21,7 @@ from openblade.api.main import app
 from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
 from openblade.nas.service import NasService
+from openblade.nas.tape_paths import dataset_tape_path
 
 CONTENT = b"the quick brown fox jumps over the lazy dog" * 4
 CHECKSUM = hashlib.sha256(CONTENT).hexdigest()
@@ -104,7 +105,7 @@ def _archive_to_tape_and_offline(file_id: str) -> str:
     assert dataset is not None
     rel_path = str(record["relative_path"])
     barcode = next(b for b in ctx.library.get_all_barcodes() if not b.startswith("CLN"))
-    tape_path = f"/{dataset.name}/{rel_path}"
+    tape_path = str(dataset_tape_path(dataset.name, rel_path))  # same formula ingest uses
 
     ctx.ltfs.write_bytes(barcode, tape_path, CONTENT)
     ctx.catalog.upsert_nas_file_record(

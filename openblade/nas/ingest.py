@@ -24,6 +24,7 @@ from openblade.nas.ltfs_manifest import TapeMetadataWriter
 from openblade.nas.manifest_validator import ManifestValidator, VersionedManifestWriter
 from openblade.nas.path_mapping import PathMappingService
 from openblade.nas.service import NasService
+from openblade.nas.tape_paths import dataset_tape_path
 from openblade.nas.types import (
     ArchivePlan,
     CacheDriveConfig,
@@ -328,7 +329,7 @@ class _BaseIngest:
         relative_path: str,
         prepared: _PreparedFile,
     ) -> PurePosixPath:
-        tape_path = PurePosixPath("/") / self.dataset.name / prepared.relative_path
+        tape_path = dataset_tape_path(self.dataset.name, prepared.relative_path)
         operation_checksum = hashlib.sha256(
             f"{prepared.relative_path}:{barcode}:{_utcnow_iso()}".encode()
         ).hexdigest()

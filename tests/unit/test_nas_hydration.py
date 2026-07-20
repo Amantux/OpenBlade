@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import threading
 
 import pytest
@@ -320,3 +321,34 @@ def test_parallel_restore_groups_are_processed_sequentially() -> None:
         monkeypatch.undo()
 
     assert seen == ["VOL001L9", "VOL002L9", "VOL003L9"]
+
+
+def test_restore_fails_when_tape_read_cannot_reproduce_recorded_checksum() -> None:
+    """Safety regression: a record with a REAL checksum whose bytes are not on tape
+    must NOT be reported as restored — the placeholder fallback can't reproduce the
+    recorded digest, so the file is marked FAILED rather than served as a corrupt
+    but checksum-clean 200. (Simulator sentinel-checksum records are unaffected: they
+    keep the placeholder path, proven by the other tests in this file.)"""
+    service = nas_service()
+    pool = seed_pool(service)
+    dataset = seed_dataset(service, pool.id)
+    real_checksum = hashlib.sha256(b"the original archived bytes").hexdigest()
+    service.upsert_file_record(
+        NasFileRecord(
+            dataset_id=dataset.id,
+            pool_id=pool.id,
+            relative_path="photos/a.jpg",
+            tape_barcode="VOL001L9",  # claims to be on tape, but no bytes were written
+            size_bytes=27,
+            checksum_sha256=real_checksum,
+            status=NasFileState.OFFLINE_ON_TAPE,
+        )
+    )
+    job = create_restore_job(service, pool_id=pool.id, paths=["photos/a.jpg"])
+
+    restored = hydration_executor(service).run(job.id)
+
+    assert restored.files_restored == 0
+    assert restored.files_failed == 1
+    record = service.list_pool_file_records(pool.id)[0]
+    assert record.status is NasFileState.FAILED
