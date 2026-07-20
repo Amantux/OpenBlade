@@ -22,6 +22,7 @@ from openblade.domain.models import (
     OperationResult,
     SlotState,
 )
+from openblade.domain.scalar_coordinate import MoveClass
 from openblade.hardware.scalar_http.errors import ScalarHttpError
 from openblade.hardware.scalar_http.session import ScalarHttpSession
 
@@ -162,8 +163,13 @@ class ScalarHttpLibraryBackend:
         )
 
     def unload(self, drive_id: int, target_slot: int) -> OperationResult:
+        # Real i3 unload uses moveClass=8 (bit field) with the drive source; the
+        # target slot is sent as a hint (Web Services manual). See
+        # docs/reference/i3-contract-notes.md.
         return self._move_medium(
-            self._coordinate("drive", drive_id), self._coordinate("slot", target_slot)
+            self._coordinate("drive", drive_id),
+            self._coordinate("slot", target_slot),
+            move_class=MoveClass.UNLOAD.to_wire(),
         )
 
     def move(self, source_slot: int, target_slot: int) -> OperationResult:

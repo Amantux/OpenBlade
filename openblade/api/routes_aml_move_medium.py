@@ -94,7 +94,11 @@ async def move_medium(
                 raise HTTPException(
                     status_code=422, detail="Unload move requires a drive source"
                 )
-            result = context.library.unload(source_address, _first_empty_slot(context))
+            # Real moveClass=8 unload takes the drive source only; if a destination
+            # slot is supplied (client hint), honor it, else the library picks an
+            # empty/home slot (Web Services manual).
+            target_slot = destination[1] if destination is not None else _first_empty_slot(context)
+            result = context.library.unload(source_address, target_slot)
         elif destination is None:
             raise HTTPException(status_code=422, detail="destinationCoordinate is required")
         else:
