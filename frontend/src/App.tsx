@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './lib/auth-context';
 import AdminSafetyPage from './pages/AdminSafetyPage';
 import AdminSecurityPage from './pages/AdminSecurityPage';
 import Archive from './pages/Archive';
+import Assistant from './pages/Assistant';
 import Catalog from './pages/Catalog';
 import CatalogRebuildPage from './pages/CatalogRebuildPage';
 import CatalogStatusPage from './pages/CatalogStatusPage';
@@ -85,6 +86,7 @@ function RoutedApp() {
       <Route element={<ProtectedLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="dashboard" element={<Dashboard />} />
+        <Route path="assistant" element={<Assistant />} />
 
         <Route path="libraries" element={<Libraries />} />
         <Route path="libraries/:libraryId" element={<LibraryScopedOutlet />}>

@@ -51,6 +51,7 @@ const sections: NavSection[] = [
     icon: Gauge,
     items: [
       { label: 'Dashboard', to: '/', end: true },
+      { label: 'Assistant', to: '/assistant' },
       { label: 'Fleet Overview', to: '/libraries' },
       { label: 'Test Runner', to: '/system/test-runner' },
       { label: 'System Health', to: '/system/health' },
