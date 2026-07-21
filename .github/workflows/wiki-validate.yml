@@ -1,0 +1,30 @@
+name: wiki-validate
+on:
+  pull_request:
+    paths:
+      - "docs/wiki/**"
+      - "scripts/wiki_validate.py"
+      - "tests/unit/test_agent_policy.py"
+      - "deploy/emulator/observability/**"
+      - "openblade/api/routes_aml_system.py"
+  push:
+    branches: [master]
+    paths:
+      - "docs/wiki/**"
+      - "scripts/wiki_validate.py"
+  workflow_dispatch:
+
+jobs:
+  wiki-validate:
+    name: wiki-validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - name: Validate wiki (front matter, IDs, metric refs, links, policy)
+        run: python scripts/wiki_validate.py
+      - name: Agent-safety policy tests
+        run: pytest tests/unit/test_agent_policy.py -q --tb=short
