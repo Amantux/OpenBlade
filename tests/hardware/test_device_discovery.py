@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from openblade.hardware.discovery import find_tape_drives, parse_lsscsi
+from openblade.hardware.discovery import find_tape_drives, parse_lsscsi, resolve_sg_device
 from openblade.hardware.sg import parse_sg_inq
 
 pytestmark = pytest.mark.real_hardware
@@ -19,21 +19,35 @@ def _lsscsi_devices(runner):
 
 
 def _normalize_drive_path(device: str) -> str:
+    """Map a no-rewind node onto the rewinding node lsscsi reports in its output.
+
+    This exists ONLY so a configured /dev/nstN can be matched against lsscsi's
+    block-device column, which always shows /dev/stN. It must never be the path
+    a SCSI command is issued against - see _resolve_scsi_path.
+    """
     if device.startswith("/dev/nst"):
         return f"/dev/st{device.removeprefix('/dev/nst')}"
     return device
 
 
 def _resolve_scsi_path(requested_device: str, devices) -> str:
+    """Resolve a configured drive device to the node SCSI commands should use.
+
+    Always prefer the SCSI generic node. Issuing sg_inq against the REWINDING
+    /dev/stN node exits 50 ("close error: No medium found") whenever the drive
+    is empty, because closing a rewinding node attempts a rewind - the inquiry
+    itself succeeds and the command still reports failure. Drives are empty
+    most of the time on a real library, so returning /dev/stN here made this a
+    guaranteed false failure rather than an occasional one.
+    """
     requested = _normalize_drive_path(requested_device)
     requested_name = Path(requested).name
     for device in devices:
         candidates = {value for value in (device.block_device, device.sg_device) if value}
-        if requested in candidates:
-            return requested
-        if requested_name in {Path(candidate).name for candidate in candidates}:
+        names = {Path(candidate).name for candidate in candidates}
+        if requested in candidates or requested_name in names:
             return device.sg_device or device.block_device or requested_device
-    return requested_device
+    return resolve_sg_device(requested_device)
 
 
 def _user_in_tape_group() -> bool:
