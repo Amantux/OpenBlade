@@ -49,13 +49,20 @@ device reports a tape online) — both are follow-on work for the bring-up, and
 
 The serials are captured either way, so ``connect-i3`` output tells an operator
 exactly what to paste into ``OPENBLADE_DRIVE_SERIAL_MAP``.
+
+A backend that can *ask the library* which drives it has (the AML Web Services
+backend can; ``mtx`` cannot) gets one more check on top of the two above:
+:func:`verify_against_library_serials` compares the declared serials with the
+serials the library reports, which catches a declaration that matches this
+host's drives but belongs to a different library. It still cannot observe which
+serial sits in which element.
 """
 
 from __future__ import annotations
 
 import logging
 import subprocess
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from openblade.domain.errors import DriveCorrelationError, RealHardwareDisabledError
@@ -310,6 +317,69 @@ def correlate_drives(
         serials_verified=True,
         warnings=tuple(warnings),
     )
+
+
+def _normalize_serial(serial: str) -> str:
+    """Fold a serial for comparison across sources (SCSI INQUIRY vs a library UI)."""
+    return serial.strip().casefold()
+
+
+def verify_against_library_serials(
+    *,
+    correlation: DriveCorrelation,
+    library_serials: Collection[str] | None,
+    source: str = "the library",
+) -> tuple[str, ...]:
+    """Cross-check operator-declared serials against the serials a library reports.
+
+    This is the third check available to a backend that can ask the library which
+    drives it has (the AML Web Services backend can; ``mtx`` cannot). It catches
+    the configuration error the local ``sg_inq`` check cannot see: a declaration
+    that matches the drives cabled to this host but belongs to a *different*
+    library than the one the controller is talking to.
+
+    What it can and cannot conclude — and why a disjoint result is not a refusal:
+
+    * **Partial overlap → refuse.** If some declared serials appear in the
+      library's list and others do not, the two sides demonstrably report serials
+      in the same form, so a missing one is a real disagreement.
+    * **No overlap → warn.** A library UI and a SCSI ``Unit serial number`` do not
+      always spell the same drive the same way (vendor prefixes, padding). With
+      zero overlap we cannot distinguish "different library" from "different
+      spelling", and refusing on a formatting difference would break a correct
+      installation. The binding check remains the live ``sg_inq`` comparison.
+    * **Nothing reported / unreadable → warn.** Absence of evidence only.
+
+    Returns the warnings to log; raises :class:`DriveCorrelationError` on refusal.
+    """
+    declared = {
+        _normalize_serial(entry.serial) for entry in correlation.entries if entry.serial.strip()
+    }
+    if not declared:
+        return (f"no drive serials to cross-check against {source}",)
+    if library_serials is None:
+        return (f"{source} drive list could not be read, so serials were not cross-checked",)
+
+    reported = {_normalize_serial(serial) for serial in library_serials if serial.strip()}
+    if not reported:
+        return (f"{source} reported no drive serial numbers, so serials were not cross-checked",)
+
+    missing = sorted(declared - reported)
+    if missing and len(missing) == len(declared):
+        return (
+            f"none of the declared drive serials appear in {source}'s drive list; the two "
+            "sides may spell serials differently, so the declaration was NOT cross-checked "
+            "against the library",
+        )
+    if missing:
+        raise DriveCorrelationError(
+            "OPENBLADE_DRIVE_SERIAL_MAP declares drive serial(s) that "
+            f"{source} does not report: {missing}. "
+            f"Declared: {sorted(declared)}. Reported by {source}: {sorted(reported)}. "
+            "Other declared serials do match, so this is a real disagreement and not a "
+            "formatting difference. Refusing to start rather than guess which drive is which."
+        )
+    return ()
 
 
 def _refuse_on_duplicate_serials(live: Mapping[str, str]) -> None:
