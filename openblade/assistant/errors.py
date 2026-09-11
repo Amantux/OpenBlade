@@ -46,3 +46,30 @@ class ToolRegistryViolationError(AssistantError):
 
 class ReadOnlyViolationError(AssistantError):
     """A tool tried to reach a mutating method through a read-only proxy."""
+
+
+class SetupRegistryViolationError(AssistantError):
+    """A tier-1 setup tool was registered that the setup registry refuses.
+
+    Either the name is not on ``SETUP_TOOL_NAMES`` (the fail-closed allowlist) or it
+    contains a destructive verb (the denylist, which wins over the allowlist).
+    """
+
+
+class SetupFacadeViolationError(AssistantError):
+    """A setup tool tried to reach something the write facade does not expose."""
+
+
+class SetupRefusedError(AssistantError):
+    """A setup action was refused because its target is not unambiguous.
+
+    Confirmation is not a licence to guess: an unknown barcode, a tape already in
+    another volume group, or a name that is already taken stops the action here and
+    hands the candidates back to the model. ``code`` is a stable machine-readable
+    reason; ``candidates`` are the objects the operator might have meant.
+    """
+
+    def __init__(self, message: str, *, code: str, candidates: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.code = code
+        self.candidates = candidates
