@@ -104,7 +104,7 @@ NAS restore jobs have operator-triggered `retry` (from `FAILED` only), `cancel`,
 | `GET /status/library` | **yes** | inventory, drive list, slot totals, cartridges loaded |
 | `GET /status/catalog` | **yes** | row counts, last catalog-rebuild run |
 | `GET /system/config-summary` | **yes** | backend, CORS origins, max upload, db path, library count |
-| `GET /health` | none | static `{"status":"ok"}` — **checks nothing** |
+| `GET /health` | none | `{"status":"ok","backend":"mock"}` — **checks nothing** |
 
 Verified against the simulator: `/healthz`, `/readyz` and `/version` return 200
 unauthenticated; `/status/catalog` and `/status/library` return **401**.

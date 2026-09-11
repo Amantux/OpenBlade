@@ -7,6 +7,19 @@ issues a token, and a **confirm** that does the work and consumes the token.
 This page explains the flow, *why* it refuses without a token, and one endpoint
 that bypasses the whole thing.
 
+> ⚠️ **`openblade format` only ever formats simulator state.** It builds its
+> config by hand and never calls `load_config()`, so the backend stays `mock`
+> whatever `OPENBLADE_BACKEND` says. On a real-hardware host
+> `openblade format confirm` prints `{"success": true, "message": "formatted"}`
+> while the physical cartridge is **untouched** — so you either hit a confusing
+> mount failure later, or believe a tape was wiped when it still holds data.
+>
+> **To format real media, use the HTTP pair:**
+> `POST /cartridges/{barcode}/format/dry-run` then
+> `POST /cartridges/format/confirm`. The two-phase protocol is identical; the
+> CLI is used below only because it shows the protocol most clearly.
+> See [getting started §5](getting-started.md).
+
 ---
 
 ## The flow
@@ -122,8 +135,9 @@ Operator guidance:
 - Treat `/ltfs/format` as a destructive, unauthenticated endpoint. Do not expose
   the OpenBlade API to any network you do not control, and if you front it with a
   proxy, block `POST /ltfs/format`.
-- Use `openblade format dry-run` / `confirm`, or the `/cartridges` pair, for
-  anything an operator drives.
+- Use the `/cartridges` dry-run / confirm pair for anything an operator drives
+  against real media. (`openblade format` is the simulator equivalent — see the
+  banner at the top of this page.)
 - `docs/safety.md` states that formatting requires a dry run and a valid token.
   That is true of the documented path and **not** true of `/ltfs/format`.
 

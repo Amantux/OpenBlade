@@ -214,22 +214,46 @@ curl localhost:8000/version
 
 Full route list: [API reference](../reference/api.md) (generated).
 
-> `/health` and `/healthz` are **different endpoints**. `/health` returns a
-> static `{"status":"ok"}` and checks nothing. `docker-compose.yml` health-checks
-> `/health`, so a container with an unreachable database still reports healthy.
-> Probe `/readyz` instead.
+> `/health` and `/healthz` are **different endpoints**. `/health` returns
+> `{"status":"ok","backend":"mock"}` and checks nothing.
+> `docker-compose.yml` health-checks `/health`, so a container with an
+> unreachable database still reports healthy. Probe `/readyz` instead.
 
 ---
 
-## 5. Two databases, one host
+## 5. ⚠️ The CLI is simulator-only
 
-The CLI's config is built by hand in `openblade/cli/main.py:_default_config()`
-rather than by `load_config()`, so **the CLI ignores `OPENBLADE_DB_URL`** and
-always uses `~/.openblade/openblade.db`. The API honours the variable.
+**Almost every `openblade` command runs against the simulator no matter what
+`OPENBLADE_BACKEND` says.** Only two commands read the real configuration:
 
-If you set `OPENBLADE_DB_URL` for the server and then run `openblade jobs`, you
-are looking at a different database and it will look empty. This is a real bug,
-not a documented design; see [the catalog](the-catalog.md).
+- `openblade hardware connect-i3`
+- `openblade hardware validate-ltfs`
+
+Everything else — `inventory`, `archive`, `restore`, `jobs`, `catalog`,
+`format dry-run`, `format confirm`, `volume-group`, and all of `mock` — goes
+through `_get_context()`, which builds its config by hand in
+`openblade/cli/main.py:_default_config()`. That helper never calls
+`load_config()`, so the backend stays at its `mock` default and
+`OPENBLADE_DB_URL` is ignored.
+
+Verified: with `OPENBLADE_BACKEND=real OPENBLADE_REAL_HARDWARE_ENABLED=true` and
+a deliberately nonexistent `OPENBLADE_DB_URL`, `openblade inventory` **exits 0
+and prints the simulator's cartridges**. No error, no warning.
+
+Two ways this hurts:
+
+1. **It looks like a successful hardware check and is not.** A plausible list of
+   tapes appears, and they are not your tapes.
+2. **`openblade format confirm` reports `"formatted": true` without touching a
+   physical cartridge.** See [formatting tapes](formatting-tapes.md).
+
+**Drive real hardware through the HTTP API**, started with the real-hardware
+environment set. Use the CLI for the simulator and for the two `hardware`
+validation commands.
+
+Same root cause, smaller blast radius: running `openblade jobs` against a server
+started with `OPENBLADE_DB_URL` set shows you a *different* database, which will
+look empty. See [the catalog](the-catalog.md).
 
 ---
 

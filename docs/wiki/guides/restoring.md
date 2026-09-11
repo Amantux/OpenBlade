@@ -38,8 +38,19 @@ openblade catalog /
 openblade catalog /demo-vg
 ```
 
-Remember the path shape: `/<volume-group-name>/<path relative to the archived
-source root>`.
+### ⚠️ The path shape depends on which engine archived it
+
+| Archived by | Catalog path |
+|---|---|
+| Simple archive (`openblade archive`, `POST /archive/`) | `/<volume-group-name>/<path relative to the source root>` |
+| **Sharded archive** (`POST /archive/sharded`) | **the raw absolute source path**, e.g. `/data/big/note.txt` — no volume-group prefix at all |
+
+Verified: a sharded archive of `…/src` into `shard-vg` produced the record
+`/tmp/…/src/note.txt`. The shard children are that path plus `#shardNNNN`.
+
+So the "everything is under `/<group>/`" rule is **not** an invariant. If a
+restore of a sharded file 404s with a group-prefixed path, list the catalog and
+use the absolute path you see there.
 
 ### Unknown path
 
@@ -92,7 +103,11 @@ How the sharded path works:
    no `archived` instance: `Missing archived shard instances`.
 4. Acquire **all** shard tapes at once. There is no sequential fallback — if the
    library cannot mount N tapes in N drives simultaneously, the restore cannot
-   run.
+   run. Two different failure shapes here: asking for **more shards than the
+   library has drives** fails immediately with `DriveBusyError`, but if the
+   drives merely happen to be *busy*, the request **blocks for the 300-second
+   default timeout** before raising the same error. A five-minute stall is that
+   timeout, not a deadlock.
 5. Read every shard in parallel into a scratch directory.
 6. Reassemble by round-robining `block_size` reads across the shard files,
    streaming straight to the destination.
@@ -106,27 +121,35 @@ what you archived with.
 
 SHA-256 throughout. There is no other digest.
 
+There are three distinct mismatch behaviours. **They differ in whether you are
+left with a file on disk**, so read the row that matches the path you used.
+
 | Path | What is compared | On mismatch |
 |---|---|---|
-| Single instance | recomputed digest vs `file_record.checksum_sha256` | temp file renamed to `quarantine_<name>` in the scratch dir, job `failed` |
-| Sharded | digest computed **during reassembly** vs the parent's whole-file checksum | **destination file is deleted**, job `failed`, `ChecksumMismatchError` |
+| **Classic restore** (`openblade restore`, and the default `POST /restore/` branch) | recomputed digest vs `file_record.checksum_sha256` | the output is renamed to **`<your-destination>.quarantine`, in your destination directory, and is left there permanently**; job `failed` |
+| **Sharded, per-instance** | same | temp file renamed to `quarantine_<name>` inside the scratch dir, which is then deleted — nothing survives |
+| **Sharded, reassembled** | digest computed during reassembly vs the parent's whole-file checksum | **destination file is deleted**; job `failed`, `ChecksumMismatchError` |
 
 Error text you will actually see:
 
 ```
-Reassembled checksum mismatch: <actual> != <expected>
-Checksum mismatch: expected <expected>, got <actual>
+Checksum mismatch for <catalog_path>                       # classic
+Checksum mismatch: expected <expected>, got <actual>       # sharded, per-instance
+Reassembled checksum mismatch: <actual> != <expected>      # sharded, reassembly
 ```
 
-Two honest caveats:
+> ⚠️ **After a failed classic restore, clean up the `.quarantine` file
+> yourself.** Nothing deletes it. It is corrupt data sitting next to where good
+> data was supposed to go, and on a retry into the same directory it is easy to
+> mistake for output. Check for it before re-running.
 
-- **The "quarantine" is not durable.** The scratch directory is removed in the
-  same `finally` block, so the quarantined file is deleted moments later. Do not
-  promise operators a recoverable artifact — treat a checksum failure as "nothing
-  was produced".
-- **Per-shard checksums are stored but not re-verified on restore.** Only the
-  reassembled whole-file digest is checked. That catches corruption, but it does
-  not tell you *which* shard was bad.
+Two further caveats:
+
+- **Only the classic path leaves you an artifact.** For both sharded paths,
+  treat a checksum failure as "nothing was produced".
+- **Per-shard checksums are stored but not re-verified during reassembly.** Only
+  the reassembled whole-file digest is checked. That catches corruption, but it
+  does not tell you *which* shard was bad.
 
 A checksum mismatch on a restore is a serious signal: it means the tape, the
 drive, or the catalog disagrees with what was written. Do not retry blindly —

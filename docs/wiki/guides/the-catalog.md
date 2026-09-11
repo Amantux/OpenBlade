@@ -180,9 +180,13 @@ openblade catalog /demo-vg
 
 Over HTTP: `GET /catalog/`, `GET /catalog/{file_id}/shards`.
 
-Path shape is `/<volume-group-name>/<path relative to the archived source root>`.
-The volume group name is part of the identity of every file, which is why there
-is no rename.
+For files written by the **simple** archive engine the path shape is
+`/<volume-group-name>/<path relative to the archived source root>`, and the group
+name is part of the identity of every file — which is why there is no rename.
+
+⚠️ Files written by the **sharded** engine are catalogued under their raw
+absolute source path instead, with no group prefix. Two path conventions coexist
+in one table; see [restoring](restoring.md).
 
 ---
 

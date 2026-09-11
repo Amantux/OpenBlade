@@ -10,6 +10,15 @@ from `openblade.cli.main:app`.
 `pip install -e .` puts the `openblade` console script on your PATH.
 Every command below also accepts `--help`.
 
+> ⚠️ **Every command here runs against the SIMULATOR, whatever
+> `OPENBLADE_BACKEND` is set to — except `openblade hardware connect-i3`
+> and `openblade hardware validate-ltfs`, which are the only two that read
+> the real configuration.** The rest build their config by hand in
+> `openblade/cli/main.py:_default_config()`, which leaves the backend at
+> its `mock` default and ignores `OPENBLADE_DB_URL`. `openblade inventory`
+> on a real-hardware host prints simulator data and exits 0. Drive real
+> hardware through the HTTP API.
+
 **14 commands**, in 3 sub-group(s) plus the top level.
 
 ## Command groups

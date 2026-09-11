@@ -175,8 +175,18 @@ mount state through the same validator but does not re-check unload legality.
    *set* of drives, not their *order*.
 5. Run with `OPENBLADE_HARDWARE_DRY_RUN=true` first and read the logged command
    lines.
-6. Only then set both real-hardware variables. Start read-only: `openblade
-   inventory`, `openblade hardware validate-ltfs`.
+6. Only then set both real-hardware variables. Start read-only — with
+   `openblade hardware connect-i3`, `openblade hardware validate-ltfs`, and
+   `GET /inventory/` against a server started with the real-hardware
+   environment.
+
+   > ⚠️ **Do not use `openblade inventory` as your hardware check.** Those two
+   > `hardware` sub-commands are the *only* CLI commands that read the real
+   > configuration. Every other `openblade` command — `inventory`, `archive`,
+   > `restore`, `format confirm` — runs against the simulator regardless of
+   > `OPENBLADE_BACKEND`, and reports success. Verified: `openblade inventory`
+   > under a full real-hardware environment exits 0 and prints simulator
+   > cartridges.
 7. Use scratch barcodes for every first destructive test, and keep real data out
    of `OPENBLADE_SCRATCH_BARCODES`.
 

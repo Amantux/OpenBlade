@@ -84,6 +84,16 @@ POST /archive/sharded
 sharded archives, and `openblade restore` cannot correctly restore them** — it
 does not replicate the shard detection that the API does.
 
+### ⚠️ Catalog paths are NOT group-prefixed here
+
+Unlike the simple engine, the sharded engine catalogs each file under its **raw
+absolute source path** — `/data/big/note.txt`, not `/shard-vg/note.txt` — even
+though it does assign the lane tapes to the volume group. Shard children are that
+path plus `#shardNNNN`.
+
+Verified against the simulator. Remember it when you come to restore: the
+group-prefixed path will 404. List the catalog and use what you see there.
+
 ### The number of lanes is what *you* pass
 
 This is the single most misunderstood part. Shard count is **`len(lane_barcodes)`**.

@@ -31,7 +31,11 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
+import os
 import sys
+import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -214,6 +218,15 @@ def render_cli_markdown() -> str:
         "`pip install -e .` puts the `openblade` console script on your PATH.",
         "Every command below also accepts `--help`.",
         "",
+        "> ⚠️ **Every command here runs against the SIMULATOR, whatever",
+        "> `OPENBLADE_BACKEND` is set to — except `openblade hardware connect-i3`",
+        "> and `openblade hardware validate-ltfs`, which are the only two that read",
+        "> the real configuration.** The rest build their config by hand in",
+        "> `openblade/cli/main.py:_default_config()`, which leaves the backend at",
+        "> its `mock` default and ignores `OPENBLADE_DB_URL`. `openblade inventory`",
+        "> on a real-hardware host prints simulator data and exits 0. Drive real",
+        "> hardware through the HTTP API.",
+        "",
         f"**{len(commands)} commands**, in {len(groups)} sub-group(s) plus the top level.",
         "",
         "## Command groups",
@@ -381,6 +394,7 @@ def _ordered_native_tags(tags: list[str]) -> list[str]:
 
 def render_api_markdown() -> str:
     grouped = collect_operations()
+    assert_app_surface_is_complete(grouped)
     native_tags = _ordered_native_tags([t for t in grouped if not _is_emulator_tag(t)])
     emulator_tags = sorted(t for t in grouped if _is_emulator_tag(t))
     native_count = sum(len(grouped[t]) for t in native_tags)
@@ -449,6 +463,70 @@ def render_api_markdown() -> str:
 # ---------------------------------------------------------------------------
 
 
+#: Environment pinned before `openblade.api.main` is imported. The generated
+#: pages must be a function of the CODE, not of the developer's shell.
+#:
+#: Two observed failures this prevents:
+#:   * `OPENBLADE_SCALAR_API_ONLY=true` scopes the app down to the emulator-only
+#:     surface, so api.md would be regenerated missing every native route.
+#:   * `OPENBLADE_BACKEND=real` (which the bring-up guides tell operators to set)
+#:     makes importing the app raise RealHardwareDisabledError, so the staleness
+#:     test errors with a hardware message that looks nothing like a docs problem.
+#:
+#: The DB URL is redirected too: importing the app runs init_db() and seeds demo
+#: rows, which would otherwise be written into the operator's real
+#: ~/.openblade/openblade.db -- the same file the CLI reads.
+_PINNED_ENV: dict[str, str | None] = {
+    "OPENBLADE_BACKEND": "mock",
+    "OPENBLADE_REAL_HARDWARE_ENABLED": None,
+    "OPENBLADE_SCALAR_API_ONLY": None,
+    "OPENBLADE_IBLADE_COMPAT_MODE": None,
+    "OPENBLADE_ROBOTICS_TRANSPORT": None,
+}
+
+
+@contextlib.contextmanager
+def pinned_introspection_env() -> Iterator[None]:
+    """Pin the env that shapes the app surface, then restore it.
+
+    Note the limit: if `openblade.api.main` was already imported by something
+    else in this process, its routes are already fixed and this cannot help.
+    :func:`assert_app_surface_is_complete` is the backstop for that case.
+    """
+    previous = {key: os.environ.get(key) for key in (*_PINNED_ENV, "OPENBLADE_DB_URL")}
+    with tempfile.TemporaryDirectory(prefix="openblade-wiki-gen-") as tmp:
+        try:
+            for key, value in _PINNED_ENV.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            os.environ["OPENBLADE_DB_URL"] = f"sqlite:///{Path(tmp) / 'introspect.db'}"
+            yield
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+def assert_app_surface_is_complete(grouped: dict[str, list[OperationDoc]]) -> None:
+    """Fail loudly if the app was scoped down before we could introspect it.
+
+    Emulator-only mode yields a schema with no native control plane. Writing
+    that out would look like "the API shrank" rather than "the generator ran in
+    the wrong mode", so refuse instead of producing a plausible wrong page.
+    """
+    native = [tag for tag in grouped if not _is_emulator_tag(tag)]
+    if not native:
+        raise RuntimeError(
+            "No native control-plane operations found. The app was probably "
+            "imported in emulator-only mode (OPENBLADE_SCALAR_API_ONLY) before "
+            "this generator could pin the environment."
+        )
+
+
 def assert_documenting_this_checkout() -> None:
     """Fail loudly if `openblade` resolved to a different checkout.
 
@@ -468,8 +546,9 @@ def assert_documenting_this_checkout() -> None:
 
 def build_pages() -> dict[Path, str]:
     """Return the full generated content keyed by destination path."""
-    assert_documenting_this_checkout()
-    return {CLI_PATH: render_cli_markdown(), API_PATH: render_api_markdown()}
+    with pinned_introspection_env():
+        assert_documenting_this_checkout()
+        return {CLI_PATH: render_cli_markdown(), API_PATH: render_api_markdown()}
 
 
 def write_pages() -> list[Path]:

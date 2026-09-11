@@ -31,9 +31,9 @@ A cartridge's `volume_group_id` is nullable — a tape with no group is
 A file record's `volume_group_id` is **not** nullable. Every catalogued file
 belongs to exactly one group.
 
-### The group name is baked into every catalog path
+### The group name is baked into every *simple* archive's catalog path
 
-Archive prefixes every catalog path with the group name:
+The simple archive engine prefixes every catalog path with the group name:
 
 ```
 source /data/reports/q3.csv  archived into  demo-vg
@@ -43,6 +43,12 @@ source /data/reports/q3.csv  archived into  demo-vg
 Since catalog paths are globally unique, archiving the same source into two
 groups produces two independent records. And **renaming a group is not possible**
 — there is no rename endpoint, and a rename would orphan every path anyway.
+
+> ⚠️ **The sharded engine does not do this.** `POST /archive/sharded` catalogs
+> files under their **raw absolute source path**, with no volume-group prefix,
+> even though it still assigns the tapes to the group. So the group prefix is a
+> property of the simple engine, not an invariant of the catalog. See
+> [restoring](restoring.md).
 
 ---
 
@@ -76,6 +82,13 @@ with `remaining_capacity >= file_size`.
 every barcode visible in the library (slots + drives), skip `CLN*`, skip tapes
 belonging to a *different* group, skip `exported`, skip ones too small — and the
 first survivor is **assigned to this volume group** and used.
+
+Side effect worth knowing: phase 2 calls `add_cartridge()` — which inserts **and
+commits** — for *every* inventory barcode it examines, including the ones it then
+rejects. So a single archive can create catalog rows for tapes it never used.
+Same phantom-row class as the unvalidated assign endpoint
+([inventory & barcodes](inventory-and-barcodes.md)), but here the archive engine
+is the source.
 
 Failure: `NoScratchMediaError`, HTTP **503**.
 
