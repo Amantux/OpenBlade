@@ -17,7 +17,7 @@ Every command below also accepts `--help`.
 > regression-tested; see docs/runbooks/real-data-campaign.md.) Real-
 > hardware commands still refuse without both flags set.
 
-**16 commands**, in 4 sub-group(s) plus the top level.
+**17 commands**, in 4 sub-group(s) plus the top level.
 
 ## Command groups
 
@@ -88,6 +88,14 @@ Mount the catalog namespace read-only. Runs in the foreground.
 Validate guarded Quantum i3 discovery and inventory wiring.
 
 Takes no arguments or options.
+
+### `openblade hardware drive-health`
+
+Report drive inquiry data and TapeAlert flags.
+
+| Parameter | Kind | Type | Required | Default | Help |
+| --- | --- | --- | --- | --- | --- |
+| `--device` | option | `STR` | no | none | Tape device to inspect, e.g. /dev/nst0. Default: every discovered drive. |
 
 ### `openblade hardware validate-ltfs`
 
