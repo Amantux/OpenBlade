@@ -6,8 +6,10 @@ Tests that run against real tape hardware. All tests are skipped unless the requ
 
 - Minimum: 1x LTO tape drive (LTO-7, LTO-8, or LTO-9 recommended)
 - Recommended: 1x tape library/changer with ≥4 slots + ≥2 drives  
-- Alternative: mhvtl virtual tape library for basic flow testing
-- Host: Linux with sg3_utils, mtx, and LTFS packages installed
+- Alternative: the mhvtl virtual tape library (see below) — the full suite has
+  been run green against it, not just "basic flow"
+- Host: Linux with `sg3-utils` and `mtx` installed, plus LTFS. LTFS is **not**
+  packaged for Ubuntu and must be built from source; see the rehearsal runbook.
 
 ## Environment Variables
 
@@ -35,12 +37,43 @@ OPENBLADE_BACKEND=real OPENBLADE_REAL_HARDWARE_ENABLED=true OPENBLADE_CHANGER_DE
 OPENBLADE_BACKEND=real OPENBLADE_REAL_HARDWARE_ENABLED=true pytest tests/hardware/test_device_discovery.py tests/hardware/test_drive_health.py -v
 ```
 
-### With mhvtl emulator
+### With the mhvtl virtual library (no physical hardware)
+
+There is **no `mhvtl` distro package** — `apt-get install mhvtl` (or
+`mhvtl-dkms` / `mhvtl-utils`) fails with `Unable to locate package` on Ubuntu.
+mhvtl has to be built from source, including an out-of-tree kernel module, and
+`scripts/mhvtl/setup.sh` does the whole thing idempotently: installs the build
+deps, builds and installs a **pinned** mhvtl commit, applies the patches in
+`scripts/mhvtl/patches/`, writes `/etc/mhvtl`, starts the daemons and verifies
+the rig with `lsscsi` and `mtx`.
+
 ```bash
-# Install: sudo apt install mhvtl
-# Configure and start mhvtl, then:
-OPENBLADE_BACKEND=real OPENBLADE_REAL_HARDWARE_ENABLED=true OPENBLADE_CHANGER_DEVICE=/dev/sg2 OPENBLADE_DRIVE_DEVICES=/dev/nst0 pytest tests/hardware/ -v -m real_hardware -k "not performance"
+sudo scripts/mhvtl/setup.sh              # build + configure + start + verify
+eval "$(scripts/mhvtl/env.sh)"           # DISCOVER device paths, export env
+pytest tests/hardware/ -v -m real_hardware
+
+sudo scripts/mhvtl/reset.sh              # between runs: unload all drives
+sudo scripts/mhvtl/teardown.sh           # stop daemons, unload the module
 ```
+
+Do not hardcode `/dev/sgN` / `/dev/nstN` for this rig: mhvtl attaches to
+whatever SCSI host number is free, so the device paths move between boots.
+`env.sh` discovers them and identifies the changer by unit serial number, so it
+can never select a real library attached to the same host.
+
+Requirements and caveats: `linux-headers-$(uname -r)` for the **running**
+kernel, Secure Boot disabled (an unsigned out-of-tree module cannot load under
+it), and root — the module is loaded on the host, so this does not work from
+inside an unprivileged container. LTFS is likewise unpackaged and must be built
+from source; without `mkltfs` the discovery, drive-health, changer and
+catalog suites still run, while the LTFS, archive/restore, sharded and
+performance suites cannot.
+
+See [`scripts/mhvtl/README.md`](../../scripts/mhvtl/README.md) for the rig
+layout, media/barcode map and the upstream mhvtl bugs it works around, and
+[`docs/runbooks/mhvtl-rehearsal.md`](../../docs/runbooks/mhvtl-rehearsal.md)
+for the first full pass (including the LTFS build recipe). The
+`mhvtl weekly rehearsal` workflow runs this rig on a schedule as a canary.
 
 ## Test Categories
 
