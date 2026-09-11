@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 from openblade.api.main import app
 from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
+from openblade.domain.models import MountMode
+from openblade.domain.policies import FormatConfirmation, SafetyToken
+from openblade.nas.ingest import _load_if_needed
 from openblade.nas.service import NasService
+from openblade.nas.tape_paths import dataset_tape_path
 from openblade.nas.types import (
     DatasetStatus,
     IngestMode,
@@ -113,15 +117,58 @@ def test_get_dataset_manifest_returns_200_with_shard_map() -> None:
     assert response.json()["generated_at"].endswith("Z")
 
 
+def write_file_to_tape(*, barcode: str, dataset_name: str, relative_path: str, content: bytes) -> None:
+    """Put real bytes on a simulated tape so ``verify`` can read them back.
+
+    ``POST /nas/datasets/{id}/verify`` mounts the tape and stats the file (see
+    ``openblade/api/nas_config.py``); it no longer synthesises a checksum from
+    "path:barcode". A file record with no bytes behind it is therefore corrupt,
+    which is correct — so the fixture has to archive the bytes first.
+    """
+    context = get_context()
+    ltfs = context.ltfs
+    _load_if_needed(context.library, barcode)
+    tape = ltfs.ensure_tape(barcode)
+    if not tape.formatted:
+        ltfs.format(
+            barcode,
+            FormatConfirmation(
+                expected_barcode=barcode,
+                safety_token=SafetyToken.generate("format", barcode),
+            ),
+        )
+    handle = ltfs.mount(barcode, MountMode.READ_WRITE)
+    try:
+        ltfs.write_bytes(handle, dataset_tape_path(dataset_name, relative_path), content)
+    finally:
+        ltfs.unmount(handle)
+
+
 def test_post_verify_returns_200_with_checksums() -> None:
     dataset_id = seed_dataset_bundle()
-    expected = hashlib.sha256(b"docs/a.txt:VOL001L9").hexdigest()
+    content = b"contents of docs/a.txt"
+    expected = hashlib.sha256(content).hexdigest()
+    write_file_to_tape(
+        barcode="VOL001L9",
+        dataset_name="dataset-one",
+        relative_path="docs/a.txt",
+        content=content,
+    )
+    write_file_to_tape(
+        barcode="VOL002L9",
+        dataset_name="dataset-one",
+        relative_path="docs/b.txt",
+        content=b"contents of docs/b.txt",
+    )
 
     response = client.post(f"/nas/datasets/{dataset_id}/verify")
 
     assert response.status_code == 200
     assert response.json()["files_verified"] == 2
     assert response.json()["checksums"]["docs/a.txt"] == expected
+    # docs/b.txt was seeded with checksum "preset", which cannot match the bytes
+    # actually on tape — a read-back mismatch is exactly what verify must flag.
+    assert response.json()["files_corrupt"] == 1
 
 
 def test_post_export_returns_200_and_exported_status() -> None:
