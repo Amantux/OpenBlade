@@ -53,6 +53,22 @@ def _is_cleaning_barcode(barcode: str) -> bool:
     return barcode.upper().startswith("CLN")
 
 
+def _has_room_for(ltfs: LTFSBackend, barcode: str, size_bytes: int) -> bool:
+    """Can ``barcode`` still take a file of ``size_bytes``?
+
+    The subtlety is zero-byte files. ``remaining >= size_bytes`` reads as True for
+    ``0 >= 0``, so on a full tape every empty file in the source tree was routed
+    straight back to it -- and an empty file still needs a directory entry and
+    index space, so LTFS answered ENOSPC and the whole archive job died. Found by
+    the first real-data campaign, whose dataset has five empty log files and
+    whose first tape filled up; see docs/runbooks/real-data-campaign.md.
+
+    A tape with no remaining capacity cannot take anything at all, empty or not.
+    """
+    remaining = ltfs.remaining_capacity(barcode)
+    return remaining > 0 and remaining >= size_bytes
+
+
 def _choose_tape(
     catalog: CatalogRepository,
     library: LibraryBackend,
@@ -68,7 +84,7 @@ def _choose_tape(
     for cartridge in assigned:
         if _is_cleaning_barcode(cartridge.barcode):
             continue
-        if ltfs.remaining_capacity(cartridge.barcode) >= size_bytes:
+        if _has_room_for(ltfs, cartridge.barcode, size_bytes):
             return cartridge.barcode
     for barcode in _inventory_barcodes(library):
         if _is_cleaning_barcode(barcode):
@@ -79,7 +95,7 @@ def _choose_tape(
             or cartridge.state == "exported"
         ):
             continue
-        if ltfs.remaining_capacity(barcode) < size_bytes:
+        if not _has_room_for(ltfs, barcode, size_bytes):
             continue
         cartridge.volume_group_id = volume_group_id
         catalog.session.commit()

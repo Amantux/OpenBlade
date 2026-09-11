@@ -3,10 +3,11 @@
   "root": "/srv/openblade-campaign/data",
   "generator": "scripts/campaign/gen_dataset.py",
   "counts": {
-    "total": 1073,
+    "total": 1074,
     "files": 1067,
     "empty": 5,
-    "symlinks": 1
+    "symlinks": 1,
+    "dangling_symlinks": 1
   },
   "total_bytes": 450491422,
   "entries": [
@@ -1406,8 +1407,15 @@
       "path": "documents/latest-report.txt",
       "kind": "symlink",
       "size": 0,
-      "sha256": "a52589b769899de1a9fdd3b146dfb05b8bf4a31b288795168a04e0a5d765920d",
-      "target": "reports 2026/q2/note-0001.txt"
+      "sha256": "cb10bfdec07ab50633880f9ccc0473cc4373892f763747fec5d44341805efb37",
+      "target": "reports 2026/note-0001.txt"
+    },
+    {
+      "path": "documents/missing-report.txt",
+      "kind": "dangling-symlink",
+      "size": 0,
+      "sha256": "21a6e09be071ccddcf6025c15baa9a13136cbfcec51d08fb12d7725d88011886",
+      "target": "reports 2026/q2/note-does-not-exist.txt"
     },
     {
       "path": "documents/note-0013.txt",

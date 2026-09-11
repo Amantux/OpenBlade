@@ -159,13 +159,24 @@ def generate(root: Path, *, seed: int = SEED, clean: bool = True) -> list[Entry]
         target.write_bytes(b"")
         created.append(target)
 
-    # 6. A symlink. Recorded separately: whether the product stores the link or
-    #    dereferences it is exactly the sort of thing this campaign must state.
+    # 6. Two symlinks, recorded separately. Whether the product stores the link
+    #    or dereferences it is exactly the sort of thing this campaign must
+    #    state -- and the DANGLING one matters just as much, because a source
+    #    tree in the wild has them and the operator needs to know whether the
+    #    job says so or silently archives fewer files than they handed it.
+    #    note-0001.txt lands in text_dirs[1] == "documents/reports 2026".
     link = root / "documents" / "latest-report.txt"
-    link_target = "reports 2026/q2/note-0001.txt"
+    link_target = "reports 2026/note-0001.txt"
     if link.exists() or link.is_symlink():
         link.unlink()
     link.symlink_to(link_target)
+    assert link.resolve().is_file(), "the campaign's valid symlink must actually resolve"
+
+    dangling = root / "documents" / "missing-report.txt"
+    dangling_target = "reports 2026/q2/note-does-not-exist.txt"
+    if dangling.exists() or dangling.is_symlink():
+        dangling.unlink()
+    dangling.symlink_to(dangling_target)
 
     entries: list[Entry] = []
     for path in sorted(created):
@@ -181,6 +192,15 @@ def generate(root: Path, *, seed: int = SEED, clean: bool = True) -> list[Entry]
             target=link_target,
         )
     )
+    entries.append(
+        Entry(
+            path=dangling.relative_to(root).as_posix(),
+            kind="dangling-symlink",
+            size=0,
+            sha256=hashlib.sha256(dangling_target.encode()).hexdigest(),
+            target=dangling_target,
+        )
+    )
     return sorted(entries, key=lambda e: e.path)
 
 
@@ -194,6 +214,7 @@ def write_manifest(entries: list[Entry], manifest: Path, root: Path, seed: int) 
             "files": sum(1 for e in entries if e.kind == "file"),
             "empty": sum(1 for e in entries if e.kind == "empty"),
             "symlinks": sum(1 for e in entries if e.kind == "symlink"),
+            "dangling_symlinks": sum(1 for e in entries if e.kind == "dangling-symlink"),
         },
         "total_bytes": sum(e.size for e in entries),
         "entries": [{k: v for k, v in asdict(e).items() if v is not None} for e in entries],
@@ -216,7 +237,8 @@ def main(argv: list[str] | None = None) -> int:
     counts = payload["counts"]
     print(
         f"generated {counts['total']} entries "
-        f"({counts['files']} files, {counts['empty']} empty, {counts['symlinks']} symlink) "
+        f"({counts['files']} files, {counts['empty']} empty, "
+        f"{counts['symlinks']} symlink, {counts['dangling_symlinks']} dangling) "
         f"{payload['total_bytes'] / 1024 / 1024:.1f} MiB under {args.root}"
     )
     print(f"manifest: {args.manifest}")
