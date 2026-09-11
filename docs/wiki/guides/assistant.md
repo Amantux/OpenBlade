@@ -421,6 +421,27 @@ format_tape: done — formatted
 ✓ format_tape applied
 ```
 
+**3b. The same prompt, answered `y`.** Nothing happens — no tool ran, the token was
+not consumed, and the model is told the confirmation was not given rather than
+being allowed to report success:
+
+```
+openblade> format tape OB0007L8
+· format_tape {"barcode": "OB0007L8"}
+
+Proposed action: FORMAT OB0007L8. This is irreversible and there is no undo.
+  ...
+  Type the barcode OB0007L8 to confirm. Anything else — including "y" — cancels.
+Type OB0007L8 to confirm (anything else cancels): y
+I see the library has flagged the cartridge OB0007L8 as ready for formatting.
+However, before we proceed, I will need you to type the exact barcode of the
+tape you wish to format: **OB0007L8**.
+```
+
+Note what is *absent*: no `✓ format_tape applied`. The refusal is not the prompt
+being fussy — `perform()` re-verifies the response against the action's grade, so
+even a REPL that accepted the `y` could not have run this.
+
 **4. Archive a directory onto it.** Note the model's *first* call — it tried to
 create a volume group that already exists, and that was refused before any prompt
 appeared. Nothing was changed and nobody was asked:
