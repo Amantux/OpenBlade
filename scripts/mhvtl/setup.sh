@@ -112,6 +112,7 @@ command -v systemctl >/dev/null && systemctl daemon-reload || true
 # ---------------------------------------------------------------- config
 log "Installing OpenBlade rig config into /etc/mhvtl"
 install -d -m 755 /etc/mhvtl
+install -m 644 "$CONFIG_SRC/mhvtl.conf"            /etc/mhvtl/mhvtl.conf
 install -m 644 "$CONFIG_SRC/device.conf"           /etc/mhvtl/device.conf
 install -m 644 "$CONFIG_SRC/library_contents.10"   /etc/mhvtl/library_contents.10
 # The stock install ships a second library (30). Our rig is deliberately ONE
@@ -233,6 +234,22 @@ lsscsi -g | awk '/ tape /{print $1, $(NF-1), $NF}' | tr -d '[]' | while read -r 
   serial=$(sg_inq "$sg" 2>/dev/null | awk -F': *' '/Unit serial number/{print $2}')
   printf '%-14s %-10s %-10s %s\n' "$addr" "$blk" "$sg" "${serial:-<unreadable>}"
 done
+
+# ---------------------------------------------------------------- scratch media
+# The archive/restore jobs mount scratch media without formatting it first, so
+# blank cartridges fail the mount. Supply formatted scratch media here.
+if command -v mkltfs >/dev/null; then
+  log "LTFS-formatting the scratch cartridges"
+  bash "$(dirname "${BASH_SOURCE[0]}")/format-scratch.sh" >/dev/null \
+    || fail "scratch formatting failed — run scripts/mhvtl/format-scratch.sh
+         directly to see the error"
+  printf 'OB0007L8, OB0008L8 formatted\n'
+else
+  printf '\nNOTE: mkltfs is not installed, so the scratch cartridges are BLANK.\n'
+  printf 'The discovery, drive-health and changer suites still run; the LTFS,\n'
+  printf 'archive/restore, sharded and performance suites will fail or skip.\n'
+  printf 'See docs/runbooks/mhvtl-rehearsal.md for how to install LTFS.\n'
+fi
 
 cat <<EOF
 
