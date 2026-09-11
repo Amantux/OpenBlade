@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from openblade.bootstrap import AppContext, create_context, reset_context
+from openblade.cli.assist import assist as assist_command
 from openblade.config import OpenBladeConfig, load_config
 from openblade.domain.errors import DriveCorrelationError
 from openblade.domain.models import Barcode, DriveState, MountState
@@ -29,6 +30,11 @@ format_app = typer.Typer(help="Format commands")
 app.add_typer(format_app, name="format")
 hardware_app = typer.Typer(help="Real hardware validation commands")
 app.add_typer(hardware_app, name="hardware")
+
+# Read-only operator assistant. Registered from its own module so the assistant's
+# dependencies stay out of this file; it is read-only by construction — see
+# openblade/assistant/readonly.py for the three enforcement points.
+app.command("assist")(assist_command)
 
 console = Console()
 _STATE_DIR = Path.home() / ".openblade"
