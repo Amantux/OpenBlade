@@ -25,6 +25,12 @@ class QuantumI3ConnectionReport:
     loaded_drive_count: int
     drive_devices: list[str]
     sg_inquiry: list[dict[str, str]]
+    # Drive-element -> device binding and how it was established. Copy the serials
+    # into OPENBLADE_DRIVE_SERIAL_MAP to turn an unverified positional order into a
+    # verified one (see openblade/hardware/correlation.py).
+    drive_correlation: list[dict[str, str | int]]
+    drive_correlation_source: str
+    drive_correlation_verified: bool
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -64,6 +70,9 @@ def connect_quantum_i3(
         loaded_drive_count=sum(1 for drive in inventory.drives if drive.barcode is not None),
         drive_devices=[library.drive_device(drive.drive_id) for drive in inventory.drives],
         sg_inquiry=_inquiry_payloads(discovery, active_runner, guard),
+        drive_correlation=library.correlation.to_payload(),
+        drive_correlation_source=library.correlation.source,
+        drive_correlation_verified=library.correlation.verified,
     )
 
 

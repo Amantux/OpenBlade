@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+from openblade.config import OpenBladeConfig
 from openblade.domain.models import (
     Barcode,
     CartridgeState,
@@ -15,6 +16,7 @@ from openblade.domain.models import (
     SlotState,
 )
 from openblade.domain.states import validate_mount_transition
+from openblade.hardware.correlation import DriveCorrelation, correlate_drives
 from openblade.hardware.discovery import LibraryDiscovery, discover_library
 from openblade.hardware.mtx import MtxChangerBackend
 from openblade.hardware.runner import SafeRunner
@@ -28,11 +30,12 @@ class RealLibraryBackend:
     changer: MtxChangerBackend
     discovery: LibraryDiscovery
     library_id: str
+    correlation: DriveCorrelation
 
     def __init__(
         self,
         *,
-        config,
+        config: OpenBladeConfig,
         runner: SafeRunner | None = None,
         discovery: LibraryDiscovery | None = None,
         changer: MtxChangerBackend | None = None,
@@ -41,13 +44,26 @@ class RealLibraryBackend:
         active_runner = runner or SafeRunner(dry_run=config.hardware_dry_run)
         active_discovery = discovery or discover_library(active_runner, guard)
         changer_device = config.changer_device or _resolve_changer_device(active_discovery)
-        object.__setattr__(
-            self,
-            "changer",
-            changer or MtxChangerBackend(device=changer_device, guard=guard, runner=active_runner),
+        active_changer = changer or MtxChangerBackend(
+            device=changer_device, guard=guard, runner=active_runner
         )
+        object.__setattr__(self, "changer", active_changer)
         object.__setattr__(self, "discovery", active_discovery)
         object.__setattr__(self, "library_id", changer_device.removeprefix("/dev/").replace("/", "-"))
+        # Drive correlation runs at construction so a mapping that disagrees with
+        # the attached hardware refuses here, before any load/write can target the
+        # wrong drive.
+        object.__setattr__(
+            self,
+            "correlation",
+            correlate_drives(
+                devices=_configured_drive_devices(config, active_discovery),
+                serial_map=config.drive_serial_map,
+                runner=active_runner,
+                guard=guard,
+                element_count=active_changer.inventory().drive_count or None,
+            ),
+        )
         object.__setattr__(self, "_mount_states", {})
 
     def inventory(self) -> LibraryInventory:
@@ -151,11 +167,8 @@ class RealLibraryBackend:
         ]
 
     def drive_device(self, drive_id: int) -> str:
-        drives = _ordered_drive_devices(self.discovery)
-        try:
-            return drives[drive_id]
-        except IndexError as exc:
-            raise KeyError(f"No tape device configured for drive {drive_id}") from exc
+        """Host device for a library drive element, via verified correlation."""
+        return self.correlation.device_for(drive_id)
 
 
 def _resolve_changer_device(discovery: LibraryDiscovery) -> str:
@@ -166,6 +179,18 @@ def _resolve_changer_device(discovery: LibraryDiscovery) -> str:
         if candidate:
             return candidate
     raise RuntimeError("Discovered changer does not expose a usable device path")
+
+
+def _configured_drive_devices(config: OpenBladeConfig, discovery: LibraryDiscovery) -> list[str]:
+    """Devices to drive, preferring the operator's explicit list over discovery.
+
+    ``OPENBLADE_DRIVE_DEVICES`` is authoritative when set (the bring-up runbook
+    requires setting it explicitly on first contact); otherwise fall back to
+    SCSI-address-ordered auto-discovery, whose order is an assumption, not a fact.
+    """
+    if config.drive_devices:
+        return list(config.drive_devices)
+    return _ordered_drive_devices(discovery)
 
 
 def _ordered_drive_devices(discovery: LibraryDiscovery) -> list[str]:
