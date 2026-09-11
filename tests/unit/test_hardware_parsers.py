@@ -17,6 +17,8 @@ from openblade.hardware.mtx import (
     SAMPLE_MTX_BARCODE_MISSING,
     SAMPLE_MTX_CLEANING,
     SAMPLE_MTX_EMPTY,
+    SAMPLE_MTX_HIGH_ADDRESSES,
+    SAMPLE_MTX_IRREGULAR,
     SAMPLE_MTX_LOADED,
     SAMPLE_MTX_REAL_SCALAR,
     SAMPLE_MTX_THREE_DRIVES,
@@ -93,6 +95,61 @@ class TestMtxParser:
         assert status.drives[0].loaded is True
         assert status.drives[0].source_slot == 1
         assert status.drives[0].barcode == "PHO001L8"
+
+
+class TestMtxParserHighElementAddresses:
+    """Real libraries may report high element start addresses (storage 4096+,
+    I/E 768+). Ids must round-trip verbatim — parser, lookup, and the mtx
+    command line may never renumber, offset, or range-check them."""
+
+    def test_high_slot_ids_parse_verbatim(self) -> None:
+        status = parse_mtx_status(SAMPLE_MTX_HIGH_ADDRESSES)
+        assert [s.slot_id for s in status.slots] == [4096, 4097, 4098, 4099]
+        assert [s.slot_id for s in status.import_export_slots] == [768, 769]
+        assert status.drives[0].source_slot == 4097
+        assert status.slots[0].barcode == "HIA000L8"
+
+    def test_high_slot_id_reaches_mtx_command_verbatim(self) -> None:
+        from openblade.domain.policies import RealHardwareGuard
+        from openblade.hardware.mtx import MtxChangerBackend
+        from openblade.hardware.runner import SafeRunner
+
+        guard = RealHardwareGuard(
+            config_backend="real",
+            config_real_hardware_enabled=True,
+            operator_acknowledgment="high-address round-trip test",
+        )
+        backend = MtxChangerBackend(
+            device="/dev/sg2", runner=SafeRunner(dry_run=True), guard=guard
+        )
+        result = backend.load(slot=4098, drive=2)
+        assert result.details["args"][-2:] == ["4098", "2"]
+        result = backend.unload(drive=2, slot=4099)
+        assert "4099" in result.details["args"]
+
+
+class TestMtxParserIrregularForms:
+    """Forms a real i3 can emit that mhvtl never does: unknown source
+    elements and unlabeled (barcode-less) media. Degrade, never drop."""
+
+    def test_unknown_source_drive_keeps_load_state_and_barcode(self) -> None:
+        status = parse_mtx_status(SAMPLE_MTX_IRREGULAR)
+        assert status.drives[0].loaded is True
+        assert status.drives[0].source_slot is None
+        assert status.drives[0].barcode == "OB0001L8"
+
+    def test_unknown_source_unlabeled_drive(self) -> None:
+        status = parse_mtx_status(SAMPLE_MTX_IRREGULAR)
+        assert status.drives[1].loaded is True
+        assert status.drives[1].source_slot is None
+        assert status.drives[1].barcode is None
+
+    def test_unlabeled_slots_are_occupied_with_no_barcode(self) -> None:
+        status = parse_mtx_status(SAMPLE_MTX_IRREGULAR)
+        assert status.slots[0].occupied is True
+        assert status.slots[0].barcode is None
+        assert status.import_export_slots[0].occupied is True
+        assert status.import_export_slots[0].barcode is None
 
 
 class TestMtxParserAgainstRealOutput:

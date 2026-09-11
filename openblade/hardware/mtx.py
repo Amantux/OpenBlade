@@ -90,6 +90,37 @@ Data Transfer Element 2:Empty
       Storage Element 12 IMPORT/EXPORT:Empty
 """
 
+# Real-library irregular forms the i3 can emit and mhvtl does not: a drive
+# loaded with an unknown source element (seen after power-cycles / manual
+# intervention) and unlabeled media (no VolumeTag at all). The parser must
+# degrade to None fields, never misparse or drop the element.
+SAMPLE_MTX_IRREGULAR = """
+  Storage Changer /dev/sg3:2 Drives, 4 Slots ( 1 Import/Export )
+Data Transfer Element 0:Full (Unknown Storage Element Loaded):VolumeTag = OB0001L8
+Data Transfer Element 1:Full (Unknown Storage Element Loaded)
+      Storage Element 1:Full
+      Storage Element 2:Full :VolumeTag=OB0002L8
+      Storage Element 3:Empty
+      Storage Element 4 IMPORT/EXPORT:Full
+"""
+
+# Element-addressing robustness: some real libraries report HIGH element
+# numbers (storage at 4096+, I/E at 768+) rather than 1-based logical ids.
+# Whatever numbering mtx reports must round-trip verbatim into load/unload —
+# no range assumption anywhere may renumber or reject it.
+SAMPLE_MTX_HIGH_ADDRESSES = """
+  Storage Changer /dev/sg2:3 Drives, 6 Slots ( 2 Import/Export )
+Data Transfer Element 0:Full (Storage Element 4097 Loaded):VolumeTag = HIA001L8
+Data Transfer Element 1:Empty
+Data Transfer Element 2:Empty
+      Storage Element 4096:Full :VolumeTag=HIA000L8
+      Storage Element 4097:Empty
+      Storage Element 4098:Full :VolumeTag=HIA002L8
+      Storage Element 4099:Empty
+      Storage Element 768 IMPORT/EXPORT:Empty
+      Storage Element 769 IMPORT/EXPORT:Full :VolumeTag=HIA769L8
+"""
+
 _HEADER_RE = re.compile(
     r"^Storage Changer (?P<device>\S+):(?P<drive_count>\d+) Drives, "
     r"(?P<slot_count>\d+) Slots"
