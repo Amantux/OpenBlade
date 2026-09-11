@@ -13,6 +13,7 @@ from openblade.hardware.mtx import (
     SAMPLE_MTX_CLEANING,
     SAMPLE_MTX_EMPTY,
     SAMPLE_MTX_LOADED,
+    SAMPLE_MTX_REAL_SCALAR,
     parse_mtx_status,
 )
 from openblade.hardware.sg import SAMPLE_SG_INQ, parse_sg_inq
@@ -54,6 +55,66 @@ class TestMtxParser:
         assert status.drives[0].loaded is True
         assert status.drives[0].source_slot == 1
         assert status.drives[0].barcode == "PHO001L8"
+
+
+class TestMtxParserAgainstRealOutput:
+    """Regressions pinned to byte-accurate `mtx status` output from real hardware.
+
+    Every assertion here failed before the mhvtl rehearsal (Phase 2 of
+    docs/runbooks/real-i3-bringup-plan.md) exercised the parser for the first
+    time against an actual changer.
+    """
+
+    def test_drive_barcode_uses_spaced_volume_tag(self) -> None:
+        # mtx writes "VolumeTag = X" for a Data Transfer Element but
+        # "VolumeTag=X" for a Storage Element. Requiring the tight form made
+        # every tape loaded in a drive parse as barcode=None, which in turn
+        # made find_drive_by_barcode() blind and archive jobs fail with
+        # "Barcode ... not found in inventory" while the tape sat in drive 0.
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        assert status.drives[0].loaded is True
+        assert status.drives[0].barcode == "OB0007L8"
+        assert status.drives[0].source_slot == 6
+
+    def test_storage_barcode_still_uses_tight_volume_tag(self) -> None:
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        assert status.slots[0].barcode == "OB0001L8"
+
+    def test_import_export_slots_are_not_dropped(self) -> None:
+        # "Storage Element 9 IMPORT/EXPORT:Empty" does not match "\\d+:", so
+        # all four I/E slots used to vanish from the inventory - leaving
+        # len(slots) disagreeing with the header's own slot count.
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        assert status.slot_count == 12
+        assert len(status.slots) == 12
+        assert [slot.slot_id for slot in status.slots] == list(range(1, 13))
+
+    def test_import_export_slots_are_flagged(self) -> None:
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        ie_slots = [slot.slot_id for slot in status.slots if slot.is_import_export]
+        assert ie_slots == [9, 10, 11, 12]
+        assert all(not slot.is_import_export for slot in status.slots if slot.slot_id <= 8)
+
+    def test_barcode_in_import_export_slot_is_visible(self) -> None:
+        # A tape parked in the mailslot must still be findable, otherwise
+        # find_slot_by_barcode() reports "not in inventory" for media the
+        # operator can plainly see in the I/E station.
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        slot = next(slot for slot in status.slots if slot.slot_id == 11)
+        assert slot.is_import_export is True
+        assert slot.occupied is True
+        assert slot.barcode == "OB0009L8"
+
+    def test_empty_drives_have_no_barcode(self) -> None:
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        assert [drive.drive_id for drive in status.drives] == [0, 1, 2]
+        assert status.drives[1].loaded is False
+        assert status.drives[1].barcode is None
+
+    def test_cleaning_cartridge_detected_in_real_output(self) -> None:
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        slot = next(slot for slot in status.slots if slot.slot_id == 5)
+        assert slot.is_cleaning is True
 
 
 class TestLsscsiParser:
