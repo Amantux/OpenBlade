@@ -22,11 +22,25 @@ loop may execute, and they are gated here:
 * A decline is fed back to the model as a result, not an error, so it can adapt.
   Re-proposing the *identical* declined action is answered from the decline cache
   without asking the operator again — one refusal is an answer, two is nagging.
+
+Tier-2 media tools (:mod:`openblade.assistant.media_tools`) are gated the same way
+and more strongly. The differences, all of them deliberate:
+
+* The confirmation callback returns *what the operator typed*, not a bool, and the
+  registry decides whether that satisfies the action's grade. A ``y`` confirms a
+  load; only the barcode confirms a format.
+* ``perform`` re-verifies the authorization against the action before it calls
+  anything, so "a media action cannot run without its strong confirmation" holds
+  even if the prompt in the CLI is wrong.
+* Archive and restore block for minutes. ``progress`` is called with one line
+  before and one after, because a REPL that goes silent for four minutes looks
+  hung, and an operator who thinks it is hung reaches for Ctrl-C mid-write.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import contextlib
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,9 +48,19 @@ from openblade.assistant.config import AssistantConfig
 from openblade.assistant.errors import (
     AssistantError,
     AssistantLoopLimitError,
+    MediaOperationFailedError,
+    MediaRefusedError,
     SetupPartialWriteError,
     SetupRefusedError,
     ToolNotFoundError,
+)
+from openblade.assistant.media_facade import MediaFacade
+from openblade.assistant.media_tools import (
+    ConfirmationGrade,
+    MediaConfirmCallback,
+    MediaToolRegistry,
+    PendingMediaAction,
+    ProgressCallback,
 )
 from openblade.assistant.prompts import system_message
 from openblade.assistant.provider import ChatReply, OllamaClient, ToolCall
@@ -60,7 +84,7 @@ MAX_CALLS_PER_ROUND = 8
 MAX_CONFIRMATION_PROMPTS_PER_ACTION = 1
 
 
-def _refusal(exc: SetupRefusedError, *, confirmed: bool) -> str:
+def _refusal(exc: SetupRefusedError | MediaRefusedError, *, confirmed: bool) -> str:
     """Serialize a refused setup action for the model.
 
     ``confirmed`` says whether the operator had already said yes. It is not a
@@ -100,6 +124,29 @@ def _unavailable(tool: str, what: str, exc: Exception) -> str:
     )
 
 
+def _completion_line(tool: str, result: Mapping[str, Any]) -> str:
+    """One operator-facing line naming what actually happened.
+
+    The job id lands here rather than on the start line because the archive and
+    restore services create the job inside the same call that runs it — there is no
+    id to print until it returns. Saying so here beats printing a placeholder.
+    """
+    parts = [f"{tool}: done"]
+    if result.get("jobId"):
+        parts.append(f"job {result['jobId']} {result.get('state', '')}".strip())
+    if result.get("filesArchived") is not None:
+        parts.append(
+            f"{result['filesArchived']}/{result.get('filesExpected')} files, "
+            f"{result.get('bytesArchived')} bytes in the catalog"
+        )
+    if result.get("bytesRestored") is not None:
+        verified = "checksum verified" if result.get("checksumVerified") else "NOT verified"
+        parts.append(f"{result['bytesRestored']} bytes restored, {verified}")
+    if result.get("message"):
+        parts.append(str(result["message"]))
+    return " — ".join(parts)
+
+
 def _cap_tool_calls(reply: ChatReply) -> ChatReply:
     if len(reply.tool_calls) <= MAX_CALLS_PER_ROUND:
         return reply
@@ -133,12 +180,26 @@ class AssistantSession:
     setup: SetupFacade | None = None
     #: Asks the operator to confirm one action. Without it, tier 1 is off.
     confirm: ConfirmCallback | None = None
+    #: Tier-2 registry. ``None`` (the default) means media tools are not offered.
+    media_registry: MediaToolRegistry | None = None
+    #: The narrow media facade the tier-2 tools act through.
+    media: MediaFacade | None = None
+    #: Asks the operator to confirm one media action, returning what they typed.
+    #: Without it, tier 2 is off — which is what makes one-shot mode read-only.
+    confirm_media: MediaConfirmCallback | None = None
+    #: One line before and after a long synchronous media operation.
+    progress: ProgressCallback | None = None
     _declined: dict[str, int] = field(default_factory=dict, init=False, repr=False)
     _executed: list[str] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.messages:
-            self.messages.append(system_message(setup_enabled=self.setup_enabled))
+            self.messages.append(self._system_message())
+
+    def _system_message(self) -> dict[str, Any]:
+        return system_message(
+            setup_enabled=self.setup_enabled, media_enabled=self.media_enabled
+        )
 
     @property
     def setup_enabled(self) -> bool:
@@ -152,9 +213,22 @@ class AssistantSession:
             self.setup_registry is not None and self.setup is not None and self.confirm is not None
         )
 
+    @property
+    def media_enabled(self) -> bool:
+        """Tier 2 needs all three parts too: a registry, a facade, and a way to ask.
+
+        Same failure mode as tier 1 by construction: a half-wired session offers no
+        media schema at all rather than offering one it could not confirm.
+        """
+        return (
+            self.media_registry is not None
+            and self.media is not None
+            and self.confirm_media is not None
+        )
+
     def reset(self) -> None:
         """Drop the conversation history, keeping the system prompt."""
-        self.messages = [system_message(setup_enabled=self.setup_enabled)]
+        self.messages = [self._system_message()]
         self._declined.clear()
 
     # -- tier 1 -------------------------------------------------------------
@@ -276,6 +350,140 @@ class AssistantSession:
         self._executed.append(action.tool)
         return render_result({"executed": True, "action": action.tool, "result": result})
 
+    # -- tier 2 -------------------------------------------------------------
+
+    def _decline_media(
+        self, action: PendingMediaAction, reason: str, *, repeated: bool = False
+    ) -> str:
+        self._declined[action.key] = self._declined.get(action.key, 0) + 1
+        log_action(action, outcome="declined", detail={"reason": reason})
+        return render_result(
+            {
+                "executed": False,
+                "status": "declined_by_operator",
+                "action": action.tool,
+                "preview": action.preview,
+                "reason": reason,
+                "confirmationGrade": action.grade.value,
+                "repeatedProposal": repeated,
+                "guidance": (
+                    "The operator declined. Nothing was moved, written or erased. Do "
+                    "not propose this same action again: acknowledge it, ask what they "
+                    "would prefer, or continue with something else."
+                ),
+            }
+        )
+
+    def _announce(self, line: str) -> None:
+        """Tell the operator something long is happening. Never fails the action."""
+        if self.progress is None:
+            return
+        # A broken printer must never abort or fail a confirmed media action.
+        with contextlib.suppress(Exception):
+            self.progress(line)
+
+    def _run_media_tool(self, call: ToolCall) -> str:
+        """Plan, strongly confirm, and only then execute one tier-2 media action."""
+        registry = self.media_registry
+        facade = self.media
+        confirm = self.confirm_media
+        if registry is None or facade is None or confirm is None:  # pragma: no cover - guarded
+            return render_result(
+                {
+                    "executed": False,
+                    "status": "unavailable",
+                    "error": (
+                        "Media actions need the interactive REPL, where the operator "
+                        "can confirm them. Propose the command instead."
+                    ),
+                }
+            )
+
+        try:
+            action = registry.plan(call.name, facade, call.arguments)
+        except MediaRefusedError as exc:
+            # Ambiguity refuses BEFORE the operator is asked. An unknown barcode
+            # must never reach a prompt that a reflex "y" could answer.
+            return _refusal(exc, confirmed=False)
+        except AssistantError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - curated, never echoed raw
+            return _unavailable(call.name, "could not be checked", exc)
+
+        if self._declined.get(action.key, 0) >= MAX_CONFIRMATION_PROMPTS_PER_ACTION:
+            return self._decline_media(
+                action, "the operator already declined this exact action", repeated=True
+            )
+
+        try:
+            response = confirm(action)
+        except (EOFError, KeyboardInterrupt):
+            # Ctrl-C / Ctrl-D at the prompt is a no, not a crash and never a yes.
+            response = None
+        except Exception:  # noqa: BLE001 - a broken prompt is a no, not a yes
+            return self._decline_media(action, "the confirmation prompt failed")
+
+        authorization = registry.authorize(action, response)
+        if authorization is None:
+            reason = (
+                "the operator did not type the exact confirmation this action requires"
+                if action.grade is ConfirmationGrade.TYPED
+                else "the operator answered no"
+            )
+            return self._decline_media(action, reason)
+
+        tool = registry.get(action.tool)
+        if tool.long_running:
+            self._announce(f"{action.tool}: running now — this can take minutes.")
+        try:
+            result = registry.perform(action, facade, authorization)
+        except MediaRefusedError as exc:
+            # Re-resolved inside the write path. A confirmation cannot buy a guess:
+            # if the library moved underneath us, this stops here.
+            log_action(action, outcome="refused", detail={"code": exc.code})
+            self._announce(f"{action.tool}: refused — nothing was changed.")
+            return _refusal(exc, confirmed=True)
+        except MediaOperationFailedError as exc:
+            # The message is already curated at the raise site in the facade: an
+            # orchestrator constant, a typed OpenBlade message, or safe_job_error.
+            log_action(action, outcome="failed", detail={"error": str(exc)})
+            self._announce(f"{action.tool}: failed — {exc}")
+            return render_result(
+                {
+                    "executed": False,
+                    "status": "failed",
+                    "action": action.tool,
+                    "preview": action.preview,
+                    "error": str(exc),
+                    "guidance": (
+                        "The operator confirmed and it failed. Report the error text "
+                        "as given, suggest `openblade jobs` for the job record, and do "
+                        "not retry it yourself."
+                    ),
+                }
+            )
+        except AssistantError:
+            # MediaNotAuthorizedError and facade/registry violations are defects in
+            # the tool layer, not data for the model. Surface them loudly.
+            raise
+        except Exception as exc:  # noqa: BLE001 - curated below, never echoed raw
+            log_action(action, outcome="error", detail={"type": type(exc).__name__})
+            return render_result(
+                {
+                    "executed": False,
+                    "status": "error",
+                    "action": action.tool,
+                    "error": (
+                        f"{action.tool} was confirmed but could not be completed "
+                        f"({type(exc).__name__}). Check `openblade jobs` and the "
+                        "library inventory before assuming nothing happened."
+                    ),
+                }
+            )
+        self._executed.append(action.tool)
+        self._announce(_completion_line(action.tool, result))
+        return render_result({"executed": True, "action": action.tool, "result": result})
+
     def _run_tool(self, call: ToolCall) -> str:
         """Execute one read-only tool and serialize its result for the model."""
         try:
@@ -321,6 +529,12 @@ class AssistantSession:
                 and call.name in self.setup_registry
             ):
                 content = self._run_setup_tool(call)
+            elif (
+                self.media_enabled
+                and self.media_registry is not None
+                and call.name in self.media_registry
+            ):
+                content = self._run_media_tool(call)
             else:
                 content = self._run_tool(call)
             self.messages.append({"role": "tool", "name": call.name, "content": content})
@@ -374,13 +588,16 @@ class AssistantSession:
     def _schemas(self) -> list[dict[str, Any]]:
         """Tool definitions offered to the model this turn.
 
-        Tier-1 schemas are added only when the session can actually confirm an
-        action. In one-shot mode the model is not told the setup tools exist, so it
-        proposes commands instead of asking for an execution that cannot happen.
+        Tier-1 and tier-2 schemas are added only when the session can actually
+        confirm that kind of action. In one-shot mode the model is told about
+        neither, so it proposes commands instead of asking for an execution that
+        cannot happen.
         """
         schemas = self.registry.schemas()
         if self.setup_enabled and self.setup_registry is not None:
             schemas.extend(self.setup_registry.schemas())
+        if self.media_enabled and self.media_registry is not None:
+            schemas.extend(self.media_registry.schemas())
         return schemas
 
     def _ask(self, question: str, on_tool: ToolObserver | None) -> AssistantTurn:

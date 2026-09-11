@@ -1,22 +1,27 @@
 """Attribute-allowlisting access proxies for the assistant's tool layer.
 
 The safety line for ``openblade assist``: the assistant reads, explains and
-*proposes*, and the only thing it can execute is a tier-1 setup action the operator
-confirmed in the REPL (:mod:`openblade.assistant.setup_facade`). Media movement,
-format, archive, restore and delete are propose-only, as they always were. That is
-enforced structurally in three independent places, of which this module is one:
+*proposes*, and the only things it can execute are a tier-1 setup action
+(:mod:`openblade.assistant.setup_facade`) and a tier-2 media action
+(:mod:`openblade.assistant.media_facade`), each confirmed by the operator in the
+REPL with a confirmation graded to what it costs. Deleting, ejecting and
+importing/exporting are propose-only, as they always were. That is enforced
+structurally in three independent places, of which this module is one:
 
-1. :mod:`openblade.assistant.readonly` (here) — tools never touch a live
+1. :mod:`openblade.assistant.readonly` (here) — *read* tools never touch a live
    ``CatalogRepository`` or ``LibraryBackend``. They see a proxy whose attribute
    allowlist is a literal set of read method names; anything else raises
    :class:`ReadOnlyViolationError` rather than returning a bound method. The same
-   no-instance-state machinery backs the narrow *write* facade, which allowlists two
-   catalog-only setup operations and nothing else.
+   no-instance-state machinery backs both write facades: the tier-1 one allowlists
+   two catalog-only setup operations, the tier-2 one thirteen named media
+   operations, and neither exposes the object it wraps under any name at all.
 2. :mod:`openblade.assistant.tools` — the tool registry refuses to build unless
    every registered name is on ``READ_ONLY_TOOL_NAMES``. Adding a tool without
    amending the allowlist fails closed.
 3. :mod:`openblade.assistant.session` — the loop only ever calls registry handlers;
-   it has no subprocess, no commit, and no write path of its own.
+   it has no subprocess, no commit, and no write path of its own. A tier-1 or
+   tier-2 handler runs only after the confirmation gate in that module has been
+   satisfied.
 
 The allowlists below are deliberately spelled out. A future read method has to be
 added here on purpose, and a future *write* method cannot be reached by accident.
