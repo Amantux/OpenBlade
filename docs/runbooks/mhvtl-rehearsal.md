@@ -10,7 +10,7 @@ cables an i3. It is the first time `openblade/hardware/` has executed against a
 real SCSI medium changer, real `mtx`, and real LTFS rather than against sample
 strings.
 
-**It found six product defects.** Four of them would have fired on the very
+**It found seven product defects.** Five of them would have fired on the very
 first i3 session; two of those would have looked like broken hardware rather
 than broken code. That is the return on this phase.
 
@@ -219,6 +219,30 @@ failures against the i3:
   invocation in two test files, both diverging from the product's own correct
   version. Worth collapsing onto `LTFSCommandBackend` later.
 
+### 3.7 `validation.py` — `device_list_ok` was always false
+
+Found by running the Phase 4.1 command against the rig. `validate_ltfs_capabilities`
+computed:
+
+```python
+device_list_ok=any(current.device == device for current in devices)
+```
+
+`devices` comes from LTFS, which only ever lists `/dev/sgN`. `device` is
+whatever the caller named — and the CLI help for this very command says
+*"Tape device path such as /dev/st0"*, while Phase 4.1 of the bring-up plan
+passes `/dev/nst0`. The two can never be equal, so the report said:
+
+```json
+{"discovered_devices": [ ...three healthy drives with serials... ],
+ "device_list_ok": false}
+```
+
+A false alarm at the first gate of the bring-up, on a working library, with
+the contradicting evidence printed directly above it. Fixed by resolving both
+sides to their sg node before comparing. Verified against the rig with all
+three spellings — `/dev/st1`, `/dev/nst1`, `/dev/sg2` — all now `true`.
+
 ### Regression tests
 
 Every fix ships with one, in `tests/unit/test_hardware_parsers.py`:
@@ -274,8 +298,39 @@ elements to drives by **serial number** (`sg_inq`, or the new `LTFSDevice.serial
 and failing loudly on mismatch, before the first multi-drive write to the i3.
 `scripts/mhvtl/setup.sh` now prints the correlation table on every run.
 
-*No bugs suspected in `sg.py` — `parse_sg_inq` handled real `sg_inq` output
-unchanged.*
+### `sg.py` — `parse_sg_inq()` reports every real device as `unknown`
+
+Also owned elsewhere, so reported not fixed. `_DEVICE_TYPE_RE` (sg.py:19)
+matches `Device type:`, which is what the module's `SAMPLE_SG_INQ` contains.
+Real `sg_inq` (sg3_utils 1.x) prints something else:
+
+```
+    length=36 (0x24)   Peripheral device type: medium changer
+ Vendor identification: QUANTUM
+ Product identification: QUANTUM Scalar
+```
+
+`Peripheral device type` does not match `Device type` (lower-case `d`), so the
+regex never fires and `device_type` falls through to its `"unknown"` default —
+for **every** device. Vendor, product and revision parse correctly, so this is
+easy to miss.
+
+Two things need fixing together:
+
+1. the label — accept `Peripheral device type:` as well as `Device type:`;
+2. the value — `[^\s]+` would capture only `medium` from `medium changer`. The
+   type is a multi-word value and needs to be read to end-of-line.
+
+Impact is diagnostic rather than functional: `ScsiInquiry.device_type` is not
+used for any decision, only surfaced in the `connect-i3` report. But that
+report is precisely what an operator reads during bring-up, and it currently
+labels every device on the bus `"unknown"`:
+
+```json
+{"device": "/dev/sg4",
+ "inquiry": {"device_type": "unknown", "vendor": "QUANTUM",
+             "product": "QUANTUM Scalar", "revision": "0108"}}
+```
 
 ---
 
@@ -317,4 +372,4 @@ still unrehearsed:
 - **Dirty-unmount recovery**, which needs process control beyond `SafeRunner`.
 
 Phases 3 and 4 stand unchanged. What this phase removes is the class of failure
-where the *parsers and device plumbing* are wrong — and it found six of those.
+where the *parsers and device plumbing* are wrong — and it found seven of those.
