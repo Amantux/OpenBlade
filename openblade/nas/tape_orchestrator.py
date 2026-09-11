@@ -14,7 +14,7 @@ import structlog
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import ChecksumMismatchError
 from openblade.domain.models import MountMode
-from openblade.domain.policies import FormatConfirmation, SafetyToken
+from openblade.domain.policies import FormatConfirmation
 from openblade.nas.types import TapeOpRecord, TapeOpRequest, TapeOpStatus, TapeOpType
 
 logger = structlog.get_logger(__name__)
@@ -45,7 +45,7 @@ class TapeOperationOrchestrator:
         self._validate_request(request)
         created_at = _utcnow_iso()
         op_id = str(uuid4())
-        created = self.repo.create_tape_op(
+        self.repo.create_tape_op(
             {
                 "op_id": op_id,
                 "op_type": request.op_type.value,
@@ -102,12 +102,20 @@ class TapeOperationOrchestrator:
                 },
             )
             assert persisted is not None
+            # The persisted/returned `error` stays curated -- it crosses a trust
+            # boundary and must never carry raw exception text. The server log is
+            # not that boundary, and without the cause here an operator whose
+            # format failed has no diagnostic anywhere on the host: the message
+            # they see is a constant string per op type. Log the real cause.
             logger.warning(
                 "tape operation failed",
                 op_id=op_id,
                 op_type=request.op_type.value,
                 barcode=request.barcode,
                 error=safe_error,
+                cause_type=type(exc).__name__,
+                cause=str(exc),
+                exc_info=True,
             )
             if isinstance(exc, OperationNotConfirmedError):
                 raise exc
@@ -196,13 +204,43 @@ class TapeOperationOrchestrator:
     def _format(self, request: TapeOpRequest) -> dict[str, Any]:
         confirmation = request.extras.get("format_confirmation")
         if not isinstance(confirmation, FormatConfirmation):
-            confirmation = FormatConfirmation(
-                expected_barcode=request.barcode,
-                safety_token=SafetyToken.generate("format", request.barcode),
-                operator_note=str(request.extras.get("operator_note", "")),
+            # It used to MINT its own SafetyToken here. `extras` is bound straight
+            # from the `POST /tape-ops/execute` body, so `{"confirmed_format":true}`
+            # -- a bare boolean an operator can type -- was the entire gate on a
+            # destructive operation, and the orchestrator then issued itself the
+            # token that was supposed to authorise it. AGENTS.md: "Never perform
+            # format or erase operations without positive barcode confirmation and
+            # a cryptographically valid safety token."
+            #
+            # This was previously inert against real hardware only by accident --
+            # the format failed before reaching mkltfs because the cartridge was
+            # never loaded. Fixing that (same commit series) made the hole live,
+            # which is why it is closed here rather than left as pre-existing.
+            #
+            # The legitimate path (FormatService.confirm -> run_format_job) always
+            # supplies a FormatConfirmation carrying the token it just validated
+            # against the persisted safety_tokens row.
+            raise OperationNotConfirmedError(
+                "Format requires a FormatConfirmation carrying a valid safety token; "
+                "obtain one from the format dry-run and confirm through FormatService"
             )
-        result = self.ltfs.format(request.barcode, confirmation)
-        return self._operation_result(result, {"barcode": request.barcode, "formatted": True})
+        confirmation.validate(request.barcode)
+        # mkltfs runs against a drive, so the cartridge has to be in one. The
+        # simulator's format() only needs a barcode, which is why this was never
+        # noticed: against real hardware every `openblade format confirm` on a
+        # cartridge sitting in its slot -- the normal state -- failed with
+        # "Barcode ... is not loaded in a drive" behind the curated message.
+        # Same load/restore discipline as _write: only put back what we took out.
+        drive_id, loaded_slot = self._ensure_loaded(request.barcode, request.drive_id)
+        try:
+            result = self.ltfs.format(request.barcode, confirmation)
+        finally:
+            if loaded_slot is not None:
+                self.library.unload(drive_id, loaded_slot)
+        return self._operation_result(
+            result,
+            {"barcode": request.barcode, "formatted": True, "drive_id": drive_id},
+        )
 
     def _write(self, request: TapeOpRequest) -> dict[str, Any]:
         drive_id, loaded_slot = self._ensure_loaded(request.barcode, request.drive_id)
@@ -301,7 +339,27 @@ class TapeOperationOrchestrator:
         destination = request.extras.get("dest_slot_id", request.extras.get("dest_slot", request.slot_id))
         if destination is None:
             raise ValueError("destination slot is required for move operations")
-        return int(destination)
+        destination_id = int(destination)
+        known_slots = {slot.slot_id for slot in self.library.inventory().slots}
+        if destination_id not in known_slots:
+            # This integer went straight to `mtx transfer` unvalidated, and mtx
+            # element numbers continue past the storage slots into the
+            # import/export magazine. On the rig, POST /tape-ops/execute with
+            # dest_slot_id 9 physically ejected a cartridge holding 358 archived
+            # files into the mailslot -- after which `inventory()` (storage slots
+            # only, by design) could not see it at all, so nothing on it could be
+            # restored. One unconfirmed integer orphaned a third of an archive.
+            #
+            # Moving media out of the library is an export, and the product's
+            # position on export is already explicit: routes_aml_move_medium
+            # rejects moveClass import/export on i3/i6. Refuse here too rather
+            # than let a typo do it silently.
+            raise ValueError(
+                f"destination slot {destination_id} is not a data storage slot in this "
+                f"library (valid: {min(known_slots, default=0)}-{max(known_slots, default=0)}); "
+                "moving media to an import/export element is not supported"
+            )
+        return destination_id
 
     def _find_empty_slot(self) -> int:
         inventory = self.library.inventory()

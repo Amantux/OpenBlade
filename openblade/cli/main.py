@@ -43,15 +43,45 @@ _DB_PATH = _STATE_DIR / "openblade.db"
 
 
 def _default_config() -> OpenBladeConfig:
-    return OpenBladeConfig(
-        db_url=f"sqlite:///{_DB_PATH}",
-        cache_dir=str(_STATE_DIR / "cache"),
-        restore_dir=str(_STATE_DIR / "restore"),
-        staging_dir=str(_STATE_DIR / "staging"),
+    """Resolve the CLI's config from the environment.
+
+    This used to construct ``OpenBladeConfig()`` directly, which silently pinned
+    the CLI to ``BackendMode.MOCK`` no matter what ``OPENBLADE_BACKEND`` said --
+    so on a real library ``openblade inventory`` printed a plausible *simulated*
+    inventory with no indication it was fiction. ``load_config()``'s own
+    defaults for db_url/cache_dir/staging_dir/restore_dir are already the same
+    ``~/.openblade`` paths this function hardcoded, so honouring the environment
+    costs nothing and changes nothing for a mock-backed operator.
+    """
+    return load_config()
+
+
+def _mock_config() -> OpenBladeConfig:
+    """Config for the ``mock`` subcommands, which are simulator-only by definition."""
+    from dataclasses import replace
+
+    from openblade.config import BackendMode
+
+    return replace(_default_config(), backend=BackendMode.MOCK, real_hardware_enabled=False)
+
+
+def _is_mock(context: AppContext) -> bool:
+    """True when this context is simulator-backed.
+
+    ``mock_state.json`` is a snapshot of ``MockLibraryBackend``/``MockLTFSBackend``
+    internals. Writing it from a real-hardware context would serialise attributes
+    those backends do not have; *reading* it back over a real context replaces the
+    live library with a simulation, which is the worse direction. Both are gated
+    on this.
+    """
+    return isinstance(context.library, MockLibraryBackend) and isinstance(
+        context.ltfs, MockLTFSBackend
     )
 
 
 def _save_state(context: AppContext) -> None:
+    if not _is_mock(context):
+        return
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "library": {
@@ -99,10 +129,30 @@ def _save_state(context: AppContext) -> None:
 
 
 def _load_state(context: AppContext) -> AppContext:
+    if not _is_mock(context):
+        # Real backend: the library itself is the state. Never shadow it.
+        return context
     if not _STATE_PATH.exists():
         _save_state(context)
         return context
-    payload = json.loads(_STATE_PATH.read_text())
+    try:
+        payload = json.loads(_STATE_PATH.read_text())
+        library_state = payload["library"]
+        ltfs_state = payload["ltfs"]
+        int(library_state["num_slots"])
+        int(library_state["num_drives"])
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        # A state file written by an older release has a different shape. Losing
+        # simulator scratch state is annoying; a traceback on every single command
+        # with no documented recovery is worse. Say what happened and re-seed.
+        stale = _STATE_PATH.with_suffix(".json.stale")
+        _STATE_PATH.replace(stale)
+        console.print(
+            f"[yellow]Ignoring unreadable mock state[/yellow] ({type(exc).__name__}: {exc}); "
+            f"moved to {stale} and re-initialised from defaults."
+        )
+        _save_state(context)
+        return context
     library_state = payload["library"]
     ltfs_state = payload["ltfs"]
     library = MockLibraryBackend(
@@ -160,11 +210,22 @@ def _load_state(context: AppContext) -> AppContext:
     return context
 
 
-def _get_context() -> AppContext:
-    context = create_context(_default_config())
+def _get_context(*, force_mock: bool = False) -> AppContext:
+    """Build the CLI's app context.
+
+    ``force_mock`` is for the ``mock`` subcommand group, which is simulator-only
+    by definition. Without it, `openblade mock load --slot 3 --drive 0` in a
+    shell that exports OPENBLADE_BACKEND=real issues a real `mtx load` against a
+    real library -- a command whose name promises the opposite.
+    """
+    context = create_context(_mock_config() if force_mock else _default_config())
     context = _load_state(context)
     reset_context(context)
     return context
+
+
+def _get_mock_context() -> AppContext:
+    return _get_context(force_mock=True)
 
 
 def _print_inventory(context: AppContext) -> None:
@@ -211,7 +272,9 @@ def mock_init(
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     if _DB_PATH.exists():
         _DB_PATH.unlink()
-    config = _default_config()
+    # Explicitly mock: `openblade mock init` must not try to talk to a real
+    # changer just because OPENBLADE_BACKEND=real is exported in this shell.
+    config = _mock_config()
     context = create_context(config)
     library = MockLibraryBackend(num_slots=slots, num_drives=drives)
     library.seed_slots([f"MCK{i:05d}" for i in range(1, cartridges + 1)])
@@ -235,13 +298,13 @@ def mock_init(
 @mock_app.command("inventory")
 def mock_inventory() -> None:
     """Show mock library inventory."""
-    _print_inventory(_get_context())
+    _print_inventory(_get_mock_context())
 
 
 @mock_app.command("load")
 def mock_load(slot: int = typer.Option(...), drive: int = typer.Option(0)) -> None:
     """Load cartridge from slot into drive."""
-    context = _get_context()
+    context = _get_mock_context()
     inventory = context.library.inventory()
     barcode = next(
         (
@@ -271,7 +334,7 @@ def mock_load(slot: int = typer.Option(...), drive: int = typer.Option(0)) -> No
 @mock_app.command("unload")
 def mock_unload(drive: int = typer.Option(0), slot: int = typer.Option(...)) -> None:
     """Unload cartridge from drive to slot."""
-    context = _get_context()
+    context = _get_mock_context()
     inventory = context.library.inventory()
     barcode = next(
         (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -14,6 +15,8 @@ from openblade.nas.service import NasService
 from openblade.nas.tape_paths import dataset_tape_path
 from openblade.nas.types import NasFileRecord, NasFileState, NasRestoreJob, RestoreJobStatus
 from openblade.simulator.ltfs_volume import MockLTFSBackend
+
+logger = logging.getLogger(__name__)
 
 _SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
@@ -313,7 +316,22 @@ class HydrationExecutor:
         tape_path = str(dataset_tape_path(dataset.name, record.relative_path))
         try:
             return self.ltfs.read_bytes(record.tape_barcode, tape_path)
-        except Exception:  # noqa: BLE001 - a tape read failure falls back to placeholder
+        except Exception as exc:  # noqa: BLE001 - a tape read failure falls back to placeholder
+            # The fallback is deliberate -- the checksum guard below turns it into
+            # a clean failure rather than corrupt data. Swallowing the *cause* is
+            # not. Against real hardware the usual cause here is "Barcode ... is
+            # not loaded in a drive", because HydrationExecutor never loads the
+            # cartridge; the operator was shown "tape read failed or data corrupt"
+            # instead, which points at the media rather than at the missing load.
+            logger.warning(
+                "hydration tape read failed; falling back to placeholder bytes",
+                exc_info=True,
+                extra={
+                    "barcode": record.tape_barcode,
+                    "tape_path": tape_path,
+                    "cause_type": type(exc).__name__,
+                },
+            )
             return None
 
     def _materialize_content(self, record: NasFileRecord) -> bytes:

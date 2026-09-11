@@ -169,3 +169,86 @@ def test_format_job_wrong_barcode_raises() -> None:
             library,
             ltfs,
         )
+
+
+# --- Real-data campaign regression -------------------------------------------
+# docs/runbooks/real-data-campaign.md: archiving 430 MB of real files onto small
+# tapes died with OSError [Errno 28] on the *empty* files. `_choose_tape` asked
+# `remaining_capacity >= size_bytes`, which is True for `0 >= 0`, so every
+# zero-byte file was routed back to the already-full first tape -- and an empty
+# file still needs a directory entry and index space, so LTFS said ENOSPC and the
+# whole job died after 617 of 1,073 files.
+
+
+def test_empty_file_is_not_routed_to_a_full_tape(tmp_path: Path) -> None:
+    from openblade.jobs.archive import _choose_tape
+
+    catalog, library, ltfs, full_barcode = _formatted_stack()
+    group = catalog.get_volume_group("photos")
+    assert group is not None
+
+    # Fill the group's only tape completely.
+    tape = ltfs.ensure_tape(full_barcode)
+    tape.used_bytes = tape.capacity_bytes
+
+    # A second, blank tape is available in the library inventory.
+    spare = str(library.inventory().slots[1].barcode)
+
+    chosen = _choose_tape(catalog, library, ltfs, group.id, 0)
+
+    assert chosen != full_barcode, "a zero-byte file was routed onto a full tape"
+    assert chosen == spare
+
+
+def test_full_tape_is_rejected_for_a_sized_file_too(tmp_path: Path) -> None:
+    from openblade.jobs.archive import _choose_tape
+
+    catalog, library, ltfs, full_barcode = _formatted_stack()
+    group = catalog.get_volume_group("photos")
+    assert group is not None
+    tape = ltfs.ensure_tape(full_barcode)
+    tape.used_bytes = tape.capacity_bytes
+
+    assert _choose_tape(catalog, library, ltfs, group.id, 1024) != full_barcode
+
+
+def test_a_tape_with_exactly_enough_room_is_still_chosen(tmp_path: Path) -> None:
+    """The fix must not become an off-by-one that rejects a perfect fit."""
+    from openblade.jobs.archive import _choose_tape
+
+    catalog, library, ltfs, barcode = _formatted_stack()
+    group = catalog.get_volume_group("photos")
+    assert group is not None
+    tape = ltfs.ensure_tape(barcode)
+    tape.used_bytes = tape.capacity_bytes - 4096
+
+    assert _choose_tape(catalog, library, ltfs, group.id, 4096) == barcode
+
+
+def test_archive_job_spills_an_empty_file_onto_the_next_tape(tmp_path: Path) -> None:
+    """End-to-end: the exact shape that failed on the rig."""
+    catalog, library, ltfs, first = _formatted_stack()
+    source = tmp_path / "source"
+    (source / "logs").mkdir(parents=True)
+    (source / "logs" / "empty.log").write_bytes(b"")
+    (source / "payload.bin").write_bytes(b"z" * 1024)
+
+    # The first tape is full before the job starts; a second is formatted and blank.
+    ltfs.ensure_tape(first).used_bytes = ltfs.ensure_tape(first).capacity_bytes
+    spare = str(library.inventory().slots[1].barcode)
+    library.load(2, 0)
+    ltfs.format(spare, FormatConfirmation(spare, SafetyToken.generate("format", spare)))
+    library.unload(0, 2)
+
+    job = catalog.create_job("archive", {"source_path": str(source), "volume_group": "photos"})
+    result = run_archive_job(
+        ArchiveRequest(source_path=source, volume_group_name="photos"),
+        library,
+        ltfs,
+        catalog,
+        job.id,
+    )
+
+    assert result.errors == []
+    assert result.files_archived == 2
+    assert first not in result.tapes_used

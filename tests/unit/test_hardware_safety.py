@@ -329,3 +329,137 @@ class TestWaitForLtfsRelease:
         while _ltfs_processes_holding(mount_point):
             assert time.monotonic() < deadline, "process never disappeared from the scan"
             time.sleep(0.05)
+
+
+class TestRealTapeCapacityAccounting:
+    """Capacity/usage must come from the live LTFS mount, and survive unmount.
+
+    Real-data campaign (docs/runbooks/real-data-campaign.md): `_refresh_tape_usage`
+    walked the mount directory and was called *after* the unmount, so every
+    tape's used_bytes was reset to 0 at exactly the moment jobs/archive.py wrote
+    it back to the cartridge row. Combined with a hardcoded 12 GB capacity
+    against a 6.57 GB medium, `_choose_tape` could never spill to the next tape;
+    it kept picking a tape it believed was empty until the write hit ENOSPC.
+    """
+
+    @staticmethod
+    def _backend(tmp_path: Path):
+        from openblade.hardware.ltfs import RealLTFSBackend
+
+        return RealLTFSBackend(
+            library=object(),  # type: ignore[arg-type]  -- unused on these paths
+            guard=RealHardwareGuard(
+                config_backend="real",
+                config_real_hardware_enabled=True,
+                operator_acknowledgment="campaign",
+            ),
+            runner=RecordingRunner(),
+            mount_root=tmp_path,
+        )
+
+    def test_mounted_refresh_reads_the_filesystem_geometry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        # tmp_path is not a mount point; this test is about the arithmetic, and
+        # the mount check has its own tests below.
+        monkeypatch.setattr("openblade.hardware.ltfs._is_distinct_mount", lambda _p: True)
+        backend = self._backend(tmp_path)
+        tape = backend.ensure_tape("CAP001L8")
+        assert tape.capacity_bytes == 12_000_000_000  # the never-mounted assumption
+
+        stats_before = os.statvfs(tmp_path)
+        backend._refresh_tape_usage(tape, tmp_path, mounted=True)
+        stats_after = os.statvfs(tmp_path)
+
+        # `used` is asserted as a range, not an equality: this measures a live
+        # filesystem, and a parallel test writing a temp file moves f_bavail
+        # between the two reads. Capacity (f_blocks) does not move.
+        assert tape.capacity_bytes == stats_after.f_frsize * stats_after.f_blocks
+        assert tape.capacity_bytes != 12_000_000_000
+        used_bounds = sorted(
+            s.f_frsize * (s.f_blocks - s.f_bavail) for s in (stats_before, stats_after)
+        )
+        assert used_bounds[0] <= tape.used_bytes <= used_bounds[1]
+
+    def test_unmounted_refresh_keeps_the_last_good_reading(self, tmp_path: Path) -> None:
+        """The bug: an empty mount point read as "this tape is empty"."""
+        backend = self._backend(tmp_path)
+        tape = backend.ensure_tape("CAP002L8")
+        tape.capacity_bytes = 6_569_328_640
+        tape.used_bytes = 4_000_000_000
+
+        backend._refresh_tape_usage(tape, tmp_path, mounted=False)
+
+        assert tape.used_bytes == 4_000_000_000
+        assert tape.capacity_bytes == 6_569_328_640
+        assert backend.remaining_capacity("CAP002L8") == 2_569_328_640
+
+    def test_unmount_measures_before_running_umount(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ordering is the whole fix: after umount there is nothing to measure."""
+        import os
+
+        from openblade.domain.models import Barcode, MountHandle, MountMode
+
+        monkeypatch.setattr("openblade.hardware.ltfs._is_distinct_mount", lambda _p: True)
+        observed: list[int] = []
+        backend = self._backend(tmp_path)
+
+        class _OrderRecordingRunner(RecordingRunner):
+            def run(self, args, timeout=None, redact_args=None):  # type: ignore[override]
+                observed.append(backend.ensure_tape("CAP003L8").capacity_bytes)
+                return super().run(args, timeout=timeout, redact_args=redact_args)
+
+        backend.runner = _OrderRecordingRunner()
+        backend.library = type(
+            "_Lib", (), {"set_drive_mount_state": lambda self, *a, **k: None}
+        )()
+        mount_path = tmp_path / "CAP003L8"
+        mount_path.mkdir()
+        handle = MountHandle(
+            handle_id="h1",
+            barcode=Barcode("CAP003L8"),
+            drive_id=0,
+            mount_path=mount_path,
+            mode=MountMode.READ_WRITE,
+        )
+        backend._active_mounts["h1"] = handle
+
+        backend.unmount(handle)
+
+        expected = os.statvfs(mount_path)
+        assert observed, "umount was never invoked"
+        assert observed[0] == expected.f_frsize * expected.f_blocks, (
+            "capacity was still the never-mounted assumption when umount ran, "
+            "i.e. the reading was taken after the filesystem was gone"
+        )
+
+
+    def test_refresh_refuses_a_mount_point_that_is_not_a_mount(self, tmp_path: Path) -> None:
+        """`mounted=True` is the caller's belief, not a fact.
+
+        With OPENBLADE_HARDWARE_DRY_RUN=true and BackendMode.REAL -- a supported
+        config -- mount() mkdir's the mount point and nothing is ever mounted, so
+        statvfs would report the HOST filesystem. jobs/archive.py copies
+        capacity_bytes straight onto the cartridge row, so a ~2 TB host disk would
+        be persisted as an LTO-8 cartridge's capacity and spillover would never
+        fire again.
+        """
+        backend = self._backend(tmp_path)
+        tape = backend.ensure_tape("CAP004L8")
+        plain_directory = tmp_path / "not-a-mount"
+        plain_directory.mkdir()
+
+        backend._refresh_tape_usage(tape, plain_directory, mounted=True)
+
+        assert tape.capacity_bytes == 12_000_000_000, "host filesystem geometry was believed"
+        assert tape.used_bytes == 0
+
+    def test_is_distinct_mount_fails_closed_on_an_unreadable_path(self, tmp_path: Path) -> None:
+        """For a check guarding persisted capacity, "I could not look" is not "yes"."""
+        from openblade.hardware.ltfs import _is_distinct_mount
+
+        assert _is_distinct_mount(tmp_path / "does-not-exist") is False
