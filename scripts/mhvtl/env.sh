@@ -3,44 +3,63 @@
 # Print the environment block that points the OpenBlade hardware suite at the
 # mhvtl rehearsal rig created by scripts/mhvtl/setup.sh.
 #
-# Devices are DISCOVERED from lsscsi, not hardcoded: mhvtl attaches to whatever
-# SCSI host number is free, so /dev/sgN moves between boots.
+# Devices are DISCOVERED, not hardcoded: mhvtl attaches to whatever SCSI host
+# number is free, so /dev/sgN and /dev/stN move between boots. The changer is
+# identified by its unit serial number rather than "first mediumx", so a real
+# library attached to the same host can never be selected - see _rig.sh.
+#
+# Diagnostics go to stderr so `eval` only ever consumes the exports.
 #
 # Usage:
 #   eval "$(scripts/mhvtl/env.sh)"
 #   python -m pytest tests/hardware/ -v -m real_hardware
-#
-# Or, to avoid polluting your shell:
-#   env $(scripts/mhvtl/env.sh | sed 's/^export //') python -m pytest ...
 
 set -euo pipefail
 
-command -v lsscsi >/dev/null || { echo "lsscsi not installed" >&2; exit 1; }
+# shellcheck source=scripts/mhvtl/_rig.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rig.sh"
 
-scsi=$(lsscsi -g)
+command -v lsscsi >/dev/null || rig_die "lsscsi not installed"
+command -v sg_inq >/dev/null || rig_die "sg_inq not installed (sg3-utils)"
 
-changer_sg=$(printf '%s\n' "$scsi" | awk '/ mediumx /{print $NF}' | head -1)
-[ -n "$changer_sg" ] || { echo "no mediumx device found - is the rig up?" >&2; exit 1; }
+changer_sg=$(rig_changer)
 
-# Tape drives, in SCSI address order. lsscsi already sorts by [host:bus:tgt:lun],
-# which is the order mhvtl instantiated the drives in device.conf (11, 12, 13).
-#
-# We export the NO-REWIND nodes (/dev/nstN), never /dev/stN. Writing LTFS
-# through a rewinding node is a data-loss footgun; see Phase 0.3 of
-# docs/runbooks/real-i3-bringup-plan.md.
-drive_st=$(printf '%s\n' "$scsi" | awk '/ tape /{print $(NF-1)}')
-drive_nst=$(printf '%s\n' "$drive_st" | sed 's#/dev/st#/dev/nst#' | paste -sd,)
+# Tape drives in SCSI address order, which is the changer's Data Transfer
+# Element order. We export the NO-REWIND nodes (/dev/nstN), never /dev/stN:
+# issuing SCSI commands on a rewinding node makes it rewind on close, which
+# fails on an empty drive and is a corruption footgun under LTFS. See Phase 0.3
+# of docs/runbooks/real-i3-bringup-plan.md.
+# Map an sg node back to its no-rewind tape node using the same sysfs
+# relationship openblade.hardware.discovery.resolve_sg_device() reads forwards.
+# st and sg numbers are allocated independently (st0 -> sg1 and st2 -> sg4 are
+# both real pairings here), so this must be looked up, never derived.
+nst_for_sg() {
+  local want="${1#/dev/}" tape
+  for tape in /sys/class/scsi_tape/nst*; do
+    [ -e "$tape/device/scsi_generic/$want" ] || continue
+    printf '/dev/%s' "$(basename "$tape")"
+    return 0
+  done
+  return 1
+}
 
-# The LTFS `sg` backend addresses drives by their /dev/sg node, NOT /dev/nst.
-drive_sg=$(printf '%s\n' "$scsi" | awk '/ tape /{print $NF}' | paste -sd,)
+drive_nst=""
+while read -r sg; do
+  [ -n "$sg" ] || continue
+  node=$(nst_for_sg "$sg") \
+    || rig_die "could not map $sg back to a /dev/nst node via sysfs"
+  drive_nst="${drive_nst:+$drive_nst,}${node}"
+done <<EOF
+$(rig_drive_sgs "$changer_sg")
+EOF
+
+[ -n "$drive_nst" ] || rig_die "no tape drives found on this rig"
 
 cat <<EOF
 export OPENBLADE_BACKEND=real
 export OPENBLADE_REAL_HARDWARE_ENABLED=true
 export OPENBLADE_CHANGER_DEVICE=${changer_sg}
 export OPENBLADE_DRIVE_DEVICES=${drive_nst}
-# LTFS sg-backend device paths for the same drives, in the same order.
-export OPENBLADE_DRIVE_SG_DEVICES=${drive_sg}
 # Only these barcodes may be formatted/overwritten. They are the scratch media
 # declared in scripts/mhvtl/config/library_contents.10 - nothing else.
 export OPENBLADE_SCRATCH_BARCODES=OB0007L8,OB0008L8

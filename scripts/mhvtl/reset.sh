@@ -8,28 +8,36 @@
 # ... is not currently present in the library" if you just re-run. Run this
 # between passes so each run starts from the same place.
 #
+# A failed test run is also exactly when an LTFS mount is most likely to have
+# been left behind, so this REFUSES to move anything while LTFS holds a drive -
+# see the project non-negotiable "never unload while LTFS is mounted or dirty".
+# It tells you how to clear the mount rather than doing it for you: unmounting
+# someone else's dirty volume is not a decision a cleanup script should make.
+#
 # Usage:  sudo scripts/mhvtl/reset.sh
 
 set -euo pipefail
 
+# shellcheck source=scripts/mhvtl/_rig.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rig.sh"
+
 log()  { printf '\n=== %s\n' "$*"; }
-fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-command -v mtx    >/dev/null || fail "mtx not installed"
-command -v lsscsi >/dev/null || fail "lsscsi not installed"
+command -v mtx    >/dev/null || rig_die "mtx not installed"
+command -v lsscsi >/dev/null || rig_die "lsscsi not installed"
+command -v sg_inq >/dev/null || rig_die "sg_inq not installed (sg3-utils)"
 
-changer=$(lsscsi -g | awk '/ mediumx /{print $NF}' | head -1)
-case "$changer" in
-  /dev/sg*) ;;
-  *) fail "no changer with an sg node found - is the rig up? (scripts/mhvtl/setup.sh)" ;;
-esac
+# Must come before anything reads or moves media.
+rig_require_no_ltfs
+
+changer=$(rig_changer)
 
 log "Unloading any loaded drives on $changer"
 
 # Parse the drive lines once. A loaded drive reports its origin slot as
 #   Data Transfer Element 0:Full (Storage Element 6 Loaded):VolumeTag = OB0007L8
 # Note mtx spaces the '=' here but not on Storage Element lines - the same
-# inconsistency that openblade/hardware/mtx.py has a regression test for.
+# inconsistency openblade/hardware/mtx.py has a regression test for.
 status=$(mtx -f "$changer" status)
 
 moved=0
@@ -37,10 +45,13 @@ while read -r drive_id source_slot; do
   [ -n "$drive_id" ] || continue
   if [ -z "$source_slot" ]; then
     printf 'drive %s is loaded but reports no origin slot; ' "$drive_id"
-    # Fall back to the first empty, non-I/E storage slot.
+    # Fall back to the first empty STORAGE slot. The regex excludes
+    # import/export elements, whose lines carry an " IMPORT/EXPORT" infix
+    # before the colon - parking a cartridge in the operator mailslot is not
+    # a reset.
     source_slot=$(printf '%s\n' "$status" \
       | awk '/^ *Storage Element [0-9]+:Empty/{gsub(/:.*/,"",$3); print $3; exit}')
-    [ -n "$source_slot" ] || fail "no empty storage slot to unload drive $drive_id into"
+    [ -n "$source_slot" ] || rig_die "no empty storage slot to unload drive $drive_id into"
     printf 'using empty slot %s\n' "$source_slot"
   fi
   printf 'unloading drive %s -> slot %s\n' "$drive_id" "$source_slot"
@@ -58,7 +69,9 @@ done < <(printf '%s\n' "$status" | awk '
     print drive, slot
   }')
 
-[ "$moved" -eq 0 ] && printf 'all drives were already empty\n'
+if [ "$moved" -eq 0 ]; then
+  printf 'all drives were already empty\n'
+fi
 
 log "Library state"
 mtx -f "$changer" status

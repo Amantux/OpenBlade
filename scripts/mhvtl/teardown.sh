@@ -10,8 +10,13 @@
 #   sudo scripts/mhvtl/teardown.sh              # stop daemons, unload module
 #   sudo scripts/mhvtl/teardown.sh --purge      # also delete media + config
 #
-# This script only ever touches things the rig created. It does not stop
-# unrelated services and does not remove packages.
+# This script is scoped to this rig: the four /dev/mhvtl minors our device.conf
+# defines, the daemons for those units, and (with --purge) only the media
+# barcodes named in our library_contents.10. /etc/mhvtl and /opt/mhvtl are
+# mhvtl's own defaults and may be shared with another library on this host, so
+# they are never removed wholesale; any config setup.sh displaced is restored
+# from /etc/mhvtl/pre-openblade.bak. It does not stop unrelated services and
+# does not remove packages.
 
 set -euo pipefail
 
@@ -58,15 +63,42 @@ else
 fi
 
 log "Removing /dev/mhvtl device nodes"
+# Only the minors this rig's device.conf defines (library 10, drives 11-13).
+# Another mhvtl library on this host uses different minors; leave them be.
 for minor in 10 11 12 13; do rm -f "/dev/mhvtl${minor}"; done
 
 if [ "$PURGE" -eq 1 ]; then
-  log "Purging virtual media and config (--purge)"
-  # Scoped to the exact paths the rig owns. /opt/mhvtl holds only virtual
-  # cartridges; /etc/mhvtl holds only mhvtl config.
-  rm -rf /opt/mhvtl
-  rm -f /etc/mhvtl/device.conf /etc/mhvtl/library_contents.10
-  printf 'Removed /opt/mhvtl and the rig config.\n'
+  log "Purging this rig's virtual media and config (--purge)"
+
+  # /opt/mhvtl is MHVTL'S default home, not a path this rig invented, and on a
+  # host that already ran mhvtl it holds someone else's cartridges. Delete only
+  # the media directories named in OUR library_contents, never the whole tree.
+  contents=/etc/mhvtl/library_contents.10
+  if [ -f "$contents" ]; then
+    while read -r barcode; do
+      [ -n "$barcode" ] || continue
+      if [ -d "/opt/mhvtl/$barcode" ]; then
+        rm -rf "/opt/mhvtl/${barcode:?}"
+        printf 'removed media %s\n' "$barcode"
+      fi
+    done <<EOF
+$(awk '/^Slot [0-9]+:/ {gsub(/^Slot [0-9]+:[ \t]*/, ""); if ($0 != "") print $1}' "$contents")
+EOF
+  else
+    printf 'No %s present; leaving /opt/mhvtl alone.\n' "$contents"
+  fi
+  rmdir /opt/mhvtl 2>/dev/null && printf 'removed empty /opt/mhvtl\n' || true
+
+  rm -f /etc/mhvtl/device.conf /etc/mhvtl/library_contents.10 /etc/mhvtl/mhvtl.conf
+
+  # Put back whatever was here before setup.sh first ran.
+  backup_dir=/etc/mhvtl/pre-openblade.bak
+  if [ -d "$backup_dir" ]; then
+    cp -a "$backup_dir"/. /etc/mhvtl/ 2>/dev/null || true
+    rm -rf "${backup_dir:?}"
+    printf 'Restored the pre-existing /etc/mhvtl config from its backup.\n'
+  fi
+
   printf 'Binaries and the kernel module are still installed; that is deliberate.\n'
 else
   printf '\nVirtual media under /opt/mhvtl and config in /etc/mhvtl were kept.\n'

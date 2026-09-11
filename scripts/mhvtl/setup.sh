@@ -20,7 +20,12 @@
 set -euo pipefail
 
 MHVTL_SRC="${MHVTL_SRC:-/usr/local/src/mhvtl}"
-MHVTL_REF="${MHVTL_REF:-master}"
+# Pinned, not "master". patches/ is byte-exact against this commit, and the
+# results recorded in docs/runbooks/mhvtl-rehearsal.md are from this build. A
+# moving ref would give the next person either a hard "failed to apply" or,
+# worse, a quietly different rig. Bump deliberately, re-running the suite.
+# Full 40-character SHA: GitHub's fetch-by-SHA only accepts the complete id.
+MHVTL_REF="${MHVTL_REF:-59f32ee50b3269c118965bffa29cf38b1553268f}"
 MHVTL_REPO="https://github.com/markh794/mhvtl.git"
 CONFIG_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
 
@@ -50,14 +55,21 @@ done
          Install linux-headers-$(uname -r) (and reboot into that kernel)."
 
 # ---------------------------------------------------------------- source
-log "Fetching mhvtl source into $MHVTL_SRC"
-if [ -d "$MHVTL_SRC/.git" ]; then
-  git -C "$MHVTL_SRC" fetch --depth 1 origin "$MHVTL_REF"
-  git -C "$MHVTL_SRC" checkout -q FETCH_HEAD
-else
+log "Fetching mhvtl source into $MHVTL_SRC ($MHVTL_REF)"
+if [ ! -d "$MHVTL_SRC/.git" ]; then
   mkdir -p "$(dirname "$MHVTL_SRC")"
-  git clone --depth 1 --branch "$MHVTL_REF" "$MHVTL_REPO" "$MHVTL_SRC"
+  git init -q "$MHVTL_SRC"
+  git -C "$MHVTL_SRC" remote add origin "$MHVTL_REPO"
 fi
+# Fetch the ref by name OR by raw commit SHA - `git clone --branch` only
+# accepts branches and tags, and MHVTL_REF is pinned to a commit.
+git -C "$MHVTL_SRC" fetch --depth 1 origin "$MHVTL_REF" \
+  || fail "could not fetch '$MHVTL_REF' from $MHVTL_REPO.
+         If you pinned a commit, the server must allow fetching it by SHA."
+# Keep local modifications (our applied patch) rather than clobbering them;
+# the patch step below detects an already-patched tree.
+git -C "$MHVTL_SRC" checkout -q FETCH_HEAD 2>/dev/null \
+  || git -C "$MHVTL_SRC" reset -q --mixed FETCH_HEAD
 
 # ---------------------------------------------------------------- patches
 # mhvtl's Scalar personality module has three defects that make vtllibrary
@@ -110,21 +122,45 @@ make -C "$MHVTL_SRC" install
 command -v systemctl >/dev/null && systemctl daemon-reload || true
 
 # ---------------------------------------------------------------- config
+# /etc/mhvtl and /opt/mhvtl are MHVTL'S OWN defaults, not paths this rig
+# invented. If someone already runs mhvtl on this host, their library lives
+# here. Back their config up once, the first time we touch it, and say so -
+# silently overwriting an operator's device.conf is not acceptable just
+# because we got here second.
 log "Installing OpenBlade rig config into /etc/mhvtl"
 install -d -m 755 /etc/mhvtl
+backup_dir=/etc/mhvtl/pre-openblade.bak
+if [ ! -d "$backup_dir" ] && ls /etc/mhvtl/*.conf /etc/mhvtl/library_contents.* >/dev/null 2>&1; then
+  install -d -m 755 "$backup_dir"
+  cp -a /etc/mhvtl/mhvtl.conf "$backup_dir"/ 2>/dev/null || true
+  cp -a /etc/mhvtl/device.conf "$backup_dir"/ 2>/dev/null || true
+  cp -a /etc/mhvtl/library_contents.* "$backup_dir"/ 2>/dev/null || true
+  printf 'Existing /etc/mhvtl config backed up to %s\n' "$backup_dir"
+fi
+
 install -m 644 "$CONFIG_SRC/mhvtl.conf"            /etc/mhvtl/mhvtl.conf
 install -m 644 "$CONFIG_SRC/device.conf"           /etc/mhvtl/device.conf
 install -m 644 "$CONFIG_SRC/library_contents.10"   /etc/mhvtl/library_contents.10
-# The stock install ships a second library (30). Our rig is deliberately ONE
-# library, so make sure a leftover library_contents.30 cannot start a daemon.
-rm -f /etc/mhvtl/library_contents.30
+
+# The stock install ships a second library (30), and our device.conf defines
+# only library 10, so a leftover library_contents.30 would describe a library
+# that no longer exists. Move it aside rather than deleting it - on a host that
+# already ran mhvtl, that file is someone's library definition.
+if [ -f /etc/mhvtl/library_contents.30 ]; then
+  install -d -m 755 "$backup_dir"
+  mv /etc/mhvtl/library_contents.30 "$backup_dir"/library_contents.30
+  printf 'Moved library_contents.30 aside to %s (this rig defines one library)\n' "$backup_dir"
+fi
 
 # ---------------------------------------------------------------- media
 log "Creating virtual media under /opt/mhvtl"
 install -d -m 755 /opt/mhvtl
-# make_vtl_media is idempotent: it only creates media files that are absent.
+# make_vtl_media is idempotent: it only creates media files that are absent,
+# so it never disturbs cartridges belonging to another library.
+# Both invocations must target the same home dir; without --home-dir the
+# fallback would write media somewhere the rest of this script does not look.
 make_vtl_media --config-dir=/etc/mhvtl --home-dir=/opt/mhvtl >/dev/null \
-  || make_vtl_media >/dev/null \
+  || make_vtl_media --home-dir=/opt/mhvtl >/dev/null \
   || fail "make_vtl_media failed — 'mtx load' will return a hardware error
          without media files present"
 
