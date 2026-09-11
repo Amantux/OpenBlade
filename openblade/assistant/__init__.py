@@ -34,6 +34,13 @@ from openblade.assistant.errors import (
 )
 from openblade.assistant.provider import ChatReply, OllamaClient, ToolCall
 from openblade.assistant.session import AssistantSession, AssistantTurn
+from openblade.assistant.setup_facade import setup_facade
+from openblade.assistant.setup_tools import (
+    SETUP_TOOL_NAMES,
+    ConfirmCallback,
+    PendingAction,
+    build_setup_registry,
+)
 from openblade.assistant.tools import (
     READ_ONLY_TOOL_NAMES,
     ReadOnlyTool,
@@ -49,6 +56,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle guard only
 __all__ = [
     "DISABLED_MESSAGE",
     "READ_ONLY_TOOL_NAMES",
+    "SETUP_TOOL_NAMES",
     "AssistantConfig",
     "AssistantDisabledError",
     "AssistantError",
@@ -58,6 +66,7 @@ __all__ = [
     "AssistantUpstreamError",
     "ChatReply",
     "OllamaClient",
+    "PendingAction",
     "ReadOnlyTool",
     "ReadOnlyViolationError",
     "ToolCall",
@@ -77,11 +86,17 @@ def create_session(
     *,
     config: AssistantConfig | None = None,
     http_client: httpx.Client | None = None,
+    confirm: ConfirmCallback | None = None,
 ) -> AssistantSession:
     """Build a session over a live :class:`~openblade.bootstrap.AppContext`.
 
     Raises :class:`AssistantDisabledError` with the curated setup message when
     ``OPENBLADE_OLLAMA_URL`` is unset.
+
+    ``confirm`` is what turns tier-1 setup actions on. Pass the REPL's ``[y/N]``
+    prompt to get a session that can create a volume group and add tapes to it once
+    the operator says yes; omit it — as one-shot mode does — and the session is
+    read-only, with the setup tools never shown to the model.
     """
     resolved = config or load_assistant_config()
     if not resolved.enabled:
@@ -104,4 +119,9 @@ def create_session(
         registry=build_registry(),
         context=tool_context,
         config=resolved,
+        # Built only when a confirmation callback exists. No callback, no facade,
+        # no setup registry: the write path is absent rather than merely unused.
+        setup_registry=build_setup_registry() if confirm is not None else None,
+        setup=setup_facade(app_context.catalog) if confirm is not None else None,
+        confirm=confirm,
     )
