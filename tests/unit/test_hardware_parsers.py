@@ -77,13 +77,16 @@ class TestMtxParser:
         cleaning = [slot.slot_id for slot in status.slots if slot.is_cleaning]
         assert cleaning == [3]
 
-    def test_three_drive_status_skips_import_export_elements(self) -> None:
-        # KNOWN GAP (docs/runbooks/real-i3-bringup-plan.md Phase 3.4): the slot regex
-        # requires "Storage Element <n>:" so the i3's
-        # "Storage Element 51 IMPORT/EXPORT:..." rows are dropped. Pinned here so the
-        # behaviour is visible; update this test when I/E parsing is implemented.
+    def test_three_drive_status_separates_import_export_elements(self) -> None:
+        # Formerly a KNOWN-GAP characterization test: I/E rows used to be
+        # dropped entirely. The mhvtl rehearsal fixed the parser to keep them
+        # in a SEPARATE list — never in `slots`, which consumers treat as
+        # "places a tape may be unloaded to" (folding them in would eject
+        # cartridges to the operator mailslot on a full library).
         status = parse_mtx_status(SAMPLE_MTX_THREE_DRIVES)
         assert [slot.slot_id for slot in status.slots] == [1, 2, 3, 4, 5]
+        assert [s.slot_id for s in status.import_export_slots] == [51, 52]
+        assert status.import_export_slots[1].barcode == "VOL052L8"
 
     def test_drive_loaded_from_slot(self) -> None:
         status = parse_mtx_status(SAMPLE_MTX_LOADED)
