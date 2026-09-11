@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import os
 import shutil
 import uuid
 from contextlib import suppress
@@ -66,13 +67,30 @@ def _stripe_tape_path(source_file: Path, source_root: Path) -> str:
 
     Existing media are unaffected: restore reads ``file_instances.tape_path`` as
     stored, it does not recompute this.
+
+    The result is always strictly under ``/stripe``. ``source_root`` arrives from
+    the API body (``POST /archive/sharded {"source_path": ...}``) and pathlib does
+    not normalise, so ``/data/../etc/passwd`` relative to ``/data`` yields
+    ``../etc/passwd`` -- which ``write_file`` would join onto the mount point and
+    escape it. Normalise lexically (never ``resolve()``: that touches the
+    filesystem and follows symlinks) and then drop any component that could still
+    climb.
     """
-    try:
-        relative = source_file.relative_to(source_root)
-    except ValueError:
-        # source_path was the file itself, or an unrelated root.
-        relative = Path(source_file.name)
-    return str(PurePosixPath("/stripe") / PurePosixPath(relative.as_posix()))
+    file_path = PurePosixPath(os.path.normpath(str(source_file)))
+    root = PurePosixPath(os.path.normpath(str(source_root)))
+    if file_path == root:
+        # source_path was the file itself: relative_to() returns Path(".") here
+        # rather than raising, which would collapse the tape path to "/stripe".
+        relative: PurePosixPath = PurePosixPath(file_path.name)
+    else:
+        try:
+            relative = file_path.relative_to(root)
+        except ValueError:
+            relative = PurePosixPath(file_path.name)
+    parts = [part for part in relative.parts if part not in {"", ".", "..", "/"}]
+    if not parts:
+        parts = [file_path.name]
+    return str(PurePosixPath("/stripe", *parts))
 
 
 def _archive_profile(mode: ShardMode) -> str:

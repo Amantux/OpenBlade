@@ -344,3 +344,40 @@ def test_failed_sharded_archive_records_why_on_the_job(tmp_path: Path) -> None:
     assert stored.state == "failed_recoverable"
     assert stored.error, "the job carried no error at all"
     assert "simulated lane write failure" in stored.error
+
+
+def test_stripe_tape_path_cannot_escape_the_stripe_prefix() -> None:
+    """`source_path` comes from the API body and pathlib does not normalise.
+
+    `/data/../etc/passwd` relative to `/data` yields `../etc/passwd`, which
+    write_file would join onto the LTFS mount point and escape it.
+    """
+    from openblade.jobs.sharded_archive import _stripe_tape_path
+
+    escapes = [
+        (Path("/data/../etc/passwd"), Path("/data")),
+        (Path("/data/a/../../etc/shadow"), Path("/data")),
+        (Path("/other/x.bin"), Path("/data")),
+    ]
+    for source_file, root in escapes:
+        result = _stripe_tape_path(source_file, root)
+        assert result.startswith("/stripe/"), result
+        assert ".." not in result.split("/"), result
+
+
+def test_stripe_tape_path_of_a_single_file_source_is_not_a_bare_directory() -> None:
+    """relative_to(itself) returns Path('.'), which collapsed the path to /stripe."""
+    from openblade.jobs.sharded_archive import _stripe_tape_path
+
+    only = Path("/data/solo.bin")
+    assert _stripe_tape_path(only, only) == "/stripe/solo.bin"
+
+
+def test_stripe_tape_path_preserves_unicode_and_collapses_repeated_separators() -> None:
+    from openblade.jobs.sharded_archive import _stripe_tape_path
+
+    assert (
+        _stripe_tape_path(Path("/data/日本語/記録 1.txt"), Path("/data"))
+        == "/stripe/日本語/記録 1.txt"
+    )
+    assert _stripe_tape_path(Path("/data//a///b.txt"), Path("/data")) == "/stripe/a/b.txt"
