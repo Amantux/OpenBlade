@@ -121,3 +121,27 @@ def scripted_client(responses: Sequence[dict[str, Any]]) -> tuple[httpx.Client, 
 
 def failing_client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def media_facade_for(context: Any, *, drive_serials: Any = (("OBLADE_D02", 1),)) -> Any:
+    """A tier-2 media facade over a live app context, built the way the CLI builds it.
+
+    The serial map is populated by default so the previews under test carry the
+    drive serial — the detail an operator standing at the rack can actually check.
+    """
+    from openblade.assistant.media_facade import media_bundle, media_facade
+    from openblade.assistant.readonly import read_only_catalog, read_only_inventory
+
+    return media_facade(
+        media_bundle(
+            catalog=read_only_catalog(context.catalog),
+            inventory=read_only_inventory(context.inventory_service),
+            catalog_repo=context.catalog,
+            library=context.library,
+            ltfs=context.ltfs,
+            format_service=context.format_service,
+            archive_service=context.archive_service,
+            restore_service=context.restore_service,
+            drive_serials=drive_serials,
+        )
+    )

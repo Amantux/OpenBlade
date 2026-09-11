@@ -1,9 +1,12 @@
 """The assistant's safety line: it reads, explains, and proposes.
 
-The one thing it may *do* is a tier-1 setup action the operator confirmed in the
-REPL — create a volume group, add existing tapes to one. These are the regression
-tests for both halves of that guarantee: everything else is unreachable, and the
-executable part is unreachable without a yes.
+The things it may *do* are a tier-1 setup action the operator confirmed with a yes
+(create a volume group, add tapes to one) and a tier-2 media action the operator
+confirmed *strongly* (load, unload, move, archive, restore, format). These are the
+regression tests for both halves of that guarantee: everything else is unreachable,
+the tier-1 part is unreachable without a yes, and the tier-2 part is unreachable
+without a confirmation matching its consequence — a typed barcode for a format, a
+typed word for an overwriting restore.
 
 The structural guards are mutation-checked, meaning removing the guard makes a
 named test fail (verified, not assumed):
@@ -13,7 +16,10 @@ named test fail (verified, not assumed):
 * the write-path AST scan (section 5, ``test_write_path_scan_catches_a_rogue_module``);
 * the setup allowlist AND the destructive-verb denylist (section 6 — the denylist
   case widens the allowlist on purpose, so only the denylist can be what fails it);
-* the facade's attribute allowlist (section 7).
+* the facade's attribute allowlist (section 7);
+* the tier-2 registry boundary, the media facade's attribute allowlist, and the
+  authorization re-check that stands between a media tool and execution
+  (sections 9-11).
 
 Sections 4 and 8 are different and are labelled as such: the prompt tests assert
 the text of an instruction, and there is no guard to remove. They catch a prompt
@@ -26,20 +32,40 @@ from __future__ import annotations
 import ast
 import copy
 import dataclasses
+import gc
+import json
 import pickle
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from openblade.assistant.errors import (
+    MediaFacadeViolationError,
+    MediaNotAuthorizedError,
+    MediaRegistryViolationError,
     ReadOnlyViolationError,
     SetupFacadeViolationError,
     SetupRegistryViolationError,
     ToolRegistryViolationError,
 )
-from openblade.assistant.prompts import SETUP_SYSTEM_PROMPT, SYSTEM_PROMPT
+from openblade.assistant.media_facade import MediaFacade, media_bundle
+from openblade.assistant.media_tools import (
+    MEDIA_TOOL_NAMES,
+    ConfirmationGrade,
+    MediaAuthorization,
+    MediaTool,
+    build_media_registry,
+)
+from openblade.assistant.prompts import (
+    MEDIA_SYSTEM_PROMPT,
+    SETUP_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    system_message,
+)
+from openblade.assistant.provider import OllamaClient, ToolCall
 from openblade.assistant.readonly import (
     CATALOG_READ_METHODS,
     INVENTORY_READ_METHODS,
@@ -47,8 +73,10 @@ from openblade.assistant.readonly import (
     read_only_catalog,
     read_only_inventory,
 )
+from openblade.assistant.session import AssistantSession
 from openblade.assistant.setup_facade import SetupFacade, setup_facade
 from openblade.assistant.setup_tools import (
+    DESTRUCTIVE_VERBS,
     SETUP_TOOL_NAMES,
     SetupTool,
     build_setup_registry,
@@ -60,7 +88,7 @@ from openblade.assistant.tools import (
     build_context,
     build_registry,
 )
-from tests.assistant_support import assistant_config
+from tests.assistant_support import assistant_config, media_facade_for
 
 ASSISTANT_DIR = Path(__file__).resolve().parents[2] / "openblade" / "assistant"
 
@@ -323,6 +351,8 @@ ASSISTANT_SOURCE_NAMES = frozenset(
         "provider.py",
         "readonly.py",
         "session.py",
+        "media_facade.py",
+        "media_tools.py",
         "setup_facade.py",
         "setup_tools.py",
         "tools.py",
@@ -330,6 +360,9 @@ ASSISTANT_SOURCE_NAMES = frozenset(
 )
 
 WRITE_PATH_OWNER = "setup_facade.py"
+
+# The one module allowed to reach the tape orchestrator and the media services.
+MEDIA_PATH_OWNER = "media_facade.py"
 
 
 def _catalog_write_methods() -> frozenset[str]:
@@ -783,3 +816,622 @@ def test_setup_prompt_keeps_tier_two_propose_only() -> None:
 def test_read_only_prompt_points_setup_execution_at_the_repl() -> None:
     assert "only in the interactive REPL" in SYSTEM_PROMPT
     assert "You are a read-only advisor. You cannot run anything." in SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# 9. Tier 2: the media registry boundary, and the three registries stay disjoint
+# ---------------------------------------------------------------------------
+
+
+def _rogue_media_tool(name: str) -> MediaTool:
+    return MediaTool(
+        name=name,
+        description="Should never be registrable.",
+        parameters={"type": "object", "properties": {}},
+        normalize=lambda arguments: {},
+        plan=lambda facade, arguments: {},
+        describe=lambda arguments, plan: "nope",
+        grade=lambda arguments, plan: (ConfirmationGrade.YES_NO, None),
+        apply=lambda facade, action: {},
+    )
+
+
+def _rogue_setup_tool(name: str) -> SetupTool:
+    return SetupTool(
+        name=name,
+        description="Should never be registrable.",
+        parameters={"type": "object", "properties": {}},
+        normalize=lambda arguments: {},
+        plan=lambda facade, arguments: {},
+        describe=lambda arguments, plan: "nope",
+        apply=lambda facade, arguments: {},
+    )
+
+
+def test_media_allowlist_is_the_reviewed_set() -> None:
+    """Six operations, spelled out, so widening tier 2 shows up in a diff."""
+    assert set(MEDIA_TOOL_NAMES) == {
+        "load_tape",
+        "unload_drive",
+        "move_tape",
+        "format_tape",
+        "archive_path",
+        "restore_path",
+    }
+    assert build_media_registry().names == MEDIA_TOOL_NAMES
+
+
+def test_the_three_registries_are_pairwise_disjoint() -> None:
+    """Dispatch is by name, so an overlap would make a tier boundary ambiguous."""
+    assert not (MEDIA_TOOL_NAMES & SETUP_TOOL_NAMES)
+    assert not (MEDIA_TOOL_NAMES & READ_ONLY_TOOL_NAMES)
+    assert not (SETUP_TOOL_NAMES & READ_ONLY_TOOL_NAMES)
+
+
+@pytest.mark.parametrize("name", sorted(MEDIA_TOOL_NAMES))
+def test_a_media_tool_can_never_register_in_the_setup_registry(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tier 2 cannot leak into tier 1, where a bare "y" would confirm it.
+
+    The setup ALLOWLIST is widened to include the media name on purpose — that is
+    exactly the mistake this guards against — so the only thing that can refuse it
+    is the tier-1 destructive-verb denylist. Remove ``reject_destructive_name``
+    from ``SetupToolRegistry.__init__`` and every case here passes, which is how we
+    know the denylist and not the allowlist is doing the work.
+    """
+    monkeypatch.setattr(
+        "openblade.assistant.setup_tools.SETUP_TOOL_NAMES",
+        frozenset({*SETUP_TOOL_NAMES, name}),
+    )
+    with pytest.raises(SetupRegistryViolationError) as excinfo:
+        build_setup_registry([_rogue_setup_tool(name)])
+    assert "destructive verb" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("name", sorted(SETUP_TOOL_NAMES))
+def test_a_setup_tool_can_never_register_in_the_media_registry(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the reverse: tier 1 cannot acquire tier-2's machinery by renaming.
+
+    The media ALLOWLIST is widened to include the setup name, so only the explicit
+    cross-registry exclusion in ``MediaToolRegistry.__init__`` can refuse it.
+    """
+    monkeypatch.setattr(
+        "openblade.assistant.media_tools.MEDIA_TOOL_NAMES",
+        frozenset({*MEDIA_TOOL_NAMES, name}),
+    )
+    with pytest.raises(MediaRegistryViolationError) as excinfo:
+        build_media_registry([_rogue_media_tool(name)])
+    assert "tier-1 setup tool" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("name", sorted(READ_ONLY_TOOL_NAMES))
+def test_a_read_tool_name_can_never_register_in_the_media_registry(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A media tool must not shadow a read tool and silently become confirmable."""
+    monkeypatch.setattr(
+        "openblade.assistant.media_tools.MEDIA_TOOL_NAMES",
+        frozenset({*MEDIA_TOOL_NAMES, name}),
+    )
+    with pytest.raises(MediaRegistryViolationError):
+        build_media_registry([_rogue_media_tool(name)])
+
+
+def test_the_tier_one_denylist_was_not_weakened() -> None:
+    """Tier 2 exists; the tier-1 denylist is untouched.
+
+    Spelled out because the tempting way to add media tools would have been to
+    delete a verb from this tuple. Every one of these is still refused for tier 1.
+    """
+    for verb in (
+        "format",
+        "delete",
+        "erase",
+        "wipe",
+        "purge",
+        "destroy",
+        "load",
+        "unload",
+        "move",
+        "eject",
+        "import",
+        "export",
+        "mount",
+        "restore",
+        "archive",
+        "write",
+        "revoke",
+        "token",
+        "rename",
+    ):
+        assert verb in DESTRUCTIVE_VERBS
+        with pytest.raises(SetupRegistryViolationError):
+            reject_destructive_name(f"do_{verb}_thing")
+
+
+def test_only_the_media_facade_reaches_the_orchestrator_or_the_services() -> None:
+    """The tier-2 acting path lives in exactly one file, and the scan proves it.
+
+    ``openblade.nas`` is where the tape orchestrator lives — the thing that moves
+    media. Importing it anywhere else in the package would route round the media
+    registry and its confirmation grades.
+    """
+    offenders = [
+        f"{path.name}:{node.lineno}"
+        for path in _assistant_sources()
+        if path.name != MEDIA_PATH_OWNER
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if (isinstance(node, ast.ImportFrom) and (node.module or "").startswith("openblade.nas"))
+        or (
+            isinstance(node, ast.Import)
+            and any(alias.name.startswith("openblade.nas") for alias in node.names)
+        )
+    ]
+    assert offenders == []
+    # And the guard is not vacuous: the media facade itself does import it.
+    facade_source = (ASSISTANT_DIR / MEDIA_PATH_OWNER).read_text(encoding="utf-8")
+    assert "from openblade.nas.tape_orchestrator import" in facade_source
+
+
+# The symbols that actually move media. Naming any of them is performing tape I/O.
+MEDIA_ACTING_SYMBOLS = frozenset({"execute_tape_request", "TapeOpRequest", "TapeOpType"})
+
+# The services the facade drives. ``__init__.py`` is the composition root and is
+# allowed to *wire* them; nobody else may name them, and wiring is not calling.
+MEDIA_SERVICE_SYMBOLS = frozenset({"format_service", "archive_service", "restore_service"})
+
+
+def _symbol_offenders(paths: Iterable[Path], symbols: frozenset[str]) -> list[str]:
+    """Files naming one of ``symbols``, as ``name:line`` strings."""
+    offenders: list[str] = []
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            named = (isinstance(node, ast.Attribute) and node.attr in symbols) or (
+                isinstance(node, ast.Name) and node.id in symbols
+            )
+            if named:
+                offenders.append(f"{path.name}:{node.lineno}")
+    return offenders
+
+
+def test_no_other_module_names_a_media_acting_symbol() -> None:
+    """Tape I/O lives in exactly one file, and the scan proves it."""
+    others = [path for path in _assistant_sources() if path.name != MEDIA_PATH_OWNER]
+    assert _symbol_offenders(others, MEDIA_ACTING_SYMBOLS) == []
+    # And the guard is not vacuous: the media facade itself does name them.
+    assert _symbol_offenders([ASSISTANT_DIR / MEDIA_PATH_OWNER], MEDIA_ACTING_SYMBOLS)
+
+
+def test_only_the_facade_and_the_composition_root_name_the_media_services() -> None:
+    """``__init__.py`` may hand the services to the bundle; nothing else sees them.
+
+    The distinction matters: the composition root wires objects together once, at
+    session construction, under the ``confirm_media is not None`` condition that
+    makes one-shot mode read-only. A *tool body* naming ``archive_service`` would
+    be a second, unconfirmed path to the same write.
+    """
+    others = [
+        path
+        for path in _assistant_sources()
+        if path.name not in {MEDIA_PATH_OWNER, "__init__.py"}
+    ]
+    assert _symbol_offenders(others, MEDIA_SERVICE_SYMBOLS) == []
+    assert _symbol_offenders([ASSISTANT_DIR / MEDIA_PATH_OWNER], MEDIA_SERVICE_SYMBOLS)
+
+
+def test_media_scan_catches_a_rogue_module(tmp_path: Path) -> None:
+    """THE MUTATION CHECK for the scan above."""
+    rogue = tmp_path / "rogue.py"
+    rogue.write_text(
+        "def sneak(ctx):\n    return execute_tape_request(ctx, None, None, None)\n",
+        encoding="utf-8",
+    )
+    assert _symbol_offenders([rogue], MEDIA_ACTING_SYMBOLS) == ["rogue.py:2"]
+
+
+# ---------------------------------------------------------------------------
+# 10. The media facade, attacked the way both other proxies were attacked
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "attribute",
+    [
+        # The live objects the bundle holds. Reaching any of them would hand a tool
+        # the unguarded hardware path the whole tier exists to wrap.
+        "library",
+        "ltfs",
+        "catalog_repo",
+        "catalog",
+        "inventory",
+        "format_service",
+        "archive_service",
+        "restore_service",
+        "drive_serials",
+        # Backend methods, in case the bundle were ever swapped for a backend.
+        "load",
+        "unload",
+        "move",
+        "format",
+        "mount",
+        "inventory_",
+        # The escapes that broke the first ReadOnlyProxy.
+        "_target",
+        "_allowed",
+        "_label",
+        "__class__",
+        "__dict__",
+        "__init__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__getstate__",
+        "__getattribute__",
+    ],
+)
+def test_media_facade_exposes_nothing_but_its_operations(app_context: Any, attribute: str) -> None:
+    """Mutation: widen MEDIA_OPERATION_NAMES or drop the __getattribute__ check -> fails."""
+    facade = media_facade_for(app_context)
+    with pytest.raises(MediaFacadeViolationError):
+        getattr(facade, attribute)
+
+
+def test_media_facade_serves_its_operations(app_context: Any) -> None:
+    """The guard must not be vacuous."""
+    facade = media_facade_for(app_context)
+    state = facade.library_state()
+    assert state["drives"] and state["barcodes"]
+
+
+def test_media_facade_cannot_be_rebound_or_re_initialised(app_context: Any) -> None:
+    facade = media_facade_for(app_context)
+    with pytest.raises(MediaFacadeViolationError):
+        facade.load_tape = lambda **kwargs: None  # type: ignore[misc]
+    with pytest.raises(MediaFacadeViolationError):
+        del facade.load_tape  # type: ignore[misc]
+    with pytest.raises(MediaFacadeViolationError):
+        facade.__init__(app_context)
+    # The unbound form bypasses instance attribute lookup entirely, so the state
+    # map refuses a second binding instead.
+    with pytest.raises(ReadOnlyViolationError):
+        AllowlistProxy.__init__(facade, app_context, frozenset({"anything"}), "media")
+    with pytest.raises(MediaFacadeViolationError):
+        getattr(facade, "anything")  # noqa: B009 - the lookup IS the test
+
+
+def test_media_facade_cannot_be_copied_or_pickled(app_context: Any) -> None:
+    facade = media_facade_for(app_context)
+    with pytest.raises(MediaFacadeViolationError):
+        copy.copy(facade)
+    with pytest.raises(MediaFacadeViolationError):
+        pickle.dumps(facade)
+
+
+def test_subclassing_the_media_facade_does_not_widen_it(app_context: Any) -> None:
+    subclass = type("Sneaky", (MediaFacade,), {})
+    facade = subclass(
+        media_bundle(
+            catalog=read_only_catalog(app_context.catalog),
+            inventory=read_only_inventory(app_context.inventory_service),
+            catalog_repo=app_context.catalog,
+            library=app_context.library,
+            ltfs=app_context.ltfs,
+            format_service=app_context.format_service,
+            archive_service=app_context.archive_service,
+            restore_service=app_context.restore_service,
+        )
+    )
+    with pytest.raises(MediaFacadeViolationError):
+        getattr(facade, "library")  # noqa: B009 - the lookup IS the test
+    assert facade.library_state()["drives"]
+
+
+@pytest.mark.parametrize(
+    "attribute", ["__closure__", "__self__", "__func__", "__class__", "__dict__", "args", "func"]
+)
+def test_a_bound_media_operation_leaks_no_reference_to_the_hardware(
+    app_context: Any, attribute: str
+) -> None:
+    """The subtle escape: a closure hands back the bundle, and the bundle holds the
+    library backend. Operations are therefore sealed objects, not closures."""
+    operation = media_facade_for(app_context).load_tape
+    with pytest.raises(MediaFacadeViolationError):
+        getattr(operation, attribute)
+
+
+def test_the_read_tool_context_has_no_route_to_the_media_facade(app_context: Any) -> None:
+    """The read-only tools and the media facade live in separate containers."""
+    context = build_context(
+        config=assistant_config(),
+        catalog=app_context.catalog,
+        inventory_service=app_context.inventory_service,
+        backend="mock",
+        real_hardware_enabled=False,
+        db_url="sqlite:///x.db",
+    )
+    assert not hasattr(context, "media")
+    for field in dataclasses.fields(context):
+        value = getattr(context, field.name)
+        # ``isinstance`` is not usable here: it consults ``__class__`` on a
+        # non-match, and every proxy in the context refuses that lookup.
+        assert type(value) is not MediaFacade, field.name
+        assert not issubclass(type(value), MediaFacade), field.name
+
+
+def test_the_setup_facade_is_still_catalog_only(app_context: Any) -> None:
+    """Tier 2 exists now; tier 1 did not quietly grow a hardware path with it."""
+    facade = setup_facade(app_context.catalog)
+    for name in ("load_tape", "format_tape", "archive_path", "library", "ltfs"):
+        with pytest.raises(SetupFacadeViolationError):
+            getattr(facade, name)
+
+
+# ---------------------------------------------------------------------------
+# 11. A tier-2 tool cannot execute without a matching strong confirmation
+# ---------------------------------------------------------------------------
+
+
+def _planned(app_context: Any, name: str, **arguments: Any) -> Any:
+    """Build a registry + facade and plan one action against the live context."""
+    registry = build_media_registry()
+    facade = media_facade_for(app_context)
+    return registry, facade, registry.plan(name, facade, arguments)
+
+
+def test_a_media_action_cannot_run_without_an_authorization(app_context: Any) -> None:
+    """MUTATION CHECK: delete the ``authorization is None`` check in perform -> fails."""
+    registry, facade, action = _planned(app_context, "load_tape", barcode="VOL001L9", drive=0)
+    with pytest.raises(MediaNotAuthorizedError):
+        registry.perform(action, facade, None)
+    assert app_context.library.inventory().drives[0].barcode is None
+
+
+def test_a_format_cannot_be_smuggled_through_the_yes_no_grade(app_context: Any) -> None:
+    """The attack: a forged YES_NO authorization carrying "y" for a TYPED action.
+
+    Two independent checks refuse this — the grade comparison and the response
+    re-verification — so it is a *scenario* test, not a mutation check for either
+    one. The two below isolate them. What it does prove end to end is that nothing
+    ran and, crucially, that the safety token was not consumed: a failed smuggling
+    attempt must not burn the operator's live authorization.
+    """
+    registry, facade, action = _planned(app_context, "format_tape", barcode="VOL001L9")
+    forged = MediaAuthorization(
+        action_key=action.key, grade=ConfirmationGrade.YES_NO, response="y"
+    )
+    with pytest.raises(MediaNotAuthorizedError):
+        registry.perform(action, facade, forged)
+    assert app_context.catalog.get_safety_token(action.token) is not None, "not consumed"
+
+
+def test_an_authorization_minted_under_a_weaker_grade_is_refused(app_context: Any) -> None:
+    """MUTATION CHECK for the grade comparison, isolated.
+
+    The response here — the barcode — *does* satisfy the action's real grade, so
+    the response re-verification passes and only the grade comparison can refuse
+    it. Delete that comparison and this test fails while everything else stays
+    green, which is what makes the check demonstrably load-bearing rather than
+    decorative defence in depth.
+    """
+    registry, facade, action = _planned(app_context, "format_tape", barcode="VOL001L9")
+    forged = MediaAuthorization(
+        action_key=action.key, grade=ConfirmationGrade.YES_NO, response="VOL001L9"
+    )
+    with pytest.raises(MediaNotAuthorizedError) as excinfo:
+        registry.perform(action, facade, forged)
+    assert "requires a typed confirmation" in str(excinfo.value)
+    assert app_context.catalog.get_safety_token(action.token) is not None
+
+
+def test_an_authorization_for_one_action_does_not_authorize_another(app_context: Any) -> None:
+    """MUTATION CHECK for the action-key comparison, isolated.
+
+    Both actions are the same tool at the same grade and the response is a valid
+    "y", so the grade check and the response check both pass: only the key
+    comparison stands between a yes given for VOL001L9 and a robot arm moving
+    VOL002L9. Delete it and this fails.
+    """
+    registry, facade, approved = _planned(app_context, "load_tape", barcode="VOL001L9", drive=0)
+    authorization = registry.authorize(approved, "y")
+    other = registry.plan("load_tape", facade, {"barcode": "VOL002L9", "drive": 0})
+    with pytest.raises(MediaNotAuthorizedError) as excinfo:
+        registry.perform(other, facade, authorization)
+    assert "different action" in str(excinfo.value)
+    assert app_context.library.inventory().drives[0].barcode is None, "nothing moved"
+
+
+def test_replaying_a_harmless_yes_against_a_format_is_refused(app_context: Any) -> None:
+    """The headline attack, kept as a scenario: a yes for a load, replayed at a format."""
+    registry, facade, harmless = _planned(app_context, "load_tape", barcode="VOL001L9", drive=0)
+    authorization = registry.authorize(harmless, "y")
+    destructive = registry.plan("format_tape", facade, {"barcode": "VOL002L9"})
+    with pytest.raises(MediaNotAuthorizedError):
+        registry.perform(destructive, facade, authorization)
+
+
+def test_a_declined_action_cannot_be_replayed_from_the_decline_cache(
+    app_context: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal is a refusal on every repeat; the cache answers, it never executes.
+
+    The attack: propose a format, have the operator decline, then propose the exact
+    same call again hoping the cached answer short-circuits into an execution.
+    """
+    asked: list[str] = []
+
+    def refuse(action: Any) -> str:
+        asked.append(action.tool)
+        return "n"
+
+    session = AssistantSession(
+        client=OllamaClient(assistant_config(), client=httpx.Client()),
+        registry=build_registry(),
+        context=build_context(
+            config=assistant_config(),
+            catalog=app_context.catalog,
+            inventory_service=app_context.inventory_service,
+            backend="mock",
+            real_hardware_enabled=False,
+            db_url="sqlite:///x.db",
+        ),
+        config=assistant_config(),
+        media_registry=build_media_registry(),
+        media=media_facade_for(app_context),
+        confirm_media=refuse,
+    )
+    call = ToolCall(name="format_tape", arguments={"barcode": "VOL001L9"})
+    first = json.loads(session._run_media_tool(call))
+    second = json.loads(session._run_media_tool(call))
+    assert first["status"] == "declined_by_operator"
+    assert second["status"] == "declined_by_operator"
+    assert second["repeatedProposal"] is True
+    assert asked == ["format_tape"], "the operator is asked once, not nagged"
+    assert session.executed_this_turn == ()
+
+
+def test_one_shot_mode_offers_neither_tier(app_context: Any) -> None:
+    """MUTATION CHECK: make ``media_enabled`` unconditional -> this fails.
+
+    One-shot has nowhere to ask a human, so the model must not even be told the
+    executing tools exist.
+    """
+    session = AssistantSession(
+        client=OllamaClient(assistant_config(), client=httpx.Client()),
+        registry=build_registry(),
+        context=build_context(
+            config=assistant_config(),
+            catalog=app_context.catalog,
+            inventory_service=app_context.inventory_service,
+            backend="mock",
+            real_hardware_enabled=False,
+            db_url="sqlite:///x.db",
+        ),
+        config=assistant_config(),
+    )
+    assert session.setup_enabled is False
+    assert session.media_enabled is False
+    offered = {schema["function"]["name"] for schema in session._schemas()}
+    assert offered == set(READ_ONLY_TOOL_NAMES)
+    assert not (offered & MEDIA_TOOL_NAMES)
+    assert not (offered & SETUP_TOOL_NAMES)
+
+
+@pytest.mark.parametrize(
+    "missing", ["media_registry", "media", "confirm_media"]
+)
+def test_a_half_wired_media_session_is_read_only(app_context: Any, missing: str) -> None:
+    """Missing any one of the three parts means tier 2 is off, not unconfirmed."""
+    parts: dict[str, Any] = {
+        "media_registry": build_media_registry(),
+        "media": media_facade_for(app_context),
+        "confirm_media": lambda action: "y",
+    }
+    parts[missing] = None
+    session = AssistantSession(
+        client=OllamaClient(assistant_config(), client=httpx.Client()),
+        registry=build_registry(),
+        context=build_context(
+            config=assistant_config(),
+            catalog=app_context.catalog,
+            inventory_service=app_context.inventory_service,
+            backend="mock",
+            real_hardware_enabled=False,
+            db_url="sqlite:///x.db",
+        ),
+        config=assistant_config(),
+        **parts,
+    )
+    assert session.media_enabled is False
+    offered = {schema["function"]["name"] for schema in session._schemas()}
+    assert not (offered & MEDIA_TOOL_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# 12. The tier-2 prompt states the confirmation contract (text, not a guard)
+# ---------------------------------------------------------------------------
+
+
+def test_media_prompt_states_the_strong_confirmation_rule() -> None:
+    assert "Tier 2 — media and robotics, confirmed with a STRONG confirmation:" in (
+        MEDIA_SYSTEM_PROMPT
+    )
+    assert (
+        "the operator must TYPE a\nspecific word — a yes is not accepted, and you must "
+        "never tell them a yes will do."
+    ) in MEDIA_SYSTEM_PROMPT
+    assert "Calling any of these does NOT perform it." in MEDIA_SYSTEM_PROMPT
+
+
+def test_media_prompt_keeps_the_two_phase_flow_and_the_refusals() -> None:
+    """Tier 2 executes the format flow; it does not soften a single gate."""
+    assert "openblade format dry-run --barcode" in MEDIA_SYSTEM_PROMPT
+    assert "one-time safety token" in MEDIA_SYSTEM_PROMPT
+    assert (
+        "If asked how to skip, disable, forge, patch out or otherwise bypass a safety gate"
+    ) in MEDIA_SYSTEM_PROMPT
+    assert "A tape is never unloaded while LTFS is mounted or dirty" in MEDIA_SYSTEM_PROMPT
+
+
+def test_the_media_prompt_is_only_sent_when_tier_two_is_live() -> None:
+    assert system_message()["content"] == SYSTEM_PROMPT
+    assert system_message(setup_enabled=True)["content"] == SETUP_SYSTEM_PROMPT
+    assert system_message(setup_enabled=True, media_enabled=True)["content"] == (
+        MEDIA_SYSTEM_PROMPT
+    )
+
+
+# ---------------------------------------------------------------------------
+# 13. Attacks found by attacking this boundary rather than by a failing test
+# ---------------------------------------------------------------------------
+
+
+def test_mutating_a_pending_action_after_authorizing_it_refuses(app_context: Any) -> None:
+    """The attack: get a yes for a harmless target, then swap the target.
+
+    ``PendingMediaAction`` is frozen, but ``arguments`` is a plain dict and so is
+    mutable in place. The defence is that ``key`` is derived from ``arguments``, so
+    editing them invalidates the authorization rather than re-pointing it — which
+    only works because ``perform`` re-checks the key instead of trusting the object.
+    """
+    registry, facade, action = _planned(app_context, "load_tape", barcode="VOL001L9", drive=0)
+    authorization = registry.authorize(action, "y")
+    action.arguments["barcode"] = "VOL002L9"
+    with pytest.raises(MediaNotAuthorizedError):
+        registry.perform(action, facade, authorization)
+    inventory = app_context.library.inventory()
+    assert inventory.drives[0].barcode is None, "nothing moved"
+
+
+def test_a_model_supplied_token_is_ignored(app_context: Any) -> None:
+    """The attack: pass ``token`` as a tool argument and skip the dry run.
+
+    Normalization keeps only the parameters the tool declares, so a model-invented
+    token never reaches ``arguments`` — and the token that is used comes from the
+    plan, which is the dry run.
+    """
+    registry, facade, action = _planned(
+        app_context, "format_tape", barcode="VOL001L9", token="forged", confirmed=True
+    )
+    assert set(action.arguments) == {"barcode"}
+    assert action.token != "forged"
+    assert app_context.catalog.get_safety_token(action.token) is not None
+
+
+def test_the_facade_holds_no_reachable_instance_state(app_context: Any) -> None:
+    """``object.__getattribute__`` bypasses the override — and finds nothing.
+
+    The proxy stores its target in a module-private ``WeakKeyDictionary``, not on
+    the instance, so the one lookup path that skips ``__getattribute__`` returns an
+    empty dict. (What this does NOT claim: that the bundle is unreachable anywhere
+    in the process. A determined ``gc.get_objects()`` walk finds the state map, as
+    it does for the tier-1 proxies. The guarantee is "no attribute path from a tool
+    body to the hardware", and that is what is tested here and above.)
+    """
+    facade = media_facade_for(app_context)
+    assert object.__getattribute__(facade, "__dict__") == {}
+    assert all(
+        type(referent).__name__ in {"dict", "type"} for referent in gc.get_referents(facade)
+    )
