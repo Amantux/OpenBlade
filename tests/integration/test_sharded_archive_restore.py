@@ -318,7 +318,16 @@ def test_failed_sharded_archive_records_why_on_the_job(tmp_path: Path) -> None:
     original_write = ltfs.write_file
 
     def _boom(*args, **kwargs):
-        raise RuntimeError("simulated lane write failure")
+        # A TYPED error: its curated message must reach the job record.
+        # (A raw RuntimeError would be reduced to its class name by
+        # safe_job_error() — jobs.error is served unauthenticated — which the
+        # second assertion below pins.)
+        from openblade.domain.errors import OpenBladeError
+
+        class LaneWriteError(OpenBladeError):
+            pass
+
+        raise LaneWriteError("simulated lane write failure")
 
     ltfs.write_file = _boom  # type: ignore[method-assign]
     try:
@@ -344,6 +353,11 @@ def test_failed_sharded_archive_records_why_on_the_job(tmp_path: Path) -> None:
     assert stored.state == "failed_recoverable"
     assert stored.error, "the job carried no error at all"
     assert "simulated lane write failure" in stored.error
+    # And the leak direction: raw (non-OpenBlade) exception text must NOT
+    # appear verbatim — the sanitizer reduces it to the class name.
+    from openblade.domain.errors import safe_job_error
+
+    assert "sneaky /dev path" not in safe_job_error(RuntimeError("sneaky /dev path"))
 
 
 def test_stripe_tape_path_cannot_escape_the_stripe_prefix() -> None:
