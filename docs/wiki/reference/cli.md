@@ -10,16 +10,14 @@ from `openblade.cli.main:app`.
 `pip install -e .` puts the `openblade` console script on your PATH.
 Every command below also accepts `--help`.
 
-> ⚠️ **Every command here runs against the SIMULATOR, whatever
-> `OPENBLADE_BACKEND` is set to — except `openblade hardware connect-i3`
-> and `openblade hardware validate-ltfs`, which are the only two that read
-> the real configuration.** The rest build their config by hand in
-> `openblade/cli/main.py:_default_config()`, which leaves the backend at
-> its `mock` default and ignores `OPENBLADE_DB_URL`. `openblade inventory`
-> on a real-hardware host prints simulator data and exits 0. Drive real
-> hardware through the HTTP API.
+> ℹ️ **Backend selection:** every command builds its backend through
+> `load_config()`, so `OPENBLADE_BACKEND` / `OPENBLADE_REAL_HARDWARE_ENABLED`
+> apply to the CLI exactly as to the API. (Before the real-data campaign
+> the CLI silently ignored them and printed simulator data — fixed and
+> regression-tested; see docs/runbooks/real-data-campaign.md.) Real-
+> hardware commands still refuse without both flags set.
 
-**14 commands**, in 3 sub-group(s) plus the top level.
+**15 commands**, in 3 sub-group(s) plus the top level.
 
 ## Command groups
 
@@ -39,6 +37,14 @@ Enqueue an archive job.
 | --- | --- | --- | --- | --- | --- |
 | `--volume-group` | option | `STR` | yes | - | - |
 | `--path` | option | `STR` | yes | - | - |
+
+### `openblade assist`
+
+Ask the read-only OpenBlade assistant about this installation.
+
+| Parameter | Kind | Type | Required | Default | Help |
+| --- | --- | --- | --- | --- | --- |
+| `QUESTION` | argument | `STR` | no | none | Ask one question and exit. Omit for an interactive session. |
 
 ### `openblade catalog`
 

@@ -7,17 +7,16 @@ issues a token, and a **confirm** that does the work and consumes the token.
 This page explains the flow, *why* it refuses without a token, and one endpoint
 that bypasses the whole thing.
 
-> ⚠️ **`openblade format` only ever formats simulator state.** It builds its
-> config by hand and never calls `load_config()`, so the backend stays `mock`
-> whatever `OPENBLADE_BACKEND` says. On a real-hardware host
-> `openblade format confirm` prints `{"success": true, "message": "formatted"}`
-> while the physical cartridge is **untouched** — so you either hit a confusing
-> mount failure later, or believe a tape was wiped when it still holds data.
+> ✅ **Fixed during the real-data campaign:** the CLI now builds its backend
+> through `load_config()`, so `OPENBLADE_BACKEND=real` (plus the enablement
+> flag) reaches every command — the earlier failure mode where
+> `openblade format confirm` reported success while the physical cartridge
+> stayed untouched is closed and regression-tested. The two-phase protocol
+> (dry run → one-time token → confirm) is unchanged.
 >
-> **To format real media, use the HTTP pair:**
+> **The HTTP pair is equivalent for API-driven setups:**
 > `POST /cartridges/{barcode}/format/dry-run` then
-> `POST /cartridges/format/confirm`. The two-phase protocol is identical; the
-> CLI is used below only because it shows the protocol most clearly.
+> `POST /cartridges/format/confirm`.
 > See [getting started §5](getting-started.md).
 
 ---

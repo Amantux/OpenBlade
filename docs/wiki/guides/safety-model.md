@@ -56,11 +56,11 @@ consumes it. Independently, the orchestrator refuses any format whose
 `confirmed_format` flag is not `True`. Full detail and rationale in
 [formatting tapes](formatting-tapes.md).
 
-> ⚠️ **`POST /ltfs/format` with `{"barcode": …, "confirm": true}` formats a tape
-> with no dry run, no token and no authentication.** Verified against the
-> simulator. It satisfies the orchestrator flag itself, and the orchestrator
-> mints a `SafetyToken` for itself when none is supplied. If you expose the API
-> beyond localhost, block this route.
+> ✅ **Fixed during the real-data campaign:** `POST /ltfs/format` now refuses
+> without a `safetyToken` from a prior dry run — the `{"confirm": true}`-only
+> bypass described in earlier revisions of this page is closed and
+> regression-tested. The route still has **no authentication**; if you expose
+> the API beyond localhost, put it behind auth or block it.
 
 ## 3. The mount-state unload gate ⚠️
 
