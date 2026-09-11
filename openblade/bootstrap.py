@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +31,13 @@ from openblade.nas.types import NasDataset, NasFileRecord, NasFileState, NasPool
 from openblade.simulator.i3_config import scalar_i3_active_config
 from openblade.simulator.scenarios import scalar_i3_default
 
-structlog.configure()
+# structlog's default PrintLoggerFactory writes to sys.stdout (verified against
+# the installed structlog._output.PrintLogger.__init__: `file or stdout`). That
+# put log lines into the CLI's own machine-readable output -- e.g.
+#     openblade format confirm --barcode X --token Y | jq
+# died with "Extra data" because two `tape operation ...` lines preceded the
+# JSON. Diagnostics belong on stderr; stdout is the data channel.
+structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=sys.stderr))
 
 _library: LibraryBackend | None = None
 _ltfs: LTFSBackend | None = None

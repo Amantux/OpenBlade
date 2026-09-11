@@ -137,3 +137,72 @@ def test_load_state_recovers_from_an_incompatible_state_file(
     assert (tmp_path / "mock_state.json.stale").exists()
     assert state_path.exists()  # re-seeded from the live context
     assert json.loads(state_path.read_text())["library"]["num_slots"] == 4
+
+
+def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
+    """stdout is the CLI's data channel; log lines there break `... | jq`.
+
+    Campaign regression: `openblade format confirm ... | jq` died with
+    "Extra data" because two `tape operation ...` lines preceded the JSON.
+
+    Run as a subprocess deliberately. structlog's factory binds a ``sys.stderr``
+    *object* at import time, and under pytest that object is the framework's own
+    global-capture stream -- so neither capsys nor capfd observes where the bytes
+    really land. Only a real process does.
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    console_script = Path(sys.executable).with_name("openblade")
+    if not console_script.exists():
+        found = shutil.which("openblade")
+        if found is None:
+            pytest.skip("openblade console script not installed in this environment")
+        console_script = Path(found)
+
+    env = {
+        **os.environ,
+        "OPENBLADE_BACKEND": "mock",
+        "OPENBLADE_DB_URL": f"sqlite:///{tmp_path / 'cli.db'}",
+        "OPENBLADE_CACHE_DIR": str(tmp_path / "cache"),
+        "OPENBLADE_STAGING_DIR": str(tmp_path / "staging"),
+        "OPENBLADE_RESTORE_DIR": str(tmp_path / "restore"),
+        "HOME": str(tmp_path),
+    }
+    seed = subprocess.run(
+        [str(console_script), "mock", "init", "--cartridges", "2"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert seed.returncode == 0, seed.stderr
+
+    dry_run = subprocess.run(
+        [str(console_script), "format", "dry-run", "--barcode", "MCK00001"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert dry_run.returncode == 0, dry_run.stderr
+    token = json.loads(dry_run.stdout)["token"]
+
+    # `format confirm` goes through the tape orchestrator, which emits
+    # "tape operation queued"/"completed" log lines. Those are what used to
+    # land on stdout ahead of the JSON.
+    confirm = subprocess.run(
+        [str(console_script), "format", "confirm", "--barcode", "MCK00001", "--token", token],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert confirm.returncode == 0, confirm.stderr
+    payload = json.loads(confirm.stdout)  # the whole of stdout, not a filtered slice
+    assert payload["success"] is True
+    assert "tape operation" in confirm.stderr, "log lines went somewhere other than stderr"

@@ -375,3 +375,115 @@ def test_api_list_ops_requires_auth(tmp_path) -> None:
     response = client.get("/tape-ops")
 
     assert response.status_code == 401
+
+
+# --- Real-data campaign regressions -----------------------------------------
+# docs/runbooks/real-data-campaign.md: `openblade format confirm` failed against
+# real hardware for every cartridge in a slot, because _format never loaded the
+# cartridge into a drive. mkltfs runs against a drive node; MockLTFSBackend.format
+# only needs a barcode, which is why the simulator never showed it.
+
+
+class _DriveObservingLTFS(MockLTFSBackend):
+    """Records where the cartridge was at the moment format() was called."""
+
+    def __init__(self, library: MockLibraryBackend, *, fail: bool = False) -> None:
+        super().__init__(library)
+        self._library_ref = library
+        self.drive_at_format: int | None = None
+        self.format_called = False
+        self._fail = fail
+
+    def format(self, barcode, confirmation=None):
+        self.format_called = True
+        self.drive_at_format = self._library_ref.find_drive_by_barcode(barcode)
+        if self._fail:
+            raise RuntimeError("SECRET mkltfs blew up")
+        return super().format(barcode, confirmation)
+
+
+def _format_request(barcode: str) -> TapeOpRequest:
+    return TapeOpRequest(
+        op_type=TapeOpType.FORMAT,
+        barcode=barcode,
+        requested_by="tester",
+        extras={"confirmed_format": True},
+    )
+
+
+def test_format_loads_the_cartridge_into_a_drive_first() -> None:
+    library = MockLibraryBackend(num_slots=4, num_drives=1)
+    ltfs = _DriveObservingLTFS(library)
+    _, _, _, orchestrator = make_orchestrator(library=library, ltfs=ltfs)
+    library.seed_slots(["FM0010L8"])
+
+    record = orchestrator.execute(_format_request("FM0010L8"))
+
+    assert record.status is TapeOpStatus.COMPLETED
+    assert ltfs.format_called is True
+    assert ltfs.drive_at_format == 0, "format ran with the cartridge still in its slot"
+
+
+def test_format_returns_the_cartridge_to_a_slot() -> None:
+    library = MockLibraryBackend(num_slots=4, num_drives=1)
+    ltfs = _DriveObservingLTFS(library)
+    _, _, _, orchestrator = make_orchestrator(library=library, ltfs=ltfs)
+    library.seed_slots(["FM0011L8"])
+
+    orchestrator.execute(_format_request("FM0011L8"))
+
+    assert library.find_drive_by_barcode("FM0011L8") is None
+    assert library.find_slot_by_barcode("FM0011L8") is not None
+
+
+def test_format_returns_the_cartridge_to_a_slot_even_when_it_fails() -> None:
+    """A failed format must not strand the cartridge in the drive."""
+    library = MockLibraryBackend(num_slots=4, num_drives=1)
+    ltfs = _DriveObservingLTFS(library, fail=True)
+    _, _, _, orchestrator = make_orchestrator(library=library, ltfs=ltfs)
+    library.seed_slots(["FM0012L8"])
+
+    record = orchestrator.execute(_format_request("FM0012L8"))
+
+    assert record.status is TapeOpStatus.FAILED
+    assert library.find_drive_by_barcode("FM0012L8") is None
+
+
+def test_format_leaves_an_already_loaded_cartridge_in_its_drive() -> None:
+    """Only put back what we took out -- same discipline as _write."""
+    library = MockLibraryBackend(num_slots=4, num_drives=1)
+    ltfs = _DriveObservingLTFS(library)
+    _, _, _, orchestrator = make_orchestrator(library=library, ltfs=ltfs)
+    library.seed_slots(["FM0013L8"])
+    library.load(library.find_slot_by_barcode("FM0013L8"), 0)
+
+    orchestrator.execute(_format_request("FM0013L8"))
+
+    assert library.find_drive_by_barcode("FM0013L8") == 0
+
+
+def test_failure_log_carries_the_real_cause_while_the_record_stays_curated() -> None:
+    """The curated message is the contract; the log must still name the cause.
+
+    Without this, an operator whose format failed on real hardware sees only the
+    constant string "Tape format operation failed" and the cause exists nowhere.
+    """
+    from structlog.testing import capture_logs
+
+    library = MockLibraryBackend(num_slots=4, num_drives=1)
+    ltfs = _DriveObservingLTFS(library, fail=True)
+    _, _, _, orchestrator = make_orchestrator(library=library, ltfs=ltfs)
+    library.seed_slots(["FM0014L8"])
+
+    with capture_logs() as logs:
+        record = orchestrator.execute(_format_request("FM0014L8"))
+
+    # The record that crosses the trust boundary stays curated.
+    assert record.error == "Tape format operation failed"
+    assert "SECRET" not in (record.error or "")
+
+    failures = [entry for entry in logs if entry.get("event") == "tape operation failed"]
+    assert failures, "the failure was not logged at all"
+    assert failures[0]["error"] == "Tape format operation failed"
+    assert failures[0]["cause"] == "SECRET mkltfs blew up"
+    assert failures[0]["cause_type"] == "RuntimeError"

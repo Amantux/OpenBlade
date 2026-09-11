@@ -45,7 +45,7 @@ class TapeOperationOrchestrator:
         self._validate_request(request)
         created_at = _utcnow_iso()
         op_id = str(uuid4())
-        created = self.repo.create_tape_op(
+        self.repo.create_tape_op(
             {
                 "op_id": op_id,
                 "op_type": request.op_type.value,
@@ -102,12 +102,20 @@ class TapeOperationOrchestrator:
                 },
             )
             assert persisted is not None
+            # The persisted/returned `error` stays curated -- it crosses a trust
+            # boundary and must never carry raw exception text. The server log is
+            # not that boundary, and without the cause here an operator whose
+            # format failed has no diagnostic anywhere on the host: the message
+            # they see is a constant string per op type. Log the real cause.
             logger.warning(
                 "tape operation failed",
                 op_id=op_id,
                 op_type=request.op_type.value,
                 barcode=request.barcode,
                 error=safe_error,
+                cause_type=type(exc).__name__,
+                cause=str(exc),
+                exc_info=True,
             )
             if isinstance(exc, OperationNotConfirmedError):
                 raise exc
@@ -201,8 +209,22 @@ class TapeOperationOrchestrator:
                 safety_token=SafetyToken.generate("format", request.barcode),
                 operator_note=str(request.extras.get("operator_note", "")),
             )
-        result = self.ltfs.format(request.barcode, confirmation)
-        return self._operation_result(result, {"barcode": request.barcode, "formatted": True})
+        # mkltfs runs against a drive, so the cartridge has to be in one. The
+        # simulator's format() only needs a barcode, which is why this was never
+        # noticed: against real hardware every `openblade format confirm` on a
+        # cartridge sitting in its slot -- the normal state -- failed with
+        # "Barcode ... is not loaded in a drive" behind the curated message.
+        # Same load/restore discipline as _write: only put back what we took out.
+        drive_id, loaded_slot = self._ensure_loaded(request.barcode, request.drive_id)
+        try:
+            result = self.ltfs.format(request.barcode, confirmation)
+        finally:
+            if loaded_slot is not None:
+                self.library.unload(drive_id, loaded_slot)
+        return self._operation_result(
+            result,
+            {"barcode": request.barcode, "formatted": True, "drive_id": drive_id},
+        )
 
     def _write(self, request: TapeOpRequest) -> dict[str, Any]:
         drive_id, loaded_slot = self._ensure_loaded(request.barcode, request.drive_id)
