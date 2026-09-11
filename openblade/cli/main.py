@@ -31,9 +31,11 @@ app.add_typer(format_app, name="format")
 hardware_app = typer.Typer(help="Real hardware validation commands")
 app.add_typer(hardware_app, name="hardware")
 
-# Read-only operator assistant. Registered from its own module so the assistant's
-# dependencies stay out of this file; it is read-only by construction — see
-# openblade/assistant/readonly.py for the three enforcement points.
+# Operator assistant. Registered from its own module so the assistant's
+# dependencies stay out of this file. It reads and proposes; the only things it
+# executes are a tier-1 catalog setup action and a tier-2 media action, both only
+# in the REPL and both only after the operator confirms — see
+# openblade/assistant/readonly.py for the enforcement points.
 app.command("assist")(assist_command)
 
 console = Console()
