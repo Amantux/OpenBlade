@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import typer
 from rich.console import Console
@@ -14,11 +14,29 @@ from rich.table import Table
 from openblade.bootstrap import AppContext, create_context, reset_context
 from openblade.cli.assist import assist as assist_command
 from openblade.config import OpenBladeConfig, load_config
-from openblade.domain.errors import DriveCorrelationError
+from openblade.domain.errors import (
+    CartridgeNotFoundError,
+    DriveCorrelationError,
+    ExportRefusedError,
+    ImportExportSlotError,
+    MailslotUnsupportedError,
+    safe_job_error,
+)
 from openblade.domain.models import Barcode, DriveState, MountState
 from openblade.fuse.filesystem import CatalogFilesystem
 from openblade.hardware.validation import connect_quantum_i3, validate_ltfs_capabilities
-from openblade.nas.tape_orchestrator import execute_tape_request
+from openblade.jobs.restore import RestoreRequest, run_restore_job
+from openblade.jobs.scheduler import DriveScheduler
+from openblade.jobs.shard import ShardMode
+from openblade.jobs.sharded_archive import ShardedArchiveRequest, run_sharded_archive
+from openblade.jobs.sharded_restore import ShardedRestoreRequest, run_sharded_restore
+from openblade.jobs.tree_restore import (
+    TreeRestoreProgress,
+    TreeRestoreRequest,
+    run_tree_restore,
+)
+from openblade.nas.mailslot import MailslotService
+from openblade.nas.tape_orchestrator import TapeOperationFailedError, execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockFileRecord, MockLTFSBackend, MockTapeContents
@@ -30,6 +48,16 @@ format_app = typer.Typer(help="Format commands")
 app.add_typer(format_app, name="format")
 hardware_app = typer.Typer(help="Real hardware validation commands")
 app.add_typer(hardware_app, name="hardware")
+# `restore` and `archive` are groups that still work as bare commands: the old
+# `openblade restore --path X --to Y` and `openblade archive --volume-group G
+# --path P` invocations are what scripts/campaign/ runs, so they stay valid and
+# the new subcommands hang off the same names.
+restore_app = typer.Typer(help="Restore commands", invoke_without_command=True)
+app.add_typer(restore_app, name="restore")
+archive_app = typer.Typer(help="Archive commands", invoke_without_command=True)
+app.add_typer(archive_app, name="archive")
+mailslot_app = typer.Typer(help="Import/export (mailslot) commands")
+app.add_typer(mailslot_app, name="mailslot")
 
 # Read-only operator assistant. Registered from its own module so the assistant's
 # dependencies stay out of this file; it is read-only by construction — see
@@ -37,6 +65,10 @@ app.add_typer(hardware_app, name="hardware")
 app.command("assist")(assist_command)
 
 console = Console()
+# Progress, warnings, and anything else that is NOT the command's result go
+# here. stdout carries the JSON result and nothing else, so
+# `openblade ... | jq` works while the operator still sees what is happening.
+err_console = Console(stderr=True)
 _STATE_DIR = Path.home() / ".openblade"
 _STATE_PATH = _STATE_DIR / "mock_state.json"
 _DB_PATH = _STATE_DIR / "openblade.db"
@@ -91,6 +123,10 @@ def _save_state(context: AppContext) -> None:
             "slots": {
                 str(slot_id): slot.barcode.value if slot.barcode is not None else None
                 for slot_id, slot in context.library._slots.items()
+            },
+            "import_export_slots": {
+                str(slot_id): slot.barcode.value if slot.barcode is not None else None
+                for slot_id, slot in context.library._ie_slots.items()
             },
             "drives": {
                 str(drive_id): {
@@ -147,7 +183,9 @@ def _load_state(context: AppContext) -> AppContext:
         # with no documented recovery is worse. Say what happened and re-seed.
         stale = _STATE_PATH.with_suffix(".json.stale")
         _STATE_PATH.replace(stale)
-        console.print(
+        # stderr: this is a warning, not a result, and it must not land in the
+        # middle of a JSON document a caller is piping into jq.
+        err_console.print(
             f"[yellow]Ignoring unreadable mock state[/yellow] ({type(exc).__name__}: {exc}); "
             f"moved to {stale} and re-initialised from defaults."
         )
@@ -155,14 +193,22 @@ def _load_state(context: AppContext) -> AppContext:
         return context
     library_state = payload["library"]
     ltfs_state = payload["ltfs"]
+    # Absent from state files written before the simulator had an I/E station:
+    # default to no mailslot rather than refusing to load an older snapshot.
+    ie_state: dict[str, str | None] = library_state.get("import_export_slots", {})
     library = MockLibraryBackend(
         library_id=library_state["library_id"],
         num_slots=library_state["num_slots"],
         num_drives=library_state["num_drives"],
+        num_import_export_slots=len(ie_state),
     )
     for slot_id, barcode in library_state["slots"].items():
         if barcode is not None:
             library._slots[int(slot_id)].barcode = Barcode(barcode)
+    # Element numbers round-trip verbatim; do not renumber them off num_slots.
+    library.seed_import_export_slots(
+        {int(slot_id): barcode for slot_id, barcode in ie_state.items()}
+    )
     for drive_id, state in library_state["drives"].items():
         drive = library._drives[int(drive_id)]
         barcode = state["barcode"]
@@ -267,6 +313,12 @@ def mock_init(
     slots: int = typer.Option(20, help="Number of slots"),
     drives: int = typer.Option(1, help="Number of drives"),
     cartridges: int = typer.Option(5, help="Number of cartridges"),
+    ie_slots: int = typer.Option(
+        4,
+        "--ie-slots",
+        min=0,
+        help="Number of import/export (mailslot) elements; 4 matches the Scalar i3",
+    ),
 ) -> None:
     """Initialize a mock library and save state."""
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -276,7 +328,9 @@ def mock_init(
     # changer just because OPENBLADE_BACKEND=real is exported in this shell.
     config = _mock_config()
     context = create_context(config)
-    library = MockLibraryBackend(num_slots=slots, num_drives=drives)
+    library = MockLibraryBackend(
+        num_slots=slots, num_drives=drives, num_import_export_slots=ie_slots
+    )
     library.seed_slots([f"MCK{i:05d}" for i in range(1, cartridges + 1)])
     ltfs = MockLTFSBackend(library)
     context.library = library
@@ -291,7 +345,8 @@ def mock_init(
     reset_context(context)
     _save_state(context)
     console.print(
-        f"Initialized mock library with {slots} slots, {drives} drives, {cartridges} cartridges"
+        f"Initialized mock library with {slots} slots, {drives} drives, "
+        f"{cartridges} cartridges, {ie_slots} import/export slots"
     )
 
 
@@ -401,28 +456,405 @@ def format_confirm(
     )
 
 
-@app.command()
+@archive_app.callback(invoke_without_command=True)
 def archive(
-    volume_group: str = typer.Option(...),
-    path: str = typer.Option(...),
+    ctx: typer.Context,
+    volume_group: str | None = typer.Option(None),
+    path: str | None = typer.Option(None),
 ) -> None:
     """Enqueue an archive job."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if volume_group is None or path is None:
+        raise typer.BadParameter(
+            "openblade archive needs --volume-group and --path "
+            "(or a subcommand such as `openblade archive sharded`)"
+        )
     context = _get_context()
     job = context.archive_service.enqueue(volume_group, Path(path))
     _save_state(context)
     console.print_json(data={"job_id": job.id, "status": job.state, "job_type": job.job_type})
 
 
-@app.command()
+@restore_app.callback(invoke_without_command=True)
 def restore(
-    path: str = typer.Option(..., help="Catalog path"),
-    to: str = typer.Option(..., help="Local destination path"),
+    ctx: typer.Context,
+    path: str | None = typer.Option(None, help="Catalog path"),
+    to: str | None = typer.Option(None, help="Local destination path"),
 ) -> None:
     """Restore a file from tape."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if path is None or to is None:
+        raise typer.BadParameter(
+            "openblade restore needs --path and --to "
+            "(or a subcommand such as `openblade restore tree`)"
+        )
     context = _get_context()
     job = context.restore_service.enqueue(path, Path(to))
     _save_state(context)
     console.print_json(data={"job_id": job.id, "status": job.state, "job_type": job.job_type})
+
+
+@restore_app.command("file")
+def restore_file(
+    catalog_path: str = typer.Argument(..., help="Catalog path of the file to restore"),
+    dest: Path = typer.Option(..., "--dest", help="Destination directory or file path"),
+) -> None:
+    """Restore one cataloged file, spanning tapes when it is sharded.
+
+    Named form of the bare `openblade restore --path ... --to ...`, with one
+    difference that matters: when `--dest` is a directory the file keeps its
+    catalog basename inside it, and a sharded file is reassembled through
+    `run_sharded_restore` rather than read as a single instance.
+    """
+    context = _get_context()
+    scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+    dest_path = dest / PurePosixPath(catalog_path).name if dest.is_dir() else dest
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    job = context.catalog.create_job(
+        "restore", {"catalog_path": catalog_path, "dest_path": str(dest_path)}
+    )
+    record = context.catalog.get_file_record(catalog_path)
+    if record is None:
+        raise typer.BadParameter(f"{catalog_path} is not in the catalog")
+    sharded = bool(context.catalog.list_shard_records(record.id)) or (record.shard_count or 1) > 1
+    err_console.print(
+        f"Restoring {catalog_path} -> {dest_path} "
+        f"({'sharded' if sharded else 'single-instance'})"
+    )
+    try:
+        if sharded:
+            result = run_sharded_restore(
+                ShardedRestoreRequest(catalog_path=catalog_path, dest_path=dest_path),
+                context.library,
+                context.ltfs,
+                context.catalog,
+                scheduler,
+                job.id,
+            )
+            payload = {
+                "jobId": job.id,
+                "catalogPath": catalog_path,
+                "destPath": str(dest_path),
+                "sourceBarcodes": result.source_barcodes,
+                "checksumVerified": result.checksum_verified,
+                "bytesRestored": result.bytes_restored,
+                "status": "failed" if result.error else "completed",
+            }
+            failed = result.error is not None
+        else:
+            plain = run_restore_job(
+                RestoreRequest(catalog_path=catalog_path, dest_path=dest_path),
+                context.library,
+                context.ltfs,
+                context.catalog,
+                job.id,
+            )
+            payload = {
+                "jobId": job.id,
+                "catalogPath": catalog_path,
+                "destPath": str(dest_path),
+                "sourceBarcodes": [plain.source_barcode],
+                "checksumVerified": plain.checksum_verified,
+                "bytesRestored": record.size_bytes,
+                "status": "completed",
+            }
+            failed = False
+    except Exception as exc:
+        message = safe_job_error(exc)
+        context.catalog.update_job_state(job.id, "failed", error=message)
+        _save_state(context)
+        err_console.print(f"[red]Restore failed:[/red] {message}")
+        raise typer.Exit(code=1) from None
+    _save_state(context)
+    console.print_json(data=payload)
+    if failed:
+        raise typer.Exit(code=1)
+
+
+@restore_app.command("tree")
+def restore_tree(
+    catalog_prefix: str = typer.Argument(..., help="Catalog path prefix, e.g. /photo-archive"),
+    dest: Path = typer.Option(..., "--dest", help="Destination directory"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Plan only; move no media"),
+) -> None:
+    """Restore every archived file under a catalog prefix, spanning tapes.
+
+    The source tree is preserved under `--dest`: restoring `/vg` writes
+    `/vg/a/x.txt` to `<dest>/a/x.txt`. Progress goes to stderr, the JSON summary
+    to stdout, and any failure exits non-zero with the curated error.
+    """
+    context = _get_context()
+    scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+    job = context.catalog.create_job(
+        "restore",
+        {"catalog_prefix": catalog_prefix, "dest_dir": str(dest), "bulk": True},
+    )
+
+    def _progress(tick: TreeRestoreProgress) -> None:
+        marker = "[red]FAIL[/red]" if tick.failed else "ok"
+        err_console.print(
+            f"[{tick.files_done}/{tick.files_total}] {marker} "
+            f"{tick.barcode} {tick.last_path} ({tick.bytes_done} bytes so far)"
+        )
+
+    try:
+        result = run_tree_restore(
+            TreeRestoreRequest(
+                catalog_prefix=catalog_prefix, dest_dir=dest, dry_run=dry_run
+            ),
+            context.library,
+            context.ltfs,
+            context.catalog,
+            scheduler,
+            job.id,
+            progress=_progress,
+        )
+    except Exception as exc:
+        message = safe_job_error(exc)
+        context.catalog.update_job_state(job.id, "failed", error=message)
+        _save_state(context)
+        err_console.print(f"[red]Tree restore failed:[/red] {message}")
+        raise typer.Exit(code=1) from None
+    _save_state(context)
+    console.print_json(data=result.to_dict())
+    if not result.ok:
+        err_console.print(
+            f"[red]{result.files_failed} of "
+            f"{result.files_restored + result.files_failed} file(s) failed[/red]"
+        )
+        raise typer.Exit(code=1)
+
+
+def _resolve_lane_barcodes(
+    context: AppContext,
+    volume_group: str,
+    lanes: int | None,
+    explicit: list[str] | None,
+) -> list[str]:
+    """Lane barcodes for a sharded archive.
+
+    `--lane-barcode` is authoritative when given. Otherwise the lanes come from
+    the volume group's own cartridges, skipping any the catalog says is
+    `exported` -- the same filter `jobs/archive.py` applies when it picks a
+    target tape, so the CLI cannot select media that is out of the library.
+    """
+    if explicit:
+        return list(explicit)
+    group = context.catalog.get_volume_group(volume_group)
+    if group is None:
+        raise typer.BadParameter(f"Volume group {volume_group} does not exist")
+    available = [
+        cartridge.barcode
+        for cartridge in sorted(group.cartridges, key=lambda item: item.barcode)
+        if cartridge.state != "exported"
+    ]
+    if not available:
+        # Common on a first sharded archive: run_sharded_archive only links a
+        # lane cartridge to the volume group when the cartridge row does not
+        # already exist, so media the catalog already knows about never joins
+        # the group and there is nothing here to pick from. Name the fix.
+        raise typer.BadParameter(
+            f"No cartridge is assigned to volume group {volume_group}; "
+            "pass the lanes explicitly with --lane-barcode "
+            "(repeat the option once per lane)"
+        )
+    if lanes is None:
+        return available
+    if lanes > len(available):
+        raise typer.BadParameter(
+            f"--lanes {lanes} but volume group {volume_group} has only "
+            f"{len(available)} usable cartridge(s): {', '.join(available)}"
+        )
+    return available[:lanes]
+
+
+def _parse_shard_mode(mode: str) -> ShardMode:
+    normalized = mode.strip().lower().replace("-", "_")
+    try:
+        return ShardMode(normalized)
+    except ValueError:
+        raise typer.BadParameter(
+            f"unknown mode {mode!r}; expected one of: "
+            + ", ".join(member.value for member in ShardMode)
+        ) from None
+
+
+@archive_app.command("sharded")
+def archive_sharded(
+    source: Path = typer.Argument(..., help="Source file or directory to archive"),
+    volume_group: str = typer.Option(..., "--volume-group", help="Target volume group"),
+    mode: str = typer.Option("stripe", "--mode", help="stripe | block-stripe"),
+    lanes: int | None = typer.Option(
+        None, "--lanes", min=1, help="Number of lane cartridges to use (default: all in the group)"
+    ),
+    lane_barcode: list[str] | None = typer.Option(
+        None, "--lane-barcode", help="Explicit lane barcode; repeatable, overrides --lanes"
+    ),
+    block_size_mb: int = typer.Option(128, "--block-size-mb", min=1),
+) -> None:
+    """Archive across several drives in parallel (the CLI half of POST /archive/sharded).
+
+    Wraps `run_sharded_archive` with the same request model and the same
+    defaults the API route uses, including its refusal of block_stripe with
+    fewer than two lanes.
+    """
+    if not source.exists():
+        raise typer.BadParameter(f"Source path {source} not found")
+    shard_mode = _parse_shard_mode(mode)
+    context = _get_context()
+    lane_barcodes = _resolve_lane_barcodes(context, volume_group, lanes, lane_barcode)
+    if shard_mode is ShardMode.BLOCK_STRIPE and len(lane_barcodes) < 2:
+        # Same refusal as the API route: a block-striped file is split ACROSS
+        # lanes, so one lane is not a sharded archive, it is a silent rename.
+        raise typer.BadParameter("block_stripe mode requires at least 2 lane barcodes")
+
+    job = context.catalog.create_job(
+        "archive",
+        {
+            "source_path": str(source),
+            "volume_group": volume_group,
+            "lane_barcodes": lane_barcodes,
+            "mode": shard_mode.value,
+            "block_size_mb": block_size_mb,
+        },
+    )
+    scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+    err_console.print(
+        f"Sharded archive {source} -> {volume_group} "
+        f"mode={shard_mode.value} lanes={','.join(lane_barcodes)}"
+    )
+    try:
+        result = run_sharded_archive(
+            ShardedArchiveRequest(
+                source_path=source,
+                volume_group_name=volume_group,
+                lane_barcodes=lane_barcodes,
+                mode=shard_mode,
+                block_size=block_size_mb * 1024 * 1024,
+            ),
+            context.library,
+            context.ltfs,
+            context.catalog,
+            scheduler,
+            job.id,
+        )
+    except Exception as exc:
+        message = safe_job_error(exc)
+        context.catalog.update_job_state(job.id, "failed", error=message)
+        _save_state(context)
+        err_console.print(f"[red]Sharded archive failed:[/red] {message}")
+        raise typer.Exit(code=1) from None
+    _save_state(context)
+    refreshed = context.catalog.get_job(job.id)
+    console.print_json(
+        data={
+            "jobId": result.job_id,
+            "status": refreshed.state if refreshed is not None else "unknown",
+            "sourcePath": str(source),
+            "volumeGroup": volume_group,
+            "mode": shard_mode.value,
+            "laneBarcodes": lane_barcodes,
+            "blockSizeMb": block_size_mb,
+            "filesArchived": result.files_archived,
+            "bytesArchived": result.bytes_archived,
+            "tapesUsed": result.tapes_used,
+            "shardGroupIds": result.shard_group_ids,
+            "errors": result.errors,
+        }
+    )
+    if result.errors:
+        raise typer.Exit(code=1)
+
+
+def _mailslot_service() -> tuple[AppContext, MailslotService]:
+    context = _get_context()
+    return context, MailslotService(context.catalog, context.library, context.ltfs)
+
+
+def _mailslot_exit(exc: Exception) -> typer.Exit:
+    """Curated, typed failure -> exit 1. Never a traceback at this boundary."""
+    err_console.print(f"[red]{type(exc).__name__}:[/red] {exc}")
+    return typer.Exit(code=1)
+
+
+@mailslot_app.command("list")
+def mailslot_list() -> None:
+    """Show the import/export (I/E) station: which slots hold which barcodes."""
+    context, service = _mailslot_service()
+    try:
+        listing = service.list_slots()
+    except (MailslotUnsupportedError, ImportExportSlotError) as exc:
+        raise _mailslot_exit(exc) from None
+    _save_state(context)
+    console.print_json(data=listing.to_dict())
+
+
+@mailslot_app.command("import")
+def mailslot_import(
+    ie_slot: int = typer.Argument(..., help="Import/export element holding the cartridge"),
+    to_slot: int | None = typer.Option(
+        None, "--to-slot", help="Storage slot to import into (default: first empty)"
+    ),
+) -> None:
+    """Move a cartridge from an I/E slot into library storage."""
+    context, service = _mailslot_service()
+    try:
+        result = service.import_cartridge(ie_slot, to_slot)
+    except (
+        MailslotUnsupportedError,
+        ImportExportSlotError,
+        CartridgeNotFoundError,
+        TapeOperationFailedError,
+    ) as exc:
+        raise _mailslot_exit(exc) from None
+    _save_state(context)
+    err_console.print(
+        f"Imported {result.barcode} from I/E slot {result.source_slot} into storage slot "
+        f"{result.destination_slot}"
+        + (" (chosen automatically)" if result.slot_was_chosen else "")
+    )
+    console.print_json(data=result.to_dict())
+
+
+@mailslot_app.command("export")
+def mailslot_export(
+    barcode: str = typer.Argument(..., help="Barcode of the cartridge to export"),
+    ie_slot: int | None = typer.Option(
+        None, "--ie-slot", help="Import/export element to use (default: first empty)"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Export even though the cartridge carries archived data"
+    ),
+) -> None:
+    """Move a cartridge out of storage into the I/E station.
+
+    This is how data walks out of the library: once exported, every file on that
+    cartridge is unrestorable until it is imported back. It refuses by default
+    when the cartridge (or its volume group) still holds archived files, and
+    names what is on it.
+    """
+    context, service = _mailslot_service()
+    try:
+        result = service.export_cartridge(barcode, ie_slot=ie_slot, force=force)
+    except ExportRefusedError as exc:
+        err_console.print(f"[red]Export refused:[/red] {exc}")
+        raise typer.Exit(code=1) from None
+    except (
+        MailslotUnsupportedError,
+        ImportExportSlotError,
+        CartridgeNotFoundError,
+        TapeOperationFailedError,
+    ) as exc:
+        raise _mailslot_exit(exc) from None
+    _save_state(context)
+    err_console.print(
+        f"Exported {result.barcode} from storage slot {result.source_slot} to I/E slot "
+        f"{result.destination_slot}"
+        + (" (chosen automatically)" if result.slot_was_chosen else "")
+    )
+    console.print_json(data=result.to_dict())
 
 
 @app.command()
