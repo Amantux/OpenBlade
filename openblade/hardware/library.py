@@ -161,6 +161,30 @@ class RealLibraryBackend:
                 return CartridgeState.CLEANING if normalized.startswith("CLN") else CartridgeState.IN_SLOT
         return None
 
+    def import_export_slots(self) -> list[SlotState]:
+        """Import/export (mailslot) elements as mtx reports them.
+
+        Element numbers round-trip verbatim -- the i3 numbers its I/E station
+        after the storage slots (9-12 on the rehearsal rig) and other libraries
+        use high element addresses (768+). Nothing here may renumber them.
+        """
+        return [
+            SlotState(
+                slot_id=slot.slot_id,
+                barcode=Barcode(slot.barcode) if slot.barcode else None,
+                occupied=slot.occupied,
+            )
+            for slot in self.changer.inventory().import_export_slots
+        ]
+
+    def import_cartridge(self, ie_slot: int, target_slot: int) -> OperationResult:
+        """Move media from an import/export element into a storage slot."""
+        return self.changer.move(ie_slot, target_slot)
+
+    def export_cartridge_to_ie(self, source_slot: int, ie_slot: int) -> OperationResult:
+        """Move media from a storage slot into an import/export element."""
+        return self.changer.move(source_slot, ie_slot)
+
     def list_tapes(self) -> list[dict[str, str | int]]:
         return [
             {"slotId": slot.slot_id, "barcode": str(slot.barcode)}

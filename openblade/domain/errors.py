@@ -74,6 +74,26 @@ class CartridgeOfflineError(OpenBladeError):
     """Cartridge is exported/offline."""
 
 
+class MailslotUnsupportedError(OpenBladeError):
+    """The active library backend has no import/export (mailslot) station."""
+
+
+class ImportExportSlotError(OpenBladeError):
+    """An import/export element is missing, empty, or already occupied."""
+
+
+class ExportRefusedError(SafetyViolationError):
+    """Refused to export a cartridge that still carries archived data.
+
+    Exporting moves media out of the library: every file instance on that
+    cartridge becomes unrestorable until someone physically puts it back. The
+    campaign runbook records the unforced version of this -- one unvalidated
+    ``dest_slot_id`` ejected a cartridge holding 358 archived files, after which
+    ``inventory()`` could not see it at all. Refusing by default (``--force`` to
+    override) is the difference between an export and an accident.
+    """
+
+
 class FileNotFoundError(OpenBladeError):  # noqa: A001
     """File not found in catalog."""
 
