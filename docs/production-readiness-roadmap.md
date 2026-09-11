@@ -146,14 +146,14 @@ emulator.
 
 22. 🔴 **#D self-hosted i3/LTFS runner:** nightly read-only lane (login/logout,
     firmware/capability discovery, inventory, element coordinates, partition
-    visibility, drive-serial/`/dev/st` correlation, TapeAlert/health, non-mutating
+    visibility, drive-serial/`/dev/nst` correlation, TapeAlert/health, non-mutating
     reports, **emulator-vs-appliance differential**); weekly/manual destructive lane
     (GitHub Environment approval, allowlisted sacrificial barcodes, snapshot
     before/after, load/unload, LTFS format, write/read/checksum, reboot persistence,
     sharded write+restore, safe failure injection, guaranteed recovery).
 23. 🔴 **#E Physical drive-identity bridge:** certify AML coordinate ↔ serial ↔ SCSI
     inquiry ↔ `/dev/tape/by-id` ↔ LTFS mount on the rig before enabling any real
-    write path. Never rely on transient `/dev/st0` ordering. (`scalar_http` currently
+    write path. Never rely on transient `/dev/nst0` ordering. (`scalar_http` currently
     raises `NotImplementedError` here — correct until proven on metal.)
 
 ## Phase 8 — Release pipeline (P2) 🟢🟡

@@ -62,6 +62,6 @@ gunicorn openblade.api.wsgi:application
 - Mock backend is the default
 - Real hardware requires `OPENBLADE_BACKEND=real` and `OPENBLADE_REAL_HARDWARE_ENABLED=true`
 - Use `openblade hardware connect-i3` to validate guarded Quantum i3 discovery before attempting live operations
-- Use `openblade hardware validate-ltfs --device /dev/st0 --barcode ABC123L9` to validate LTFS capabilities explicitly
+- Use `openblade hardware validate-ltfs --device /dev/nst0 --barcode ABC123L9` to validate LTFS capabilities explicitly (always the **no-rewind** `nst` node — see `docs/hardware-setup.md`)
 - Formatting requires barcode confirmation plus a one-time safety token
 - Drive unload is blocked if LTFS is mounted or dirty

@@ -410,7 +410,9 @@ def hardware_connect_i3() -> None:
 
 @hardware_app.command("validate-ltfs")
 def hardware_validate_ltfs(
-    device: str = typer.Option(..., help="Tape device path such as /dev/st0"),
+    device: str = typer.Option(
+        ..., help="No-rewind tape device path such as /dev/nst0 (never the rewinding /dev/stN)"
+    ),
     barcode: str = typer.Option(..., help="Barcode used for LTFS format planning"),
     mount_point: str | None = typer.Option(None, help="Mount point for optional mount checks"),
     exercise_mounts: bool = typer.Option(
