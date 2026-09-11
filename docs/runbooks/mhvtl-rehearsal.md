@@ -298,7 +298,7 @@ pattern the project rules call out by name.
 
 ---
 
-## 3.8 What adversarial review changed
+### 3.8 What adversarial review changed
 
 Worth recording, because two of these were fixes that *worked* and were still
 wrong:
@@ -344,10 +344,11 @@ wrong:
 
 ---
 
-## 4. Suspected bugs in `library.py` — NOT fixed here
+## 4. Suspected bugs in files owned elsewhere — NOT fixed here
 
-`openblade/hardware/library.py` is owned by a parallel agent, so these are
-reported rather than changed. Both concern `_ordered_drive_devices()`.
+`openblade/hardware/library.py` and `sg.py` are owned by a parallel agent, so
+these are reported rather than changed. The two `library.py` findings both
+concern `_ordered_drive_devices()`.
 
 **(a) It returns the REWINDING `/dev/stN` node.** It prefers `block_device` over
 `sg_device`, and `lsscsi` reports `/dev/st0` in the block column. Every consumer
