@@ -53,15 +53,17 @@ class RealLibraryBackend:
         # Drive correlation runs at construction so a mapping that disagrees with
         # the attached hardware refuses here, before any load/write can target the
         # wrong drive.
+        drive_devices = _configured_drive_devices(config, active_discovery)
         object.__setattr__(
             self,
             "correlation",
             correlate_drives(
-                devices=_configured_drive_devices(config, active_discovery),
+                devices=drive_devices,
                 serial_map=config.drive_serial_map,
                 runner=active_runner,
                 guard=guard,
                 element_count=active_changer.inventory().drive_count or None,
+                probe_devices=_sg_probe_devices(drive_devices, active_discovery),
             ),
         )
         object.__setattr__(self, "_mount_states", {})
@@ -191,6 +193,27 @@ def _configured_drive_devices(config: OpenBladeConfig, discovery: LibraryDiscove
     if config.drive_devices:
         return list(config.drive_devices)
     return _ordered_drive_devices(discovery)
+
+
+def _sg_probe_devices(devices: list[str], discovery: LibraryDiscovery) -> dict[str, str]:
+    """Map each drive device to the generic ``/dev/sgN`` node to inquire against.
+
+    The ``st`` driver allows a single open, so running ``sg_inq`` on ``/dev/nstN``
+    while LTFS holds that drive fails with EBUSY; the ``sg`` node always answers.
+    Devices discovery cannot place map to themselves (inquiry then uses the node
+    the operator gave us, which is still better than not checking at all).
+    """
+    probes: dict[str, str] = {}
+    for device in devices:
+        rewinding = (
+            device.replace("/dev/nst", "/dev/st") if device.startswith("/dev/nst") else device
+        )
+        for drive in discovery.drives:
+            known = {value for value in (drive.block_device, drive.sg_device) if value}
+            if (device in known or rewinding in known) and drive.sg_device:
+                probes[device] = drive.sg_device
+                break
+    return probes
 
 
 def _ordered_drive_devices(discovery: LibraryDiscovery) -> list[str]:

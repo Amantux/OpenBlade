@@ -27,7 +27,9 @@ from openblade.hardware.runner import CommandResult, SafeRunner
 
 DEVICES = ("/dev/nst0", "/dev/nst1", "/dev/nst2")
 # Device order is NOT element order: nst0 is DTE 2, nst1 is DTE 0, nst2 is DTE 1.
-SERIALS = {"/dev/nst0": "SER-C", "/dev/nst1": "SER-A", "/dev/nst2": "SER-B"}
+# sg_inq is issued against the generic sg node (the st node can be held by LTFS),
+# so the fake keys serials by the sg device lsscsi reports for each drive.
+SERIALS = {"/dev/sg4": "SER-C", "/dev/sg5": "SER-A", "/dev/sg6": "SER-B"}
 SERIAL_MAP = "SER-A:0,SER-B:1,SER-C:2"
 
 LSSCSI_THREE_DRIVES = """
@@ -111,7 +113,7 @@ def test_three_drives_are_visible_in_inventory(tmp_path: Path) -> None:
 def test_verified_map_binds_elements_to_the_right_devices(tmp_path: Path) -> None:
     backend = _backend(_config(tmp_path, serial_map=SERIAL_MAP))
 
-    assert backend.correlation.verified is True
+    assert backend.correlation.serials_verified is True
     assert backend.drive_device(0) == "/dev/nst1"
     assert backend.drive_device(1) == "/dev/nst2"
     assert backend.drive_device(2) == "/dev/nst0"
@@ -129,7 +131,7 @@ def test_positional_fallback_warns_and_stays_unverified(
     with caplog.at_level(logging.WARNING, logger="openblade.hardware.correlation"):
         backend = _backend(_config(tmp_path))
 
-    assert backend.correlation.verified is False
+    assert backend.correlation.serials_verified is False
     assert backend.drive_device(1) == "/dev/nst1"
     assert any("DRIVE ORDER UNVERIFIED" in record.getMessage() for record in caplog.records)
 
@@ -146,7 +148,7 @@ def test_discovery_order_is_used_when_no_devices_are_configured(tmp_path: Path) 
     assert backend.correlation.devices_in_drive_order() == list(DEVICES)
 
 
-def test_unknown_drive_element_raises_keyerror(tmp_path: Path) -> None:
+def test_uncorrelated_drive_element_raises_a_typed_error(tmp_path: Path) -> None:
     backend = _backend(_config(tmp_path, serial_map=SERIAL_MAP))
-    with pytest.raises(KeyError):
+    with pytest.raises(DriveCorrelationError, match="no correlated host device"):
         backend.drive_device(7)

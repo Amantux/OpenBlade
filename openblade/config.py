@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from openblade.domain.errors import DriveCorrelationError
+
 
 class BackendMode(str, Enum):
     MOCK = "mock"
@@ -106,7 +108,7 @@ def _load_emulator_latency_enabled() -> bool:
 def parse_drive_serial_map(raw: str) -> tuple[tuple[str, int], ...]:
     """Parse ``"SERIAL:DTE,SERIAL:DTE"`` into ``((serial, drive_id), ...)``.
 
-    Raises ``ValueError`` on a malformed entry: a typo in this variable must fail
+    Raises ``DriveCorrelationError`` on a malformed entry: a typo in this variable must fail
     loudly at load time, never silently drop a drive from the mapping (a dropped
     entry degrades to positional order, which is the bug this map exists to stop).
     """
@@ -121,25 +123,27 @@ def parse_drive_serial_map(raw: str) -> tuple[tuple[str, int], ...]:
         serial = serial.strip()
         drive_text = drive_text.strip()
         if not separator or not serial or not drive_text:
-            raise ValueError(
+            raise DriveCorrelationError(
                 f"OPENBLADE_DRIVE_SERIAL_MAP entry {item!r} is not of the form "
                 "'<serial>:<drive_element_id>'"
             )
         try:
             drive_id = int(drive_text)
         except ValueError as exc:
-            raise ValueError(
+            raise DriveCorrelationError(
                 f"OPENBLADE_DRIVE_SERIAL_MAP entry {item!r} has a non-integer "
                 f"drive element id {drive_text!r}"
             ) from exc
         if drive_id < 0:
-            raise ValueError(
+            raise DriveCorrelationError(
                 f"OPENBLADE_DRIVE_SERIAL_MAP entry {item!r} has a negative drive element id"
             )
         if serial in seen_serials:
-            raise ValueError(f"OPENBLADE_DRIVE_SERIAL_MAP lists serial {serial!r} more than once")
+            raise DriveCorrelationError(
+                f"OPENBLADE_DRIVE_SERIAL_MAP lists serial {serial!r} more than once"
+            )
         if drive_id in seen_drive_ids:
-            raise ValueError(
+            raise DriveCorrelationError(
                 f"OPENBLADE_DRIVE_SERIAL_MAP lists drive element id {drive_id} more than once"
             )
         seen_serials.add(serial)

@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from openblade.config import OpenBladeConfig
+from openblade.domain.errors import DriveCorrelationError
 from openblade.domain.policies import DryRunPlan
 from openblade.hardware.discovery import LibraryDiscovery, discover_library
 from openblade.hardware.library import RealLibraryBackend
@@ -30,7 +31,11 @@ class QuantumI3ConnectionReport:
     # verified one (see openblade/hardware/correlation.py).
     drive_correlation: list[dict[str, str | int]]
     drive_correlation_source: str
-    drive_correlation_verified: bool
+    # True only when every device was probed and its serial matched the declared
+    # map. It does NOT mean the element assignment itself was machine-verified —
+    # see openblade/hardware/correlation.py.
+    drive_correlation_serials_verified: bool
+    drive_correlation_warnings: list[str]
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -68,11 +73,16 @@ def connect_quantum_i3(
         drive_count=len(inventory.drives),
         occupied_slot_count=sum(1 for slot in inventory.slots if slot.occupied),
         loaded_drive_count=sum(1 for drive in inventory.drives if drive.barcode is not None),
-        drive_devices=[library.drive_device(drive.drive_id) for drive in inventory.drives],
+        # An element the host has no device for is reported as "" rather than
+        # raising: connect-i3 is the diagnostic you run *because* a drive is missing.
+        drive_devices=[
+            _drive_device_or_blank(library, drive.drive_id) for drive in inventory.drives
+        ],
         sg_inquiry=_inquiry_payloads(discovery, active_runner, guard),
         drive_correlation=library.correlation.to_payload(),
         drive_correlation_source=library.correlation.source,
-        drive_correlation_verified=library.correlation.verified,
+        drive_correlation_serials_verified=library.correlation.serials_verified,
+        drive_correlation_warnings=list(library.correlation.warnings),
     )
 
 
@@ -111,6 +121,13 @@ def validate_ltfs_capabilities(
         readonly_mount_ok=readonly_mount_ok,
         readwrite_mount_ok=readwrite_mount_ok,
     )
+
+
+def _drive_device_or_blank(library: RealLibraryBackend, drive_id: int) -> str:
+    try:
+        return library.drive_device(drive_id)
+    except DriveCorrelationError:
+        return ""
 
 
 def _changer_devices(discovery: LibraryDiscovery) -> list[str]:

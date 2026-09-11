@@ -46,24 +46,58 @@ OpenBlade therefore correlates the two sides explicitly
    OPENBLADE_DRIVE_SERIAL_MAP=10WT073820:0,10WT073821:1,10WT073819:2
    ```
 
+   ⚠ **The element index is 0-based** — it is `mtx`'s *Data Transfer Element*
+   number, which you can read straight off `mtx -f /dev/sgN status`. The i3 web
+   UI numbers drive **bays from 1**. For a three-drive partition:
+
+   | i3 UI drive bay | mtx line | index to use |
+   |---|---|---|
+   | Drive 1 | `Data Transfer Element 0` | `0` |
+   | Drive 2 | `Data Transfer Element 1` | `1` |
+   | Drive 3 | `Data Transfer Element 2` | `2` |
+
 At startup every configured device is probed and compared against this
 declaration. Any disagreement — a declared serial that is not attached, an
-attached drive that is not declared, a duplicate, a drive that reports no serial,
-or an element index beyond the changer's drive count — raises
+attached drive that is not declared, a duplicate serial, the same device listed
+twice, a drive that reports no serial, an element index beyond the changer's
+drive count, or a drive element with no host device at all — raises
 `DriveCorrelationError` and the backend **refuses to start**. Correlation is not
 allowed to guess.
 
 With no map declared, OpenBlade falls back to positional order and logs a
 `DRIVE ORDER UNVERIFIED` warning listing the observed serials — copy them from
 that line to build the map. `connect-i3` reports
-`drive_correlation_verified: false` in that state.
+`drive_correlation_serials_verified: false` in that state.
+
+### What the serial check does NOT prove — verify it by hand once
+
+The check compares the **set** of attached serials with the set you declared.
+Nothing in this design ever observes which serial is physically in which drive
+element, so a declaration whose elements are **transposed or shifted** — exactly
+what an off-by-one from 1-based bay numbers produces — passes the check and is
+reported as `drive_correlation_serials_verified: true`. That flag means "the
+drives attached are the drives you declared", never "element 0 is really the
+drive you assigned to element 0".
+
+So on first bring-up, confirm the assignment empirically, once, per drive:
+
+```
+mtx -f /dev/sgN load <slot> 0              # load a scratch tape into element 0
+mt -f $(...device correlated with element 0...) status   # must show a tape online
+mt -f <each other drive device> status                   # must show no tape
+mtx -f /dev/sgN unload <slot> 0
+```
+
+Repeat for each element before any write workflow. Note the load succeeding is
+not the check — the check is that **only** the correlated device sees the tape.
 
 ### Why not READ ELEMENT STATUS?
 
 The authoritative SCSI route is READ ELEMENT STATUS with the DVCID bit, which
-makes the *library* report which drive serial sits in which element. `mtx status`
-does not print serials, and wiring READ ELEMENT STATUS would add a new binary
-dependency plus a hex descriptor parser that could not be validated against any
-captured real-i3 output. An operator-declared map that is machine-verified
-against live `sg_inq` gives the same safety property with code we can test today.
+makes the *library* report which drive serial sits in which element — and would
+remove the manual step above. `mtx status` does not print serials, and wiring
+READ ELEMENT STATUS would add a new binary dependency plus a hex descriptor
+parser that could not be validated against any captured real-i3 output. An
+operator-declared map whose serial set is machine-checked, plus the one-time
+manual confirmation, gets the safety property with code we can test today.
 Revisit once real i3 output has been captured.

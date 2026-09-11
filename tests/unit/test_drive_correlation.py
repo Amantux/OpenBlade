@@ -11,6 +11,7 @@ import logging
 
 import pytest
 
+import openblade.hardware.correlation as correlation_module
 from openblade.config import parse_drive_serial_map
 from openblade.domain.errors import DriveCorrelationError, SafetyViolationError
 from openblade.domain.policies import RealHardwareGuard
@@ -112,7 +113,7 @@ class TestParseDriveSerialMap:
         ],
     )
     def test_malformed_entries_raise(self, raw: str) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(DriveCorrelationError):
             parse_drive_serial_map(raw)
 
 
@@ -133,7 +134,7 @@ class TestCorrelateDrivesHappyPath:
             element_count=3,
         )
 
-        assert correlation.verified is True
+        assert correlation.serials_verified is True
         assert correlation.source == SOURCE_SERIAL_MAP
         assert correlation.warnings == ()
         # The whole point: element order != device order.
@@ -157,7 +158,9 @@ class TestCorrelateDrivesHappyPath:
             "serial": "10WT073820",
         }
 
-    def test_unknown_drive_id_raises_keyerror(self, guard: RealHardwareGuard) -> None:
+    def test_uncorrelated_drive_element_raises_a_typed_error(
+        self, guard: RealHardwareGuard
+    ) -> None:
         correlation = correlate_drives(
             devices=list(DRIVE_SERIALS),
             serial_map=parse_drive_serial_map(THREE_DRIVE_MAP),
@@ -165,8 +168,30 @@ class TestCorrelateDrivesHappyPath:
             guard=guard,
             element_count=3,
         )
-        with pytest.raises(KeyError):
+        with pytest.raises(DriveCorrelationError, match="no correlated host device"):
             correlation.device_for(3)
+
+    def test_serial_check_does_not_claim_the_element_assignment_was_verified(
+        self, guard: RealHardwareGuard
+    ) -> None:
+        """A transposed declaration passes the serial check — by design, documented.
+
+        Nothing observes which serial sits in which element, so the check proves
+        the SET of attached drives, not the assignment. This test pins the
+        limitation so the API can never quietly start claiming more: the flag is
+        named `serials_verified`, and there is no `verified` attribute to read.
+        """
+        transposed = correlate_drives(
+            devices=list(DRIVE_SERIALS),
+            # Every element rotated by one (the 1-based-bay-number mistake).
+            serial_map=parse_drive_serial_map("10WT073820:1,10WT073821:2,10WT073819:0"),
+            runner=FakeRunner(DRIVE_SERIALS),
+            guard=guard,
+            element_count=3,
+        )
+        assert transposed.serials_verified is True
+        assert transposed.device_for(0) == "/dev/nst0"  # the rotation is NOT detected
+        assert not hasattr(transposed, "verified")
 
 
 class TestCorrelateDrivesRefusesMismatch:
@@ -213,6 +238,60 @@ class TestCorrelateDrivesRefusesMismatch:
                 element_count=3,
             )
 
+    def test_duplicate_live_serials_refuse_without_a_map_too(
+        self, guard: RealHardwareGuard
+    ) -> None:
+        """Two devices that are one drive (e.g. /dev/st0 and /dev/nst0) can never be right."""
+        aliased = {"/dev/st0": "SAME", "/dev/nst0": "SAME"}
+        with pytest.raises(DriveCorrelationError, match="same physical drive"):
+            correlate_drives(
+                devices=list(aliased),
+                serial_map=(),
+                runner=FakeRunner(aliased),
+                guard=guard,
+                element_count=2,
+            )
+
+    def test_duplicate_device_paths_refuse(self, guard: RealHardwareGuard) -> None:
+        with pytest.raises(DriveCorrelationError, match="more than once"):
+            correlate_drives(
+                devices=["/dev/nst0", "/dev/nst0", "/dev/nst2"],
+                serial_map=(),
+                runner=FakeRunner(DRIVE_SERIALS),
+                guard=guard,
+            )
+
+    def test_sg_inq_failure_is_a_typed_correlation_error(self, guard: RealHardwareGuard) -> None:
+        """A drive that cannot be probed must not be silently treated as correlated."""
+        runner = FakeRunner(DRIVE_SERIALS)
+        with pytest.raises(DriveCorrelationError, match="sg_inq failed"):
+            correlate_drives(
+                devices=["/dev/nst9"],
+                serial_map=(),
+                runner=runner,
+                guard=guard,
+            )
+
+    def test_missing_sg_inq_binary_is_a_typed_correlation_error(
+        self, guard: RealHardwareGuard
+    ) -> None:
+        class NoSgInqRunner(SafeRunner):
+            def run(
+                self,
+                args: list[str],
+                timeout: int | None = None,
+                redact_args: list[int] | None = None,
+            ) -> CommandResult:
+                raise FileNotFoundError(args[0])
+
+        with pytest.raises(DriveCorrelationError, match="sg_inq is not installed"):
+            correlate_drives(
+                devices=["/dev/nst0"],
+                serial_map=(),
+                runner=NoSgInqRunner(dry_run=False),
+                guard=guard,
+            )
+
     def test_device_without_a_serial_refuses(self, guard: RealHardwareGuard) -> None:
         blank = {**DRIVE_SERIALS, "/dev/nst2": ""}
         with pytest.raises(DriveCorrelationError, match="no unit serial number"):
@@ -235,14 +314,22 @@ class TestCorrelateDrivesRefusesMismatch:
                 element_count=3,
             )
 
-    def test_no_devices_refuses(self, guard: RealHardwareGuard) -> None:
-        with pytest.raises(DriveCorrelationError, match="No tape devices configured"):
-            correlate_drives(
+    def test_no_devices_warns_and_refuses_only_on_use(
+        self, guard: RealHardwareGuard, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # connect-i3 is the diagnostic you run *because* no drive shows up, so an
+        # empty device list must still produce a report; using a drive then fails.
+        with caplog.at_level(logging.WARNING, logger="openblade.hardware.correlation"):
+            correlation = correlate_drives(
                 devices=[],
                 serial_map=(),
                 runner=FakeRunner(DRIVE_SERIALS),
                 guard=guard,
             )
+        assert correlation.entries == ()
+        assert any("No tape devices" in record.getMessage() for record in caplog.records)
+        with pytest.raises(DriveCorrelationError):
+            correlation.device_for(0)
 
 
 class TestPositionalFallback:
@@ -259,7 +346,7 @@ class TestPositionalFallback:
             )
 
         assert correlation.source == SOURCE_POSITIONAL
-        assert correlation.verified is False
+        assert correlation.serials_verified is False
         assert correlation.device_for(0) == "/dev/nst0"
         # Serials are still captured so the operator can build the map from the log.
         assert correlation.serial_for(2) == "10WT073821"
@@ -283,21 +370,74 @@ class TestPositionalFallback:
         assert len(correlation.entries) == 2
         assert any("3 drive element" in warning for warning in correlation.warnings)
 
-    def test_dry_run_claims_nothing(self, guard: RealHardwareGuard) -> None:
-        correlation = correlate_drives(
+    def test_dry_run_says_the_declared_map_could_not_be_applied(
+        self, guard: RealHardwareGuard, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A map binds serials to elements, and serials need a live probe.
+
+        A dry run therefore cannot apply it — and must not present its positional
+        guess as though it were the plan the live run will follow.
+        """
+        with caplog.at_level(logging.WARNING, logger="openblade.hardware.correlation"):
+            correlation = correlate_drives(
+                devices=list(DRIVE_SERIALS),
+                serial_map=parse_drive_serial_map(THREE_DRIVE_MAP),
+                runner=SafeRunner(dry_run=True),
+                guard=guard,
+                element_count=3,
+            )
+        assert correlation.source == SOURCE_DRY_RUN
+        assert correlation.serials_verified is False
+        assert correlation.serial_for(0) == ""
+        assert any("could not be applied" in warning for warning in correlation.warnings)
+        assert any("could not be applied" in record.getMessage() for record in caplog.records)
+        live = correlate_drives(
             devices=list(DRIVE_SERIALS),
             serial_map=parse_drive_serial_map(THREE_DRIVE_MAP),
-            runner=SafeRunner(dry_run=True),
+            runner=FakeRunner(DRIVE_SERIALS),
             guard=guard,
             element_count=3,
         )
-        assert correlation.source == SOURCE_DRY_RUN
-        assert correlation.verified is False
-        assert correlation.serial_for(0) == ""
+        # Proof the disclosure is needed: the orders genuinely differ.
+        assert correlation.devices_in_drive_order() != live.devices_in_drive_order()
+
+    def test_dry_run_refuses_an_out_of_range_declared_element(
+        self, guard: RealHardwareGuard
+    ) -> None:
+        with pytest.raises(DriveCorrelationError, match="only 3 Data Transfer Element"):
+            correlate_drives(
+                devices=list(DRIVE_SERIALS),
+                serial_map=parse_drive_serial_map("A:0,B:1,C:9"),
+                runner=SafeRunner(dry_run=True),
+                guard=guard,
+                element_count=3,
+            )
+
+    def test_dry_run_is_positional_without_a_map(self, guard: RealHardwareGuard) -> None:
+        correlation = correlate_drives(
+            devices=list(DRIVE_SERIALS),
+            serial_map=(),
+            runner=SafeRunner(dry_run=True),
+            guard=guard,
+        )
+        assert correlation.devices_in_drive_order() == list(DRIVE_SERIALS)
 
 
 class TestGuardIsEnforced:
-    def test_correlation_requires_the_real_hardware_gate(self) -> None:
+    def test_correlation_refuses_before_probing_anything(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pre-check exists so a closed gate reaches NO device at all.
+
+        Asserting only that the call raises is vacuous — sg_inq validates the
+        guard itself — so this stubs sg_inq and asserts it was never reached.
+        """
+        probed: list[str] = []
+        monkeypatch.setattr(
+            correlation_module,
+            "sg_inq",
+            lambda device, runner, guard: probed.append(device),  # type: ignore[misc,return-value]
+        )
         closed_guard = RealHardwareGuard(
             config_backend="mock",
             config_real_hardware_enabled=False,
@@ -310,3 +450,69 @@ class TestGuardIsEnforced:
                 runner=FakeRunner(DRIVE_SERIALS),
                 guard=closed_guard,
             )
+        assert probed == []
+
+
+class TestEveryElementNeedsADevice:
+    def test_declared_map_with_an_uncovered_element_refuses(self, guard: RealHardwareGuard) -> None:
+        """The scheduler sizes itself from the changer, so an element with no
+        device would get a cartridge loaded into it and strand it at mount."""
+        two = {"/dev/nst0": "A1", "/dev/nst1": "B2"}
+        with pytest.raises(DriveCorrelationError, match="strand a cartridge"):
+            correlate_drives(
+                devices=list(two),
+                serial_map=parse_drive_serial_map("A1:0,B2:1"),
+                runner=FakeRunner(two),
+                guard=guard,
+                element_count=3,
+            )
+
+    def test_more_devices_than_elements_is_only_a_warning(self, guard: RealHardwareGuard) -> None:
+        # A spare device the library does not expose as an element strands nothing.
+        correlation = correlate_drives(
+            devices=list(DRIVE_SERIALS),
+            serial_map=(),
+            runner=FakeRunner(DRIVE_SERIALS),
+            guard=guard,
+            element_count=2,
+        )
+        assert any("2 drive element" in warning for warning in correlation.warnings)
+        assert len(correlation.entries) == 3
+
+    def test_uncovered_element_without_a_map_warns_and_refuses_on_use(
+        self, guard: RealHardwareGuard
+    ) -> None:
+        """Without a declared map we cannot tell "not cabled" from "forgot one",
+        so this stays a warning — and using the element refuses with a typed error."""
+        two = {"/dev/nst0": "A1", "/dev/nst1": "B2"}
+        correlation = correlate_drives(
+            devices=list(two),
+            serial_map=(),
+            runner=FakeRunner(two),
+            guard=guard,
+            element_count=3,
+        )
+        assert any("3 drive element" in warning for warning in correlation.warnings)
+        with pytest.raises(DriveCorrelationError, match="no correlated host device"):
+            correlation.device_for(2)
+
+
+class TestSgNodeProbing:
+    def test_serials_are_read_from_the_probe_node_when_given(
+        self, guard: RealHardwareGuard
+    ) -> None:
+        """LTFS holds /dev/nstN open; the generic sg node always answers INQUIRY."""
+        by_sg = {"/dev/sg4": "10WT073819", "/dev/sg5": "10WT073820"}
+        runner = FakeRunner(by_sg)
+        correlation = correlate_drives(
+            devices=["/dev/nst0", "/dev/nst1"],
+            serial_map=parse_drive_serial_map("10WT073819:0,10WT073820:1"),
+            runner=runner,
+            guard=guard,
+            element_count=2,
+            probe_devices={"/dev/nst0": "/dev/sg4", "/dev/nst1": "/dev/sg5"},
+        )
+        assert [call[-1] for call in runner.calls] == ["/dev/sg4", "/dev/sg5"]
+        # The correlated device is still the node the writer opens.
+        assert correlation.device_for(0) == "/dev/nst0"
+        assert correlation.serial_for(0) == "10WT073819"
