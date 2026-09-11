@@ -91,7 +91,7 @@ def create_session(
     tool_context = build_context(
         config=resolved,
         catalog=app_context.catalog,
-        library=app_context.library,
+        inventory_service=app_context.inventory_service,
         backend=openblade_config.backend.value,
         real_hardware_enabled=openblade_config.real_hardware_enabled,
         db_url=openblade_config.db_url,

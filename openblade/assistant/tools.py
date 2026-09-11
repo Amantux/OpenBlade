@@ -22,7 +22,11 @@ from urllib.parse import urlsplit
 
 from openblade.assistant.config import AssistantConfig, default_docs_dir
 from openblade.assistant.errors import ToolNotFoundError, ToolRegistryViolationError
-from openblade.assistant.readonly import ReadOnlyProxy, read_only_catalog, read_only_library
+from openblade.assistant.readonly import (
+    ReadOnlyProxy,
+    read_only_catalog,
+    read_only_inventory,
+)
 
 # ---------------------------------------------------------------------------
 # The allowlist. This is the fail-closed guard, not documentation.
@@ -59,8 +63,10 @@ def _no_refresh() -> None:
 class ToolContext:
     """Everything a tool is allowed to see.
 
-    ``catalog`` and ``library`` are :class:`ReadOnlyProxy` instances, so a tool
-    body physically cannot reach a mutating repository method.
+    ``catalog`` and ``inventory`` are :class:`ReadOnlyProxy` instances, so a tool
+    body physically cannot reach a mutating repository method. ``inventory`` wraps
+    ``InventoryService``, not the ``LibraryBackend`` -- the media-moving calls are
+    not on the wrapped object at all.
 
     Nothing here holds a credential: the database URL arrives already redacted and
     the Scalar password is reduced to a boolean by :func:`build_context`. ``config``
@@ -70,7 +76,7 @@ class ToolContext:
 
     config: AssistantConfig = field(repr=False)
     catalog: ReadOnlyProxy
-    library: ReadOnlyProxy
+    inventory: ReadOnlyProxy
     backend: str
     real_hardware_enabled: bool
     database_summary: str
@@ -178,7 +184,7 @@ def _iso(value: Any) -> str | None:
 
 
 def _get_inventory(context: ToolContext, arguments: Mapping[str, Any]) -> JSONDict:
-    inventory = context.library.inventory()
+    inventory = context.inventory.snapshot()
     slots = [
         {
             "slot": slot.slot_id,
@@ -395,7 +401,7 @@ def _redact_db_url(db_url: str) -> str:
 
 
 def _get_config_summary(context: ToolContext, arguments: Mapping[str, Any]) -> JSONDict:
-    inventory = context.library.inventory()
+    inventory = context.inventory.snapshot()
     real_operations_permitted = context.backend == "real" and context.real_hardware_enabled
     return {
         "backend": context.backend,
@@ -676,7 +682,7 @@ def build_context(
     *,
     config: AssistantConfig,
     catalog: object,
-    library: object,
+    inventory_service: object,
     backend: str,
     real_hardware_enabled: bool,
     db_url: str,
@@ -694,7 +700,7 @@ def build_context(
     return ToolContext(
         config=config,
         catalog=read_only_catalog(catalog),
-        library=read_only_library(library),
+        inventory=read_only_inventory(inventory_service),
         backend=backend,
         real_hardware_enabled=real_hardware_enabled,
         database_summary=_redact_db_url(db_url),

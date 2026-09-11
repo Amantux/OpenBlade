@@ -63,7 +63,7 @@ def _context(app_context: Any, docs_dir: Path | None = None) -> Any:
     return build_context(
         config=config,
         catalog=app_context.catalog,
-        library=app_context.library,
+        inventory_service=app_context.inventory_service,
         backend=app_context.config.backend.value,
         real_hardware_enabled=app_context.config.real_hardware_enabled,
         db_url=app_context.config.db_url,
@@ -229,7 +229,7 @@ def test_tool_loop_round_trip_is_grounded(app_context: Any, seeded: dict[str, An
     tool_messages = [m for m in second_request["messages"] if m["role"] == "tool"]
     assert len(tool_messages) == 1
     payload = json.loads(tool_messages[0]["content"])
-    inventory = app_context.library.inventory()
+    inventory = app_context.inventory_service.snapshot()
     assert payload["slotCount"] == len(inventory.slots)
     assert payload["driveCount"] == len(inventory.drives)
     # Tool schemas were advertised on every call.
@@ -329,7 +329,7 @@ def test_reset_keeps_only_the_system_prompt(app_context: Any) -> None:
 def test_get_inventory_reports_slots_drives_and_mount_state(app_context: Any) -> None:
     registry = build_registry()
     result = registry.call("get_inventory", _context(app_context), {})
-    inventory = app_context.library.inventory()
+    inventory = app_context.inventory_service.snapshot()
     assert result["slotCount"] == len(inventory.slots)
     assert result["driveCount"] == len(inventory.drives)
     assert result["changerState"] == inventory.changer_state.value
@@ -413,7 +413,7 @@ def test_config_summary_reports_gates_and_redacts_credentials(app_context: Any) 
     assert gates["realOperationsPermitted"] is False
     assert "OPENBLADE_REAL_HARDWARE_ENABLED=true" in gates["requires"]
     assert result["simulator"] is True
-    assert result["driveCount"] == len(app_context.library.inventory().drives)
+    assert result["driveCount"] == len(app_context.inventory_service.snapshot().drives)
 
     # The Scalar password was supplied to build_context and must not survive.
     assert result["scalarCredentialSet"] is True
@@ -437,7 +437,7 @@ def test_config_summary_redacts_dsn_passwords(
     context = build_context(
         config=config,
         catalog=app_context.catalog,
-        library=app_context.library,
+        inventory_service=app_context.inventory_service,
         backend="mock",
         real_hardware_enabled=False,
         db_url=db_url,
@@ -560,7 +560,7 @@ def test_build_context_refresh_is_a_no_op_without_a_session() -> None:
     context = build_context(
         config=assistant_config(),
         catalog=Plain(),
-        library=Plain(),
+        inventory_service=Plain(),
         backend="mock",
         real_hardware_enabled=False,
         db_url="sqlite:///x.db",
@@ -647,7 +647,7 @@ def test_tool_context_repr_hides_the_api_key(app_context: Any) -> None:
     context = build_context(
         config=config,
         catalog=app_context.catalog,
-        library=app_context.library,
+        inventory_service=app_context.inventory_service,
         backend="mock",
         real_hardware_enabled=False,
         db_url="postgresql://admin:s3cret@db.internal/openblade",

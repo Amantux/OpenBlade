@@ -27,15 +27,16 @@ from openblade.assistant.errors import ReadOnlyViolationError, ToolRegistryViola
 from openblade.assistant.prompts import SYSTEM_PROMPT
 from openblade.assistant.readonly import (
     CATALOG_READ_METHODS,
-    LIBRARY_READ_METHODS,
+    INVENTORY_READ_METHODS,
     read_only_catalog,
-    read_only_library,
+    read_only_inventory,
 )
 from openblade.assistant.tools import (
     READ_ONLY_TOOL_NAMES,
     ReadOnlyTool,
     build_registry,
 )
+from tests.assistant_support import assistant_config
 
 ASSISTANT_DIR = Path(__file__).resolve().parents[2] / "openblade" / "assistant"
 
@@ -153,9 +154,15 @@ def test_catalog_read_allowlist_contains_nothing_mutating() -> None:
         assert not name.startswith(_MUTATING_PREFIXES), name
 
 
-def test_library_read_allowlist_is_only_inventory() -> None:
-    """load/unload/move are the media-moving calls on LibraryBackend."""
-    assert set(LIBRARY_READ_METHODS) == {"inventory"}
+def test_inventory_read_allowlist_is_only_snapshot() -> None:
+    """The assistant is handed InventoryService, never the LibraryBackend.
+
+    So load/unload/move/eject are not merely un-allowlisted -- they are not
+    attributes of the wrapped object at all. This also keeps SAFETY_003
+    (openblade/safety/import_guard.py) satisfied without widening its allowlist:
+    the service layer already existed and the assistant now goes through it.
+    """
+    assert set(INVENTORY_READ_METHODS) == {"snapshot"}
 
 
 @pytest.mark.parametrize(
@@ -193,16 +200,34 @@ def test_read_only_catalog_blocks_writes(app_context: Any, method: str) -> None:
         getattr(proxy, method)
 
 
-@pytest.mark.parametrize("method", ["load", "unload", "move"])
-def test_read_only_library_blocks_media_moves(app_context: Any, method: str) -> None:
-    proxy = read_only_library(app_context.library)
+@pytest.mark.parametrize("method", ["load", "unload", "move", "eject", "inventory", "library"])
+def test_read_only_inventory_blocks_media_moves(app_context: Any, method: str) -> None:
+    """Belt and braces: even if a LibraryBackend were passed in by mistake, the
+    media-moving calls are refused by the allowlist."""
+    proxy = read_only_inventory(app_context.inventory_service)
     with pytest.raises(ReadOnlyViolationError):
         getattr(proxy, method)
 
 
+def test_assistant_context_never_holds_the_library_backend(app_context: Any) -> None:
+    """The tool context must expose the service, not the hardware abstraction."""
+    from openblade.assistant.tools import build_context
+
+    context = build_context(
+        config=assistant_config(),
+        catalog=app_context.catalog,
+        inventory_service=app_context.inventory_service,
+        backend="mock",
+        real_hardware_enabled=False,
+        db_url="sqlite:///x.db",
+    )
+    assert not hasattr(context, "library")
+    assert context.inventory.snapshot() is not None
+
+
 def test_read_only_proxy_still_serves_reads(app_context: Any) -> None:
     """The guard must not be vacuous: permitted reads do work."""
-    assert read_only_library(app_context.library).inventory() is not None
+    assert read_only_inventory(app_context.inventory_service).snapshot() is not None
     assert read_only_catalog(app_context.catalog).list_volume_groups() is not None
 
 

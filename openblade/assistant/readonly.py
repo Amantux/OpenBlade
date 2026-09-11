@@ -59,9 +59,17 @@ CATALOG_READ_METHODS: frozenset[str] = frozenset(
     }
 )
 
-# Library-backend reads. ``inventory()`` is the only non-moving call on the
-# backend protocol; load/unload/move are media-moving and must never be reachable.
-LIBRARY_READ_METHODS: frozenset[str] = frozenset({"inventory"})
+# Inventory reads. The assistant is given ``InventoryService``, never the raw
+# ``LibraryBackend`` -- so load/unload/move/eject are not merely un-allowlisted,
+# they are not on the wrapped object at all.
+#
+# This also honours SAFETY_003 (``openblade/safety/import_guard.py``), which
+# forbids a direct ``inventory()`` call on a library backend outside the
+# authorized hardware access points (spelled indirectly here: the guard is a
+# line-based substring scan, so writing the literal would trip it).
+# The service layer already existed and the first version of this module simply
+# bypassed it; going through ``snapshot()`` is the supported call path.
+INVENTORY_READ_METHODS: frozenset[str] = frozenset({"snapshot"})
 
 _State = tuple[object, frozenset[str], str]
 
@@ -111,5 +119,5 @@ def read_only_catalog(catalog: object) -> ReadOnlyProxy:
     return ReadOnlyProxy(catalog, CATALOG_READ_METHODS, "catalog")
 
 
-def read_only_library(library: object) -> ReadOnlyProxy:
-    return ReadOnlyProxy(library, LIBRARY_READ_METHODS, "library")
+def read_only_inventory(inventory_service: object) -> ReadOnlyProxy:
+    return ReadOnlyProxy(inventory_service, INVENTORY_READ_METHODS, "inventory")
