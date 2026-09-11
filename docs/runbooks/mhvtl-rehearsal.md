@@ -224,7 +224,7 @@ failures against the i3:
 Found by running the Phase 4.1 command against the rig. `validate_ltfs_capabilities`
 computed:
 
-```python
+```
 device_list_ok=any(current.device == device for current in devices)
 ```
 
