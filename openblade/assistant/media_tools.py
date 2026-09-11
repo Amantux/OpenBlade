@@ -54,12 +54,16 @@ from typing import Any
 
 from openblade.assistant.errors import (
     MediaNotAuthorizedError,
+    MediaRefusedError,
     MediaRegistryViolationError,
     ToolNotFoundError,
 )
 from openblade.assistant.media_facade import (
     OVERWRITE_WORD,
     MediaFacade,
+    clean_barcode,
+    clean_catalog_path,
+    clean_path,
     human_bytes,
     sentence_case,
 )
@@ -225,6 +229,34 @@ def _optional(arguments: Mapping[str, Any], *names: str) -> Any:
     return None
 
 
+def _barcode(arguments: Mapping[str, Any], *names: str, required: bool = True) -> str | None:
+    """Normalize a barcode argument to its canonical form, or refuse.
+
+    Normalizing HERE rather than only inside the facade is what makes the decline
+    cache work: the cache is keyed on the normalized arguments, so without this
+    "VOL001L9", "vol001l9" and " VOL001L9 " are three different actions and an
+    operator who declined a format once can be asked about it three more times.
+    Confirmation fatigue is the realistic attack on a type-the-barcode gate; an
+    adversarial review got four prompts out of one refused action.
+    """
+    raw = _optional(arguments, *names)
+    if raw is None:
+        if required:
+            raise MediaRefusedError("A tape barcode is required.", code="missing_barcode")
+        return None
+    return clean_barcode(raw)
+
+
+def _number(arguments: Mapping[str, Any], *names: str) -> int | None:
+    raw = _optional(arguments, *names)
+    if raw is None:
+        return None
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise MediaRefusedError(f"{raw!r} is not a slot or drive number.", code="invalid_number") from None
+
+
 def _yes_no(_: dict[str, Any], __: JSONDict) -> tuple[ConfirmationGrade, str | None]:
     return ConfirmationGrade.YES_NO, None
 
@@ -234,8 +266,8 @@ def _yes_no(_: dict[str, Any], __: JSONDict) -> tuple[ConfirmationGrade, str | N
 
 def _normalize_load(arguments: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "barcode": _optional(arguments, "barcode", "tape"),
-        "drive": _optional(arguments, "drive", "drive_id", "driveId"),
+        "barcode": _barcode(arguments, "barcode", "tape"),
+        "drive": _number(arguments, "drive", "drive_id", "driveId"),
     }
 
 
@@ -270,9 +302,11 @@ def _apply_load(facade: MediaFacade, action: PendingMediaAction) -> JSONDict:
 
 def _normalize_unload(arguments: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "barcode": _optional(arguments, "barcode", "tape"),
-        "drive": _optional(arguments, "drive", "drive_id", "driveId"),
-        "slot": _optional(arguments, "slot", "slot_id", "slotId"),
+        # Not required: "unload drive 1" is a legitimate way to say it, and the
+        # facade resolves which cartridge that is and names it back.
+        "barcode": _barcode(arguments, "barcode", "tape", required=False),
+        "drive": _number(arguments, "drive", "drive_id", "driveId"),
+        "slot": _number(arguments, "slot", "slot_id", "slotId"),
     }
 
 
@@ -309,8 +343,8 @@ def _apply_unload(facade: MediaFacade, action: PendingMediaAction) -> JSONDict:
 
 def _normalize_move(arguments: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "barcode": _optional(arguments, "barcode", "tape"),
-        "slot": _optional(arguments, "slot", "slot_id", "slotId", "dest_slot", "destination"),
+        "barcode": _barcode(arguments, "barcode", "tape"),
+        "slot": _number(arguments, "slot", "slot_id", "slotId", "dest_slot", "destination"),
     }
 
 
@@ -341,7 +375,7 @@ def _apply_move(facade: MediaFacade, action: PendingMediaAction) -> JSONDict:
 
 
 def _normalize_format(arguments: Mapping[str, Any]) -> dict[str, Any]:
-    return {"barcode": _optional(arguments, "barcode", "tape")}
+    return {"barcode": _barcode(arguments, "barcode", "tape")}
 
 
 def _plan_format(facade: MediaFacade, arguments: dict[str, Any]) -> JSONDict:
@@ -369,8 +403,16 @@ def _describe_format(_: dict[str, Any], plan: JSONDict) -> str:
         "it matters.",
         f"  The format writes {plan.get('wouldWrite')}.",
         f"  A one-time safety token was issued by the dry run and expires in "
-        f"{plan.get('tokenTtlSeconds')}s.",
+        f"{plan.get('tokenTtlSeconds')}s — if it expires while you check the "
+        "cartridge, ask again and a fresh dry run runs.",
     ]
+    if plan.get("willBeLoaded"):
+        lines.append(
+            f"  The cartridge is in {plan.get('currentlyIn')} and will be loaded into "
+            f"drive {plan.get('driveId')} to format it, then returned."
+        )
+    else:
+        lines.append(f"  The cartridge is already in {plan.get('currentlyIn')}.")
     samples = list(plan.get("samplePaths") or [])
     if samples:
         lines.append(f"  Files that would be lost include: {', '.join(samples)}")
@@ -403,9 +445,11 @@ def _apply_format(facade: MediaFacade, action: PendingMediaAction) -> JSONDict:
 
 
 def _normalize_archive(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    path = _optional(arguments, "path", "source_path", "sourcePath", "source")
+    group = _optional(arguments, "volume_group", "volumeGroup", "name", "pool")
     return {
-        "path": _optional(arguments, "path", "source_path", "sourcePath", "source"),
-        "volume_group": _optional(arguments, "volume_group", "volumeGroup", "name", "pool"),
+        "path": str(clean_path(path, "source path")),
+        "volume_group": None if group is None else str(group).strip(),
     }
 
 
@@ -442,8 +486,15 @@ def _apply_archive(facade: MediaFacade, action: PendingMediaAction) -> JSONDict:
 
 def _normalize_restore(arguments: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "path": _optional(arguments, "path", "catalog_path", "catalogPath", "source"),
-        "dest": _optional(arguments, "dest", "dest_path", "destPath", "destination", "to"),
+        "path": clean_catalog_path(
+            _optional(arguments, "path", "catalog_path", "catalogPath", "source")
+        ),
+        "dest": str(
+            clean_path(
+                _optional(arguments, "dest", "dest_path", "destPath", "destination", "to"),
+                "destination path",
+            )
+        ),
     }
 
 
@@ -492,8 +543,16 @@ def _grade_restore(_: dict[str, Any], plan: JSONDict) -> tuple[ConfirmationGrade
 
 
 def _apply_restore(facade: MediaFacade, action: PendingMediaAction) -> JSONDict:
+    """Carries the plan's overwrite verdict into the write path.
+
+    That verdict is what chose the confirmation grade, so the facade re-checks it
+    against the filesystem and refuses if it changed. Without it, a ``y`` given
+    for "nothing is overwritten" destroys a file that appeared in between.
+    """
     result: JSONDict = facade.restore_path(
-        path=action.arguments["path"], dest=action.arguments["dest"]
+        path=action.arguments["path"],
+        dest=action.arguments["dest"],
+        expect_overwrite=bool(action.plan.get("overwrites")),
     )
     return result
 
@@ -706,6 +765,20 @@ class MediaToolRegistry:
             return self._tools[name]
         except KeyError:
             raise ToolNotFoundError(f"Unknown media tool {name!r}") from None
+
+    def action_key(self, name: str, arguments: Mapping[str, Any]) -> str:
+        """The decline-cache identity of a call, WITHOUT planning it.
+
+        Planning a format runs the dry run, which mints and persists a live safety
+        token. Asking "has the operator already refused this?" must therefore be
+        answerable from the normalized arguments alone, or every repeat proposal
+        of a refused format leaves another live authorization in the database.
+        """
+        tool = self.get(name)
+        normalized = tool.normalize(arguments)
+        return PendingMediaAction(
+            tool=name, arguments=normalized, preview="", grade=ConfirmationGrade.YES_NO
+        ).key
 
     def plan(
         self, name: str, facade: MediaFacade, arguments: Mapping[str, Any]

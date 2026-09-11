@@ -153,23 +153,33 @@ def _build_session(*, interactive: bool) -> AssistantSession:
     )
 
 
-def _show_executed(actions: tuple[str, ...]) -> None:
+def _show_executed(actions: tuple[str, ...], partial: tuple[str, ...] = ()) -> None:
     """One line per confirmed write, so the transcript shows what changed.
 
     Printed on the failure path too: a turn that wrote and then hit the round
-    limit still wrote, and the operator has to know.
+    limit still wrote, and the operator has to know. A failed archive or restore
+    gets its own line, because "it failed" and "nothing happened" are not the same
+    sentence when the job writes file by file.
     """
     for action in actions:
         console.print(Text(f"✓ {action} applied", style="green"))
+    for action in partial:
+        console.print(
+            Text(
+                f"⚠ {action} failed part-way — some of it may already be on tape. "
+                "Check `openblade jobs` and the catalog before retrying.",
+                style="yellow",
+            )
+        )
 
 
 def _ask(session: AssistantSession, question: str) -> None:
     try:
         turn = session.ask(question, on_tool=_show_tool)
     except AssistantError:
-        _show_executed(session.executed_this_turn)
+        _show_executed(session.executed_this_turn, session.possibly_partial_this_turn)
         raise
-    _show_executed(turn.executed_actions)
+    _show_executed(turn.executed_actions, session.possibly_partial_this_turn)
     # markup=False is load-bearing: model replies contain markdown links, array
     # syntax and quoted doc excerpts. Rich would either raise MarkupError on an
     # unbalanced tag (killing the REPL) or silently swallow "[dim]" as styling.

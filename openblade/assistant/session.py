@@ -191,6 +191,7 @@ class AssistantSession:
     progress: ProgressCallback | None = None
     _declined: dict[str, int] = field(default_factory=dict, init=False, repr=False)
     _executed: list[str] = field(default_factory=list, init=False, repr=False)
+    _possibly_partial: list[str] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.messages:
@@ -220,8 +221,14 @@ class AssistantSession:
         Same failure mode as tier 1 by construction: a half-wired session offers no
         media schema at all rather than offering one it could not confirm.
         """
+        # Tier 1 is required, not merely expected. The tier-2 system prompt
+        # describes BOTH tiers, so a media-only session would advertise
+        # create_volume_group and then answer that call with "there is no tool
+        # named that". Enforcing the implication is cheaper than a fourth prompt,
+        # and a session that can confirm a format can certainly confirm a pool.
         return (
-            self.media_registry is not None
+            self.setup_enabled
+            and self.media_registry is not None
             and self.media is not None
             and self.confirm_media is not None
         )
@@ -374,6 +381,31 @@ class AssistantSession:
             }
         )
 
+    def _decline_repeat(self, tool: str, key: str) -> str:
+        """Answer a re-proposal from the cache, without planning it again.
+
+        One refusal is an answer; two is nagging, and for a format the second
+        planning would also mint a second live safety token.
+        """
+        self._declined[key] = self._declined.get(key, 0) + 1
+        logger_action = PendingMediaAction(
+            tool=tool, arguments={}, preview="", grade=ConfirmationGrade.YES_NO
+        )
+        log_action(logger_action, outcome="declined", detail={"reason": "already declined"})
+        return render_result(
+            {
+                "executed": False,
+                "status": "declined_by_operator",
+                "action": tool,
+                "reason": "the operator already declined this exact action",
+                "repeatedProposal": True,
+                "guidance": (
+                    "The operator declined this already and was not asked again. "
+                    "Nothing was changed. Do not propose it a third time."
+                ),
+            }
+        )
+
     def _announce(self, line: str) -> None:
         """Tell the operator something long is happening. Never fails the action."""
         if self.progress is None:
@@ -399,6 +431,21 @@ class AssistantSession:
                 }
             )
 
+        # The decline cache is consulted BEFORE planning, not after. Planning a
+        # format runs the real dry run, which persists a live safety token; a model
+        # that re-proposes a refused format ten times would otherwise leave ten
+        # live authorizations behind for an action the operator explicitly refused.
+        try:
+            key = registry.action_key(call.name, call.arguments)
+        except MediaRefusedError as exc:
+            return _refusal(exc, confirmed=False)
+        except AssistantError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - curated, never echoed raw
+            return _unavailable(call.name, "could not be read", exc)
+        if self._declined.get(key, 0) >= MAX_CONFIRMATION_PROMPTS_PER_ACTION:
+            return self._decline_repeat(call.name, key)
+
         try:
             action = registry.plan(call.name, facade, call.arguments)
         except MediaRefusedError as exc:
@@ -409,11 +456,6 @@ class AssistantSession:
             raise
         except Exception as exc:  # noqa: BLE001 - curated, never echoed raw
             return _unavailable(call.name, "could not be checked", exc)
-
-        if self._declined.get(action.key, 0) >= MAX_CONFIRMATION_PROMPTS_PER_ACTION:
-            return self._decline_media(
-                action, "the operator already declined this exact action", repeated=True
-            )
 
         try:
             response = confirm(action)
@@ -446,7 +488,22 @@ class AssistantSession:
         except MediaOperationFailedError as exc:
             # The message is already curated at the raise site in the facade: an
             # orchestrator constant, a typed OpenBlade message, or safe_job_error.
-            log_action(action, outcome="failed", detail={"error": str(exc)})
+            #
+            # A failed archive is NOT "nothing happened". The archive job writes
+            # file by file and its cleanup only removes the records for files that
+            # did not finish, so a failure on file 300 of 400 leaves 299 files on
+            # tape and in the catalog. Tier 1 has SetupPartialWriteError for
+            # exactly this; tier 2's partial surface is far bigger, so a failed
+            # long-running action is flagged as possibly-partial rather than
+            # reported as a clean no-op.
+            partial = tool.long_running
+            if partial:
+                self._possibly_partial.append(action.tool)
+            log_action(
+                action,
+                outcome="failed",
+                detail={"error": str(exc), "possiblyPartial": partial},
+            )
             self._announce(f"{action.tool}: failed — {exc}")
             return render_result(
                 {
@@ -455,10 +512,18 @@ class AssistantSession:
                     "action": action.tool,
                     "preview": action.preview,
                     "error": str(exc),
+                    "possiblyPartial": partial,
                     "guidance": (
                         "The operator confirmed and it failed. Report the error text "
-                        "as given, suggest `openblade jobs` for the job record, and do "
-                        "not retry it yourself."
+                        "as given. "
+                        + (
+                            "Say explicitly that part of it may already have been "
+                            "written and that they should check `openblade jobs` and "
+                            "the catalog before retrying. "
+                            if partial
+                            else ""
+                        )
+                        + "Do not retry it yourself."
                     ),
                 }
             )
@@ -569,19 +634,32 @@ class AssistantSession:
         """
         return tuple(self._executed)
 
+    @property
+    def possibly_partial_this_turn(self) -> tuple[str, ...]:
+        """Long-running actions that failed and may have written something anyway.
+
+        Separate from ``executed_this_turn`` because the honest answer is "some of
+        it, we do not know how much", and reporting that as either "applied" or
+        "nothing happened" would be a lie in opposite directions.
+        """
+        return tuple(self._possibly_partial)
+
     def _rewind_floor(self, checkpoint: int) -> int:
         """The earliest index this turn may rewind to.
 
         Everything up to and including the last tool message reporting an executed
         action is kept, so the transcript never claims less happened than did.
         """
-        if not self._executed:
+        if not self._executed and not self._possibly_partial:
             return checkpoint
+        # A possibly-partial failure is kept for the same reason an execution is:
+        # something may be on tape, and a transcript that forgets it invites the
+        # model to propose the same archive again.
+        markers = ('"executed": true', '"possiblyPartial": true')
         for index in range(len(self.messages) - 1, checkpoint - 1, -1):
             message = self.messages[index]
-            if message.get("role") == "tool" and '"executed": true' in str(
-                message.get("content", "")
-            ):
+            content = str(message.get("content", ""))
+            if message.get("role") == "tool" and any(marker in content for marker in markers):
                 return index + 1
         return checkpoint
 
@@ -607,6 +685,7 @@ class AssistantSession:
         schemas: Sequence[dict[str, Any]] = self._schemas()
         used: list[str] = []
         self._executed.clear()
+        self._possibly_partial.clear()
 
         for round_number in range(1, self.config.max_rounds + 1):
             reply = self.client.chat(self.messages, schemas)

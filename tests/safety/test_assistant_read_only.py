@@ -45,13 +45,20 @@ import pytest
 from openblade.assistant.errors import (
     MediaFacadeViolationError,
     MediaNotAuthorizedError,
+    MediaRefusedError,
     MediaRegistryViolationError,
     ReadOnlyViolationError,
     SetupFacadeViolationError,
     SetupRegistryViolationError,
     ToolRegistryViolationError,
 )
-from openblade.assistant.media_facade import MediaFacade, media_bundle
+from openblade.assistant.media_facade import (
+    ACTING_OPERATIONS,
+    DESTRUCTIVE_OPERATIONS,
+    MEDIA_OPERATION_NAMES,
+    MediaFacade,
+    media_bundle,
+)
 from openblade.assistant.media_tools import (
     MEDIA_TOOL_NAMES,
     ConfirmationGrade,
@@ -88,6 +95,7 @@ from openblade.assistant.tools import (
     build_context,
     build_registry,
 )
+from openblade.domain.models import MountMode
 from tests.assistant_support import assistant_config, media_facade_for
 
 ASSISTANT_DIR = Path(__file__).resolve().parents[2] / "openblade" / "assistant"
@@ -1174,6 +1182,34 @@ def test_the_setup_facade_is_still_catalog_only(app_context: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _media_session(
+    app_context: Any,
+    *,
+    confirm_media: Any,
+    with_setup: bool = True,
+) -> AssistantSession:
+    """A session with tier 2 live, built the way ``create_session`` builds it."""
+    return AssistantSession(
+        client=OllamaClient(assistant_config(), client=httpx.Client()),
+        registry=build_registry(),
+        context=build_context(
+            config=assistant_config(),
+            catalog=app_context.catalog,
+            inventory_service=app_context.inventory_service,
+            backend="mock",
+            real_hardware_enabled=False,
+            db_url="sqlite:///x.db",
+        ),
+        config=assistant_config(),
+        setup_registry=build_setup_registry() if with_setup else None,
+        setup=setup_facade(app_context.catalog) if with_setup else None,
+        confirm=(lambda action: False) if with_setup else None,
+        media_registry=build_media_registry(),
+        media=media_facade_for(app_context),
+        confirm_media=confirm_media,
+    )
+
+
 def _planned(app_context: Any, name: str, **arguments: Any) -> Any:
     """Build a registry + facade and plan one action against the live context."""
     registry = build_media_registry()
@@ -1435,3 +1471,229 @@ def test_the_facade_holds_no_reachable_instance_state(app_context: Any) -> None:
     assert all(
         type(referent).__name__ in {"dict", "type"} for referent in gc.get_referents(facade)
     )
+
+
+# ---------------------------------------------------------------------------
+# 14. The failures the adversarial review found, and their guards
+# ---------------------------------------------------------------------------
+
+
+def test_a_destination_that_appears_after_the_yes_is_refused(
+    app_context: Any, tmp_path: Path
+) -> None:
+    """THE regression for the worst bug in this feature.
+
+    Found by attacking, with a working repro: the restore grade was decided at
+    plan time from ``final.exists()`` and never re-checked, so a ``y`` given for
+    "nothing is overwritten" destroyed a file that appeared while the operator was
+    reading the preview. MUTATION CHECK: drop the ``expect_overwrite`` comparison
+    in ``_restore_path`` (or stop passing it from ``_apply_restore``) and this
+    fails -- the precious file is silently replaced.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "one.raw").write_bytes(b"archived contents")
+    app_context.catalog.create_volume_group("pool")
+    app_context.ltfs.ensure_tape("VOL001L9").formatted = True
+    registry, facade, archive = _planned(
+        app_context, "archive_path", path=str(source), volume_group="pool"
+    )
+    registry.perform(archive, facade, registry.authorize(archive, "y"))
+
+    destination = tmp_path / "out.raw"
+    action = registry.plan(
+        "restore_path", facade, {"path": "/pool/one.raw", "dest": str(destination)}
+    )
+    assert action.grade is ConfirmationGrade.YES_NO, "nothing exists there yet"
+    authorization = registry.authorize(action, "y")
+
+    # ...the operator reads the preview, and meanwhile something creates the file.
+    precious = b"PRECIOUS DATA THE OPERATOR STILL WANTS"
+    destination.write_bytes(precious)
+
+    with pytest.raises(MediaRefusedError) as excinfo:
+        registry.perform(action, facade, authorization)
+    assert excinfo.value.code == "destination_changed"
+    assert destination.read_bytes() == precious, "the file the operator never saw is intact"
+
+
+def test_formatting_a_mounted_cartridge_is_refused(app_context: Any) -> None:
+    """The second repro: unload refused a mounted drive, format did not.
+
+    Formatting runs mkltfs against a drive, and the orchestrator LOADS a slotted
+    cartridge to do it -- so the mount-state non-negotiable applies here with more
+    force than it does to unload, and the guard was simply absent.
+    MUTATION CHECK: remove ``_require_unmounted`` from ``_resolve_format_target``
+    and this fails, formatting a cartridge with an open LTFS volume.
+    """
+    app_context.ltfs.ensure_tape("VOL001L9").formatted = True
+    registry, facade, load = _planned(app_context, "load_tape", barcode="VOL001L9", drive=0)
+    registry.perform(load, facade, registry.authorize(load, "y"))
+    app_context.ltfs.mount("VOL001L9", MountMode.READ_WRITE)
+
+    with pytest.raises(MediaRefusedError) as excinfo:
+        registry.plan("format_tape", facade, {"barcode": "VOL001L9"})
+    assert excinfo.value.code == "drive_mounted"
+
+
+def test_the_format_preview_names_the_load_it_will_perform(app_context: Any) -> None:
+    """Formatting a slotted cartridge moves it. The preview must say so."""
+    _registry, _facade, action = _planned(app_context, "format_tape", barcode="VOL001L9")
+    assert action.plan["willBeLoaded"] is True
+    assert "will be loaded into drive" in action.preview
+
+
+def test_archiving_over_a_catalogued_path_is_refused(app_context: Any, tmp_path: Path) -> None:
+    """The third repro: create_file_record is an upsert.
+
+    Archiving a path that is already catalogued replaced the record describing the
+    copy already on tape -- behind a y/N whose preview said "existing data on them
+    is not touched". MUTATION CHECK: drop the ``collisions`` check in
+    ``_resolve_archive`` and this fails, and the first file's checksum is gone.
+    """
+    app_context.catalog.create_volume_group("pool")
+    app_context.ltfs.ensure_tape("VOL001L9").formatted = True
+    first = tmp_path / "a"
+    first.mkdir()
+    (first / "one.raw").write_bytes(b"the master copy, twenty-nine")
+    registry, facade, action = _planned(
+        app_context, "archive_path", path=str(first), volume_group="pool"
+    )
+    registry.perform(action, facade, registry.authorize(action, "y"))
+    original = app_context.catalog.get_file_record("/pool/one.raw")
+    checksum = original.checksum_sha256
+
+    second = tmp_path / "b"
+    second.mkdir()
+    (second / "one.raw").write_bytes(b"junk")
+    with pytest.raises(MediaRefusedError) as excinfo:
+        registry.plan("archive_path", facade, {"path": str(second), "volume_group": "pool"})
+    assert excinfo.value.code == "catalog_path_exists"
+    assert app_context.catalog.get_file_record("/pool/one.raw").checksum_sha256 == checksum
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        {"barcode": "VOL001L9"},
+        {"barcode": "vol001l9"},
+        {"barcode": " VOL001L9"},
+        {"barcode": "VOL001L9 "},
+        {"tape": "vol001l9 "},
+    ],
+)
+def test_a_declined_format_is_not_re_proposed_under_another_spelling(
+    app_context: Any, spelling: dict[str, str]
+) -> None:
+    """Confirmation fatigue is the realistic attack on a type-the-barcode gate.
+
+    The decline cache keys on NORMALIZED arguments, so "vol001l9" and " VOL001L9 "
+    are the same refused action. MUTATION CHECK: normalize only the argument name
+    (drop ``clean_barcode`` from ``_normalize_format``) and the operator is asked
+    again for every spelling.
+    """
+    asked: list[str] = []
+
+    def refuse(action: Any) -> str:
+        asked.append(action.tool)
+        return "n"
+
+    session = _media_session(app_context, confirm_media=refuse)
+    session._run_media_tool(ToolCall(name="format_tape", arguments={"barcode": "VOL001L9"}))
+    result = json.loads(
+        session._run_media_tool(ToolCall(name="format_tape", arguments=spelling))
+    )
+    assert result["status"] == "declined_by_operator"
+    assert result["repeatedProposal"] is True
+    assert asked == ["format_tape"], "asked exactly once, whatever the spelling"
+
+
+def test_a_repeated_format_proposal_mints_no_second_safety_token(app_context: Any) -> None:
+    """The decline cache is consulted BEFORE the dry run runs.
+
+    Planning a format persists a live token, so a model that re-proposes a refused
+    format ten times would otherwise leave ten live authorizations behind for an
+    action the operator explicitly refused. MUTATION CHECK: move the
+    ``_declined`` check back after ``registry.plan`` and the token count grows.
+    """
+    minted: list[Any] = []
+    original = app_context.format_service.dry_run
+
+    def spy(barcode: str) -> Any:
+        outcome = original(barcode)
+        minted.append(outcome[1].token)
+        return outcome
+
+    app_context.format_service.dry_run = spy  # type: ignore[method-assign]
+    session = _media_session(app_context, confirm_media=lambda action: "n")
+    call = ToolCall(name="format_tape", arguments={"barcode": "VOL001L9"})
+    for _ in range(5):
+        session._run_media_tool(call)
+    assert len(minted) == 1, "one refusal, one dry run, one token"
+
+
+def test_a_failed_long_running_action_is_reported_as_possibly_partial(
+    app_context: Any, tmp_path: Path
+) -> None:
+    """An archive that dies half way left files on tape. Saying "failed" is not enough.
+
+    MUTATION CHECK: stop appending to ``_possibly_partial`` (or drop the
+    ``long_running`` check) and this fails -- the operator is told nothing
+    happened, and ``_rewind_floor`` may drop the message from the transcript.
+    """
+    app_context.catalog.create_volume_group("pool")
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "one.raw").write_bytes(b"x")
+
+    def explode(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("device /dev/nst0: write error at block 41231")
+
+    app_context.archive_service.enqueue = explode  # type: ignore[method-assign]
+    session = _media_session(app_context, confirm_media=lambda action: "y")
+    result = json.loads(
+        session._run_media_tool(
+            ToolCall(
+                name="archive_path",
+                arguments={"path": str(source), "volume_group": "pool"},
+            )
+        )
+    )
+    assert result["status"] == "failed"
+    assert result["possiblyPartial"] is True
+    assert "/dev/nst0" not in result["error"], "raw device paths must not reach the model"
+    assert session.possibly_partial_this_turn == ("archive_path",)
+
+
+def test_media_without_setup_is_off_rather_than_half_advertised(app_context: Any) -> None:
+    """The tier-2 prompt describes BOTH tiers, so tier 2 requires tier 1.
+
+    Without this a session with confirm_media but no confirm tells the model it can
+    create a volume group and then answers that call with "there is no tool named
+    that". MUTATION CHECK: drop ``self.setup_enabled`` from ``media_enabled``.
+    """
+    session = _media_session(app_context, confirm_media=lambda action: "y", with_setup=False)
+    assert session.setup_enabled is False
+    assert session.media_enabled is False
+    offered = {schema["function"]["name"] for schema in session._schemas()}
+    assert offered == set(READ_ONLY_TOOL_NAMES)
+
+
+def test_the_declared_acting_surface_matches_the_registry() -> None:
+    """The "one line a reviewer can read" must not drift from the code.
+
+    ACTING_OPERATIONS and DESTRUCTIVE_OPERATIONS are documentation of the tier-2
+    surface; without this they are comments that go stale silently and mislead the
+    next person who reads them instead of the registry.
+    """
+    assert ACTING_OPERATIONS == MEDIA_TOOL_NAMES
+    assert ACTING_OPERATIONS <= MEDIA_OPERATION_NAMES
+    assert {f"plan_{name}" for name in ACTING_OPERATIONS} <= MEDIA_OPERATION_NAMES
+    # Everything named destructive is graded TYPED for at least one plan, and
+    # nothing outside the set ever is.
+    registry = build_media_registry()
+    always_yes_no = MEDIA_TOOL_NAMES - DESTRUCTIVE_OPERATIONS
+    for name in always_yes_no:
+        grade, required = registry.get(name).grade({}, {"barcode": "VOL001L9"})
+        assert grade is ConfirmationGrade.YES_NO, name
+        assert required is None, name

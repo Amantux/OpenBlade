@@ -626,6 +626,36 @@ def _format_consequences(bundle: MediaBundle, barcode: str) -> JSONDict:
     }
 
 
+def _resolve_format_target(bundle: MediaBundle, barcode: str) -> JSONDict:
+    """Where the cartridge is, and whether it can be formatted at all.
+
+    The mount-state gate belongs here even more than it belongs on unload. The
+    orchestrator's ``_ensure_loaded`` will put a slotted cartridge INTO a drive to
+    run mkltfs, so "format" is also a load the operator was never shown; and
+    running mkltfs against a device with an open LTFS volume is the worst version
+    of the thing "never unload while LTFS is mounted or dirty" exists to prevent.
+    An adversarial review found the guard on load/unload but not here, with a
+    working repro against the simulator: unload refused, format went through.
+    """
+    inventory, location = _locate(bundle, barcode)
+    if location.in_drive:
+        drive_id = int(location.drive_id or 0)
+        _require_unmounted(bundle, _drive(inventory, drive_id))
+        return {
+            "currentlyIn": f"drive {drive_id}",
+            "driveId": drive_id,
+            "willBeLoaded": False,
+        }
+    # A free drive is needed for mkltfs; refusing now beats failing after the
+    # operator has typed the barcode.
+    drive_id = _pick_free_drive(bundle, inventory)
+    return {
+        "currentlyIn": f"slot {location.slot_id}",
+        "driveId": drive_id,
+        "willBeLoaded": True,
+    }
+
+
 def _plan_format_tape(bundle: MediaBundle, *, barcode: object) -> JSONDict:
     """Phase one: run the real dry run and mint the real one-time safety token.
 
@@ -639,7 +669,7 @@ def _plan_format_tape(bundle: MediaBundle, *, barcode: object) -> JSONDict:
     code = clean_barcode(barcode)
     # Refuse before minting a token: an unknown barcode should not leave a live
     # authorization sitting in the database for five minutes.
-    _locate(bundle, code)
+    where = _resolve_format_target(bundle, code)
     plan, token = _run_service("format dry run", lambda: bundle.format_service.dry_run(code))
     remaining = max(0, int(getattr(token, "expires_at", time.time()) - time.time()))
     return {
@@ -654,6 +684,7 @@ def _plan_format_tape(bundle: MediaBundle, *, barcode: object) -> JSONDict:
         # presented as fact on a destructive preview. Say what is true.
         "worm": None,
         "wouldWrite": "a new LTFS label, index partition and data partition",
+        **where,
         **_format_consequences(bundle, code),
     }
 
@@ -673,7 +704,9 @@ def _format_tape(bundle: MediaBundle, *, barcode: object, token: object = None) 
             "The two-phase flow is not optional: plan the format again.",
             code="missing_safety_token",
         )
-    _locate(bundle, code)
+    # Re-resolved inside the write path, mount state included: a volume that was
+    # unmounted when the operator was asked may be mounted by the time they answer.
+    _resolve_format_target(bundle, code)
     result = _run_service("format", lambda: bundle.format_service.confirm(code, token_value))
     return {
         "barcode": code,
@@ -692,6 +725,15 @@ def _source_files(source: Path) -> list[Path]:
     if source.is_file():
         return [source]
     return sorted(path for path in source.rglob("*") if path.is_file())
+
+
+def _catalog_paths_for(source: Path, group_name: str) -> list[str]:
+    """Where each source file lands in the catalog — mirrors ``run_archive_job``."""
+    paths: list[str] = []
+    for item in _source_files(source):
+        relative = item.name if source.is_file() else str(item.relative_to(source))
+        paths.append(str(PurePosixPath("/") / group_name / relative))
+    return paths
 
 
 def _resolve_archive(bundle: MediaBundle, *, path: object, volume_group: object) -> JSONDict:
@@ -728,6 +770,29 @@ def _resolve_archive(bundle: MediaBundle, *, path: object, volume_group: object)
             f"`openblade archive --volume-group {group_name} --path {source}` instead.",
             code="too_many_files",
         )
+    # ``create_file_record`` is an UPSERT: archiving a path that is already
+    # catalogued overwrites that row's size, checksum and volume group, so the
+    # instances still on tape are described by a record that no longer matches
+    # them and the older copy is no longer restorable. The preview said "existing
+    # data is not touched" while this happened -- an adversarial review proved it.
+    # Detect it at plan time, where it is cheap, and refuse: re-archiving over a
+    # catalogued path is a deliberate act for `openblade archive`, not something
+    # to slip through a y/N.
+    collisions = [
+        catalog_path
+        for catalog_path in _catalog_paths_for(source, group.name)
+        if bundle.catalog.get_file_record(catalog_path) is not None
+    ]
+    if collisions:
+        raise MediaRefusedError(
+            f"{len(collisions)} of these file(s) are already catalogued in "
+            f"{group.name!r} and archiving would replace the catalog record that "
+            f"describes the copy already on tape: {', '.join(collisions[:_MAX_CANDIDATES])}. "
+            "Archive to a different volume group, or run `openblade archive` "
+            "deliberately if replacing them is really the intent.",
+            code="catalog_path_exists",
+            candidates=tuple(collisions[:_MAX_CANDIDATES]),
+        )
     cartridges = list(group.cartridges)
     return {
         "sourcePath": str(source),
@@ -743,15 +808,6 @@ def _plan_archive_path(
     bundle: MediaBundle, *, path: object, volume_group: object = None
 ) -> JSONDict:
     return _resolve_archive(bundle, path=path, volume_group=volume_group)
-
-
-def _catalog_paths_for(source: Path, group_name: str) -> list[str]:
-    """Where each source file lands in the catalog — mirrors ``run_archive_job``."""
-    paths: list[str] = []
-    for item in _source_files(source):
-        relative = item.name if source.is_file() else str(item.relative_to(source))
-        paths.append(str(PurePosixPath("/") / group_name / relative))
-    return paths
 
 
 def _archive_path(bundle: MediaBundle, *, path: object, volume_group: object = None) -> JSONDict:
@@ -781,7 +837,6 @@ def _archive_path(bundle: MediaBundle, *, path: object, volume_group: object = N
         "bytesArchived": sum(int(record.size_bytes) for record in stored),
         "tapes": sorted({str(instance.barcode) for record in stored for instance in record.instances}),
         "allFilesInCatalog": len(stored) == len(expected),
-        "error": job.error,
     }
 
 
@@ -845,8 +900,39 @@ def _plan_restore_path(bundle: MediaBundle, *, path: object, dest: object = None
     return _resolve_restore(bundle, path=path, dest=dest)
 
 
-def _restore_path(bundle: MediaBundle, *, path: object, dest: object = None) -> JSONDict:
+def _restore_path(
+    bundle: MediaBundle,
+    *,
+    path: object,
+    dest: object = None,
+    expect_overwrite: object = None,
+) -> JSONDict:
+    """Restore, refusing if the destination changed since the operator was asked.
+
+    ``expect_overwrite`` is what the plan the operator confirmed said about the
+    destination. It is not bookkeeping: whether this restore is destructive is a
+    fact about the filesystem, sampled at plan time, and the operator's thinking
+    time at the prompt is a window in which a cron job, another tool, or the
+    assistant's own previous action can create that file. Without this check a
+    ``y`` given for "nothing is overwritten" destroys whatever appeared — which is
+    exactly the repro an adversarial review produced. Confirmation is not a licence
+    to act on stale facts, and this is the fact that decides the grade.
+    """
     resolved = _resolve_restore(bundle, path=path, dest=dest)
+    if expect_overwrite is not None and bool(resolved["overwrites"]) != bool(expect_overwrite):
+        appeared = bool(resolved["overwrites"])
+        raise MediaRefusedError(
+            f"{resolved['destinationPath']} "
+            + (
+                "now exists and this restore would destroy it. You confirmed a "
+                "restore that overwrote nothing, so nothing was changed; ask again "
+                "and the preview will demand the overwrite confirmation."
+                if appeared
+                else "no longer exists, so the overwrite you confirmed is not the "
+                "action that would run. Nothing was changed; ask again."
+            ),
+            code="destination_changed",
+        )
     final = Path(str(resolved["destinationPath"]))
     # The *resolved* file path, not the operator's argument: the service applies
     # the same "existing directory means put it inside" rule, so handing it the
@@ -867,7 +953,6 @@ def _restore_path(bundle: MediaBundle, *, path: object, dest: object = None) -> 
         "sizeMatches": final.exists() and final.stat().st_size == resolved["sizeBytes"],
         "checksumVerified": job.state == "completed",
         "overwrote": bool(resolved["overwrites"]),
-        "error": job.error,
     }
 
 

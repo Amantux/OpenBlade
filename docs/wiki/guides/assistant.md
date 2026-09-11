@@ -45,8 +45,18 @@ to confirm an action that would then have to guess:
   full → refused, naming the occupant;
 - `unload` with neither a barcode nor a drive while two drives are loaded → refused
   with the candidates. Guessing here unloads the wrong tape;
-- a drive whose LTFS volume is still mounted or dirty → refused. Unmounting someone
-  else's volume is not a decision the assistant makes;
+- a drive whose LTFS volume is still mounted or dirty → refused, for unload **and
+  for format**. Formatting runs `mkltfs` against a drive, and the orchestrator will
+  load a slotted cartridge to do it, so a format is also a load — the preview says
+  which drive it will use, and a mounted volume stops it;
+- an archive whose files are already catalogued at those paths → refused. The
+  catalog write is an upsert, so it would replace the record describing the copy
+  already on tape; that is a deliberate act for `openblade archive`, not something
+  to slip through a `y`;
+- a restore whose destination **changed** between the preview and your answer →
+  refused. Whether a restore overwrites is a fact about the filesystem sampled when
+  the plan ran, and it is what chose the confirmation grade; if a file appeared
+  while you were reading, the `y` you gave was for a different action;
 - a destination slot that is an import/export element → refused. Moving media out of
   the library is an export, and the orchestrator rejects it too;
 - a relative source path, a missing directory, an unknown volume group, an unknown
@@ -394,32 +404,42 @@ unload_drive: done — unloaded
 ```
 
 **3. Format a scratch cartridge.** The destructive grade. The dry run has already
-run and minted the one-time token by the time you see this; a `y` here cancels:
+run and minted the one-time token by the time you see this; a `y` here cancels.
+Note that the preview names the drive it will *load the cartridge into* — a format
+is also a media move, and the orchestrator would do it whether or not you were
+told:
 
 ```
-openblade> format the scratch tape OB0007L8
-· format_tape {"barcode": "OB0007L8"}
+openblade> format the scratch tape OB0008L8
+· format_tape {"barcode": "OB0008L8"}
 
-Proposed action: FORMAT OB0007L8. This is irreversible and there is no undo.
-  Everything on the cartridge is destroyed: 186 archived file(s) in volume group
-'hw-catalog-stripe', 203.4 MB recorded as used of 6.6 GB capacity.
+Proposed action: FORMAT OB0008L8. This is irreversible and there is no undo.
+  Everything on the cartridge is destroyed: 80 archived file(s) in volume group
+'hw-catalog-stripe', 0 B recorded as used of 12.0 GB capacity.
   WORM: not reported by this backend — check the cartridge label yourself if it
 matters.
   The format writes a new LTFS label, index partition and data partition.
-  A one-time safety token was issued by the dry run and expires in 299s.
+  A one-time safety token was issued by the dry run and expires in 299s — if it
+expires while you check the cartridge, ask again and a fresh dry run runs.
+  The cartridge is in slot 7 and will be loaded into drive 0 to format it, then
+returned.
   Files that would be lost include:
-/block_stripe/0b5ac0c2-…/catalog.bin.shard0000,
-/block_stripe/1918e46e-…/block-stripe.bin.shard0000, …
+/block_stripe/0b5ac0c2-…/catalog.bin.shard0001,
+/block_stripe/1918e46e-…/block-stripe.bin.shard0001, …
   Dry run: Destructive operation
   Dry run: Inventory barcode must match confirmation
-  Type the barcode OB0007L8 to confirm. Anything else — including "y" — cancels.
-Type OB0007L8 to confirm (anything else cancels): OB0007L8
+  Type the barcode OB0008L8 to confirm. Anything else — including "y" — cancels.
+Type OB0008L8 to confirm (anything else cancels): OB0008L8
 format_tape: running now — this can take minutes.
-[info     ] tape operation queued          barcode=OB0007L8 op_id=6eb4e8a2-… op_type=format
-[info     ] tape operation completed       barcode=OB0007L8 op_id=6eb4e8a2-… op_type=format
+[info     ] tape operation queued          barcode=OB0008L8 op_id=da0bf47f-… op_type=format
+[info     ] tape operation completed       barcode=OB0008L8 op_id=da0bf47f-… op_type=format
 format_tape: done — formatted
 ✓ format_tape applied
 ```
+
+Had LTFS still been mounted on that cartridge, this would have been refused before
+the prompt — the same gate that stops an unload, applied to the operation that
+cannot be undone.
 
 **3b. The same prompt, answered `y`.** Nothing happens — no tool ran, the token was
 not consumed, and the model is told the confirmation was not given rather than
@@ -508,6 +528,23 @@ $ sha256sum /tmp/tier2-src/hello.txt /tmp/tier2-out/hello.txt
 9597d98beccac409cc9f039154804ecf0a4a78316c38f0f13742b093dc35dda0  /tmp/tier2-out/hello.txt
 ```
 
+**7. Try step 4 again.** It is refused, and that is the guard working: those paths
+are already catalogued, and archiving over them would replace the record that
+describes the copy already on tape.
+
+```
+Nothing was changed. 2 of these file(s) are already catalogued in
+'hw-catalog-stripe' and archiving would replace the catalog record that describes
+the copy already on tape: /hw-catalog-stripe/alpha.txt,
+/hw-catalog-stripe/beta.txt. Archive to a different volume group, or run
+`openblade archive` deliberately if replacing them is really the intent.
+```
+
+Known trade-off: formatting a cartridge does not purge the catalog rows that
+pointed at it, so re-archiving the same paths after a format is refused too. The
+message names the supported way through, and refusing is the right direction for
+an action confirmed with a `y`.
+
 Afterwards, return the rig to its at-rest state with `sudo scripts/mhvtl/reset.sh`.
 
 ### "Where is wedding.raw?"
@@ -554,7 +591,13 @@ Afterwards, return the rig to its at-rest state with `sudo scripts/mhvtl/reset.s
 - **Both executing tiers are REPL-only**, by construction: no confirmation
   callback, no facade, and neither tier's tools in the schema the model is shown.
   Missing any one of the three parts (registry, facade, prompt) means the tier is
-  off, not unconfirmed.
+  off, not unconfirmed. Tier 2 additionally requires tier 1, because the tier-2
+  system prompt describes both — a media-only session would advertise a tool it
+  would then refuse.
+- **A failed archive or restore is not "nothing happened".** Those jobs write file
+  by file, so a failure part-way leaves earlier files on tape and in the catalog.
+  The REPL prints a `⚠ … failed part-way` line and the model is told to say so;
+  check `openblade jobs` and the catalog before retrying.
 - **Read the preview, not the prose.** The `[y/N]` line above the prompt is what
   will actually happen; the model's sentence describing it is not the contract.
 - **Adding several tapes is several transactions.** The catalog commits per
