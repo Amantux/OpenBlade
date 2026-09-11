@@ -1,0 +1,139 @@
+scalar_pm: fix two VPD heap overflows and a use-after-free
+
+Against mhvtl 59f32ee (github.com/markh794/mhvtl).
+
+Configuring a library whose product id starts with QUANTUM or ADIC selects
+init_scalar_smc(), and vtllibrary then aborts during startup:
+
+    smc_personality_module_register(): mhVTL - Scalar emulation
+    malloc(): invalid next size (unsorted)
+
+Three defects, all in usr/pm/scalar_pm.c. alloc_vpd(sz) (usr/spc.c) allocates
+exactly sz bytes of PAYLOAD - the 4-byte page header is added later by
+spc_inquiry - so the bounds below are the whole budget.
+
+1. update_scalar_vpd_80(): snprintf(&d[0], 26, ...) into an alloc_vpd(24)
+   payload. Up to 25 bytes are written into 24. Heap overflow.
+
+2. update_scalar_vpd_83(): snprintf(&d[12], 25, "%-24s", ...) into an
+   alloc_vpd(36) payload. 24 characters plus the NUL terminator occupy
+   d[12..36], one byte past the end. Heap overflow.
+
+3. Both functions dealloc_vpd() the existing page and assign the replacement
+   to a LOCAL variable, never storing it back into lu->lu_vpd[PCODE_OFFSET(x)].
+   The logical unit is left holding a dangling pointer to freed memory, and
+   the new page leaks. Compare init_default_smc(), which assigns through.
+
+The fix renders each field into a scratch buffer that is always large enough,
+memcpy's exactly the page payload, and installs the new page before anything
+can observe the stale pointer.
+
+CAVEAT, unchanged from upstream: VPD page 0x80 is 24 bytes but its content is
+vendor id + "%-17s" serial. With an 8-character vendor id that is 25
+characters, so the last byte is dropped. This patch makes the truncation
+explicit and safe rather than a buffer overrun; it does not enlarge the page,
+because the page size is what the Quantum SCSI reference specifies. Harmless
+for the rig's "QUANTUM"/"OBLADE_L10" (the lost byte is padding).
+
+Should be reported upstream; drop this patch once it lands.
+
+diff --git a/usr/pm/scalar_pm.c b/usr/pm/scalar_pm.c
+index 0fc4fce..1999a06 100644
+--- a/usr/pm/scalar_pm.c
++++ b/usr/pm/scalar_pm.c
+@@ -3,11 +3,22 @@
+  */
+ 
+ #include <stdio.h>
++#include <string.h>
+ #include "vtllib.h"
+ #include "smc.h"
+ #include "logging.h"
+ #include "be_byteshift.h"
+ 
++/* Payload sizes of the VPD pages this personality builds. */
++#define VPD_80_SZ		 24
++#define VPD_83_SCALAR_SZ 36
++
++/* Scratch big enough that snprintf never truncates for any vendor id or
++ * serial number, so the only truncation is the deliberate memcpy of exactly
++ * the page payload below.
++ */
++#define VPD_SCRATCH_SZ	 (VENDOR_ID_LEN + SCSI_SN_LEN + 64)
++
+ static struct smc_personality_template smc_pm = {
+ 	.library_has_map			= TRUE,
+ 	.library_has_barcode_reader = TRUE,
+@@ -35,7 +46,7 @@ static void init_scalar_inquiry(struct lu_phy_attr *lu) {
+ 
+ static void update_scalar_vpd_80(struct lu_phy_attr *lu) {
+ 	struct vpd *lu_vpd;
+-	uint8_t	   *d;
++	char		scratch[VPD_SCRATCH_SZ];
+ 
+ 	lu_vpd = lu->lu_vpd[PCODE_OFFSET(0x80)];
+ 
+@@ -43,19 +54,27 @@ static void update_scalar_vpd_80(struct lu_phy_attr *lu) {
+ 	if (lu_vpd) /* Free any earlier allocation */
+ 		dealloc_vpd(lu_vpd);
+ 
+-	lu_vpd = alloc_vpd(24);
++	lu_vpd = alloc_vpd(VPD_80_SZ);
++	/* Install the new page before anything can use the stale pointer. */
++	lu->lu_vpd[PCODE_OFFSET(0x80)] = lu_vpd;
+ 	if (lu_vpd) {
+-		d = lu_vpd->data;
+-		/* d[4 - 27] Serial number prefixed by Vendor ID */
+-		snprintf((char *)&d[0], 26, "%-s%-17s", lu->vendor_id, lu->lu_serial_no);
++		/* Serial number prefixed by Vendor ID, space padded, NOT NUL
++		 * terminated: the page is exactly VPD_80_SZ bytes of payload.
++		 * Render into scratch (which has room for the terminator) and
++		 * copy only the payload across.
++		 */
++		snprintf(scratch, sizeof(scratch), "%-s%-17s", lu->vendor_id,
++				 lu->lu_serial_no);
++		memcpy(lu_vpd->data, scratch, VPD_80_SZ);
+ 	} else {
+-		MHVTL_ERR("Could not malloc(24) bytes, line %d", __LINE__);
++		MHVTL_ERR("Could not malloc(%d) bytes, line %d", VPD_80_SZ, __LINE__);
+ 	}
+ }
+ 
+ static void update_scalar_vpd_83(struct lu_phy_attr *lu) {
+ 	struct vpd *lu_vpd;
+ 	uint8_t	   *d;
++	char		scratch[VPD_SCRATCH_SZ];
+ 
+ 	lu_vpd = lu->lu_vpd[PCODE_OFFSET(0x83)];
+ 
+@@ -63,17 +82,25 @@ static void update_scalar_vpd_83(struct lu_phy_attr *lu) {
+ 	if (lu_vpd) /* Free any earlier allocation */
+ 		dealloc_vpd(lu_vpd);
+ 
+-	lu_vpd = alloc_vpd(36);
++	lu_vpd = alloc_vpd(VPD_83_SCALAR_SZ);
++	/* Install the new page before anything can use the stale pointer. */
++	lu->lu_vpd[PCODE_OFFSET(0x83)] = lu_vpd;
+ 	if (lu_vpd) {
+ 		d	 = lu_vpd->data;
+ 		d[0] = 0xf2;
+ 		d[1] = 0x01;
+ 		d[3] = 0x20;
+-		snprintf((char *)&d[4], 9, "%-8s", lu->vendor_id);
+-		snprintf((char *)&d[12], 25, "%-24s", lu->lu_serial_no);
+-
++		/* d[4 - 11]  vendor id, d[12 - 35] serial number. Both are space
++		 * padded and NOT NUL terminated - writing a terminator after the
++		 * serial number would run one byte past the page.
++		 */
++		snprintf(scratch, sizeof(scratch), "%-8s", lu->vendor_id);
++		memcpy(&d[4], scratch, 8);
++		snprintf(scratch, sizeof(scratch), "%-24s", lu->lu_serial_no);
++		memcpy(&d[12], scratch, 24);
+ 	} else {
+-		MHVTL_ERR("Could not malloc(36) bytes, line %d", __LINE__);
++		MHVTL_ERR("Could not malloc(%d) bytes, line %d", VPD_83_SCALAR_SZ,
++				  __LINE__);
+ 	}
+ }
+ 

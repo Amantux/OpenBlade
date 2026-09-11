@@ -1,0 +1,41 @@
+VERSION: 2
+
+# OpenBlade mhvtl rehearsal rig — library 10 contents.
+# 3 drives, 1 picker, 4 I/E (MAP) slots, 8 storage slots.
+#
+# Barcode trailing characters select the media type (see mhvtl docs):
+#   "L8" = LTO-8, "CLN" leading = cleaning cartridge.
+#
+# Seven cartridges across eight storage slots:
+#   OB0001L8..OB0004L8  data media (slots 1-4)
+#   CLN001L8            cleaning cartridge (slot 5) - exercises the CLN branch
+#                       in the barcode parsers
+#   OB0007L8, OB0008L8  the declared SCRATCH tapes (slots 6-7). These are the
+#                       only barcodes handed to OPENBLADE_SCRATCH_BARCODES and
+#                       the only ones destructive tests may format.
+#   slot 8              deliberately EMPTY, so inventory always has an
+#                       unoccupied storage slot to unload into.
+#
+# The four MAP entries above are import/export elements and appear as slots
+# 9-12 in `mtx status`. openblade.hardware.mtx keeps them out of the storage
+# slot list on purpose - see MtxStatus.import_export_slots.
+
+Drive 1:
+Drive 2:
+Drive 3:
+
+Picker 1:
+
+MAP 1:
+MAP 2:
+MAP 3:
+MAP 4:
+
+Slot 1: OB0001L8
+Slot 2: OB0002L8
+Slot 3: OB0003L8
+Slot 4: OB0004L8
+Slot 5: CLN001L8
+Slot 6: OB0007L8
+Slot 7: OB0008L8
+Slot 8:

@@ -6,7 +6,7 @@ from pathlib import Path
 from openblade.config import OpenBladeConfig
 from openblade.domain.errors import DriveCorrelationError
 from openblade.domain.policies import DryRunPlan
-from openblade.hardware.discovery import LibraryDiscovery, discover_library
+from openblade.hardware.discovery import LibraryDiscovery, discover_library, resolve_sg_device
 from openblade.hardware.library import RealLibraryBackend
 from openblade.hardware.ltfs import LTFSCommandBackend, LTFSDevice
 from openblade.hardware.runner import SafeRunner
@@ -116,7 +116,12 @@ def validate_ltfs_capabilities(
     return LTFSValidationReport(
         requested_device=device,
         discovered_devices=[_ltfs_device_payload(current) for current in devices],
-        device_list_ok=any(current.device == device for current in devices),
+        # Compare on the SCSI generic node. LTFS only ever lists /dev/sgN, but
+        # callers pass a tape node - the CLI help for this command literally
+        # suggests "/dev/st0", and Phase 4.1 of the bring-up plan passes
+        # /dev/nst0 - so a raw equality check reported device_list_ok=false on
+        # a perfectly healthy setup, at the first gate of the bring-up.
+        device_list_ok=_device_in_list(device, devices),
         format_plan=_plan_payload(format_plan),
         readonly_mount_ok=readonly_mount_ok,
         readwrite_mount_ok=readwrite_mount_ok,
@@ -171,6 +176,21 @@ def _inquiry_devices(discovery: LibraryDiscovery) -> list[str]:
         if element.sg_device:
             devices.append(element.sg_device)
     return devices
+
+
+def _device_in_list(device: str, devices: list[LTFSDevice]) -> bool:
+    """Is ``device`` one of the drives LTFS enumerated?
+
+    LTFS lists SCSI generic nodes (/dev/sgN); callers name a tape node
+    (/dev/stN or /dev/nstN). Resolve both sides before comparing, and keep the
+    literal comparison too so an already-sg argument still matches on a host
+    where the sysfs mapping is unreadable.
+    """
+    resolved = resolve_sg_device(device)
+    return any(
+        current.device == device or resolve_sg_device(current.device) == resolved
+        for current in devices
+    )
 
 
 def _ltfs_device_payload(device: LTFSDevice) -> dict[str, object]:

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from openblade.hardware.discovery import resolve_sg_device
+from openblade.hardware.ltfs import wait_for_ltfs_release
 from openblade.hardware.mtx import parse_mtx_status
 
 pytestmark = pytest.mark.real_hardware
@@ -41,8 +43,19 @@ def _unload_barcode(changer_device: str, runner, slot_id: int):
 
 
 def _format_tape(runner, drive_device: str, barcode: str):
+    # --tape-serial takes exactly 6 alphanumeric characters. Real LTO barcodes
+    # are 6-8 (typically 8: six characters plus a two-character media-type
+    # suffix such as "L8"), so passing a barcode there fails every time with
+    # "LTFS15029E Tape serial must be 6 characters." The barcode belongs in
+    # --volume-name, which is unbounded - and that is what
+    # openblade.hardware.ltfs.LTFSCommandBackend.format_tape uses.
     result = runner.run(
-        ["mkltfs", f"--device={drive_device}", f"--tape-serial={barcode}", "--force"],
+        [
+            "mkltfs",
+            f"--device={resolve_sg_device(drive_device)}",
+            f"--volume-name={barcode}",
+            "--force",
+        ],
         timeout=LTFS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
@@ -50,7 +63,11 @@ def _format_tape(runner, drive_device: str, barcode: str):
 
 
 def _mount_ltfs(runner, drive_device: str, mount_dir: Path, read_only: bool = False):
-    option = f"devname={drive_device}" if not read_only else f"devname={drive_device},ro"
+    # LTFS talks to drives through their SCSI generic node; given /dev/nst0 the
+    # sg backend reads the wrong device and reports "No index found in the
+    # medium", which looks like blank media rather than a bad device path.
+    device = resolve_sg_device(drive_device)
+    option = f"devname={device}" if not read_only else f"devname={device},ro"
     result = runner.run(["ltfs", str(mount_dir), "-o", option], timeout=LTFS_TIMEOUT)
     assert result.returncode == 0, result.stderr
     return result
@@ -58,11 +75,15 @@ def _mount_ltfs(runner, drive_device: str, mount_dir: Path, read_only: bool = Fa
 
 def _unmount_ltfs(runner, mount_dir: Path):
     result = runner.run(["umount", str(mount_dir)], timeout=120)
-    if result.returncode == 0:
-        return result
-    fallback = runner.run(["fusermount", "-u", str(mount_dir)], timeout=120)
-    assert fallback.returncode == 0, f"{result.stderr}\n{fallback.stderr}"
-    return fallback
+    if result.returncode != 0:
+        fallback = runner.run(["fusermount", "-u", str(mount_dir)], timeout=120)
+        assert fallback.returncode == 0, f"{result.stderr}\n{fallback.stderr}"
+        result = fallback
+    # umount returns before the LTFS process has closed the drive, so an
+    # immediate remount of the same drive fails with EBUSY. Same wait the
+    # product performs in LTFSCommandBackend.unmount.
+    assert wait_for_ltfs_release(str(mount_dir)), f"LTFS still holds {mount_dir} after unmount"
+    return result
 
 
 def _write_payload(path: Path, size_bytes: int = 1024 * 1024) -> str:

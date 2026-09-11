@@ -5,8 +5,13 @@ from pathlib import Path
 import pytest
 
 from openblade.config import BackendMode, OpenBladeConfig
+from openblade.hardware.ltfs import LTFSDevice
 from openblade.hardware.runner import SafeRunner
-from openblade.hardware.validation import connect_quantum_i3, validate_ltfs_capabilities
+from openblade.hardware.validation import (
+    _device_in_list,
+    connect_quantum_i3,
+    validate_ltfs_capabilities,
+)
 
 
 def _config(tmp_path: Path) -> OpenBladeConfig:
@@ -59,6 +64,50 @@ def test_validate_ltfs_capabilities_can_exercise_mounts_in_dry_run(tmp_path: Pat
 
     assert report.readonly_mount_ok is True
     assert report.readwrite_mount_ok is True
+
+
+class TestDeviceListOk:
+    """`device_list_ok` must compare tape nodes against LTFS's sg nodes.
+
+    LTFS only ever enumerates /dev/sgN, while callers name a tape node - the
+    CLI help for `hardware validate-ltfs` suggests "/dev/st0" and Phase 4.1 of
+    docs/runbooks/real-i3-bringup-plan.md passes /dev/nst0. A raw string
+    equality therefore reported device_list_ok=false on a perfectly healthy
+    library, at the very first gate of the bring-up.
+    """
+
+    @staticmethod
+    def _devices() -> list[LTFSDevice]:
+        return [
+            LTFSDevice(index=0, device="/dev/sg1", description="IBM ULT3580-TD8"),
+            LTFSDevice(index=1, device="/dev/sg2", description="IBM ULT3580-TD8"),
+        ]
+
+    def test_matches_sg_device_directly(self) -> None:
+        assert _device_in_list("/dev/sg2", self._devices()) is True
+
+    def test_matches_tape_node_via_sysfs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # st2 -> sg1 is deliberately mismatched in number: the mapping must be
+        # resolved, never derived from the device name.
+        mapping = {"/dev/st2": "/dev/sg1"}
+        monkeypatch.setattr(
+            "openblade.hardware.validation.resolve_sg_device",
+            lambda device, **_: mapping.get(device, device),
+        )
+        assert _device_in_list("/dev/st2", self._devices()) is True
+
+    def test_reports_false_for_a_drive_ltfs_did_not_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mapping = {"/dev/st9": "/dev/sg9"}
+        monkeypatch.setattr(
+            "openblade.hardware.validation.resolve_sg_device",
+            lambda device, **_: mapping.get(device, device),
+        )
+        assert _device_in_list("/dev/st9", self._devices()) is False
+
+    def test_empty_device_list_is_false(self) -> None:
+        assert _device_in_list("/dev/sg1", []) is False
 
 
 def test_validate_ltfs_capabilities_requires_mount_path_for_mount_checks(tmp_path: Path) -> None:
