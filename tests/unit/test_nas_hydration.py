@@ -352,3 +352,42 @@ def test_restore_fails_when_tape_read_cannot_reproduce_recorded_checksum() -> No
     assert restored.files_failed == 1
     record = service.list_pool_file_records(pool.id)[0]
     assert record.status is NasFileState.FAILED
+
+
+def test_hydration_logs_why_the_tape_read_failed(caplog) -> None:
+    """The placeholder fallback must not erase the cause.
+
+    Real-data campaign: HydrationExecutor never loads the cartridge, so against
+    real hardware `read_bytes` raises "Barcode ... is not loaded in a drive" --
+    and the operator was shown "tape read failed or data corrupt", which points
+    at the media rather than at the missing load.
+    """
+    import logging
+
+    from openblade.nas.hydration import HydrationExecutor
+    from openblade.nas.types import NasDataset, NasFileRecord
+
+    class _ExplodingLTFS:
+        def read_bytes(self, barcode, tape_path):
+            raise ValueError("Barcode CAM001L8 is not loaded in a drive")
+
+    class _Service:
+        def get_dataset(self, dataset_id):
+            return NasDataset(id=dataset_id, pool_id="p1", name="ds")
+
+    executor = HydrationExecutor.__new__(HydrationExecutor)
+    executor.service = _Service()
+    executor.ltfs = _ExplodingLTFS()
+    record = NasFileRecord(
+        id="f1", dataset_id="d1", pool_id="p1", relative_path="a.txt", tape_barcode="CAM001L8"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="openblade.nas.hydration"):
+        assert executor._read_archived_bytes(record) is None
+
+    assert caplog.records, "the tape read failure was not logged at all"
+    joined = " ".join(r.getMessage() for r in caplog.records) + " ".join(
+        str(r.exc_info) for r in caplog.records
+    )
+    assert "hydration tape read failed" in joined
+    assert any(r.exc_info is not None for r in caplog.records), "no traceback captured"

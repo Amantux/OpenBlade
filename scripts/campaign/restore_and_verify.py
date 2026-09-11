@@ -102,7 +102,17 @@ def main(argv: list[str] | None = None) -> int:
 
     args.dest.mkdir(parents=True, exist_ok=True)
     prefix = f"/{args.volume_group}/"
-    results = {"ok": 0, "checksum_mismatch": [], "restore_failed": [], "not_in_manifest": []}
+    results: dict = {
+        "ok": 0,
+        "checksum_mismatch": [],
+        "restore_failed": [],
+        "not_in_manifest": [],
+        # Not a failure -- a documented semantic difference. OpenBlade archives a
+        # symlink by dereferencing it, so the restored object is a regular file
+        # holding the target's bytes, not a link. Counting that as corruption
+        # would bury the one number that matters (byte-identical regular files).
+        "symlinks_dereferenced": [],
+    }
     started = time.monotonic()
     total_bytes = 0
 
@@ -123,7 +133,16 @@ def main(argv: list[str] | None = None) -> int:
         actual = _sha256(destination)
         size = destination.stat().st_size
         total_bytes += size
-        if actual != entry["sha256"] or size != entry["size"]:
+        if entry["kind"] in {"symlink", "dangling-symlink"}:
+            results["symlinks_dereferenced"].append(
+                {
+                    "path": relative,
+                    "link_target": entry.get("target"),
+                    "restored_as": "regular file",
+                    "restored_size": size,
+                }
+            )
+        elif actual != entry["sha256"] or size != entry["size"]:
             results["checksum_mismatch"].append(
                 {
                     "path": relative,
@@ -145,9 +164,15 @@ def main(argv: list[str] | None = None) -> int:
         "destination": str(args.dest),
         "requested": len(targets),
         "verified_ok": results["ok"],
+        "symlinks_dereferenced": results["symlinks_dereferenced"],
         "checksum_mismatch": results["checksum_mismatch"],
         "restore_failed": results["restore_failed"],
         "not_in_manifest": results["not_in_manifest"],
+        # The other direction: source entries the archive never catalogued at
+        # all. Only meaningful for a full run; a sample legitimately misses most.
+        "in_manifest_but_never_archived": (
+            sorted(set(expected) - {t[0][len(prefix) :] for t in targets}) if args.all else []
+        ),
         "bytes_restored": total_bytes,
         "tapes_touched": sorted({barcode for _, barcode in targets}),
         "elapsed_seconds": round(elapsed, 1),
