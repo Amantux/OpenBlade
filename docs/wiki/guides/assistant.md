@@ -51,7 +51,7 @@ built:
 | Read-only tool allowlist | `openblade/assistant/tools.py` (`READ_ONLY_TOOL_NAMES`) | A read tool registered without being added to the allowlist raises at startup. New tools fail **closed**. |
 | Read-only proxies | `openblade/assistant/readonly.py` | Read tools see a proxy over the catalog and library whose attribute allowlist contains only read methods. `catalog.create_volume_group` and the library's media moves are not reachable — they raise, they do not return a callable. The proxy keeps no instance state, so `__class__`, `__init__`, `__dict__` and `__reduce__` are refused as well: there is no route back to the live object. |
 | Setup allowlist | `openblade/assistant/setup_tools.py` (`SETUP_TOOL_NAMES`) | Exactly two names may ever be tier-1 tools. Anything else raises at registry-build time. |
-| Destructive-verb denylist | `openblade/assistant/setup_tools.py` (`DESTRUCTIVE_VERBS`) | A tool name containing `format`, `load`, `unload`, `move`, `eject`, `delete`, `erase`, `wipe`, `restore`, `archive` or `write` is refused **even if someone also adds it to the allowlist**. Widening tier 1 to a destructive action takes two deliberate edits and a test change, not one. |
+| Destructive-verb denylist | `openblade/assistant/setup_tools.py` (`DESTRUCTIVE_VERBS`) | A tool name containing any verb of data loss (`format`, `delete`, `erase`, `wipe`, `purge`, `destroy`, `drop`, `truncate`, `clear`, `prune`, `reset`), media movement (`load`, `unload`, `move`, `eject`, `import`, `export`, `mount`), bulk data (`archive`, `restore`, `write`) or trust (`revoke`, `deactivate`, `grant`, `token`, `rename`) is refused **even if someone also adds it to the allowlist**. Widening tier 1 to a destructive action takes two deliberate edits and a test change, not one. |
 | Narrow write facade | `openblade/assistant/setup_facade.py` | Tier-1 tools do not get the catalog. They get a facade exposing five named operations; every other attribute — repository methods, `__init__`, `__reduce__`, `_target` — raises. Even the callables it hands back are sealed, because a plain closure or bound method would leak the repository through `__closure__` / `__self__`. The library backend is not behind it at all. |
 | Confirmation gate | `openblade/assistant/session.py` | A tier-1 call never runs on arrival. It becomes a `PendingAction` with a preview, and only an explicit `y` executes it. No confirmation callback (one-shot mode) ⇒ the setup tools are not even offered to the model. |
 | One write path | `tests/safety/test_assistant_read_only.py` | An AST scan over the whole package: `setup_facade.py` is the only file allowed to name a catalog write method. |
@@ -316,6 +316,14 @@ Run it? [y/N] n
   facade, no setup tools in the schema the model is shown.
 - **Read the preview, not the prose.** The `[y/N]` line above the prompt is what
   will actually happen; the model's sentence describing it is not the contract.
+- **Adding several tapes is several transactions.** The catalog commits per
+  cartridge, so if the database fails part-way you get `partially_applied` naming
+  exactly which barcodes landed — not a silent half-write, and not a false
+  "nothing happened". Check the pool before retrying.
+- **A read tool hands back live ORM rows.** The proxies stop the assistant's code
+  from *naming* a write; they do not make writes unreachable in the process, since
+  a SQLAlchemy row knows its session. That gap is covered by the AST scans over the
+  package rather than by the proxy, and it predates the two-tier model.
 - **Always read a proposed command before running it.** For everything in tier 2 the
   assistant is an advisor, and the human is the safety gate that actually matters.
 

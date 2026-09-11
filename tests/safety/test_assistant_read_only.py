@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import dataclasses
 import pickle
 from collections.abc import Iterable
 from pathlib import Path
@@ -328,25 +329,29 @@ ASSISTANT_SOURCE_NAMES = frozenset(
     }
 )
 
-# The repository methods that write. Only ``setup_facade.py`` may name one, so a
-# write cannot appear anywhere else in the package -- not in a tool body, not in
-# the loop, not by typo.
-CATALOG_WRITE_METHODS = frozenset(
-    {
-        "create_volume_group",
-        "add_cartridge",
-        "add_barcode_to_volume_group",
-        "create_file_record",
-        "create_file_instance",
-        "delete_file_record",
-        "save_safety_token",
-        "create_job",
-        "update_job_state",
-        "mark_instance_archived",
-    }
-)
-
 WRITE_PATH_OWNER = "setup_facade.py"
+
+
+def _catalog_write_methods() -> frozenset[str]:
+    """Every ``CatalogRepository`` method that is not a permitted read.
+
+    Derived, not hand-listed. A hand-written set of ten covered a fifth of the
+    repository's write surface and would have gone stale the moment someone added
+    a method — the scan would have kept passing while covering less. Anything
+    public on the repository that is not in ``CATALOG_READ_METHODS`` is treated as
+    a write for the purpose of "only the facade may name it", which errs strict.
+    """
+    from openblade.catalog.repository import CatalogRepository
+
+    public = {
+        name
+        for name in dir(CatalogRepository)
+        if not name.startswith("__") and callable(getattr(CatalogRepository, name, None))
+    }
+    return frozenset(public - CATALOG_READ_METHODS)
+
+
+CATALOG_WRITE_METHODS = _catalog_write_methods()
 
 
 def _assistant_sources() -> list[Path]:
@@ -425,8 +430,14 @@ def test_assistant_never_calls_an_execution_builtin(forbidden: str) -> None:
 
 @pytest.mark.parametrize("forbidden", ["commit", "flush", "rollback", "execute"])
 def test_assistant_never_calls_a_session_write(forbidden: str) -> None:
-    """No `session.commit()` anywhere in the assistant: reads only, and the
-    caller owns the transaction."""
+    """No `session.commit()`, `flush()`, `rollback()` or `execute()` anywhere in
+    the package: the assistant never drives a transaction itself.
+
+    Note what this does NOT say any more. The tier-1 facade calls two repository
+    methods that commit internally, one per cartridge, so the assistant does cause
+    commits — it just never issues one, and has no session to issue it on. The
+    consequence (a multi-barcode action can partially apply) is handled explicitly
+    by SetupPartialWriteError rather than hidden behind this test's name."""
     for path in _assistant_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -499,9 +510,7 @@ def test_only_the_facade_names_a_catalog_write_method() -> None:
     repository methods those wrap are named nowhere else in the package, so a write
     cannot appear in a tool body, in the loop, or via a copy-paste.
     """
-    others = [
-        path for path in _assistant_sources() if path.name != WRITE_PATH_OWNER
-    ]
+    others = [path for path in _assistant_sources() if path.name != WRITE_PATH_OWNER]
     assert _write_path_offenders(others) == []
     # And the guard is not vacuous: the facade itself does name them.
     facade = [path for path in _assistant_sources() if path.name == WRITE_PATH_OWNER]
@@ -704,15 +713,35 @@ def test_a_bound_setup_operation_leaks_no_reference_to_the_catalog(
 
 
 def test_the_facade_never_holds_the_library_backend(app_context: Any) -> None:
-    """Tier 1 is catalog-only: there is no media-moving object behind the facade."""
+    """Tier 1 is catalog-only: nothing media-moving is behind the facade.
+
+    Asserting that ``facade.load`` raises would prove nothing — every unlisted name
+    raises. What matters is the *target*: a facade wrapping a LibraryBackend would
+    still refuse ``load``, and would still be a disaster. So assert the wrapped
+    object is the catalog, by calling an operation that can only work on one, and
+    assert the backend the CLI would hand over is not a catalog.
+    """
     facade = setup_facade(app_context.catalog)
-    for attribute in ("library", "inventory", "load", "unload", "move", "eject"):
-        with pytest.raises(SetupFacadeViolationError):
-            getattr(facade, attribute)
+    assert facade.known_volume_groups() == {"volumeGroups": []}
+    backend = app_context.library
+    assert not hasattr(backend, "create_volume_group"), (
+        "if a LibraryBackend ever grows catalog-shaped methods, this test must be "
+        "rewritten: the facade would no longer be provably over the catalog"
+    )
+    # And the operations the facade exposes do not exist on the backend at all,
+    # so it could not be substituted even by mistake.
+    for operation in ("list_volume_groups", "get_cartridge"):
+        assert not hasattr(backend, operation)
 
 
 def test_read_tool_context_has_no_route_to_the_facade(app_context: Any) -> None:
-    """The read-only tools and the write facade live in separate containers."""
+    """The read-only tools and the write facade live in separate containers.
+
+    ``not hasattr(context, "setup")`` alone would be true by construction and could
+    never fail, so this also walks every field of the context and asserts none of
+    them is a SetupFacade — the failure mode that actually matters is someone
+    passing the facade in as a new field later.
+    """
     context = build_context(
         config=assistant_config(),
         catalog=app_context.catalog,
@@ -722,6 +751,12 @@ def test_read_tool_context_has_no_route_to_the_facade(app_context: Any) -> None:
         db_url="sqlite:///x.db",
     )
     assert not hasattr(context, "setup")
+    for field in dataclasses.fields(context):
+        value = getattr(context, field.name)
+        # ``isinstance`` is not usable here: it consults ``__class__`` on a
+        # non-match, and every proxy in the context refuses that lookup.
+        assert type(value) is not SetupFacade, field.name
+        assert not issubclass(type(value), SetupFacade), field.name
     with pytest.raises(ReadOnlyViolationError):
         getattr(context.catalog, "create_volume_group")  # noqa: B009 - the lookup IS the test
 

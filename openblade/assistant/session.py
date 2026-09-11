@@ -34,6 +34,7 @@ from openblade.assistant.config import AssistantConfig
 from openblade.assistant.errors import (
     AssistantError,
     AssistantLoopLimitError,
+    SetupPartialWriteError,
     SetupRefusedError,
     ToolNotFoundError,
 )
@@ -78,6 +79,22 @@ def _refusal(exc: SetupRefusedError, *, confirmed: bool) -> str:
             "guidance": (
                 "Nothing was changed. Ask the operator which of the candidates they "
                 "meant; do not pick one for them."
+            ),
+        }
+    )
+
+
+def _unavailable(tool: str, what: str, exc: Exception) -> str:
+    """Report a failure the operator was never asked about. Type name only."""
+    return render_result(
+        {
+            "executed": False,
+            "status": "unavailable",
+            "action": tool,
+            "error": (
+                f"{tool} {what} ({type(exc).__name__}); nothing was changed and the "
+                "operator was not asked. Report the failure and suggest they check "
+                "the catalog."
             ),
         }
     )
@@ -132,9 +149,7 @@ class AssistantSession:
         writes".
         """
         return (
-            self.setup_registry is not None
-            and self.setup is not None
-            and self.confirm is not None
+            self.setup_registry is not None and self.setup is not None and self.confirm is not None
         )
 
     def reset(self) -> None:
@@ -186,6 +201,15 @@ class AssistantSession:
             # Ambiguity refuses BEFORE the operator is asked: a confirmation
             # prompt for an action that cannot name its target is worse than none.
             return _refusal(exc, confirmed=False)
+        except AssistantError:
+            # A facade or registry violation is a defect in the tool layer, not
+            # data for the model. Same policy as ``_run_tool``.
+            raise
+        except Exception as exc:  # noqa: BLE001 - curated, never echoed raw
+            # ``plan`` reads the live catalog, so a database failure lands here. It
+            # must not take the REPL down mid-conversation and its text must not
+            # reach the model: a DSN appears in psycopg/SQLAlchemy connect errors.
+            return _unavailable(call.name, "could not be checked", exc)
 
         if self._declined.get(action.key, 0) >= MAX_CONFIRMATION_PROMPTS_PER_ACTION:
             return self._decline(
@@ -197,6 +221,10 @@ class AssistantSession:
         except (EOFError, KeyboardInterrupt):
             # Ctrl-C / Ctrl-D at the prompt is a no, not a crash and never a yes.
             approved = False
+        except Exception:  # noqa: BLE001 - a broken prompt is a no, not a yes
+            # Fail closed: if we cannot establish that the operator agreed, they
+            # did not. Recorded as a decline so the model stops proposing it.
+            return self._decline(action, "the confirmation prompt failed")
 
         if not approved:
             return self._decline(action, "the operator answered no")
@@ -207,9 +235,32 @@ class AssistantSession:
             # Re-validated inside the write path. A yes cannot buy a guess.
             log_action(action, outcome="refused", detail={"code": exc.code})
             return _refusal(exc, confirmed=True)
+        except SetupPartialWriteError as exc:
+            # The repository commits per barcode, so a mid-loop failure leaves real
+            # rows behind. Report exactly which ones landed rather than the flat
+            # "nothing happened" that would otherwise be a lie in the audit trail.
+            log_action(
+                action,
+                outcome="partial",
+                detail={"applied": list(exc.applied), "cause": exc.cause},
+            )
+            self._executed.append(action.tool)
+            return render_result(
+                {
+                    "executed": False,
+                    "status": "partially_applied",
+                    "action": action.tool,
+                    "applied": list(exc.applied),
+                    "error": str(exc),
+                    "guidance": (
+                        "Tell the operator exactly what did land and that the rest "
+                        "did not. Do not retry it yourself."
+                    ),
+                }
+            )
+        except AssistantError:
+            raise
         except Exception as exc:  # noqa: BLE001 - curated below, never echoed raw
-            # A database error here must not take the REPL down mid-conversation,
-            # and its text must not reach the model: a DSN can appear in it.
             log_action(action, outcome="error", detail={"type": type(exc).__name__})
             return render_result(
                 {
@@ -218,7 +269,7 @@ class AssistantSession:
                     "action": action.tool,
                     "error": (
                         f"{action.tool} was confirmed but could not be completed "
-                        f"({type(exc).__name__}). Nothing further was attempted."
+                        f"({type(exc).__name__}). Nothing was changed."
                     ),
                 }
             )
@@ -264,7 +315,11 @@ class AssistantSession:
                 observer(call.name, dict(call.arguments))
             # ``setup_enabled`` is checked first, so a tier-1 name in read-only mode
             # falls through to the read registry and comes back as "no such tool".
-            if self.setup_enabled and self.setup_registry is not None and call.name in self.setup_registry:
+            if (
+                self.setup_enabled
+                and self.setup_registry is not None
+                and call.name in self.setup_registry
+            ):
                 content = self._run_setup_tool(call)
             else:
                 content = self._run_tool(call)
@@ -277,13 +332,44 @@ class AssistantSession:
         turn that died mid-round would leave an assistant message carrying unanswered
         ``tool_calls`` plus a dangling ``tool`` message, and the operator's next
         question would be appended onto that malformed history with no sign of it.
+
+        Rewinding stops at an executed tier-1 action, because that one did happen:
+        a confirmed write followed by a loop-limit error must not leave the model
+        with no memory of it — it would propose the same action again on the next
+        question, and the operator would be asked to confirm something already done.
         """
         checkpoint = len(self.messages)
         try:
             return self._ask(question, on_tool)
         except AssistantError:
-            del self.messages[checkpoint:]
+            del self.messages[self._rewind_floor(checkpoint) :]
             raise
+
+    @property
+    def executed_this_turn(self) -> tuple[str, ...]:
+        """Tier-1 actions that ran during the last ``ask()``, failed turn included.
+
+        ``AssistantTurn`` only exists on the success path, so without this a turn
+        that wrote and then hit the round limit would report nothing to the
+        operator — the one case where they most need to be told.
+        """
+        return tuple(self._executed)
+
+    def _rewind_floor(self, checkpoint: int) -> int:
+        """The earliest index this turn may rewind to.
+
+        Everything up to and including the last tool message reporting an executed
+        action is kept, so the transcript never claims less happened than did.
+        """
+        if not self._executed:
+            return checkpoint
+        for index in range(len(self.messages) - 1, checkpoint - 1, -1):
+            message = self.messages[index]
+            if message.get("role") == "tool" and '"executed": true' in str(
+                message.get("content", "")
+            ):
+                return index + 1
+        return checkpoint
 
     def _schemas(self) -> list[dict[str, Any]]:
         """Tool definitions offered to the model this turn.

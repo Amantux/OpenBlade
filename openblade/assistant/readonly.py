@@ -21,6 +21,17 @@ enforced structurally in three independent places, of which this module is one:
 The allowlists below are deliberately spelled out. A future read method has to be
 added here on purpose, and a future *write* method cannot be reached by accident.
 
+Known residual, stated rather than papered over: what an allowlisted read *returns*
+is a live SQLAlchemy ORM row, and a row knows its session
+(``row._sa_instance_state.session``). So the guarantee here is precisely "no
+**attribute** path from the proxy to a write", not "no reachable write in the
+process". Closing it means returning DTOs from every read tool, which is a larger
+change than this module; the AST scans in
+``tests/safety/test_assistant_read_only.py`` are what cover the deliberate version
+of that escape, and no tool body does it. Pre-existing; recorded here because a
+reviewer found it while attacking the tier-1 work and a silent claim is worse than
+a documented gap.
+
 Implementation note — why ``__getattribute__`` and an external state map:
     An earlier version stored the wrapped object in ``self._target`` (with
     ``__slots__``) and filtered through ``__getattr__``. That leaked. ``__getattr__``
@@ -100,6 +111,12 @@ class SealedCall:
     """
 
     def __init__(self, function: Any, label: str, error: type[AssistantError]) -> None:
+        # Binds once, for the same reason ``AllowlistProxy`` does: the unbound
+        # ``SealedCall.__init__(sealed, live.create_volume_group, ...)`` bypasses
+        # instance attribute lookup and would otherwise re-point a sealed read call
+        # at a write method.
+        if self in _CALL_STATE:
+            raise ReadOnlyViolationError("This sealed call is already bound")
         _CALL_STATE[self] = (function, label, error)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:

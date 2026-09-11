@@ -23,8 +23,9 @@ from openblade.assistant.errors import (
     AssistantLoopLimitError,
     AssistantUpstreamError,
     SetupRefusedError,
+    SetupRegistryViolationError,
 )
-from openblade.assistant.provider import OllamaClient
+from openblade.assistant.provider import OllamaClient, ToolCall
 from openblade.assistant.session import MAX_CALLS_PER_ROUND, AssistantSession
 from openblade.assistant.setup_facade import setup_facade
 from openblade.assistant.setup_tools import PendingAction, build_setup_registry, log_action
@@ -457,7 +458,9 @@ def test_search_docs_finds_the_safety_gates_section(app_context: Any) -> None:
     result = build_registry().call(
         # Verbatim from docs/safety.md — the growing corpus (campaign runbook,
         # wiki) displaced it from the top results for generic queries.
-        "search_docs", _context(app_context, docs), {"query": "binds a barcode to a one-time SafetyToken"}
+        "search_docs",
+        _context(app_context, docs),
+        {"query": "binds a barcode to a one-time SafetyToken"},
     )
     assert result["matchCount"] > 0
     docs_hit = [section for section in result["sections"] if section["doc"] == "safety.md"]
@@ -865,9 +868,7 @@ def test_one_shot_mode_is_not_offered_the_setup_tools(app_context: Any) -> None:
     assert session.setup_enabled is False
     session.ask("make me a pool called photos")
 
-    offered = {
-        schema["function"]["name"] for schema in script.requests[0].get("tools", [])
-    }
+    offered = {schema["function"]["name"] for schema in script.requests[0].get("tools", [])}
     assert "create_volume_group" not in offered
     assert offered == set(READ_ONLY_TOOL_NAMES)
     # And if the model calls it anyway, it is simply not a tool.
@@ -905,7 +906,9 @@ def test_a_half_wired_session_is_read_only_not_unconfirmed(app_context: Any) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_an_unknown_barcode_is_refused_with_candidates(app_context: Any, seeded: dict[str, Any]) -> None:
+def test_an_unknown_barcode_is_refused_with_candidates(
+    app_context: Any, seeded: dict[str, Any]
+) -> None:
     """The operator is never even asked: nothing can name what it would act on."""
     confirm = Confirmer(True)
     session, _ = _setup_session(
@@ -934,7 +937,9 @@ def test_an_unknown_barcode_is_refused_with_candidates(app_context: Any, seeded:
     assert "do not pick one for them" in payload["guidance"]
 
 
-def test_a_tape_already_in_another_pool_is_refused(app_context: Any, seeded: dict[str, Any]) -> None:
+def test_a_tape_already_in_another_pool_is_refused(
+    app_context: Any, seeded: dict[str, Any]
+) -> None:
     app_context.catalog.create_volume_group("second")
     confirm = Confirmer(True)
     session, _ = _setup_session(
@@ -1002,7 +1007,10 @@ def test_confirmation_is_not_a_licence_to_guess(app_context: Any, seeded: dict[s
         ({"name": "photos\nrm -rf", "barcodes": ["PH000001"]}, "invalid_name"),
         ({"name": "photos", "barcodes": []}, "missing_barcodes"),
         ({"name": "photos", "barcodes": ["../etc/passwd"]}, "invalid_barcode"),
-        ({"name": "photos", "barcodes": [f"B{index:07d}" for index in range(30)]}, "too_many_tapes"),
+        (
+            {"name": "photos", "barcodes": [f"B{index:07d}" for index in range(30)]},
+            "too_many_tapes",
+        ),
     ],
 )
 def test_malformed_arguments_are_refused_not_normalised_away(
@@ -1096,7 +1104,15 @@ def test_the_audit_line_cannot_be_forged_with_a_newline(
 
 @pytest.mark.parametrize(
     ("answer", "expected"),
-    [("y", True), ("Y", True), ("yes", True), ("", False), ("n", False), ("ok", False), ("yep", False)],
+    [
+        ("y", True),
+        ("Y", True),
+        ("yes", True),
+        ("", False),
+        ("n", False),
+        ("ok", False),
+        ("yep", False),
+    ],
 )
 def test_repl_confirmation_requires_an_explicit_yes(
     monkeypatch: pytest.MonkeyPatch, answer: str, expected: bool
@@ -1142,3 +1158,251 @@ def test_one_shot_cli_builds_a_session_without_a_confirm_callback(
     assert captured["confirm"] is None
     assist_cli._build_session(interactive=True)
     assert captured["confirm"] is assist_cli._confirm_action
+
+
+# ---------------------------------------------------------------------------
+# Failure paths (adversarial-review regressions)
+# ---------------------------------------------------------------------------
+
+
+class BoomCatalog:
+    """A catalog whose nth volume-group write explodes with a DSN in the text."""
+
+    LEAK = "unable to open database file '/data/secret/openblade.db'"
+
+    def __init__(self, *, fail_on: int = 1, fail_reads: bool = False) -> None:
+        self._fail_on = fail_on
+        self._fail_reads = fail_reads
+        self.calls = 0
+        self.added: list[str] = []
+        self.group = type("G", (), {"id": "g1", "name": "pool", "barcodes": [], "cartridges": []})()
+
+    def list_volume_groups(self) -> list[Any]:
+        if self._fail_reads:
+            raise RuntimeError(self.LEAK)
+        return [self.group]
+
+    def get_volume_group(self, name: str) -> Any:
+        if self._fail_reads:
+            raise RuntimeError(self.LEAK)
+        return self.group if name == "pool" else None
+
+    def list_cartridges(self) -> list[Any]:
+        return [
+            type("C", (), {"barcode": barcode, "volume_group_id": None})()
+            for barcode in ("A0000001", "B0000002", "C0000003")
+        ]
+
+    def get_cartridge(self, barcode: str) -> Any:
+        return type("C", (), {"barcode": barcode, "volume_group_id": None})()
+
+    def create_volume_group(self, name: str) -> Any:
+        raise RuntimeError(self.LEAK)
+
+    def add_barcode_to_volume_group(self, group_id: str, barcode: str) -> Any:
+        self.calls += 1
+        if self.calls == self._fail_on:
+            raise RuntimeError(self.LEAK)
+        self.added.append(barcode)
+        return None
+
+
+def _boom_session(app_context: Any, catalog: Any, responses: list[dict[str, Any]], confirm: Any):
+    client, script = scripted_client(responses)
+    config = assistant_config()
+    session = AssistantSession(
+        client=OllamaClient(config, client=client),
+        registry=build_registry(),
+        context=_context(app_context),
+        config=config,
+        setup_registry=build_setup_registry(),
+        setup=setup_facade(catalog),
+        confirm=confirm,
+    )
+    return session, script
+
+
+def test_a_failure_while_checking_never_reaches_the_model_or_kills_the_repl(
+    app_context: Any,
+) -> None:
+    """``plan`` reads the live catalog. A database failure there used to escape the
+    loop entirely: not an AssistantError, so the transcript was not rewound and the
+    REPL died with a traceback carrying the DSN."""
+    confirm = Confirmer(True)
+    session, _ = _boom_session(
+        app_context,
+        BoomCatalog(fail_reads=True),
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            prose_response("I could not check that."),
+        ],
+        confirm,
+    )
+    session.ask("create photos")
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert payload["status"] == "unavailable"
+    assert payload["executed"] is False
+    assert BoomCatalog.LEAK not in json.dumps(payload)
+    assert "RuntimeError" in payload["error"]
+    assert confirm.asked == [], "the operator must not be asked about a broken action"
+
+
+def test_a_broken_confirmation_prompt_is_a_no(app_context: Any) -> None:
+    """Fail closed: if we cannot establish that the operator agreed, they did not."""
+
+    def broken(action: PendingAction) -> bool:
+        raise ValueError("terminal exploded")
+
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            prose_response("Nothing done."),
+        ],
+        broken,
+    )
+    session.ask("create photos")
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert payload["status"] == "declined_by_operator"
+    assert app_context.catalog.get_volume_group("photos") is None
+
+
+def test_a_confirmed_write_that_fails_reports_what_actually_landed(app_context: Any) -> None:
+    """The repository commits per cartridge, so a mid-loop failure leaves rows
+    behind. Reporting "nothing happened" there would be a lie in the audit trail."""
+    catalog = BoomCatalog(fail_on=2)
+    session, _ = _boom_session(
+        app_context,
+        catalog,
+        [
+            tool_call_response(
+                "add_tapes_to_volume_group",
+                {"name": "pool", "barcodes": ["A0000001", "B0000002", "C0000003"]},
+            ),
+            prose_response("Partly done."),
+        ],
+        Confirmer(True),
+    )
+    session.ask("add three tapes")
+
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert payload["status"] == "partially_applied"
+    assert payload["applied"] == ["A0000001"] == catalog.added
+    assert BoomCatalog.LEAK not in json.dumps(payload)
+
+
+def test_a_partial_write_is_named_in_the_audit_log(
+    app_context: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    session, _ = _boom_session(
+        app_context,
+        BoomCatalog(fail_on=2),
+        [
+            tool_call_response(
+                "add_tapes_to_volume_group", {"name": "pool", "barcodes": ["A0000001", "B0000002"]}
+            ),
+            prose_response("Partly done."),
+        ],
+        Confirmer(True),
+    )
+    with caplog.at_level(logging.INFO, logger="openblade.assistant.setup"):
+        session.ask("add two tapes")
+    line = caplog.records[0].getMessage()
+    assert "outcome=partial" in line
+    assert "A0000001" in line
+    assert BoomCatalog.LEAK not in line
+
+
+@pytest.mark.parametrize("stage", ["plan", "execute"])
+def test_a_facade_violation_is_not_handed_to_the_model_as_data(
+    app_context: Any, stage: str
+) -> None:
+    """A tool reaching outside the facade is the loudest signal this design has;
+    neither broad ``except`` may turn it into a polite "could not be completed".
+
+    Both stages are exercised: the plan path and the write path have separate
+    handlers, and an earlier version of this test only tripped the first — so the
+    write path's re-raise was uncovered and a mutation run proved it.
+    """
+    from openblade.assistant.errors import SetupFacadeViolationError
+
+    class Rogue:
+        """Behaves until the chosen stage, then reaches outside the facade."""
+
+        def plan_new_volume_group(self, **kwargs: Any) -> dict[str, Any]:
+            if stage == "plan":
+                raise SetupFacadeViolationError("a tool reached outside the facade")
+            return {"name": kwargs.get("name"), "existingVolumeGroups": []}
+
+        def new_volume_group(self, **kwargs: Any) -> dict[str, Any]:
+            raise SetupFacadeViolationError("a tool reached outside the facade")
+
+    session, _ = _setup_session(app_context, [prose_response("x")], Confirmer(True))
+    session.setup = Rogue()  # type: ignore[assignment]
+    with pytest.raises(SetupFacadeViolationError):
+        session._run_setup_tool(ToolCall(name="create_volume_group", arguments={"name": "photos"}))
+
+
+def test_a_confirmed_write_survives_a_failed_turn(app_context: Any) -> None:
+    """Operator says yes, the write lands, then the model loops past max_rounds.
+
+    The write happened; the transcript and the CLI must both still say so, or the
+    assistant proposes it again next turn and asks the operator to confirm
+    something already done.
+    """
+    client, _script = scripted_client(
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            tool_call_response("get_inventory", {}),
+        ]
+    )
+    config = assistant_config(max_rounds=2)
+    session = AssistantSession(
+        client=OllamaClient(config, client=client),
+        registry=build_registry(),
+        context=_context(app_context),
+        config=config,
+        setup_registry=build_setup_registry(),
+        setup=setup_facade(app_context.catalog),
+        confirm=Confirmer(True),
+    )
+    with pytest.raises(AssistantLoopLimitError):
+        session.ask("create photos and then look around")
+
+    assert app_context.catalog.get_volume_group("photos") is not None
+    assert session.executed_this_turn == ("create_volume_group",)
+    kept = json.dumps(session.messages)
+    assert '\\"executed\\": true' in kept or '"executed": true' in kept
+
+
+def test_a_group_named_zero_is_not_mistaken_for_a_missing_name(app_context: Any) -> None:
+    facade = setup_facade(app_context.catalog)
+    action = build_setup_registry().plan("create_volume_group", facade, {"name": "0"})
+    assert action.arguments == {"name": "0"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "purge_volume_group",
+        "destroy_pool",
+        "drop_volume_group",
+        "truncate_catalog",
+        "clear_catalog",
+        "prune_file_records",
+        "reset_library",
+        "export_tape_to_mailslot",
+        "import_cartridge",
+        "unmount_ltfs",
+        "rename_volume_group",
+        "revoke_api_token",
+        "deactivate_user",
+        "grant_admin",
+    ],
+)
+def test_the_denylist_covers_the_verbs_a_reviewer_reached_for(name: str) -> None:
+    """Every one of these was accepted by the first eleven-verb denylist."""
+    from openblade.assistant.setup_tools import reject_destructive_name
+
+    with pytest.raises(SetupRegistryViolationError):
+        reject_destructive_name(name)

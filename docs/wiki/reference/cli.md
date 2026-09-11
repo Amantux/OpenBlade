@@ -40,7 +40,7 @@ Enqueue an archive job.
 
 ### `openblade assist`
 
-Ask the read-only OpenBlade assistant about this installation.
+Ask the OpenBlade assistant about this installation, or talk through setup.
 
 | Parameter | Kind | Type | Required | Default | Help |
 | --- | --- | --- | --- | --- | --- |

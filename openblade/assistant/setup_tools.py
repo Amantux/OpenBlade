@@ -58,20 +58,48 @@ SETUP_TOOL_NAMES: frozenset[str] = frozenset(
     }
 )
 
-# Verbs that mark an operation as destructive or media-moving. No tool name may
-# contain one, allowlisted or not.
+# Verbs that mark an operation as destructive, media-moving, or trust-changing. No
+# tool name may contain one, allowlisted or not.
+#
+# A first pass listed only the obvious tape verbs, which let ``purge_volume_group``,
+# ``destroy_pool``, ``export_tape_to_mailslot`` and ``revoke_api_token`` straight
+# through — and a denylist a reviewer walks around in thirty seconds is not the
+# independent second guard this claims to be. Rule for extending it: if the word
+# could describe losing data, moving media, or changing who may do what, it belongs
+# here. Over-blocking costs a rename; under-blocking costs the guarantee.
 DESTRUCTIVE_VERBS: tuple[str, ...] = (
+    # data loss
     "format",
+    "delete",
+    "erase",
+    "wipe",
+    "purge",
+    "destroy",
+    "drop",
+    "truncate",
+    "clear",
+    "prune",
+    "reset",
+    # media movement (import/export are the I/E station in this domain)
     "load",
     "unload",
     "move",
     "eject",
-    "delete",
-    "erase",
-    "wipe",
+    "import",
+    "export",
+    "mount",
+    # bulk data operations
     "restore",
     "archive",
     "write",
+    # identity and trust
+    "revoke",
+    "deactivate",
+    "grant",
+    "token",
+    # renaming is not destructive, but it silently invalidates every stored
+    # reference to the old name, and no tier-1 action should do that quietly.
+    "rename",
 )
 
 
@@ -207,9 +235,7 @@ def _describe_add(arguments: dict[str, Any], plan: JSONDict) -> str:
 
 
 def _execute_add(facade: SetupFacade, arguments: dict[str, Any]) -> JSONDict:
-    result: JSONDict = facade.attach_tapes(
-        name=arguments["name"], barcodes=arguments["barcodes"]
-    )
+    result: JSONDict = facade.attach_tapes(name=arguments["name"], barcodes=arguments["barcodes"])
     return result
 
 
@@ -339,7 +365,9 @@ def build_setup_registry(extra: list[SetupTool] | None = None) -> SetupToolRegis
     return SetupToolRegistry([*_tool_definitions(), *(extra or [])])
 
 
-def log_action(action: PendingAction, *, outcome: str, detail: Mapping[str, Any] | None = None) -> None:
+def log_action(
+    action: PendingAction, *, outcome: str, detail: Mapping[str, Any] | None = None
+) -> None:
     """One structured line per tier-1 decision.
 
     ``json.dumps`` is what sanitizes here: it escapes CR/LF, so a model-supplied

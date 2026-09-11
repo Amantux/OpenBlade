@@ -73,3 +73,18 @@ class SetupRefusedError(AssistantError):
         super().__init__(message)
         self.code = code
         self.candidates = candidates
+
+
+class SetupPartialWriteError(AssistantError):
+    """A multi-step setup action failed after part of it had already committed.
+
+    The catalog repository commits per cartridge, so "add three tapes" is three
+    transactions and a failure on the second leaves the first in place. Reporting
+    "nothing happened" there would be false, and the audit line would be wrong
+    about what the assistant did — so the applied items travel with the error.
+    """
+
+    def __init__(self, message: str, *, applied: tuple[str, ...], cause: str) -> None:
+        super().__init__(message)
+        self.applied = applied
+        self.cause = cause

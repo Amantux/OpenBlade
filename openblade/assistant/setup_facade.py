@@ -43,7 +43,11 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from openblade.assistant.errors import SetupFacadeViolationError, SetupRefusedError
+from openblade.assistant.errors import (
+    SetupFacadeViolationError,
+    SetupPartialWriteError,
+    SetupRefusedError,
+)
 from openblade.assistant.readonly import AllowlistProxy
 
 JSONDict = dict[str, Any]
@@ -64,7 +68,9 @@ def clean_name(raw: object) -> str:
     embedded newline is a log-forging attempt or a confused model, and silently
     "fixing" it would create an object the operator did not ask for.
     """
-    name = str(raw or "").strip()
+    # ``str(raw or "")`` would turn the perfectly legal name "0" into "" and refuse
+    # it as missing; None is the only thing that means "not given".
+    name = "" if raw is None else str(raw).strip()
     if not name:
         raise SetupRefusedError("A volume group name is required.", code="missing_name")
     if len(name) > MAX_NAME_LENGTH:
@@ -72,7 +78,9 @@ def clean_name(raw: object) -> str:
             f"That volume group name is longer than {MAX_NAME_LENGTH} characters.",
             code="invalid_name",
         )
-    if not name.isprintable() or any(character.isspace() and character != " " for character in name):
+    if not name.isprintable() or any(
+        character.isspace() and character != " " for character in name
+    ):
         raise SetupRefusedError(
             "A volume group name must be a single printable line.", code="invalid_name"
         )
@@ -111,8 +119,7 @@ def clean_barcodes(raw: object) -> tuple[str, ...]:
         raise SetupRefusedError("At least one tape barcode is required.", code="missing_barcodes")
     if len(seen) > MAX_TAPES_PER_ACTION:
         raise SetupRefusedError(
-            f"One action may add at most {MAX_TAPES_PER_ACTION} tapes; "
-            f"{len(seen)} were requested.",
+            f"One action may add at most {MAX_TAPES_PER_ACTION} tapes; {len(seen)} were requested.",
             code="too_many_tapes",
         )
     return tuple(seen)
@@ -175,7 +182,9 @@ def _validate_new_group(catalog: Any, name: object) -> str:
     return cleaned
 
 
-def _validate_attach(catalog: Any, name: object, barcodes: object) -> tuple[Any, list[str], list[str]]:
+def _validate_attach(
+    catalog: Any, name: object, barcodes: object
+) -> tuple[Any, list[str], list[str]]:
     """Resolve the group and partition the barcodes, refusing on any ambiguity."""
     cleaned = clean_name(name)
     wanted = clean_barcodes(barcodes)
@@ -236,6 +245,13 @@ def _plan_new_volume_group(catalog: Any, *, name: object) -> JSONDict:
 def _new_volume_group(catalog: Any, *, name: object) -> JSONDict:
     cleaned = _validate_new_group(catalog, name)
     group = catalog.create_volume_group(cleaned)
+    # Known, accepted window: ``create_volume_group`` returns an existing group
+    # rather than raising, so a group created by another process between the
+    # validation above and this line is reported as ours. Nothing is lost or
+    # overwritten when that happens — the name is idempotent and the row is the
+    # same one the operator asked for — so it is not worth a lock. The tape-level
+    # membership, where a wrong answer would matter, is read back from the
+    # cartridges in ``_attach_tapes``.
     return {"created": True, **_describe_group(group)}
 
 
@@ -253,16 +269,29 @@ def _attach_tapes(catalog: Any, *, name: object, barcodes: object) -> JSONDict:
     # Re-validated here, inside the write path: the plan ran before the operator
     # answered, and confirmation is not a licence to act on stale facts.
     group, to_add, already = _validate_attach(catalog, name, barcodes)
+    # One commit per cartridge is the repository's contract, and the assistant does
+    # not get to open transactions (the session is not reachable from here by
+    # design). So a mid-loop failure CAN leave earlier barcodes committed: track
+    # exactly which ones landed and hand that to the caller instead of letting a
+    # bare exception imply nothing happened.
+    applied: list[str] = []
     for barcode in to_add:
-        catalog.add_barcode_to_volume_group(group.id, barcode)
+        try:
+            catalog.add_barcode_to_volume_group(group.id, barcode)
+        except Exception as exc:  # noqa: BLE001 - re-raised typed, text dropped
+            raise SetupPartialWriteError(
+                f"Adding tapes to {group.name!r} failed after "
+                f"{len(applied)} of {len(to_add)} were applied.",
+                applied=tuple(applied),
+                cause=type(exc).__name__,
+            ) from None
+        applied.append(barcode)
     # Membership is read back from the cartridges, not from the group's collection:
     # the repository commits with ``expire_on_commit=False``, so the already-loaded
     # ``group.cartridges`` would still report the pre-write state and the assistant
     # would confirm "0 tapes" immediately after adding two.
     members = sorted(
-        str(item.barcode)
-        for item in catalog.list_cartridges()
-        if item.volume_group_id == group.id
+        str(item.barcode) for item in catalog.list_cartridges() if item.volume_group_id == group.id
     )
     return {
         "added": to_add,

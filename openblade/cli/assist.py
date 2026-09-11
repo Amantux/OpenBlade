@@ -109,12 +109,23 @@ def _build_session(*, interactive: bool) -> AssistantSession:
     )
 
 
-def _ask(session: AssistantSession, question: str) -> None:
-    turn = session.ask(question, on_tool=_show_tool)
-    for action in turn.executed_actions:
-        # One line per confirmed write, so the transcript shows what actually
-        # changed even if the model's prose is vague about it.
+def _show_executed(actions: tuple[str, ...]) -> None:
+    """One line per confirmed write, so the transcript shows what changed.
+
+    Printed on the failure path too: a turn that wrote and then hit the round
+    limit still wrote, and the operator has to know.
+    """
+    for action in actions:
         console.print(Text(f"✓ {action} applied", style="green"))
+
+
+def _ask(session: AssistantSession, question: str) -> None:
+    try:
+        turn = session.ask(question, on_tool=_show_tool)
+    except AssistantError:
+        _show_executed(session.executed_this_turn)
+        raise
+    _show_executed(turn.executed_actions)
     # markup=False is load-bearing: model replies contain markdown links, array
     # syntax and quoted doc excerpts. Rich would either raise MarkupError on an
     # unbalanced tag (killing the REPL) or silently swallow "[dim]" as styling.
@@ -149,6 +160,17 @@ def _repl(session: AssistantSession) -> None:
         except AssistantError as exc:
             # Curated message only — provider/socket text never reaches here.
             console.print(Text(str(exc), style="red"))
+        except Exception as exc:  # noqa: BLE001 - the REPL must survive a defect
+            # An unexpected failure ends the question, not the session: the
+            # operator may be mid-setup. The type name only — a database error's
+            # text can carry a DSN.
+            console.print(
+                Text(
+                    f"That question failed unexpectedly ({type(exc).__name__}). "
+                    "The conversation is intact; try again or /reset.",
+                    style="red",
+                )
+            )
 
 
 def assist(
