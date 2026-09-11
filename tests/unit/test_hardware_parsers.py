@@ -6,8 +6,13 @@ from openblade.hardware.discovery import (
     find_tape_drives,
     parse_lsscsi,
     parse_sg_map,
+    resolve_sg_device,
 )
-from openblade.hardware.ltfs import SAMPLE_LTFS_DEVICE_LIST, parse_ltfs_device_list
+from openblade.hardware.ltfs import (
+    SAMPLE_LTFS_DEVICE_LIST,
+    SAMPLE_LTFS_DEVICE_LIST_REAL,
+    parse_ltfs_device_list,
+)
 from openblade.hardware.mtx import (
     SAMPLE_MTX_BARCODE_MISSING,
     SAMPLE_MTX_CLEANING,
@@ -162,6 +167,88 @@ class TestLTFSParser:
 
     def test_parse_empty_device_list(self) -> None:
         assert parse_ltfs_device_list("") == []
+
+
+class TestLTFSParserAgainstRealOutput:
+    """Regressions pinned to real `ltfs -o device_list` output (LTFS 2.4.8.4)."""
+
+    def test_parses_real_device_list(self) -> None:
+        # The hand-written SAMPLE_LTFS_DEVICE_LIST above is fictional; no
+        # shipping LTFS emits "LTFS14001I <n>: <dev>". Against real output the
+        # old regex matched nothing at all.
+        devices = parse_ltfs_device_list(SAMPLE_LTFS_DEVICE_LIST_REAL)
+        assert [device.device for device in devices] == ["/dev/sg4", "/dev/sg2", "/dev/sg1"]
+
+    def test_real_devices_are_indexed_positionally(self) -> None:
+        # Real LTFS does not number its devices, so index comes from order.
+        devices = parse_ltfs_device_list(SAMPLE_LTFS_DEVICE_LIST_REAL)
+        assert [device.index for device in devices] == [0, 1, 2]
+
+    def test_serial_numbers_are_captured(self) -> None:
+        # Serial is how drives get correlated to changer elements; ordering is
+        # not trustworthy (see docs/runbooks/mhvtl-rehearsal.md).
+        devices = parse_ltfs_device_list(SAMPLE_LTFS_DEVICE_LIST_REAL)
+        assert [device.serial for device in devices] == [
+            "OBLADE_D03",
+            "OBLADE_D02",
+            "OBLADE_D01",
+        ]
+
+    def test_padding_and_trailing_period_are_stripped(self) -> None:
+        # LTFS pads vendor/product to the SCSI INQUIRY widths and ends the line
+        # with '.', both of which would otherwise land in the parsed values.
+        devices = parse_ltfs_device_list(SAMPLE_LTFS_DEVICE_LIST_REAL)
+        assert devices[0].description == "IBM ULT3580-TD8"
+
+    def test_legacy_format_still_parses(self) -> None:
+        devices = parse_ltfs_device_list(SAMPLE_LTFS_DEVICE_LIST)
+        assert [device.device for device in devices] == ["/dev/st0", "/dev/st1"]
+        assert devices[0].serial is None
+
+
+class TestResolveSgDevice:
+    """`resolve_sg_device` maps tape/changer nodes onto their sg node.
+
+    SCSI pass-through tools need the sg node: LTFS's sg backend misreads
+    /dev/stN, and sg_inq against the REWINDING /dev/stN exits non-zero on an
+    empty drive. st and sg numbers are allocated independently, so the mapping
+    must be read from sysfs rather than derived from the number.
+    """
+
+    @staticmethod
+    def _sysfs(tmp_path, class_name: str, node: str, sg: str):
+        generic = tmp_path / "class" / class_name / node / "device" / "scsi_generic" / sg
+        generic.mkdir(parents=True)
+        return tmp_path
+
+    def test_maps_rewinding_tape_node_to_sg(self, tmp_path) -> None:
+        root = self._sysfs(tmp_path, "scsi_tape", "st0", "sg1")
+        assert resolve_sg_device("/dev/st0", sysfs_root=root) == "/dev/sg1"
+
+    def test_maps_no_rewind_tape_node_to_sg(self, tmp_path) -> None:
+        root = self._sysfs(tmp_path, "scsi_tape", "nst0", "sg1")
+        assert resolve_sg_device("/dev/nst0", sysfs_root=root) == "/dev/sg1"
+
+    def test_number_is_not_assumed_to_match(self, tmp_path) -> None:
+        # st2 -> sg4 is a real pairing from the rehearsal rig. Anything that
+        # derives "sg2" from "st2" is wrong.
+        root = self._sysfs(tmp_path, "scsi_tape", "st2", "sg4")
+        assert resolve_sg_device("/dev/st2", sysfs_root=root) == "/dev/sg4"
+
+    def test_maps_changer_node_to_sg(self, tmp_path) -> None:
+        root = self._sysfs(tmp_path, "scsi_changer", "sch0", "sg3")
+        assert resolve_sg_device("/dev/sch0", sysfs_root=root) == "/dev/sg3"
+
+    def test_sg_device_passes_through(self, tmp_path) -> None:
+        assert resolve_sg_device("/dev/sg1", sysfs_root=tmp_path) == "/dev/sg1"
+
+    def test_unmapped_device_passes_through(self, tmp_path) -> None:
+        # Callers apply this unconditionally, so an unknown node must not raise
+        # or return something bogus.
+        assert resolve_sg_device("/dev/st9", sysfs_root=tmp_path) == "/dev/st9"
+
+    def test_non_dev_path_passes_through(self, tmp_path) -> None:
+        assert resolve_sg_device("not-a-device", sysfs_root=tmp_path) == "not-a-device"
 
 
 class TestSgInqParser:

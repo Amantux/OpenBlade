@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from openblade.domain.policies import RealHardwareGuard
 from openblade.hardware.runner import SafeRunner
@@ -99,6 +100,55 @@ def parse_sg_map(output: str) -> dict[str, str]:
         if len(parts) >= 2:
             mapping[parts[0]] = parts[1]
     return mapping
+
+
+_SYSFS_TAPE_CLASS = Path("/sys/class/scsi_tape")
+_SYSFS_CHANGER_CLASS = Path("/sys/class/scsi_changer")
+
+
+def resolve_sg_device(device: str, *, sysfs_root: Path | None = None) -> str:
+    """Map a tape or changer device node onto its SCSI generic (``/dev/sg*``) node.
+
+    SCSI pass-through tools want the ``sg`` node, not the tape node:
+
+    * The LTFS ``sg`` backend addresses drives as ``/dev/sgN``. Handing it
+      ``/dev/st0`` does not error cleanly - it reads the wrong device and
+      reports "No index found in the medium", which looks like blank or
+      corrupt media rather than a wrong device path.
+    * ``sg_inq`` on the REWINDING ``/dev/stN`` node exits non-zero ("close
+      error: No medium found") whenever the drive is empty, because closing a
+      rewinding node attempts a rewind. The ``sg`` node has no such side
+      effect.
+
+    The kernel already publishes the mapping, so we read it rather than
+    guessing from device numbering - ``stN`` and ``sgN`` are independently
+    allocated and do NOT correlate (this rig routinely produces ``st0 -> sg1``).
+
+    Returns ``device`` unchanged when it is already an ``sg`` node or when no
+    mapping exists, so callers can use this unconditionally.
+    """
+    if not device.startswith("/dev/"):
+        return device
+    name = Path(device).name
+    if name.startswith("sg"):
+        return device
+
+    root = sysfs_root if sysfs_root is not None else Path("/sys")
+    tape_class = root / "class" / "scsi_tape" if sysfs_root is not None else _SYSFS_TAPE_CLASS
+    changer_class = (
+        root / "class" / "scsi_changer" if sysfs_root is not None else _SYSFS_CHANGER_CLASS
+    )
+
+    for class_dir in (tape_class, changer_class):
+        generic_dir = class_dir / name / "device" / "scsi_generic"
+        try:
+            entries = sorted(entry.name for entry in generic_dir.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.startswith("sg"):
+                return f"/dev/{entry}"
+    return device
 
 
 def find_tape_changers(devices: list[ScsiDevice]) -> list[ScsiDevice]:
