@@ -13,6 +13,7 @@ from rich.table import Table
 
 from openblade.bootstrap import AppContext, create_context, reset_context
 from openblade.config import OpenBladeConfig, load_config
+from openblade.domain.errors import DriveCorrelationError
 from openblade.domain.models import Barcode, DriveState, MountState
 from openblade.fuse.filesystem import CatalogFilesystem
 from openblade.hardware.validation import connect_quantum_i3, validate_ltfs_capabilities
@@ -404,7 +405,13 @@ def catalog_ls(path: str = typer.Argument("/")) -> None:
 @hardware_app.command("connect-i3")
 def hardware_connect_i3() -> None:
     """Validate guarded Quantum i3 discovery and inventory wiring."""
-    report = connect_quantum_i3(load_config())
+    try:
+        report = connect_quantum_i3(load_config())
+    except DriveCorrelationError as exc:
+        # This is the operator-facing diagnostic: show the curated message, not a
+        # traceback. The message names the variable to fix.
+        console.print(f"[red]Drive correlation failed:[/red] {exc}")
+        raise typer.Exit(code=1) from None
     console.print_json(data=report.to_dict())
 
 

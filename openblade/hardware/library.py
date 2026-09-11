@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+from openblade.config import OpenBladeConfig
 from openblade.domain.models import (
     Barcode,
     CartridgeState,
@@ -15,6 +16,7 @@ from openblade.domain.models import (
     SlotState,
 )
 from openblade.domain.states import validate_mount_transition
+from openblade.hardware.correlation import DriveCorrelation, correlate_drives
 from openblade.hardware.discovery import LibraryDiscovery, discover_library
 from openblade.hardware.mtx import MtxChangerBackend
 from openblade.hardware.runner import SafeRunner
@@ -28,11 +30,12 @@ class RealLibraryBackend:
     changer: MtxChangerBackend
     discovery: LibraryDiscovery
     library_id: str
+    correlation: DriveCorrelation
 
     def __init__(
         self,
         *,
-        config,
+        config: OpenBladeConfig,
         runner: SafeRunner | None = None,
         discovery: LibraryDiscovery | None = None,
         changer: MtxChangerBackend | None = None,
@@ -41,13 +44,28 @@ class RealLibraryBackend:
         active_runner = runner or SafeRunner(dry_run=config.hardware_dry_run)
         active_discovery = discovery or discover_library(active_runner, guard)
         changer_device = config.changer_device or _resolve_changer_device(active_discovery)
-        object.__setattr__(
-            self,
-            "changer",
-            changer or MtxChangerBackend(device=changer_device, guard=guard, runner=active_runner),
+        active_changer = changer or MtxChangerBackend(
+            device=changer_device, guard=guard, runner=active_runner
         )
+        object.__setattr__(self, "changer", active_changer)
         object.__setattr__(self, "discovery", active_discovery)
         object.__setattr__(self, "library_id", changer_device.removeprefix("/dev/").replace("/", "-"))
+        # Drive correlation runs at construction so a mapping that disagrees with
+        # the attached hardware refuses here, before any load/write can target the
+        # wrong drive.
+        drive_devices = _configured_drive_devices(config, active_discovery)
+        object.__setattr__(
+            self,
+            "correlation",
+            correlate_drives(
+                devices=drive_devices,
+                serial_map=config.drive_serial_map,
+                runner=active_runner,
+                guard=guard,
+                element_count=active_changer.inventory().drive_count or None,
+                probe_devices=_sg_probe_devices(drive_devices, active_discovery),
+            ),
+        )
         object.__setattr__(self, "_mount_states", {})
 
     def inventory(self) -> LibraryInventory:
@@ -151,11 +169,8 @@ class RealLibraryBackend:
         ]
 
     def drive_device(self, drive_id: int) -> str:
-        drives = _ordered_drive_devices(self.discovery)
-        try:
-            return drives[drive_id]
-        except IndexError as exc:
-            raise KeyError(f"No tape device configured for drive {drive_id}") from exc
+        """Host device for a library drive element, via verified correlation."""
+        return self.correlation.device_for(drive_id)
 
 
 def _resolve_changer_device(discovery: LibraryDiscovery) -> str:
@@ -166,6 +181,39 @@ def _resolve_changer_device(discovery: LibraryDiscovery) -> str:
         if candidate:
             return candidate
     raise RuntimeError("Discovered changer does not expose a usable device path")
+
+
+def _configured_drive_devices(config: OpenBladeConfig, discovery: LibraryDiscovery) -> list[str]:
+    """Devices to drive, preferring the operator's explicit list over discovery.
+
+    ``OPENBLADE_DRIVE_DEVICES`` is authoritative when set (the bring-up runbook
+    requires setting it explicitly on first contact); otherwise fall back to
+    SCSI-address-ordered auto-discovery, whose order is an assumption, not a fact.
+    """
+    if config.drive_devices:
+        return list(config.drive_devices)
+    return _ordered_drive_devices(discovery)
+
+
+def _sg_probe_devices(devices: list[str], discovery: LibraryDiscovery) -> dict[str, str]:
+    """Map each drive device to the generic ``/dev/sgN`` node to inquire against.
+
+    The ``st`` driver allows a single open, so running ``sg_inq`` on ``/dev/nstN``
+    while LTFS holds that drive fails with EBUSY; the ``sg`` node always answers.
+    Devices discovery cannot place map to themselves (inquiry then uses the node
+    the operator gave us, which is still better than not checking at all).
+    """
+    probes: dict[str, str] = {}
+    for device in devices:
+        rewinding = (
+            device.replace("/dev/nst", "/dev/st") if device.startswith("/dev/nst") else device
+        )
+        for drive in discovery.drives:
+            known = {value for value in (drive.block_device, drive.sg_device) if value}
+            if (device in known or rewinding in known) and drive.sg_device:
+                probes[device] = drive.sg_device
+                break
+    return probes
 
 
 def _ordered_drive_devices(discovery: LibraryDiscovery) -> list[str]:

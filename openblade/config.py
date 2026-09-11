@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from openblade.domain.errors import DriveCorrelationError
+
 
 class BackendMode(str, Enum):
     MOCK = "mock"
@@ -43,7 +45,16 @@ class OpenBladeConfig:
     drive_timeout_seconds: int = 300
     hardware_dry_run: bool = False
     changer_device: str | None = None
+    # Host tape devices, in LIBRARY drive-element order when no serial map is
+    # declared. Prefer the no-rewind nodes (/dev/nst0,...). Empty means "fall back
+    # to auto-discovery order", which is NOT a verified ordering — see
+    # drive_serial_map and openblade/hardware/correlation.py.
     drive_devices: tuple[str, ...] = ()
+    # Operator-declared correlation of drive unit serial numbers to library drive
+    # elements (mtx Data Transfer Element indices), parsed from
+    # OPENBLADE_DRIVE_SERIAL_MAP="<serial>:<dte>,...". Verified live against sg_inq
+    # at startup; empty means unverified positional order.
+    drive_serial_map: tuple[tuple[str, int], ...] = ()
     # Robotics transport for BackendMode.REAL: "scsi" (mtx/host changer) or
     # "webservices" (drive robotics over a real Scalar i3 AML Web Services API).
     robotics_transport: str = "scsi"
@@ -94,6 +105,53 @@ def _load_emulator_latency_enabled() -> bool:
     return _env_bool("EMULATOR_LATENCY_ENABLED", default=True)
 
 
+def parse_drive_serial_map(raw: str) -> tuple[tuple[str, int], ...]:
+    """Parse ``"SERIAL:DTE,SERIAL:DTE"`` into ``((serial, drive_id), ...)``.
+
+    Raises ``DriveCorrelationError`` on a malformed entry: a typo in this variable must fail
+    loudly at load time, never silently drop a drive from the mapping (a dropped
+    entry degrades to positional order, which is the bug this map exists to stop).
+    """
+    entries: list[tuple[str, int]] = []
+    seen_serials: set[str] = set()
+    seen_drive_ids: set[int] = set()
+    for chunk in raw.split(","):
+        item = chunk.strip()
+        if not item:
+            continue
+        serial, separator, drive_text = item.rpartition(":")
+        serial = serial.strip()
+        drive_text = drive_text.strip()
+        if not separator or not serial or not drive_text:
+            raise DriveCorrelationError(
+                f"OPENBLADE_DRIVE_SERIAL_MAP entry {item!r} is not of the form "
+                "'<serial>:<drive_element_id>'"
+            )
+        try:
+            drive_id = int(drive_text)
+        except ValueError as exc:
+            raise DriveCorrelationError(
+                f"OPENBLADE_DRIVE_SERIAL_MAP entry {item!r} has a non-integer "
+                f"drive element id {drive_text!r}"
+            ) from exc
+        if drive_id < 0:
+            raise DriveCorrelationError(
+                f"OPENBLADE_DRIVE_SERIAL_MAP entry {item!r} has a negative drive element id"
+            )
+        if serial in seen_serials:
+            raise DriveCorrelationError(
+                f"OPENBLADE_DRIVE_SERIAL_MAP lists serial {serial!r} more than once"
+            )
+        if drive_id in seen_drive_ids:
+            raise DriveCorrelationError(
+                f"OPENBLADE_DRIVE_SERIAL_MAP lists drive element id {drive_id} more than once"
+            )
+        seen_serials.add(serial)
+        seen_drive_ids.add(drive_id)
+        entries.append((serial, drive_id))
+    return tuple(entries)
+
+
 def _load_iblade_compat_mode() -> IBladeCompatibilityMode:
     raw = os.environ.get("OPENBLADE_IBLADE_COMPAT_MODE", "extended").strip().lower()
     if raw in {"strict", "strict-interface"}:
@@ -129,6 +187,7 @@ def load_config() -> OpenBladeConfig:
         hardware_dry_run=os.environ.get("OPENBLADE_HARDWARE_DRY_RUN", "false").lower() == "true",
         changer_device=os.environ.get("OPENBLADE_CHANGER_DEVICE") or None,
         drive_devices=drive_devices,
+        drive_serial_map=parse_drive_serial_map(os.environ.get("OPENBLADE_DRIVE_SERIAL_MAP", "")),
         robotics_transport=os.environ.get("OPENBLADE_ROBOTICS_TRANSPORT", "scsi").strip().lower(),
         scalar_url=os.environ.get("OPENBLADE_SCALAR_URL") or None,
         scalar_user=os.environ.get("OPENBLADE_SCALAR_USER", "admin"),

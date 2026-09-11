@@ -21,6 +21,15 @@ class BarcodeMismatchError(SafetyViolationError):
     """Barcode in confirmation does not match device."""
 
 
+class DriveCorrelationError(SafetyViolationError):
+    """Drive device <-> library drive-element correlation could not be verified.
+
+    Raised when the operator-declared drive serial map disagrees with the serials
+    read live from the drives. Acting on an unverified mapping means writing to
+    the wrong drive, so this refuses instead of guessing.
+    """
+
+
 class DriveOccupiedError(OpenBladeError):
     """Drive is already in use."""
 
