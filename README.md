@@ -2,6 +2,8 @@
 
 OpenBlade is a simulator-first DIY tape archive controller inspired by iBlade-style workflows for Quantum Scalar i3 and LTFS media handling. It provides a safe default mock backend, a FastAPI control plane, a Typer CLI, a SQLite-backed catalog, and regression tests for safety-critical operations.
 
+📖 **Operator documentation: [docs/wiki/](docs/wiki/README.md)** — guides for every user-facing function, plus a generated [CLI](docs/wiki/reference/cli.md) and [API](docs/wiki/reference/api.md) reference.
+
 ## Features
 - Simulator-first backend with deterministic library, drive, changer, and LTFS behavior
 - Explicit safety gates for real hardware enablement and tape formatting
