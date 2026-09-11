@@ -52,8 +52,56 @@ def _shard_record_path(source_file: Path, shard_index: int) -> str:
     return f"{source_file}#shard{shard_index:04d}"
 
 
+def _stripe_tape_path(source_file: Path, source_root: Path) -> str:
+    """On-tape location for a STRIPE-mode file, preserving the source tree.
+
+    This used to be ``/stripe/{source_file.name}`` -- a single flat namespace
+    keyed on the basename. Any two files with the same name in different source
+    directories that landed on the same lane therefore wrote to the same place,
+    and the second silently overwrote the first. Both were marked ``archived``.
+    Demonstrated on the rig: ``alpha/same.txt`` and ``beta/same.txt`` both
+    catalogued at ``OB0001L8:/stripe/same.txt``; restoring alpha returned beta's
+    bytes and only the checksum verify caught it -- at restore time, long after
+    the source was presumed safe. See docs/runbooks/real-data-campaign.md.
+
+    Existing media are unaffected: restore reads ``file_instances.tape_path`` as
+    stored, it does not recompute this.
+    """
+    try:
+        relative = source_file.relative_to(source_root)
+    except ValueError:
+        # source_path was the file itself, or an unrelated root.
+        relative = Path(source_file.name)
+    return str(PurePosixPath("/stripe") / PurePosixPath(relative.as_posix()))
+
+
 def _archive_profile(mode: ShardMode) -> str:
     return mode.value
+
+
+_JOB_ERROR_MAX_CHARS = 2000
+
+
+def _summarize_errors(errors: list[str]) -> str | None:
+    """Condense per-batch failures into one bounded string for ``jobs.error``.
+
+    A sharded archive can fail hundreds of batches with the same cause, so the
+    distinct messages are what carry information -- and the column has to stay a
+    sane size. Returns None when there is nothing to report, so a clean run still
+    clears the field.
+    """
+    if not errors:
+        return None
+    distinct: list[str] = []
+    for message in errors:
+        if message not in distinct:
+            distinct.append(message)
+    summary = f"{len(errors)} shard batch failure(s); {len(distinct)} distinct: " + " | ".join(
+        distinct
+    )
+    if len(summary) > _JOB_ERROR_MAX_CHARS:
+        summary = summary[: _JOB_ERROR_MAX_CHARS - 3] + "..."
+    return summary
 
 
 def run_sharded_archive(
@@ -145,7 +193,13 @@ def run_sharded_archive(
         shutil.rmtree(scratch_dir, ignore_errors=True)
 
     state = "completed" if not errors else "failed_recoverable"
-    catalog.update_job_state(job_id, state)
+    # `errors` used to be returned in ShardedArchiveResult and nowhere else. The
+    # API route discards the result (it answers {job_id, status:"pending"}), so a
+    # sharded archive that failed every batch surfaced as `failed_recoverable`
+    # with `error: null` and no log line -- the first real-data run wrote 3 of
+    # 1,073 files over ten minutes and said nothing about why. Persist a bounded
+    # summary on the job, which is the one place an operator looks.
+    catalog.update_job_state(job_id, state, _summarize_errors(errors))
     return ShardedArchiveResult(
         job_id=job_id,
         files_archived=files_archived,
@@ -266,7 +320,7 @@ def _archive_stripe(
                 barcode: str,
                 mount: object,
             ) -> tuple[Path, str, str, str, int]:
-                tape_path = f"/stripe/{source_file.name}"
+                tape_path = _stripe_tape_path(source_file, request.source_path)
                 checksum = compute_checksum(source_file)
                 ltfs.write_file(mount, source_file, PurePosixPath(tape_path))
                 stat = ltfs.stat(mount, PurePosixPath(tape_path))
@@ -329,6 +383,15 @@ def _archive_stripe(
                 bytes_archived += size_bytes
         except Exception as exc:  # noqa: BLE001
             # Staged instances remain PENDING -> not exposed as archived; resumable.
+            # This branch had no logging at all, so a batch that failed left no
+            # trace anywhere except a list the caller throws away.
+            logger.warning(
+                "stripe batch failed on %s: %s: %s",
+                ",".join(batch_barcodes),
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
             errors.append(str(exc))
         finally:
             for mount in mounts.values():

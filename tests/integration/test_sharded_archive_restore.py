@@ -188,3 +188,159 @@ def test_scheduler_blocks_when_all_drives_busy() -> None:
     scheduler.release_drives(handles)
     handles2 = scheduler.acquire_drives(["T002L8"], timeout=1.0)
     scheduler.release_drives(handles2)
+
+
+# --- Real-data campaign regression -------------------------------------------
+# docs/runbooks/real-data-campaign.md: STRIPE wrote every file to
+# /stripe/{basename}, a single flat namespace. Two same-named files from
+# different source directories that landed on the same lane overwrote each other
+# silently, and BOTH were marked archived. On the rig, alpha/same.txt and
+# beta/same.txt were both catalogued at OB0001L8:/stripe/same.txt; restoring
+# alpha returned beta's bytes and only the checksum verify caught it.
+
+
+def _same_named_tree(tmp_path: Path) -> Path:
+    root = tmp_path / "src"
+    for sub in ("alpha", "beta"):
+        (root / sub).mkdir(parents=True)
+        (root / sub / "same.txt").write_bytes(f"content from {sub}\n".encode() * 10)
+    return root
+
+
+def test_stripe_preserves_the_source_tree_in_the_tape_path(tmp_path: Path) -> None:
+    library, ltfs = _setup(num_drives=1, barcodes=["SHARD1L8"])
+    catalog = _catalog()
+    root = _same_named_tree(tmp_path)
+    job = catalog.create_job("archive", {"source_path": str(root)})
+
+    result = run_sharded_archive(
+        ShardedArchiveRequest(
+            source_path=root,
+            volume_group_name="collide",
+            lane_barcodes=["SHARD1L8"],
+            mode=ShardMode.STRIPE,
+        ),
+        library,
+        ltfs,
+        catalog,
+        DriveScheduler(num_drives=1),
+        job.id,
+    )
+
+    assert result.errors == []
+    assert result.files_archived == 2
+
+    tape_paths = sorted(
+        instance.tape_path
+        for record in catalog.list_file_records("/")
+        for instance in record.instances
+        if str(record.path).endswith("same.txt")
+    )
+    assert tape_paths == ["/stripe/alpha/same.txt", "/stripe/beta/same.txt"], (
+        "both files share one on-tape location; the second overwrote the first"
+    )
+    assert len(set(tape_paths)) == 2
+
+
+def test_stripe_round_trips_both_same_named_files(tmp_path: Path) -> None:
+    """The proof that matters: each file restores to its own bytes."""
+    library, ltfs = _setup(num_drives=1, barcodes=["SHARD1L8"])
+    catalog = _catalog()
+    root = _same_named_tree(tmp_path)
+    job = catalog.create_job("archive", {"source_path": str(root)})
+    run_sharded_archive(
+        ShardedArchiveRequest(
+            source_path=root,
+            volume_group_name="collide",
+            lane_barcodes=["SHARD1L8"],
+            mode=ShardMode.STRIPE,
+        ),
+        library,
+        ltfs,
+        catalog,
+        DriveScheduler(num_drives=1),
+        job.id,
+    )
+
+    destination = tmp_path / "out"
+    destination.mkdir()
+    for sub in ("alpha", "beta"):
+        source = root / sub / "same.txt"
+        restore_job = catalog.create_job("restore", {"catalog_path": str(source)})
+        run_sharded_restore(
+            ShardedRestoreRequest(catalog_path=str(source), dest_path=destination / f"{sub}.txt"),
+            library,
+            ltfs,
+            catalog,
+            DriveScheduler(num_drives=1),
+            restore_job.id,
+        )
+        assert (destination / f"{sub}.txt").read_bytes() == source.read_bytes(), (
+            f"{sub}/same.txt restored to the wrong file's bytes"
+        )
+
+
+def test_stripe_handles_a_single_file_source(tmp_path: Path) -> None:
+    """source_path == the file itself: relative_to() would raise."""
+    library, ltfs = _setup(num_drives=1, barcodes=["SHARD1L8"])
+    catalog = _catalog()
+    only = tmp_path / "solo.bin"
+    only.write_bytes(b"solo" * 64)
+    job = catalog.create_job("archive", {"source_path": str(only)})
+
+    result = run_sharded_archive(
+        ShardedArchiveRequest(
+            source_path=only,
+            volume_group_name="solo",
+            lane_barcodes=["SHARD1L8"],
+            mode=ShardMode.STRIPE,
+        ),
+        library,
+        ltfs,
+        catalog,
+        DriveScheduler(num_drives=1),
+        job.id,
+    )
+
+    assert result.errors == []
+    assert result.files_archived == 1
+
+
+def test_failed_sharded_archive_records_why_on_the_job(tmp_path: Path) -> None:
+    """`failed_recoverable` with `error: null` told the operator nothing."""
+    library, ltfs = _setup(num_drives=1, barcodes=["SHARD1L8"])
+    catalog = _catalog()
+    root = tmp_path / "src"
+    root.mkdir()
+    (root / "a.bin").write_bytes(b"x" * 1024)
+    job = catalog.create_job("archive", {"source_path": str(root)})
+
+    original_write = ltfs.write_file
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated lane write failure")
+
+    ltfs.write_file = _boom  # type: ignore[method-assign]
+    try:
+        result = run_sharded_archive(
+            ShardedArchiveRequest(
+                source_path=root,
+                volume_group_name="boom",
+                lane_barcodes=["SHARD1L8"],
+                mode=ShardMode.STRIPE,
+            ),
+            library,
+            ltfs,
+            catalog,
+            DriveScheduler(num_drives=1),
+            job.id,
+        )
+    finally:
+        ltfs.write_file = original_write  # type: ignore[method-assign]
+
+    assert result.errors
+    stored = catalog.get_job(job.id)
+    assert stored is not None
+    assert stored.state == "failed_recoverable"
+    assert stored.error, "the job carried no error at all"
+    assert "simulated lane write failure" in stored.error
