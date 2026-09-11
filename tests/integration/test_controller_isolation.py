@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from openblade.api.main import app
-from openblade.bootstrap import create_context, reset_context
+from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
 
 
@@ -30,6 +30,19 @@ def _merge_headers(*header_sets: dict[str, str]) -> dict[str, str]:
     for header_set in header_sets:
         merged.update(header_set)
     return merged
+
+
+def _free_slot_address() -> str:
+    """Return the AML address of an empty storage slot in the seeded simulator.
+
+    The destination must not be hardcoded: the default i3 media seed grew from
+    slots 1-10 to slots 1-28, so a literal "1,1,11" now names an occupied slot
+    and the move is (correctly) rejected with 409 SlotOccupiedError.
+    """
+    inventory = get_context().library.inventory()
+    empty = sorted(slot.slot_id for slot in inventory.slots if not slot.occupied)
+    assert empty, "simulator seed has no empty storage slot to move into"
+    return f"1,1,{empty[0]}"
 
 
 def _find_direct_simulator_imports(paths: list[Path], repo_root: Path) -> list[str]:
@@ -76,7 +89,7 @@ def test_moveMedium_accepted_with_service_token(
     """moveMedium accepted only with service token"""
     response = client.post(
         "/aml/media/move",
-        json={"move": {"barcode": "VOL001L9", "destination": "1,1,11"}},
+        json={"move": {"barcode": "VOL001L9", "destination": _free_slot_address()}},
         headers=_merge_headers(admin_auth_headers, service_token_headers),
     )
 
