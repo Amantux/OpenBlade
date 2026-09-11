@@ -1,0 +1,109 @@
+# ==============================================================================
+# docker-compose.hardware.example.yml — OPT-IN real-hardware override. EXAMPLE.
+# ==============================================================================
+#
+#  ⚠  DO NOT ENABLE THIS ON A DEVELOPMENT BOX. ⚠
+#
+#  This override puts the API container into REAL hardware mode: it passes the
+#  host's medium changer and tape drive device nodes into the container and sets
+#  OPENBLADE_BACKEND=real + OPENBLADE_REAL_HARDWARE_ENABLED=true. Every safety
+#  gate that the mock backend gives you for free is gone. A wrong device path
+#  here points OpenBlade at whatever SCSI device happens to hold that node.
+#
+#  Use it ONLY on a host where:
+#    * the library has already been brought up BARE-METAL in the project venv
+#      and `pytest tests/hardware/` is green (docs/runbooks/real-i3-bringup-plan.md
+#      — bare-metal venv remains the recommended bring-up path, this file is the
+#      later, deliberate step),
+#    * `lsscsi -g` shows the expected `mediumx` + `tape` rows, and
+#    * the device paths below have been verified on THIS host.
+#
+#  This file is never loaded automatically. Copy it, edit it, then:
+#
+#    cp docker-compose.hardware.example.yml docker-compose.hardware.yml
+#    export OPENBLADE_TAPE_GID=$(stat -c %g /dev/sg0)
+#    docker compose -f docker-compose.yml -f docker-compose.hardware.yml config -q
+#    docker compose -f docker-compose.yml -f docker-compose.hardware.yml up -d
+#
+# ------------------------------------------------------------------------------
+# Why there is no `privileged: true` and no `cap_add:` here
+# ------------------------------------------------------------------------------
+# Plain `devices:` is sufficient. Verified empirically (Linux 5.15, Docker 29.3)
+# by issuing SG_IO ioctls from a container that had ONLY `--device /dev/sgN` and
+# the default capability set (CapEff 0xa80425fb — CAP_SYS_RAWIO *not* held): the
+# full opcode set OpenBlade's backends use was accepted — INQUIRY (0x12),
+# MODE SENSE (0x1A), READ ELEMENT STATUS (0xB8), MOVE MEDIUM (0xA5),
+# INITIALIZE ELEMENT STATUS (0x07), READ/WRITE(6), WRITE FILEMARKS (0x10),
+# SPACE (0x11), LOAD/UNLOAD (0x1B). Adding CAP_SYS_RAWIO changed nothing.
+# If a future host DOES reject a command with EPERM, add `cap_add: [SYS_RAWIO]`
+# — never `privileged: true`, which also hands the container every other device.
+#
+# ------------------------------------------------------------------------------
+# The thing that actually bites: device-node OWNERSHIP, not capabilities
+# ------------------------------------------------------------------------------
+# The image drops to the unprivileged `openblade` user (docker-entrypoint.sh,
+# gosu). `devices:` reproduces the node inside the container with the HOST's
+# uid/gid/mode (typically root:tape or root:disk, mode 0660) — so the dropped
+# user cannot open it unless it is in that group. Verified: uid 1000 with no
+# matching group got EACCES on open(); the same uid with the node's gid as a
+# supplementary group worked. Hence `group_add` below. Set it from the host:
+#
+#     export OPENBLADE_TAPE_GID=$(stat -c %g /dev/sg0)     # e.g. 6 / 26 / 33
+#
+# (Compose will refuse to start if OPENBLADE_TAPE_GID is unset — that is
+# deliberate; a missing group fails later, at the first SCSI call, as a confusing
+# permission error.)
+#
+# ------------------------------------------------------------------------------
+# Host tooling caveat
+# ------------------------------------------------------------------------------
+# The API image installs `mtx` only. It does NOT ship `sg3_utils` or an LTFS
+# implementation, so drive-health (`sg_inq`) and any LTFS format/mount path will
+# fail inside this container until the Dockerfile is extended for your site.
+# Read-only changer inventory works as shipped. Bare-metal remains the path for
+# LTFS bring-up.
+# ==============================================================================
+
+services:
+  api:
+    environment:
+      # These two together are the ONLY way real hardware is ever touched.
+      OPENBLADE_BACKEND: real
+      OPENBLADE_REAL_HARDWARE_ENABLED: "true"
+      # Set explicitly — do not rely on auto-discovery on a first bring-up.
+      # Drives are the NO-REWIND nodes (/dev/nstN). Never /dev/stN: a rewinding
+      # node repositions the tape on close and can corrupt an LTFS index.
+      # See docs/hardware-setup.md.
+      OPENBLADE_CHANGER_DEVICE: ${OPENBLADE_CHANGER_DEVICE:-/dev/sg0}
+      OPENBLADE_DRIVE_DEVICES: ${OPENBLADE_DRIVE_DEVICES:-/dev/nst0}
+
+    # Supplementary group owning the tape/sg device nodes on the HOST.
+    # Required — see the ownership section above.
+    group_add:
+      - "${OPENBLADE_TAPE_GID:?required - the numeric host group owning the tape/sg nodes; get it with stat -c %g /dev/sg0}"
+
+    # Delete every line below for hardware this host does not have. A device
+    # listed here that does not exist makes `docker compose up` fail outright.
+    devices:
+      # --- medium changer -------------------------------------------------
+      # The i3 bridges its changer through a drive (LUN 1); confirm which sg
+      # node carries the `mediumx` row in `lsscsi -g` before trusting this.
+      - "/dev/sg0:/dev/sg0"
+
+      # --- drive 1 (always present) ---------------------------------------
+      - "/dev/nst0:/dev/nst0"   # no-rewind tape node
+      - "/dev/sg1:/dev/sg1"     # same drive's generic node (sg_inq / TapeAlert)
+
+      # --- drive 2 (uncomment if present) ---------------------------------
+      # - "/dev/nst1:/dev/nst1"
+      # - "/dev/sg2:/dev/sg2"
+
+      # --- drive 3 (uncomment if present) ---------------------------------
+      # - "/dev/nst2:/dev/nst2"
+      # - "/dev/sg3:/dev/sg3"
+
+      # NOTE: /dev/nstN ordering is NOT stable across reboots or rescans, and
+      # mtx Data Transfer Element order is not guaranteed to match device order.
+      # Correlate by drive serial (sg_inq) against the library's drive list
+      # before enabling any write path — see docs/production-readiness-roadmap.md
+      # item #E and the Phase 2 notes in docs/runbooks/real-i3-bringup-plan.md.
