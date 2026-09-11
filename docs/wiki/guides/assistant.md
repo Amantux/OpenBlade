@@ -3,25 +3,68 @@
 `openblade assist` is a local chat assistant that answers questions about **your**
 library: what is in which slot, which tape a file lives on, why a job failed, what a
 volume group is for, and how to do a thing safely. In the interactive REPL it can
-also *do* the safe part of setting up — creating a pool and putting tapes in it —
-after asking you, each time.
+also *do* things — set up a pool, load a tape, archive a directory, even format a
+cartridge — after asking you, each time, with a confirmation matched to what the
+action costs.
 
 It runs against [Ollama](https://ollama.com), so the conversation and your catalog
 never leave your machine unless you deliberately point it at a cloud endpoint.
 
-## The two tiers
+## The three tiers
 
-| | Tier 1 — it can do this | Tier 2 — everything else |
-|---|---|---|
-| **What** | `create_volume_group`, `add_tapes_to_volume_group` | format, load, unload, move, eject, archive, restore, delete — and anything not in the left column |
-| **How** | It shows you exactly what it would do and asks `[y/N]`. Only `y` runs it. | It proposes the exact command; **you** run it. |
-| **Where** | Interactive REPL only | Everywhere |
-| **Why it's allowed** | Catalog-only, reversible by hand, touches no media and no hardware | Moves media, destroys data, or cannot be undone |
+| | Tier 1 — setup | Tier 2 — media & robotics | Tier 3 — everything else |
+|---|---|---|---|
+| **What** | `create_volume_group`, `add_tapes_to_volume_group` | `load_tape`, `unload_drive`, `move_tape`, `archive_path`, `restore_path`, `format_tape` | eject, import/export, delete, configuration — and anything not to the left |
+| **How** | Shows exactly what it would do and asks `[y/N]`. Only `y` runs it. | Shows the cartridge, slot, drive, drive serial and cost, then asks. Load/unload/move/archive take `y`; **format**, and a **restore that would overwrite a file**, make you TYPE the barcode or the word shown — `y` is refused. | It proposes the exact command; **you** run it. |
+| **Where** | Interactive REPL only | Interactive REPL only | Everywhere |
+| **Why it's allowed** | Catalog-only, reversible by hand, touches no media | Goes through the same services the REST API and CLI use — job-queue drive ownership, `RealHardwareGuard`, the mount-state gate and the one-time format token all still apply | It doesn't have a tool, and won't get one |
 
-Tier 1 exists because pool setup is the one part of getting started that is pure
-bookkeeping — and it is the part people get stuck on. Nothing else moved: the
-two-phase format flow, the real-hardware flags and the mount-state gate are
-untouched, and the assistant still refuses to help you around any of them.
+Tier 1 exists because pool setup is pure bookkeeping and it is the part people get
+stuck on. Tier 2 exists because "load OB0003L8 into drive 1" is a sentence, not a
+command line — but it is also a robot arm moving a cartridge, so the confirmation is
+graded by consequence rather than being one blanket `y`.
+
+**The assistant is a new caller, not a new path.** Every tier-2 action runs through
+`TapeOperationOrchestrator` (via `execute_tape_request`), `FormatService`,
+`ArchiveService` or `RestoreService` — the same objects `POST /tape-ops/execute`,
+`openblade format confirm` and `openblade archive` use. Nothing about the two-phase
+format flow, the real-hardware flags or the mount-state gate was softened to make
+this work, and the assistant still refuses to help you around any of them.
+
+### What tier 2 will not do, even if you confirm
+
+Same house rule as tier 1, applied **before** you are prompted — you are never asked
+to confirm an action that would then have to guess:
+
+- a barcode that is not in this library → refused, with the barcodes you might have
+  meant (prefix matches first);
+- a barcode the inventory reports in two places at once → refused, naming both. It
+  means the inventory disagrees with the changer, and acting on that is how media
+  gets crushed;
+- a target drive that already holds a cartridge, or a target slot that is already
+  full → refused, naming the occupant;
+- `unload` with neither a barcode nor a drive while two drives are loaded → refused
+  with the candidates. Guessing here unloads the wrong tape;
+- a drive whose LTFS volume is still mounted or dirty → refused. Unmounting someone
+  else's volume is not a decision the assistant makes;
+- a destination slot that is an import/export element → refused. Moving media out of
+  the library is an export, and the orchestrator rejects it too;
+- a relative source path, a missing directory, an unknown volume group, an unknown
+  catalog path, a tree over 500 files → refused with the reason.
+
+Everything is validated again inside the write path, so a confirmation given a
+minute ago cannot act on facts that have since changed.
+
+### Why format still takes two phases
+
+Calling `format_tape` does not format anything. It runs the **real** dry run —
+`FormatService.dry_run`, which mints a one-time `SafetyToken` bound to that barcode
+and persists it — and shows you the plan: what is on the cartridge, how much of it,
+which pool, the capacity, what the format writes, and how long the token is good
+for. Only after you type the barcode does it present that token back to
+`FormatService.confirm`, which validates it against the persisted row and deletes
+it. There is no branch in which a missing token merely skips a check: no dry run
+means no token means the format fails.
 
 ### What tier 1 will not do, even if you say yes
 
@@ -42,9 +85,9 @@ The validation runs before you are asked *and again* inside the write path, so a
 
 ## The safety line
 
-**The assistant cannot run anything except the two tier-1 actions, and never
-without your yes.** That is not a promise made in a prompt — it is how the code is
-built:
+**The assistant can run only the two tier-1 actions and the six tier-2 actions, and
+never without a confirmation strong enough for what the action costs.** That is not
+a promise made in a prompt — it is how the code is built:
 
 | Guard | Where | What it stops |
 |---|---|---|
@@ -55,6 +98,10 @@ built:
 | Narrow write facade | `openblade/assistant/setup_facade.py` | Tier-1 tools do not get the catalog. They get a facade exposing five named operations; every other attribute — repository methods, `__init__`, `__reduce__`, `_target` — raises. Even the callables it hands back are sealed, because a plain closure or bound method would leak the repository through `__closure__` / `__self__`. The library backend is not behind it at all. |
 | Confirmation gate | `openblade/assistant/session.py` | A tier-1 call never runs on arrival. It becomes a `PendingAction` with a preview, and only an explicit `y` executes it. No confirmation callback (one-shot mode) ⇒ the setup tools are not even offered to the model. |
 | One write path | `tests/safety/test_assistant_read_only.py` | An AST scan over the whole package: `setup_facade.py` is the only file allowed to name a catalog write method. |
+| Media allowlist | `openblade/assistant/media_tools.py` (`MEDIA_TOOL_NAMES`) | Exactly six names may ever be tier-2 tools, and the registry additionally refuses any name already claimed by the tier-1 or read-only registries. The three registries are provably disjoint, so a tool cannot cross a tier boundary by being renamed — and every tier-2 name (`load`, `unload`, `move`, `format`, `archive`, `restore`) is permanently *unregistrable* as a tier-1 tool, because the tier-1 denylist above still rejects all of them. |
+| Media facade | `openblade/assistant/media_facade.py` | Tier-2 tools do not get the library backend, the LTFS backend or the repository. They get a facade over thirteen named operations; every other attribute — `library`, `ltfs`, `catalog_repo`, `__init__`, `__reduce__`, `_target` — raises, and the callables it returns are sealed so `__closure__` cannot leak the bundle. Its own validation reads go through the tier-1 read-only proxy. |
+| Confirmation grade | `openblade/assistant/media_tools.py` (`ConfirmationGrade`) | The grade is a property of the tool and its resolved plan, never of the model's arguments — a format is always `TYPED`, a restore is `TYPED` exactly when the filesystem says the destination exists. `authorize()` turns what you typed into an authorization; `perform()` **re-verifies** it against the action before calling anything. A forged authorization, one issued for a different action, or a `y` against a typed grade raises and nothing runs — so the strength of the confirmation does not depend on the REPL prompt being written correctly. |
+| One media path | `tests/safety/test_assistant_read_only.py` | A second AST scan: `media_facade.py` is the only file allowed to import `openblade.nas` or name `execute_tape_request` / `TapeOpRequest`. `__init__.py` may wire the job services into the bundle and nothing else may name them. |
 
 All of it is covered by `tests/safety/test_assistant_read_only.py`, and every
 structural guard is mutation-checked — remove the guard and a named test fails
@@ -63,8 +110,8 @@ so only the denylist can be what fails it. The source scans walk the whole packa
 (`rglob`) and assert the exact file list, so a new module cannot quietly fall
 outside the guard.
 
-Every executed or declined tier-1 action writes one structured line to the
-`openblade.assistant.setup` logger (`actor=assistant tool=… outcome=… args=…
+Every proposed, declined, refused, failed or executed action — both tiers — writes
+one structured line to the `openblade.assistant.setup` logger (`actor=assistant tool=… outcome=… args=…
 result=…`), JSON-encoded so a crafted name cannot forge a second line.
 
 It will also **refuse to help you bypass a safety gate**. Ask how to skip the format
@@ -133,9 +180,9 @@ openblade> /reset     # clear the conversation
 openblade> /quit
 ```
 
-One-shot mode has nobody to ask, so it is not offered the tier-1 tools at all and
-its system prompt says setup execution needs the REPL. You cannot get an
-unconfirmed write by piping a question into it.
+One-shot mode has nobody to ask, so it is offered **neither** tier's tools and its
+system prompt says execution needs the REPL. You cannot get an unconfirmed write —
+or an unconfirmed format — by piping a question into it.
 
 Tool calls appear as dim single lines so you can see what was consulted:
 
@@ -153,6 +200,24 @@ Proposed action: Create volume group 'photos' (your first pool).
 Run it? [y/N] y
 ✓ create_volume_group applied
 ```
+
+A tier-2 action prints the same way, in red when it is destructive, and the prompt
+demands the typed word rather than a yes:
+
+```
+Proposed action: FORMAT OB0007L8. This is irreversible and there is no undo.
+  ...
+  Type the barcode OB0007L8 to confirm. Anything else — including "y" — cancels.
+Type OB0007L8 to confirm (anything else cancels): OB0007L8
+format_tape: running now — this can take minutes.
+format_tape: done — formatted
+✓ format_tape applied
+```
+
+`archive_path` and `restore_path` block the REPL while they run, so they print a
+line before and after — the trailing line carries the job id and the verified byte
+count, because the services create the job inside the same call that runs it and
+there is no id to print before it returns.
 
 ## What it can see
 
@@ -173,8 +238,19 @@ Eight read-only tools:
 
 | Tool | Does | Asks first |
 |---|---|---|
-| `create_volume_group` | Creates an empty pool in the catalog. Creates no tapes. | Always |
-| `add_tapes_to_volume_group` | Puts cartridges that already exist into an existing pool. | Always |
+| `create_volume_group` | Creates an empty pool in the catalog. Creates no tapes. | Always — `[y/N]` |
+| `add_tapes_to_volume_group` | Puts cartridges that already exist into an existing pool. | Always — `[y/N]` |
+
+...and six tier-2 tools, each behind a confirmation graded by what it costs:
+
+| Tool | Does | Confirmation |
+|---|---|---|
+| `load_tape` | Moves a cartridge from its slot into a drive. | `[y/N]` on a preview naming tape, slot, drive and drive serial |
+| `unload_drive` | Returns a loaded cartridge to a storage slot. Refused while LTFS is mounted. | `[y/N]` |
+| `move_tape` | Moves a cartridge between two storage slots. Import/export elements are not valid destinations. | `[y/N]` |
+| `archive_path` | Copies a local file or directory onto the tapes of a pool and catalogues it. Additive. | `[y/N]`; reports job id, files and bytes verified against the catalog afterwards |
+| `restore_path` | Copies an archived file back to a local path, checksum-verified. | `[y/N]` normally — **type `OVERWRITE`** if the destination file already exists |
+| `format_tape` | Erases a cartridge with LTFS. Irreversible. | Dry run first, then **type the barcode**. A `y` is refused |
 
 There is deliberately **no** tool for removing a tape from a pool: the catalog layer
 has no such operation, and the assistant does not get capabilities the rest of
@@ -195,8 +271,10 @@ with your say-so, and hands you the destructive parts to run yourself.
 
 ```
 $ openblade assist
-OpenBlade assistant. It can create a volume group and add tapes to one, and it
-asks you first — [y/N] — every time. Everything else it proposes; you run it.
+OpenBlade assistant. It can set up volume groups, and load, unload, move,
+archive, restore and format media — and it asks you first, every time. A
+format, or a restore that would overwrite a file, makes you type the barcode
+or the word shown; "y" will not do it. Everything else it proposes; you run it.
 Type your question, or /quit to leave, /reset to clear the conversation.
 
 openblade> I want to archive my photos onto tape. Help me get set up.
@@ -271,6 +349,146 @@ Run it? [y/N] n
 > All right, nothing created. Did you want to rename `photo-archive` instead, or use
 > a different name for a second pool?
 
+### Moving and writing real media (a full REPL transcript)
+
+Captured verbatim against the **mhvtl rehearsal rig** — a real SCSI changer, real
+`/dev/nst*` drives, real `mkltfs`, real LTFS mounts — with
+`OPENBLADE_BACKEND=real`, `OPENBLADE_REAL_HARDWARE_ENABLED=true` and
+`OPENBLADE_DRIVE_SERIAL_MAP="OBLADE_D01:0,OBLADE_D02:1,OBLADE_D03:2"`. Reproduce
+it with `eval "$(scripts/mhvtl/env.sh)"`; see
+[`scripts/mhvtl/README.md`](../../../scripts/mhvtl/README.md). The model is a small
+local one (`qwen2.5:3b`), so its prose is sometimes loose — the previews, prompts
+and results are the product, and they are exact.
+
+**1. Load a cartridge.** Non-destructive robotics, so a `y` is enough — but the
+preview names the drive *serial*, which is the thing you can check against a label
+on the rack:
+
+```
+openblade> load tape OB0003L8 into drive 1
+· load_tape {"barcode": "OB0003L8", "drive": 1}
+
+Proposed action: Load OB0003L8 from slot 3 into drive 1 (serial OBLADE_D02).
+  Slot 3 becomes empty; the cartridge is not written to and nothing is mounted.
+Run it? [y/N] y
+[info     ] tape operation queued          barcode=OB0003L8 op_id=4bae7957-… op_type=load
+[info     ] tape operation completed       barcode=OB0003L8 op_id=4bae7957-… op_type=load
+load_tape: done — loaded
+✓ load_tape applied
+```
+
+**2. Put it back.** Asked by drive, not by barcode — the assistant resolves which
+cartridge that is and names it back to you before doing anything:
+
+```
+openblade> unload the tape in drive 1 back to slot 3
+· unload_drive {"barcode": null, "drive": 1}
+
+Proposed action: Unload OB0003L8 from drive 1 (serial OBLADE_D02) into slot 3 —
+the lowest free slot.
+  Drive 1 (serial OBLADE_D02) becomes free. Nothing on the cartridge changes;
+LTFS is not mounted on it.
+Run it? [y/N] y
+unload_drive: done — unloaded
+✓ unload_drive applied
+```
+
+**3. Format a scratch cartridge.** The destructive grade. The dry run has already
+run and minted the one-time token by the time you see this; a `y` here cancels:
+
+```
+openblade> format the scratch tape OB0007L8
+· format_tape {"barcode": "OB0007L8"}
+
+Proposed action: FORMAT OB0007L8. This is irreversible and there is no undo.
+  Everything on the cartridge is destroyed: 186 archived file(s) in volume group
+'hw-catalog-stripe', 203.4 MB recorded as used of 6.6 GB capacity.
+  WORM: not reported by this backend — check the cartridge label yourself if it
+matters.
+  The format writes a new LTFS label, index partition and data partition.
+  A one-time safety token was issued by the dry run and expires in 299s.
+  Files that would be lost include:
+/block_stripe/0b5ac0c2-…/catalog.bin.shard0000,
+/block_stripe/1918e46e-…/block-stripe.bin.shard0000, …
+  Dry run: Destructive operation
+  Dry run: Inventory barcode must match confirmation
+  Type the barcode OB0007L8 to confirm. Anything else — including "y" — cancels.
+Type OB0007L8 to confirm (anything else cancels): OB0007L8
+format_tape: running now — this can take minutes.
+[info     ] tape operation queued          barcode=OB0007L8 op_id=6eb4e8a2-… op_type=format
+[info     ] tape operation completed       barcode=OB0007L8 op_id=6eb4e8a2-… op_type=format
+format_tape: done — formatted
+✓ format_tape applied
+```
+
+**4. Archive a directory onto it.** Note the model's *first* call — it tried to
+create a volume group that already exists, and that was refused before any prompt
+appeared. Nothing was changed and nobody was asked:
+
+```
+openblade> archive the directory /tmp/tier2-src into volume group hw-catalog-stripe
+· create_volume_group {"name": "hw-catalog-stripe"}
+· archive_path {"path": "/tmp/tier2-src", "volume_group": "hw-catalog-stripe"}
+
+Proposed action: Archive /tmp/tier2-src into volume group 'hw-catalog-stripe': 2
+file(s), 67 B.
+  Written to the 2 tape(s) in that pool; existing data on them is not touched,
+and the source files are left where they are.
+  Including: /tmp/tier2-src/hello.txt, /tmp/tier2-src/notes.txt
+  This runs synchronously and can take minutes — the prompt will not come back
+until it finishes.
+Run it? [y/N] y
+archive_path: running now — this can take minutes.
+[info     ] tape operation queued          barcode=OB0007L8 op_id=27460e0f-… op_type=load
+[info     ] tape operation completed       barcode=OB0007L8 op_id=27460e0f-… op_type=load
+[info     ] tape operation queued          barcode=OB0007L8 op_id=a2058c68-… op_type=unload
+[info     ] tape operation completed       barcode=OB0007L8 op_id=a2058c68-… op_type=unload
+archive_path: done — job dcfde0ea-62c9-4156-a123-e317566d2757 completed — 2/2
+files, 67 bytes in the catalog
+✓ archive_path applied
+```
+
+`2/2 files, 67 bytes in the catalog` is read back from the catalog after the job
+finishes, not taken from the job's return value: the thing that matters is whether
+a future restore can find the rows, so that is what is reported.
+
+**5. Restore it.** The destination does not exist, so this is the `[y/N]` grade —
+had the file been there, the preview would have said so in capitals and demanded
+`OVERWRITE`:
+
+```
+openblade> restore /hw-catalog-stripe/hello.txt to /tmp/tier2-out/hello.txt
+· restore_path {"dest": "/tmp/tier2-out/hello.txt", "path": "/hw-catalog-stripe/hello.txt"}
+
+Proposed action: Restore /hw-catalog-stripe/hello.txt (25 B, from tape OB0007L8)
+to /tmp/tier2-out/hello.txt.
+  Nothing is overwritten; the destination does not exist yet. The tape is
+mounted read-only.
+  This runs synchronously and can take minutes — the prompt will not come back
+until it finishes.
+Run it? [y/N] y
+restore_path: running now — this can take minutes.
+[info     ] tape operation queued          barcode=OB0007L8 op_id=1f8638cc-… op_type=load
+[info     ] tape operation completed       barcode=OB0007L8 op_id=1f8638cc-… op_type=load
+[info     ] tape operation queued          barcode=OB0007L8 op_id=3b99a08e-… op_type=unload
+[info     ] tape operation completed       barcode=OB0007L8 op_id=3b99a08e-… op_type=unload
+restore_path: done — job 519aa446-2a17-4f7b-95a5-03a98b5e1fc8 completed — 25
+bytes restored, checksum verified
+✓ restore_path applied
+```
+
+**6. Verify, outside the assistant.** The round trip is byte-identical:
+
+```
+$ cmp /tmp/tier2-src/hello.txt /tmp/tier2-out/hello.txt && echo "BYTE IDENTICAL"
+BYTE IDENTICAL
+$ sha256sum /tmp/tier2-src/hello.txt /tmp/tier2-out/hello.txt
+9597d98beccac409cc9f039154804ecf0a4a78316c38f0f13742b093dc35dda0  /tmp/tier2-src/hello.txt
+9597d98beccac409cc9f039154804ecf0a4a78316c38f0f13742b093dc35dda0  /tmp/tier2-out/hello.txt
+```
+
+Afterwards, return the rig to its at-rest state with `sudo scripts/mhvtl/reset.sh`.
+
 ### "Where is wedding.raw?"
 
 ```
@@ -312,8 +530,10 @@ Run it? [y/N] n
   candidate records; a very broad pattern reports `scanTruncated` rather than
   loading a large archive's whole catalog into memory.
 - **No HTTP API in v1.** The assistant is CLI-only; there is no `/assist` endpoint.
-- **Tier 1 is REPL-only**, by construction: no confirmation callback, no write
-  facade, no setup tools in the schema the model is shown.
+- **Both executing tiers are REPL-only**, by construction: no confirmation
+  callback, no facade, and neither tier's tools in the schema the model is shown.
+  Missing any one of the three parts (registry, facade, prompt) means the tier is
+  off, not unconfirmed.
 - **Read the preview, not the prose.** The `[y/N]` line above the prompt is what
   will actually happen; the model's sentence describing it is not the contract.
 - **Adding several tapes is several transactions.** The catalog commits per
@@ -324,7 +544,20 @@ Run it? [y/N] n
   from *naming* a write; they do not make writes unreachable in the process, since
   a SQLAlchemy row knows its session. That gap is covered by the AST scans over the
   package rather than by the proxy, and it predates the two-tier model.
-- **Always read a proposed command before running it.** For everything in tier 2 the
+- **Archive and restore block the REPL.** They are synchronous jobs, so the prompt
+  does not come back until they finish — minutes, on a real library. The lines
+  before and after are there so a long silence is not mistaken for a hang; do not
+  reach for Ctrl-C mid-write.
+- **The job id arrives after the fact, not before.** `ArchiveService.enqueue` and
+  `RestoreService.enqueue` create the job inside the same call that runs it, so
+  the completion line is the first point at which there is an id to print. The
+  assistant does not create job rows itself.
+- **`archive_path` is capped at 500 files** per confirmed action — a preview nobody
+  can read is not a confirmation. Use `openblade archive` for bigger trees.
+- **WORM is not reported.** No backend surfaces a WORM bit through the services, so
+  the format preview says so rather than guessing from a barcode suffix. Check the
+  cartridge label yourself if it matters.
+- **Always read a proposed command before running it.** For everything in tier 3 the
   assistant is an advisor, and the human is the safety gate that actually matters.
 
 ## See also
