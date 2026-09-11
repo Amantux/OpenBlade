@@ -170,15 +170,17 @@ def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
     import sys
     from pathlib import Path
 
-    console_script = Path(sys.executable).with_name("openblade")
-    if not console_script.exists():
-        found = shutil.which("openblade")
-        if found is None:
-            pytest.skip("openblade console script not installed in this environment")
-        console_script = Path(found)
+    # Invoke via `-m` with PYTHONPATH pinned to THIS repo: the venv's
+    # editable-install console script can resolve `openblade` from a
+    # DIFFERENT checkout (worktrees share one venv), silently testing other
+    # code. `shutil` retained for no other caller. 
+    del shutil
+    repo_root = Path(__file__).resolve().parents[2]
+    console_script = None  # replaced by the -m invocation below
 
     env = {
         **os.environ,
+        "PYTHONPATH": str(repo_root),
         "OPENBLADE_BACKEND": "mock",
         "OPENBLADE_DB_URL": f"sqlite:///{tmp_path / 'cli.db'}",
         "OPENBLADE_CACHE_DIR": str(tmp_path / "cache"),
@@ -187,7 +189,7 @@ def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
         "HOME": str(tmp_path),
     }
     seed = subprocess.run(
-        [str(console_script), "mock", "init", "--cartridges", "2"],
+        [sys.executable, "-m", "openblade.cli.main", "mock", "init", "--cartridges", "2"],
         capture_output=True,
         text=True,
         env=env,
@@ -196,7 +198,7 @@ def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
     assert seed.returncode == 0, seed.stderr
 
     dry_run = subprocess.run(
-        [str(console_script), "format", "dry-run", "--barcode", "MCK00001"],
+        [sys.executable, "-m", "openblade.cli.main", "format", "dry-run", "--barcode", "MCK00001"],
         capture_output=True,
         text=True,
         env=env,
@@ -209,7 +211,7 @@ def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
     # "tape operation queued"/"completed" log lines. Those are what used to
     # land on stdout ahead of the JSON.
     confirm = subprocess.run(
-        [str(console_script), "format", "confirm", "--barcode", "MCK00001", "--token", token],
+        [sys.executable, "-m", "openblade.cli.main", "format", "confirm", "--barcode", "MCK00001", "--token", token],
         capture_output=True,
         text=True,
         env=env,

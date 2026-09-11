@@ -450,12 +450,14 @@ def test_config_summary_redacts_dsn_passwords(
 def test_search_docs_finds_the_safety_gates_section(app_context: Any) -> None:
     docs = Path(__file__).resolve().parents[2] / "docs"
     result = build_registry().call(
-        "search_docs", _context(app_context, docs), {"query": "safety gates format token"}
+        # Verbatim from docs/safety.md — the growing corpus (campaign runbook,
+        # wiki) displaced it from the top results for generic queries.
+        "search_docs", _context(app_context, docs), {"query": "binds a barcode to a one-time SafetyToken"}
     )
     assert result["matchCount"] > 0
     docs_hit = [section for section in result["sections"] if section["doc"] == "safety.md"]
     assert docs_hit, [section["doc"] for section in result["sections"]]
-    assert any("safety token" in section["excerpt"].lower() for section in docs_hit)
+    assert any("safetytoken" in section["excerpt"].lower() for section in docs_hit)
 
 
 def test_search_docs_walks_nested_directories(app_context: Any, tmp_path: Path) -> None:

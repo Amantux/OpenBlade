@@ -505,3 +505,9 @@ def hardware_validate_ltfs(
         exercise_mounts=exercise_mounts,
     )
     console.print_json(data=report.to_dict())
+
+
+if __name__ == "__main__":  # pragma: no cover — the console script calls app() via the entry point
+    # Without this, `python -m openblade.cli.main …` imports the module,
+    # prints nothing, and exits 0 — which reads as success to a script.
+    app()

@@ -478,14 +478,22 @@ def _split_sections(text: str) -> list[tuple[str, str]]:
     return sections
 
 
-def _score(terms: Sequence[str], heading: str, body: str) -> int:
-    heading_lower = heading.lower()
-    body_lower = body.lower()
+def _score(terms: Sequence[str], heading: str, body: str, phrase: str = "") -> int:
+    # Markdown code-spans break exact-phrase matches ("one-time `SafetyToken`"
+    # never contains "one-time safetytoken") — strip backticks before matching.
+    heading_lower = heading.lower().replace("`", "")
+    body_lower = body.lower().replace("`", "")
     score = 0
     for term in terms:
         if term in heading_lower:
             score += 10
         score += min(body_lower.count(term), 5)
+    # An exact-phrase hit is the strongest possible signal: without this
+    # bonus, a section quoting the query verbatim is outranked by pages that
+    # merely repeat one common term ("barcode") many times — observed once
+    # the wiki + campaign runbook grew the corpus.
+    if phrase and (phrase in body_lower or phrase in heading_lower):
+        score += 100
     return score
 
 
@@ -505,7 +513,7 @@ def _search_docs(context: ToolContext, arguments: Mapping[str, Any]) -> JSONDict
         relative = path.relative_to(docs_dir).as_posix()
         path_bonus = 3 * sum(1 for term in terms if term in relative.lower())
         for heading, body in _split_sections(text):
-            score = _score(terms, heading, body) + path_bonus
+            score = _score(terms, heading, body, phrase=query.lower().replace("`", "").strip()) + path_bonus
             if score <= path_bonus:
                 continue
             hits.append((score, relative, heading, body))
