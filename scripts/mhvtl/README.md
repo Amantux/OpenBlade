@@ -4,7 +4,9 @@ A virtual tape library — **1 medium changer + 3 LTO-8 drives + 8 barcoded
 slots + 4 I/E slots** — so `tests/hardware/` can exercise the *real* hardware
 backend (`openblade/hardware/`) with no physical hardware and no risk.
 
-This is Phase 2 of [`docs/runbooks/real-i3-bringup-plan.md`](../../docs/runbooks/real-i3-bringup-plan.md).
+This is Phase 2 of `docs/runbooks/real-i3-bringup-plan.md`. That plan is not on
+`master` yet — it lives on `chore/py312-baseline-and-quantum-refs`
+(`git show 1d8c565:docs/runbooks/real-i3-bringup-plan.md`).
 For what the first rehearsal actually found, read
 [`docs/runbooks/mhvtl-rehearsal.md`](../../docs/runbooks/mhvtl-rehearsal.md).
 

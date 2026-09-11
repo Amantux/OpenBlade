@@ -4,7 +4,10 @@
 suite green · **Host:** Ubuntu 22.04.5, kernel 5.15.0-174-generic, x86_64,
 bare metal, Secure Boot disabled.
 
-This is Phase 2 of [`real-i3-bringup-plan.md`](real-i3-bringup-plan.md): run the
+This is Phase 2 of `docs/runbooks/real-i3-bringup-plan.md` — which is **not on
+`master` yet**; it lives on the `chore/py312-baseline-and-quantum-refs` branch
+(commit `1d8c565`), so the links to it below only resolve once that lands. Read
+it with `git show 1d8c565:docs/runbooks/real-i3-bringup-plan.md`. Phase 2 is: run the
 entire hardware suite against a virtual library, with zero risk, before anyone
 cables an i3. It is the first time `openblade/hardware/` has executed against a
 real SCSI medium changer, real `mtx`, and real LTFS rather than against sample
