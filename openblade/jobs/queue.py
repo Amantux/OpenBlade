@@ -1,15 +1,23 @@
 """In-process job queue with resource ownership tracking."""
 
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TypeVar
 
-from openblade.domain.errors import ChangerBusyError, DriveOccupiedError, JobNotFoundError
+from openblade.domain.errors import (
+    ChangerBusyError,
+    DriveOccupiedError,
+    JobNotFoundError,
+    safe_job_error,
+)
 from openblade.domain.models import Job, JobState, JobType
 
 ResultT = TypeVar("ResultT")
+
+logger = logging.getLogger(__name__)
 
 
 class JobQueue:
@@ -77,7 +85,8 @@ class JobQueue:
         try:
             result = func()
         except Exception as exc:
-            self.update_job(job.id, state=JobState.FAILED, error=str(exc))
+            logger.warning("job %s failed", job.id, exc_info=True)
+            self.update_job(job.id, state=JobState.FAILED, error=safe_job_error(exc))
             raise
         completed = self.update_job(job.id, state=JobState.COMPLETED, error=None)
         return completed, result

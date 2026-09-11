@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.domain.errors import safe_job_error
 from openblade.domain.models import MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
@@ -193,7 +194,7 @@ def run_sharded_archive(
                     files_archived += 1
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Shard archive failed for %s", source_file)
-                    errors.append(str(exc))
+                    errors.append(safe_job_error(exc))
         else:
             files_archived, bytes_archived = _archive_stripe(
                 files,
@@ -410,7 +411,7 @@ def _archive_stripe(
                 exc,
                 exc_info=True,
             )
-            errors.append(str(exc))
+            errors.append(safe_job_error(exc))
         finally:
             for mount in mounts.values():
                 with suppress(Exception):

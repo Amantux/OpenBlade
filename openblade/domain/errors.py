@@ -96,3 +96,16 @@ class SimulatedRobotTimeout(OpenBladeError):
 
 class SimulatedMountFailure(OpenBladeError):
     """Injected mount failure (simulator only)."""
+
+
+def safe_job_error(exc: Exception) -> str:
+    """Curated failure text for UNAUTHENTICATED surfaces (jobs.error).
+
+    Typed OpenBlade errors carry operator-written messages and pass through.
+    Anything else — CommandError (argv + raw mkltfs/mtx stderr), OSError,
+    RuntimeError wrapping tool output — must never reach the wire: psycopg-
+    style tools echo device paths and command lines. Callers log the full
+    exception server-side; this returns only the class name."""
+    if isinstance(exc, OpenBladeError):
+        return str(exc)
+    return f"Job failed ({type(exc).__name__}); see server logs for detail"

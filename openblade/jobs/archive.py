@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from openblade.api import aml_state
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
-from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError
+from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError, safe_job_error
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.verify import sha256sum
@@ -150,7 +150,9 @@ def _mark_aml_drive_idle(barcode: str, drive_id: int, slot_id: int | None) -> No
         aml_state.update_aml_drive(drive_name, {"state": "idle", "loadedMedia": None})
     media = aml_state.get_aml_media(barcode)
     if media is not None and slot_id is not None:
-        aml_state.update_aml_media(barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"})
+        aml_state.update_aml_media(
+            barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"}
+        )
 
 
 def _load_if_needed(
@@ -337,7 +339,7 @@ def run_archive_job(
                 _mark_aml_drive_idle(current_barcode, current_drive_id, current_slot_id)
             except Exception:
                 logger.exception("failed to reset archive AML drive state for job %s", job_id)
-        catalog.update_job_state(job_id, "failed", str(exc))
+        catalog.update_job_state(job_id, "failed", safe_job_error(exc))
         raise
 
     result = ArchiveResult(
