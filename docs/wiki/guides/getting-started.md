@@ -67,9 +67,9 @@ openblade mock init --slots 8 --drives 2 --cartridges 4
 Initialized mock library with 8 slots, 2 drives, 4 cartridges
 ```
 
-This wipes and recreates the state under `~/.openblade/` — the mock library
-state file and the catalog database. It is the only destructive simulator
-command.
+This **deletes and recreates** the catalog database and overwrites the mock
+library state file, both under `~/.openblade/`. Running it again later discards
+everything you have archived in the simulator.
 
 The cartridges are barcoded `MCK00001`…`MCK0000N`.
 
