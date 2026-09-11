@@ -2,29 +2,70 @@
 
 `openblade assist` is a local chat assistant that answers questions about **your**
 library: what is in which slot, which tape a file lives on, why a job failed, what a
-volume group is for, and how to do a thing safely.
+volume group is for, and how to do a thing safely. In the interactive REPL it can
+also *do* the safe part of setting up — creating a pool and putting tapes in it —
+after asking you, each time.
 
 It runs against [Ollama](https://ollama.com), so the conversation and your catalog
 never leave your machine unless you deliberately point it at a cloud endpoint.
 
+## The two tiers
+
+| | Tier 1 — it can do this | Tier 2 — everything else |
+|---|---|---|
+| **What** | `create_volume_group`, `add_tapes_to_volume_group` | format, load, unload, move, eject, archive, restore, delete — and anything not in the left column |
+| **How** | It shows you exactly what it would do and asks `[y/N]`. Only `y` runs it. | It proposes the exact command; **you** run it. |
+| **Where** | Interactive REPL only | Everywhere |
+| **Why it's allowed** | Catalog-only, reversible by hand, touches no media and no hardware | Moves media, destroys data, or cannot be undone |
+
+Tier 1 exists because pool setup is the one part of getting started that is pure
+bookkeeping — and it is the part people get stuck on. Nothing else moved: the
+two-phase format flow, the real-hardware flags and the mount-state gate are
+untouched, and the assistant still refuses to help you around any of them.
+
+### What tier 1 will not do, even if you say yes
+
+**Confirmation is not a licence to guess.** If the action cannot name exactly what
+it would touch, it is refused and nothing changes:
+
+- a barcode that isn't in this library → refused, with the barcodes you might have
+  meant (prefix matches first, then tapes currently in no pool);
+- a tape that is already in another pool → refused, naming that pool. Moving a tape
+  between pools is a decision, so it is yours to make;
+- a volume-group name that already exists → refused (the REST API answers `409` for
+  the same request);
+- a name with a newline in it, a non-alphanumeric "barcode", thirty tapes in one
+  action → refused.
+
+The validation runs before you are asked *and again* inside the write path, so a
+`y` given a minute ago cannot act on facts that have since changed.
+
 ## The safety line
 
-**The assistant cannot run anything.** It reads state, explains, and proposes the
-exact command for *you* to run. It never loads, unloads, moves, formats, erases,
-archives or restores, and it never shells out.
-
-That is not a promise made in a prompt — it is how the code is built:
+**The assistant cannot run anything except the two tier-1 actions, and never
+without your yes.** That is not a promise made in a prompt — it is how the code is
+built:
 
 | Guard | Where | What it stops |
 |---|---|---|
-| Tool allowlist | `openblade/assistant/tools.py` (`READ_ONLY_TOOL_NAMES`) | A tool registered without being added to the allowlist raises at startup. New tools fail **closed**. |
-| Read-only proxies | `openblade/assistant/readonly.py` | Tools see a proxy over the catalog and library whose attribute allowlist contains only read methods. `catalog.create_volume_group` and `library.load` are not reachable — they raise, they do not return a callable. The proxy keeps no instance state, so `__class__`, `__init__`, `__dict__` and `__reduce__` are refused as well: there is no route back to the live object. |
-| No write path in the loop | `openblade/assistant/session.py` | No subprocess import, no database session, no `commit()`. The loop can only call handlers the registry accepted. |
+| Read-only tool allowlist | `openblade/assistant/tools.py` (`READ_ONLY_TOOL_NAMES`) | A read tool registered without being added to the allowlist raises at startup. New tools fail **closed**. |
+| Read-only proxies | `openblade/assistant/readonly.py` | Read tools see a proxy over the catalog and library whose attribute allowlist contains only read methods. `catalog.create_volume_group` and the library's media moves are not reachable — they raise, they do not return a callable. The proxy keeps no instance state, so `__class__`, `__init__`, `__dict__` and `__reduce__` are refused as well: there is no route back to the live object. |
+| Setup allowlist | `openblade/assistant/setup_tools.py` (`SETUP_TOOL_NAMES`) | Exactly two names may ever be tier-1 tools. Anything else raises at registry-build time. |
+| Destructive-verb denylist | `openblade/assistant/setup_tools.py` (`DESTRUCTIVE_VERBS`) | A tool name containing `format`, `load`, `unload`, `move`, `eject`, `delete`, `erase`, `wipe`, `restore`, `archive` or `write` is refused **even if someone also adds it to the allowlist**. Widening tier 1 to a destructive action takes two deliberate edits and a test change, not one. |
+| Narrow write facade | `openblade/assistant/setup_facade.py` | Tier-1 tools do not get the catalog. They get a facade exposing five named operations; every other attribute — repository methods, `__init__`, `__reduce__`, `_target` — raises. Even the callables it hands back are sealed, because a plain closure or bound method would leak the repository through `__closure__` / `__self__`. The library backend is not behind it at all. |
+| Confirmation gate | `openblade/assistant/session.py` | A tier-1 call never runs on arrival. It becomes a `PendingAction` with a preview, and only an explicit `y` executes it. No confirmation callback (one-shot mode) ⇒ the setup tools are not even offered to the model. |
+| One write path | `tests/safety/test_assistant_read_only.py` | An AST scan over the whole package: `setup_facade.py` is the only file allowed to name a catalog write method. |
 
-All three are covered by `tests/safety/test_assistant_read_only.py`, and both
-allowlist guards are mutation-checked: disable either one and those tests fail.
-The source scans there walk the whole package (`rglob`) and assert the exact file
-list, so a new module cannot quietly fall outside the guard.
+All of it is covered by `tests/safety/test_assistant_read_only.py`, and every
+structural guard is mutation-checked — remove the guard and a named test fails
+(verified, not assumed). The denylist check widens the allowlist on purpose first,
+so only the denylist can be what fails it. The source scans walk the whole package
+(`rglob`) and assert the exact file list, so a new module cannot quietly fall
+outside the guard.
+
+Every executed or declined tier-1 action writes one structured line to the
+`openblade.assistant.setup` logger (`actor=assistant tool=… outcome=… args=…
+result=…`), JSON-encoded so a crafted name cannot forge a second line.
 
 It will also **refuse to help you bypass a safety gate**. Ask how to skip the format
 safety token and it will explain what that gate protects against and show you the
@@ -83,7 +124,7 @@ One-shot:
 openblade assist "which tape is /photos/2019/wedding.raw on?"
 ```
 
-Interactive:
+Interactive (the only mode where it can execute anything):
 
 ```bash
 openblade assist
@@ -91,6 +132,10 @@ openblade> which drives are loaded right now?
 openblade> /reset     # clear the conversation
 openblade> /quit
 ```
+
+One-shot mode has nobody to ask, so it is not offered the tier-1 tools at all and
+its system prompt says setup execution needs the REPL. You cannot get an
+unconfirmed write by piping a question into it.
 
 Tool calls appear as dim single lines so you can see what was consulted:
 
@@ -100,10 +145,18 @@ Tool calls appear as dim single lines so you can see what was consulted:
 ```
 
 If an answer looks wrong, those lines tell you whether it looked anything up at all.
+A tier-1 action prints a yellow proposal and a prompt, and a green line after it
+ran:
+
+```
+Proposed action: Create volume group 'photos' (your first pool).
+Run it? [y/N] y
+✓ create_volume_group applied
+```
 
 ## What it can see
 
-Eight read-only tools, and nothing else:
+Eight read-only tools:
 
 | Tool | Answers |
 |---|---|
@@ -116,6 +169,18 @@ Eight read-only tools, and nothing else:
 | `get_config_summary` | Backend mode, drive/slot counts, the state of each safety gate. |
 | `search_docs` | Best-matching sections of `docs/` — this wiki, the runbooks, the reference docs. |
 
+...and, in the REPL only, two tier-1 tools it may *perform* once you confirm:
+
+| Tool | Does | Asks first |
+|---|---|---|
+| `create_volume_group` | Creates an empty pool in the catalog. Creates no tapes. | Always |
+| `add_tapes_to_volume_group` | Puts cartridges that already exist into an existing pool. | Always |
+
+There is deliberately **no** tool for removing a tape from a pool: the catalog layer
+has no such operation, and the assistant does not get capabilities the rest of
+OpenBlade doesn't have. (If one is ever added it cannot be called
+`remove_tapes_from_volume_group` — the denylist rejects any name containing `move`.)
+
 **No credentials are ever exposed.** Secrets are reduced at the boundary, before
 the tool context is built: the Scalar password becomes `scalarCredentialSet:
 true/false`, and the database URL becomes its scheme (`postgresql://<redacted>`), so
@@ -123,35 +188,57 @@ a DSN password cannot reach the model's context — or a traceback, or a log lin
 
 ## Examples
 
-### "Help me set up a pool for photo archives across 2 tapes"
+### Setting up a pool, talked through (a full REPL transcript)
 
-The assistant will check what tapes you actually have, then propose the commands:
+This is the flagship case: you say what you want, it does the bookkeeping parts
+with your say-so, and hands you the destructive parts to run yourself.
 
 ```
+$ openblade assist
+OpenBlade assistant. It can create a volume group and add tapes to one, and it
+asks you first — [y/N] — every time. Everything else it proposes; you run it.
+Type your question, or /quit to leave, /reset to clear the conversation.
+
+openblade> I want to archive my photos onto tape. Help me get set up.
 · get_inventory
 · list_volume_groups
 ```
-
-> You have 20 slots with 5 cartridges and no volume group yet. A *volume group* is
+> You have 20 slots with 5 cartridges and no volume groups yet. A *volume group* is
 > a pool of tapes that archives are written into — files go to whichever member tape
-> has room, and the catalog records which one.
+> has room, and the catalog records which one. Two of your cartridges (PH000001,
+> PH000002) are unformatted and in no pool, so they are the natural candidates.
 >
-> Create the pool:
+> Shall I create a pool called `photo-archive` and put those two tapes in it?
+
+```
+openblade> yes, call it photo-archive
+· create_volume_group {"name": "photo-archive"}
+
+Proposed action: Create volume group 'photo-archive' (your first pool).
+Run it? [y/N] y
+✓ create_volume_group applied
+```
+> Done — `photo-archive` exists and is empty. Now the tapes.
+
+```
+openblade> add both of them
+· add_tapes_to_volume_group {"name": "photo-archive", "barcodes": ["PH000001", "PH000002"]}
+
+Proposed action: Add tape(s) PH000001, PH000002 to volume group 'photo-archive'.
+Run it? [y/N] y
+✓ add_tapes_to_volume_group applied
+```
+> Done — `photo-archive` now has 2 tapes: PH000001 and PH000002.
 >
-> ```bash
-> openblade volume-group photo-archive
-> ```
->
-> Two of your cartridges (PH000001, PH000002) are unformatted, so they need
-> formatting before they can take data. That is destructive, so do it one tape at a
-> time with the dry run first:
+> Both are still unformatted, and that part I can't do for you: formatting erases a
+> cartridge and is unrecoverable, so it is a two-step flow you run yourself. Dry run
+> first — it prints the plan and mints a one-time token bound to that barcode:
 >
 > ```bash
 > openblade format dry-run --barcode PH000001
 > ```
 >
-> Read the plan it prints, confirm PH000001 is the tape you mean, then pass the
-> token it gave you:
+> Read the plan, confirm PH000001 is the tape you mean, then:
 >
 > ```bash
 > openblade format confirm --barcode PH000001 --token <TOKEN-FROM-DRY-RUN>
@@ -164,6 +251,25 @@ The assistant will check what tapes you actually have, then propose the commands
 > ```bash
 > openblade archive --volume-group photo-archive --path /srv/photos
 > ```
+
+Two things worth noticing in that transcript. The tapes it offered were ones it had
+actually *looked up* — ask it to add `PH009999` and it refuses, listing the barcodes
+you might have meant, rather than creating a phantom tape. And the moment the work
+turned destructive it went back to proposing; there is no tool it could have called
+instead.
+
+If you answer `n`, nothing happens, it is told you declined, and it moves on —
+it will not ask you about that same action a second time:
+
+```
+openblade> actually make one called photos
+· create_volume_group {"name": "photos"}
+
+Proposed action: Create volume group 'photos' (you have 1 already).
+Run it? [y/N] n
+```
+> All right, nothing created. Did you want to rename `photo-archive` instead, or use
+> a different name for a second pool?
 
 ### "Where is wedding.raw?"
 
@@ -206,11 +312,17 @@ The assistant will check what tapes you actually have, then propose the commands
   candidate records; a very broad pattern reports `scanTruncated` rather than
   loading a large archive's whole catalog into memory.
 - **No HTTP API in v1.** The assistant is CLI-only; there is no `/assist` endpoint.
-- **Always read a proposed command before running it.** The assistant is an advisor,
-  and the human is the safety gate that actually matters.
+- **Tier 1 is REPL-only**, by construction: no confirmation callback, no write
+  facade, no setup tools in the schema the model is shown.
+- **Read the preview, not the prose.** The `[y/N]` line above the prompt is what
+  will actually happen; the model's sentence describing it is not the contract.
+- **Always read a proposed command before running it.** For everything in tier 2 the
+  assistant is an advisor, and the human is the safety gate that actually matters.
 
 ## See also
 
 - [`docs/safety.md`](../../safety.md) — the full safety model and every gate
 - [`docs/runbooks/safe-format-checklist.md`](../../runbooks/safe-format-checklist.md)
-- `openblade/assistant/readonly.py` — the enforcement points, documented in place
+- `openblade/assistant/readonly.py` — the read-only enforcement points, documented
+  in place
+- `openblade/assistant/setup_facade.py` — the entire write surface, in one file
