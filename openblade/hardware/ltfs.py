@@ -3,6 +3,7 @@ from __future__ import annotations
 """Safe LTFS command helpers for real hardware."""
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +26,8 @@ from openblade.domain.policies import DryRunPlan, FormatConfirmation, RealHardwa
 from openblade.hardware.discovery import resolve_sg_device
 from openblade.hardware.library import RealLibraryBackend
 from openblade.hardware.runner import CommandError, SafeRunner
+
+logger = logging.getLogger(__name__)
 
 SAMPLE_LTFS_DEVICE_LIST = """
 [2026-05-19 12:00:00] LTFS14000I Device list:
@@ -145,26 +148,35 @@ def parse_ltfs_device_list(output: str) -> list[LTFSDevice]:
     return devices
 
 
-def _ltfs_processes_holding(mount_point: str) -> list[int]:
+def _ltfs_processes_holding(mount_point: str) -> list[int] | None:
     """PIDs of running ``ltfs`` processes whose argv mentions ``mount_point``.
 
     Read straight from procfs so this needs no extra dependency and no
     subprocess. A process that exits mid-scan simply disappears.
+
+    Returns ``None`` when procfs cannot be enumerated at all — under
+    ``hidepid``, in a restricted container, or as an unprivileged uid. That is
+    *unknown*, not *released*: this feeds a data-integrity gate, so "I could
+    not look" must never read as "safe to yank the cartridge".
     """
     holders: list[int] = []
     try:
         entries = list(Path("/proc").iterdir())
     except OSError:
-        return holders
+        return None
     for entry in entries:
         if not entry.name.isdigit():
             continue
         try:
             argv = (entry / "cmdline").read_bytes().split(b"\0")
         except OSError:
+            # A single unreadable process is normal (it may have just exited,
+            # or belong to another user). Only total failure is "unknown".
             continue
         if not argv or not argv[0]:
             continue
+        # Best-effort argv match: a wrapper or a differently-spelled mount
+        # point would be missed. It is a backstop, not a lock.
         if PurePosixPath(argv[0].decode(errors="replace")).name != "ltfs":
             continue
         if any(arg.decode(errors="replace") == mount_point for arg in argv[1:]):
@@ -172,18 +184,41 @@ def _ltfs_processes_holding(mount_point: str) -> list[int]:
     return holders
 
 
-def wait_for_ltfs_release(mount_point: str, timeout_seconds: float = 60.0) -> bool:
+# Observed release on the mhvtl rig is well under a second. This bound exists
+# for a wedged process, and it is deliberately not generous: callers include an
+# async request handler, so every second here is a second of blocked event loop.
+LTFS_RELEASE_TIMEOUT_SECONDS = 20.0
+
+
+def wait_for_ltfs_release(
+    mount_point: str, timeout_seconds: float = LTFS_RELEASE_TIMEOUT_SECONDS
+) -> bool:
     """Block until the LTFS process for ``mount_point`` has exited.
 
-    Returns True if it released within the timeout, False otherwise. Callers
-    treat False as "probably still busy", not as an unmount failure - the
-    unmount itself already succeeded.
+    Returns True only if we positively observed the release. False means
+    "still held, or we could not tell" — both of which mean the drive may not
+    be safe to unload yet.
     """
     deadline = monotonic() + timeout_seconds
     while True:
-        if not _ltfs_processes_holding(mount_point):
+        holders = _ltfs_processes_holding(mount_point)
+        if holders is None:
+            logger.warning(
+                "cannot enumerate /proc to confirm LTFS released %s; "
+                "treating the drive as still held",
+                mount_point,
+            )
+            return False
+        if not holders:
             return True
         if monotonic() >= deadline:
+            logger.error(
+                "LTFS still holds %s after %.0fs (pids %s); the drive is not "
+                "safe to unload",
+                mount_point,
+                timeout_seconds,
+                holders,
+            )
             return False
         sleep(0.1)
 
@@ -312,24 +347,37 @@ class LTFSCommandBackend:
                 {"mount_point": mount_point, "args": args},
             )
         result = runner.run(args, timeout=120)
-        released = True
-        if result.success:
-            # `umount` returns as soon as the kernel detaches the filesystem,
-            # but the LTFS FUSE process lives on for a moment to flush its
-            # index and close the drive. Until it exits, the drive's sg node
-            # is still held and the NEXT mount of the same drive fails with
-            # "Cannot open device: failed to open /dev/sgN (16)" - EBUSY.
-            # An unmount/remount cycle (or unload-then-reload on a real
-            # library) hits this reliably, so wait for the release here rather
-            # than making every caller sleep.
-            released = wait_for_ltfs_release(mount_point)
+
+        # `umount` returns as soon as the kernel detaches the filesystem, but
+        # the LTFS FUSE process lives on for a moment to flush its index and
+        # close the drive. Until it exits the drive's sg node is still held:
+        # the next mount fails with "Cannot open device: failed to open
+        # /dev/sgN (16)" (EBUSY), and - far worse - an unload at that moment
+        # pulls the cartridge out from under an index that has not been
+        # written. "Never unload while LTFS is mounted or dirty" is a project
+        # non-negotiable, so the drive being FREE is what this operation
+        # promises, not merely that umount exited 0.
+        #
+        # Judging on release rather than on the exit status also makes retries
+        # work: a second call whose `umount` fails with "not mounted" still
+        # reports success once LTFS has actually gone.
+        released = wait_for_ltfs_release(mount_point)
+
+        if released:
+            message = "unmounted"
+        elif result.success:
+            message = "unmount incomplete: LTFS still holds the drive"
+        else:
+            message = "unmount failed"
+
         return OperationResult(
-            result.success,
-            "unmounted" if result.success else "unmount failed",
+            released,
+            message,
             {
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "args": args,
+                "umount_exit_ok": result.success,
                 "device_released": released,
             },
         )

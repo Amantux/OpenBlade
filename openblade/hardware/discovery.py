@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Hardware discovery parsers for lsscsi and sg_map."""
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,8 +103,7 @@ def parse_sg_map(output: str) -> dict[str, str]:
     return mapping
 
 
-_SYSFS_TAPE_CLASS = Path("/sys/class/scsi_tape")
-_SYSFS_CHANGER_CLASS = Path("/sys/class/scsi_changer")
+logger = logging.getLogger(__name__)
 
 
 def resolve_sg_device(device: str, *, sysfs_root: Path | None = None) -> str:
@@ -133,14 +133,9 @@ def resolve_sg_device(device: str, *, sysfs_root: Path | None = None) -> str:
     if name.startswith("sg"):
         return device
 
-    root = sysfs_root if sysfs_root is not None else Path("/sys")
-    tape_class = root / "class" / "scsi_tape" if sysfs_root is not None else _SYSFS_TAPE_CLASS
-    changer_class = (
-        root / "class" / "scsi_changer" if sysfs_root is not None else _SYSFS_CHANGER_CLASS
-    )
-
-    for class_dir in (tape_class, changer_class):
-        generic_dir = class_dir / name / "device" / "scsi_generic"
+    root = sysfs_root or Path("/sys")
+    for class_name in ("scsi_tape", "scsi_changer"):
+        generic_dir = root / "class" / class_name / name / "device" / "scsi_generic"
         try:
             entries = sorted(entry.name for entry in generic_dir.iterdir())
         except OSError:
@@ -148,6 +143,17 @@ def resolve_sg_device(device: str, *, sysfs_root: Path | None = None) -> str:
         for entry in entries:
             if entry.startswith("sg"):
                 return f"/dev/{entry}"
+
+    # Falling back to the tape node is the behaviour that produces LTFS's
+    # "No index found in the medium" - i.e. it looks like bad media rather than
+    # a bad device path. Say so, loudly, so the next person does not have to
+    # rediscover it.
+    logger.warning(
+        "no SCSI generic node found for %s under %s; using it as-is. "
+        "SCSI pass-through tools (LTFS, sg_inq) may misbehave on a tape node.",
+        device,
+        root,
+    )
     return device
 
 
