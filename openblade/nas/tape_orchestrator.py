@@ -14,7 +14,7 @@ import structlog
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import ChecksumMismatchError
 from openblade.domain.models import MountMode
-from openblade.domain.policies import FormatConfirmation, SafetyToken
+from openblade.domain.policies import FormatConfirmation
 from openblade.nas.types import TapeOpRecord, TapeOpRequest, TapeOpStatus, TapeOpType
 
 logger = structlog.get_logger(__name__)
@@ -204,11 +204,27 @@ class TapeOperationOrchestrator:
     def _format(self, request: TapeOpRequest) -> dict[str, Any]:
         confirmation = request.extras.get("format_confirmation")
         if not isinstance(confirmation, FormatConfirmation):
-            confirmation = FormatConfirmation(
-                expected_barcode=request.barcode,
-                safety_token=SafetyToken.generate("format", request.barcode),
-                operator_note=str(request.extras.get("operator_note", "")),
+            # It used to MINT its own SafetyToken here. `extras` is bound straight
+            # from the `POST /tape-ops/execute` body, so `{"confirmed_format":true}`
+            # -- a bare boolean an operator can type -- was the entire gate on a
+            # destructive operation, and the orchestrator then issued itself the
+            # token that was supposed to authorise it. AGENTS.md: "Never perform
+            # format or erase operations without positive barcode confirmation and
+            # a cryptographically valid safety token."
+            #
+            # This was previously inert against real hardware only by accident --
+            # the format failed before reaching mkltfs because the cartridge was
+            # never loaded. Fixing that (same commit series) made the hole live,
+            # which is why it is closed here rather than left as pre-existing.
+            #
+            # The legitimate path (FormatService.confirm -> run_format_job) always
+            # supplies a FormatConfirmation carrying the token it just validated
+            # against the persisted safety_tokens row.
+            raise OperationNotConfirmedError(
+                "Format requires a FormatConfirmation carrying a valid safety token; "
+                "obtain one from the format dry-run and confirm through FormatService"
             )
+        confirmation.validate(request.barcode)
         # mkltfs runs against a drive, so the cartridge has to be in one. The
         # simulator's format() only needs a barcode, which is why this was never
         # noticed: against real hardware every `openblade format confirm` on a

@@ -204,11 +204,22 @@ def _load_state(context: AppContext) -> AppContext:
     return context
 
 
-def _get_context() -> AppContext:
-    context = create_context(_default_config())
+def _get_context(*, force_mock: bool = False) -> AppContext:
+    """Build the CLI's app context.
+
+    ``force_mock`` is for the ``mock`` subcommand group, which is simulator-only
+    by definition. Without it, `openblade mock load --slot 3 --drive 0` in a
+    shell that exports OPENBLADE_BACKEND=real issues a real `mtx load` against a
+    real library -- a command whose name promises the opposite.
+    """
+    context = create_context(_mock_config() if force_mock else _default_config())
     context = _load_state(context)
     reset_context(context)
     return context
+
+
+def _get_mock_context() -> AppContext:
+    return _get_context(force_mock=True)
 
 
 def _print_inventory(context: AppContext) -> None:
@@ -281,13 +292,13 @@ def mock_init(
 @mock_app.command("inventory")
 def mock_inventory() -> None:
     """Show mock library inventory."""
-    _print_inventory(_get_context())
+    _print_inventory(_get_mock_context())
 
 
 @mock_app.command("load")
 def mock_load(slot: int = typer.Option(...), drive: int = typer.Option(0)) -> None:
     """Load cartridge from slot into drive."""
-    context = _get_context()
+    context = _get_mock_context()
     inventory = context.library.inventory()
     barcode = next(
         (
@@ -317,7 +328,7 @@ def mock_load(slot: int = typer.Option(...), drive: int = typer.Option(0)) -> No
 @mock_app.command("unload")
 def mock_unload(drive: int = typer.Option(0), slot: int = typer.Option(...)) -> None:
     """Unload cartridge from drive to slot."""
-    context = _get_context()
+    context = _get_mock_context()
     inventory = context.library.inventory()
     barcode = next(
         (

@@ -583,6 +583,20 @@ class RealLTFSBackend:
         if not mounted:
             # Keep the last good observation rather than inventing a new one.
             return
+        # `mounted` is the caller's BELIEF, not a fact, and being wrong is
+        # expensive: an unmounted mount point is a plain directory on the host
+        # disk, so statvfs would report the host filesystem and we would persist
+        # a ~2 TB "LTO-8 cartridge" into the catalog (jobs/archive.py copies
+        # capacity_bytes onto the cartridge row). Two ways to be wrong that are
+        # not hypothetical:
+        #   * OPENBLADE_HARDWARE_DRY_RUN=true with BackendMode.REAL -- a
+        #     supported, tested config in which mount() mkdir's the mount point
+        #     and LTFSCommandBackend never actually mounts anything;
+        #   * the documented unmount retry, where `released=False` leaves the
+        #     handle active after the filesystem is already gone.
+        # So verify it really is a separate filesystem before believing it.
+        if not _is_distinct_mount(mount_path):
+            return
         try:
             stats = os.statvfs(mount_path)
         except OSError:
@@ -591,6 +605,21 @@ class RealLTFSBackend:
             return
         tape.capacity_bytes = stats.f_frsize * stats.f_blocks
         tape.used_bytes = max(0, tape.capacity_bytes - stats.f_frsize * stats.f_bavail)
+
+
+def _is_distinct_mount(mount_path: Path) -> bool:
+    """True when ``mount_path`` is a mount point, not a directory on its parent's fs.
+
+    The classic st_dev comparison. Fails closed: if either stat fails we report
+    False, because for a check guarding what we persist as a cartridge's capacity,
+    "I could not look" must not mean "believe the number".
+    """
+    try:
+        here = os.stat(mount_path)
+        parent = os.stat(mount_path.parent)
+    except OSError:
+        return False
+    return here.st_dev != parent.st_dev
 
 
 def _relative_tape_path(path: PurePosixPath | str) -> Path:

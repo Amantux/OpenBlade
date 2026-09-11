@@ -11,10 +11,12 @@ drive it the way an operator would** — through the `openblade` CLI and the RES
 API, not through pytest.
 
 430 MB, 1,074 source entries, 1,073 files archived, restored and byte-verified
-against a seeded manifest. **It found eight defects**, including one that lost
-data silently and one that could orphan a third of an archive with a single
-unconfirmed API call. Neither is visible from the simulator, and neither would
-have been caught by the existing suites — which pass on both.
+against a seeded manifest. **It found eleven defects** — eight by running it, three more by attacking its own
+diff afterwards. They include one that lost data silently, one that could orphan a
+third of an archive with a single unconfirmed API call, and a format-token bypass
+that this branch's own fix turned from latent into working. None is visible from
+the simulator, and none would have been caught by the existing suites, which pass
+on all of them.
 
 Everything here is reproducible: `scripts/campaign/` holds the generator, the
 manifest, the phase runner and the verifier, so the identical campaign can be
@@ -376,7 +378,17 @@ rig: `/stripe/alpha/same.txt` and `/stripe/beta/same.txt`, both restoring to
 their own bytes. Existing media are unaffected — restore reads
 `file_instances.tape_path` as stored rather than recomputing it.
 
-`tests/integration/test_sharded_archive_restore.py` · commit `7c041a5`
+Self-review of that fix then found two defects *in the fix*: `Path.relative_to`
+does not normalise, so a `source_path` of `/data/..` (operator-supplied, straight
+from the API body) produced `/stripe/../etc/passwd` and escaped the mount; and
+`relative_to(itself)` returns `Path(".")` rather than raising, collapsing a
+single-file source to a bare `/stripe`. Both are closed — normalised lexically
+with `os.path.normpath` (never `resolve()`, which touches the filesystem and
+follows symlinks) plus a component filter. Worth recording because the
+single-file case had a test that *passed* on the broken version: MockLTFSBackend
+accepts any path string, so only probing the function directly exposed it.
+
+`tests/integration/test_sharded_archive_restore.py` · commits `7c041a5`, `441c11e`
 
 ### 3.8 A failed sharded archive recorded no reason anywhere
 
@@ -431,6 +443,136 @@ HTTP 400 {"detail":"destination slot 9 is not a data storage slot in this librar
 
 and the cartridge stayed in slot 3. `tests/unit/test_tape_orchestrator.py` ·
 commit `9d82533`
+
+### 3.10 The format safety token was self-issued — found by adversarial review
+
+Not found by running the campaign; found by attacking the campaign's own diff
+afterwards, which is why the reviewer step is not optional.
+
+`extras` on `POST /tape-ops/execute` is bound straight from the request body, and
+`_validate_request` accepted `extras["confirmed_format"] is True` — a bare boolean
+an operator can type — as the entire gate. `_format` then **minted its own
+`SafetyToken`** to satisfy the confirmation it was supposed to be checking:
+
+```json
+{"op_type":"format","barcode":"OB0001L8","extras":{"confirmed_format":true}}
+→ status: COMPLETED   result: {"formatted": true}
+```
+
+AGENTS.md: *"Never perform format or erase operations without positive barcode
+confirmation and a cryptographically valid safety token."*
+
+The hole predates this branch, **but defect 3.2 is what made it lethal.** Before
+that fix, on real hardware the same request died at "Barcode … is not loaded in a
+drive" for any cartridge in a slot — the normal state. Fixing the load made the
+bypass reach `mkltfs`. A fix that converts a latent auth hole into a working one
+has to close the hole in the same change, so:
+
+- `_format` no longer mints anything. No `FormatConfirmation` in extras →
+  `OperationNotConfirmedError`. It also calls `confirmation.validate(barcode)`, so
+  a token issued for one cartridge cannot format another.
+- `POST /ltfs/format` now goes through `FormatService.confirm`, which checks the
+  persisted one-time token from the dry-run. **This is a deliberate contract
+  tightening**: the route previously ignored the `safetyToken` its own callers
+  were already sending (`tests/i3/test_07_ltfs.py:53` sends one), and formatted
+  on `confirm: true` alone. It now returns 422 without a token and 403 on a bad
+  one. `tests/i3/test_07_ltfs.py::test_format_with_timing` sends a placeholder
+  token and will need a real dry-run token; that suite needs a live emulator and
+  was not run here.
+
+While in `routes_ltfs.py`: `/ltfs/mount` and `/ltfs/unmount` returned
+`str(exc)` from a bare `except Exception` on an unauthenticated route, leaking
+argv, device paths and raw LTFS stderr. Curated message out, cause to the log.
+
+`tests/unit/test_tape_orchestrator.py::test_format_refuses_a_bare_confirmed_format_flag`
+
+### 3.11 `statvfs` could read the host disk — found by adversarial review
+
+The capacity fix (3.5) trusts a `mounted` flag that is the **caller's belief**.
+Two ways to be wrong, neither hypothetical: `OPENBLADE_HARDWARE_DRY_RUN=true`
+with `BackendMode.REAL` is a supported, tested config in which `mount()` creates
+the mount point and nothing is ever mounted; and the documented unmount retry
+leaves the handle active after the filesystem is gone. In both, `statvfs` reads
+the host filesystem — and `jobs/archive.py:255` copies that straight onto the
+cartridge row. The reviewer reproduced it:
+
+```
+capacity_bytes: 1965172678656   used_bytes: 674029903872   ← the host disk
+```
+
+A ~2 TB "LTO-8 cartridge" in the catalog means spillover never fires again — the
+exact bug 3.5 exists to fix, reintroduced from the other direction. And on a
+nearly-full host disk, `remaining == 0` makes the new `_has_room_for` guard
+refuse *every* tape.
+
+`_is_distinct_mount()` now compares `st_dev` against the parent's before
+believing the numbers, and **fails closed**: if either stat fails, the answer is
+no. Verified against real LTFS — `True` while mounted, `False` after unmount.
+
+### 3.12 Other review findings, fixed
+
+- **`openblade mock inventory` / `mock load` / `mock unload` drove the real
+  library.** Defect 3.1 switched only `mock init` to a pinned mock config; the
+  other three went through the env-driven one, so in the campaign's own shell
+  `openblade mock load --slot 3 --drive 0` issued a real `mtx load`. All four now
+  use `_get_mock_context()`.
+- **Two of the 3.2 regression tests were vacuous against a full revert.** With
+  `_format` fully reverted, only `test_format_loads_the_cartridge_into_a_drive_first`
+  failed; the two unload tests passed *trivially*, because with no load the
+  cartridge was never in a drive. They now also assert `drive_at_format` and that
+  the cartridge returns to its **original** slot, and all three fail on a full
+  revert. The runbook's "every test was mutation-checked" claim was true of the
+  reverts I ran and false of the one I did not.
+- **`test_default_config_keeps_home_relative_paths` failed inside the campaign's
+  own documented shell** — the fixture cleared only the two backend variables,
+  while `scripts/campaign/env.sh` exports `OPENBLADE_DB_URL` and friends. Fixture
+  widened.
+- **A flaky capacity assertion.** `used_bytes` was asserted as an equality
+  against a live host filesystem, so a parallel test writing a temp file moved
+  `f_bavail` between the two reads. It is now a range, and the arithmetic tests
+  stub the mount check rather than depending on it.
+- **One tracked `.pyc` was committed** in `bffd191` and has been restored. 66 are
+  tracked on `master` despite `.gitignore` covering them, and they are
+  `cpython-310` artefacts on a repo pinned to 3.12 — worth a `git rm -r --cached`
+  pass that is out of scope here.
+
+### Review findings NOT fixed
+
+Reported rather than changed, because each is pre-existing, sits in a risky area,
+and the campaign had already made enough changes there:
+
+- **`jobs.error` now carries raw exception text at an unauthenticated boundary.**
+  `GET /jobs/` and `/jobs/{id}` have no auth dependency, and 3.8's error summary
+  routes `str(exc)` — which for a `CommandError` is argv plus raw `mkltfs` stderr
+  — into that field. `archive.py:333` already did this; 3.8 widened it. The right
+  fix is a sanitiser shared with `_safe_error_message`, and the existing test only
+  asserts the field is non-empty, so it locks in the leak. **This one should be
+  fixed before merge.**
+- **`_has_room_for` only rejects a tape with *exactly* zero bytes free.** The
+  stated cause is LTFS index overhead, so the threshold should be a reserve, not
+  1 byte; a tape with 512 bytes left still ENOSPCs on an empty file.
+- **`RealLTFSBackend._tapes` is never hydrated from `cartridge.capacity_bytes`.**
+  After a restart every tape reports the fictional 12 GB default again, so spill
+  selection is wrong until each tape has been mounted once. The catalog already
+  holds the measured value.
+- **`_format` takes the wrong drive lock** when `request.drive_id` disagrees with
+  where the cartridge actually is, and `RealLibraryBackend.unload` has **no**
+  `can_unload_drive` guard at all — the "never unload while LTFS is mounted or
+  dirty" non-negotiable is enforced only in the simulator. That is a real gap in
+  the product, not in this branch.
+- **A failed unload in `_format`'s `finally` masks a successful format**: the
+  media is wiped, the exception replaces the result, and `FormatService.confirm`
+  never marks the cartridge formatted.
+- **`run_campaign.sh` formats six cartridges with no prompt**, and keys on its own
+  `CAMPAIGN_TAPES` rather than the `OPENBLADE_SCRATCH_BARCODES` the runbook tells
+  you to narrow (that variable is read only by `tests/hardware/conftest.py`).
+  `scripts/mhvtl/format-scratch.sh` has a confirmation step; this does not. **On
+  the real i3, set `CAMPAIGN_TAPES` explicitly and re-read it before running the
+  format phase.**
+- **`_dest_slot`'s error message** renders `min-max` of a slot set that is not
+  guaranteed contiguous (`SAMPLE_MTX_HIGH_ADDRESSES` has elements at 4096-4099).
+  The guard itself is a set-membership test and is correct; only the message
+  could mislead.
 
 ---
 
@@ -530,7 +672,7 @@ Read this as the honest state of the operator surfaces, not a wish list.
 | `ruff check .` | **13 findings — all pre-existing on `master` (14 there).** Identical rule-for-rule except one `F841` this branch fixes. Zero new findings; `ruff check` is clean on every file this branch touches. |
 | `ruff format --check` | Already failing on `master` for the touched files; unchanged. |
 | `pytest tests/unit tests/integration tests/safety` | 1,315 passed, **2 failed — both reproduced on a clean `master` checkout** (`test_controller_isolation.py::test_moveMedium_accepted_with_service_token`, `test_nas_dataset_api.py::test_post_verify_returns_200_with_checksums`). Not introduced here. |
-| New tests | 24 across 6 files, **all mutation-checked** |
+| New tests | 31 across 6 files, **all mutation-checked, including against full reverts** |
 | `tests/hardware/ -m real_hardware` | Not re-run; the rig was in campaign use. Worth a pass before merge. |
 
 `make lint` is red on `master` and stays red — `make all` cannot currently pass
@@ -586,6 +728,9 @@ minutes — a real tape change is not 0.15 s.
 
 ## 8. What this campaign did not cover
 
+- **`tests/i3/`.** Not run — it needs a live emulator fleet, and defect 3.10
+  deliberately tightens `POST /ltfs/format` in a way that
+  `test_07_ltfs.py::test_format_with_timing` will notice. Run it before merge.
 - **Concurrency.** One operator, one job at a time. `_ARCHIVE_REQUEST_LOCK`
   serialises archive requests but `POST /restore/` has no lock at all, and
   `DriveScheduler` is constructed per request rather than shared — so two

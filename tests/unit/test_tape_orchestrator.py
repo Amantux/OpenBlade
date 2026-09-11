@@ -10,6 +10,7 @@ from openblade.bootstrap import create_context, reset_context
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
 from openblade.config import OpenBladeConfig
+from openblade.domain.policies import FormatConfirmation, SafetyToken
 from openblade.nas.tape_orchestrator import OperationNotConfirmedError, TapeOperationOrchestrator
 from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
@@ -32,6 +33,22 @@ class ObservedLibrary(MockLibraryBackend):
         self.observed_created = bool(ops) and ops[0]["status"] == TapeOpStatus.RUNNING.value
         return super().load(source_slot, drive_id)
 
+
+
+def format_extras(barcode: str) -> dict:
+    """Extras for a legitimately confirmed format.
+
+    `confirmed_format: True` alone is NOT sufficient any more, and must not be --
+    `extras` is bound straight from the POST /tape-ops/execute body, so a bare
+    boolean would be the whole gate on a destructive operation.
+    """
+    return {
+        "confirmed_format": True,
+        "format_confirmation": FormatConfirmation(
+            expected_barcode=barcode,
+            safety_token=SafetyToken.generate("format", barcode),
+        ),
+    }
 
 
 def make_repo() -> CatalogRepository:
@@ -65,7 +82,7 @@ def prepare_write_target(orchestrator: TapeOperationOrchestrator, library: MockL
             op_type=TapeOpType.FORMAT,
             barcode=barcode,
             requested_by="tester",
-            extras={"confirmed_format": True},
+            extras=format_extras(barcode),
         )
     )
 
@@ -191,7 +208,7 @@ def test_format_op_confirmed_succeeds() -> None:
             op_type=TapeOpType.FORMAT,
             barcode="FM0002L8",
             requested_by="tester",
-            extras={"confirmed_format": True},
+            extras=format_extras("FM0002L8"),
         )
     )
 
@@ -408,7 +425,7 @@ def _format_request(barcode: str) -> TapeOpRequest:
         op_type=TapeOpType.FORMAT,
         barcode=barcode,
         requested_by="tester",
-        extras={"confirmed_format": True},
+        extras=format_extras(barcode),
     )
 
 
@@ -425,16 +442,21 @@ def test_format_loads_the_cartridge_into_a_drive_first() -> None:
     assert ltfs.drive_at_format == 0, "format ran with the cartridge still in its slot"
 
 
-def test_format_returns_the_cartridge_to_a_slot() -> None:
+def test_format_returns_the_cartridge_to_its_original_slot() -> None:
     library = MockLibraryBackend(num_slots=4, num_drives=1)
     ltfs = _DriveObservingLTFS(library)
     _, _, _, orchestrator = make_orchestrator(library=library, ltfs=ltfs)
     library.seed_slots(["FM0011L8"])
+    origin = library.find_slot_by_barcode("FM0011L8")
 
     orchestrator.execute(_format_request("FM0011L8"))
 
+    # `drive_at_format` is asserted too, so this test also fails on a full revert
+    # of the load -- without it, "not in a drive afterwards" passes trivially
+    # because the cartridge was never put in one.
+    assert ltfs.drive_at_format == 0
     assert library.find_drive_by_barcode("FM0011L8") is None
-    assert library.find_slot_by_barcode("FM0011L8") is not None
+    assert library.find_slot_by_barcode("FM0011L8") == origin
 
 
 def test_format_returns_the_cartridge_to_a_slot_even_when_it_fails() -> None:
@@ -444,10 +466,14 @@ def test_format_returns_the_cartridge_to_a_slot_even_when_it_fails() -> None:
     _, _, _, orchestrator = make_orchestrator(library=library, ltfs=ltfs)
     library.seed_slots(["FM0012L8"])
 
+    origin = library.find_slot_by_barcode("FM0012L8")
+
     record = orchestrator.execute(_format_request("FM0012L8"))
 
     assert record.status is TapeOpStatus.FAILED
+    assert ltfs.drive_at_format == 0, "the cartridge was never loaded, so this proves nothing"
     assert library.find_drive_by_barcode("FM0012L8") is None
+    assert library.find_slot_by_barcode("FM0012L8") == origin
 
 
 def test_format_leaves_an_already_loaded_cartridge_in_its_drive() -> None:
@@ -538,3 +564,46 @@ def test_move_to_a_real_storage_slot_still_works() -> None:
 
     assert record.status is TapeOpStatus.COMPLETED
     assert library.find_slot_by_barcode("MV0101L8") == empty
+
+
+def test_format_refuses_a_bare_confirmed_format_flag() -> None:
+    """`extras` is bound straight from the POST /tape-ops/execute body.
+
+    Before this, `{"confirmed_format": true}` -- a boolean an operator can type --
+    was the entire gate on a destructive operation, and `_format` then minted the
+    SafetyToken that was supposed to authorise it. AGENTS.md requires "positive
+    barcode confirmation and a cryptographically valid safety token".
+    """
+    _, library, ltfs, orchestrator = make_orchestrator()
+    library.seed_slots(["FM0020L8"])
+
+    with pytest.raises(OperationNotConfirmedError):
+        orchestrator.execute(
+            TapeOpRequest(
+                op_type=TapeOpType.FORMAT,
+                barcode="FM0020L8",
+                requested_by="attacker",
+                extras={"confirmed_format": True},
+            )
+        )
+
+    assert ltfs.ensure_tape("FM0020L8").formatted is False
+
+
+def test_format_refuses_a_confirmation_for_a_different_barcode() -> None:
+    """A token authorises one cartridge, not any cartridge."""
+    _, library, ltfs, orchestrator = make_orchestrator()
+    library.seed_slots(["FM0021L8", "FM0022L8"])
+
+    record = orchestrator.execute(
+        TapeOpRequest(
+            op_type=TapeOpType.FORMAT,
+            barcode="FM0022L8",
+            requested_by="attacker",
+            extras=format_extras("FM0021L8"),
+        )
+    )
+
+    assert record.status is TapeOpStatus.FAILED
+    assert record.error == "Tape format operation failed"  # curated, not the raw mismatch
+    assert ltfs.ensure_tape("FM0022L8").formatted is False

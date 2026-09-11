@@ -19,7 +19,21 @@ from openblade.config import BackendMode
 
 @pytest.fixture(autouse=True)
 def _clear_backend_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("OPENBLADE_BACKEND", "OPENBLADE_REAL_HARDWARE_ENABLED"):
+    """Clear every OPENBLADE_* the CLI reads.
+
+    Not just the two backend switches: `scripts/campaign/env.sh` -- the shell the
+    runbook tells you to be in -- exports OPENBLADE_DB_URL/CACHE_DIR/STAGING_DIR/
+    RESTORE_DIR, and these tests assert on the defaults those override.
+    """
+    for name in (
+        "OPENBLADE_BACKEND",
+        "OPENBLADE_REAL_HARDWARE_ENABLED",
+        "OPENBLADE_DB_URL",
+        "OPENBLADE_CACHE_DIR",
+        "OPENBLADE_STAGING_DIR",
+        "OPENBLADE_RESTORE_DIR",
+        "OPENBLADE_LTFS_MOUNT_ROOT",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -206,3 +220,48 @@ def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
     payload = json.loads(confirm.stdout)  # the whole of stdout, not a filtered slice
     assert payload["success"] is True
     assert "tape operation" in confirm.stderr, "log lines went somewhere other than stderr"
+
+
+def test_mock_subcommands_never_reach_a_real_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`openblade mock load` must not issue `mtx load` against a real changer.
+
+    Only `mock init` was pinned to BackendMode.MOCK originally; `mock inventory`,
+    `mock load` and `mock unload` went through the env-driven config, so in a
+    shell exporting OPENBLADE_BACKEND=real they drove the real library -- a
+    command whose name promises the opposite.
+    """
+    monkeypatch.setenv("OPENBLADE_BACKEND", "real")
+    monkeypatch.setenv("OPENBLADE_REAL_HARDWARE_ENABLED", "true")
+
+    captured: list[BackendMode] = []
+    monkeypatch.setattr(
+        cli_main, "create_context", lambda config: captured.append(config.backend) or _Stub()
+    )
+    monkeypatch.setattr(cli_main, "_load_state", lambda context: context)
+    monkeypatch.setattr(cli_main, "reset_context", lambda context: context)
+
+    cli_main._get_mock_context()
+
+    assert captured == [BackendMode.MOCK]
+
+
+def test_plain_subcommands_still_honour_a_real_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard above must not also neuter the non-mock commands."""
+    monkeypatch.setenv("OPENBLADE_BACKEND", "real")
+    monkeypatch.setenv("OPENBLADE_REAL_HARDWARE_ENABLED", "true")
+
+    captured: list[BackendMode] = []
+    monkeypatch.setattr(
+        cli_main, "create_context", lambda config: captured.append(config.backend) or _Stub()
+    )
+    monkeypatch.setattr(cli_main, "_load_state", lambda context: context)
+    monkeypatch.setattr(cli_main, "reset_context", lambda context: context)
+
+    cli_main._get_context()
+
+    assert captured == [BackendMode.REAL]
+
+
+class _Stub:
+    library = None
+    ltfs = None
