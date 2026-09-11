@@ -8,6 +8,7 @@ The read-only safety guarantees are tested separately in
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -21,14 +22,18 @@ from openblade.assistant.errors import (
     AssistantDisabledError,
     AssistantLoopLimitError,
     AssistantUpstreamError,
+    SetupRefusedError,
 )
 from openblade.assistant.provider import OllamaClient
 from openblade.assistant.session import MAX_CALLS_PER_ROUND, AssistantSession
-from openblade.assistant.tools import build_context, build_registry
+from openblade.assistant.setup_facade import setup_facade
+from openblade.assistant.setup_tools import PendingAction, build_setup_registry, log_action
+from openblade.assistant.tools import READ_ONLY_TOOL_NAMES, build_context, build_registry
 from tests.assistant_support import (
     ARCHIVED_PATH,
     BARCODES,
     VOLUME_GROUP,
+    ScriptedOllama,
     assistant_config,
     failing_client,
     prose_response,
@@ -659,3 +664,481 @@ def test_tool_context_repr_hides_the_api_key(app_context: Any) -> None:
     assert "sk-super-secret" not in rendered
     assert "s3cret" not in rendered
     assert "hunter2" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# Tier-1 setup actions: confirm-gated execution
+# ---------------------------------------------------------------------------
+
+
+class Confirmer:
+    """A scripted operator. Records every action it was asked about."""
+
+    def __init__(self, answers: list[bool] | bool = True) -> None:
+        self._answers = answers if isinstance(answers, list) else None
+        self._default = answers if isinstance(answers, bool) else True
+        self.asked: list[PendingAction] = []
+
+    def __call__(self, action: PendingAction) -> bool:
+        self.asked.append(action)
+        if self._answers is None:
+            return self._default
+        if not self._answers:
+            return False
+        return self._answers.pop(0)
+
+    @property
+    def previews(self) -> list[str]:
+        return [action.preview for action in self.asked]
+
+
+def _setup_session(
+    app_context: Any,
+    responses: list[dict[str, Any]],
+    confirm: Any,
+) -> tuple[AssistantSession, ScriptedOllama]:
+    """A REPL-shaped session: read tools plus the confirm-gated tier-1 tools."""
+    client, script = scripted_client(responses)
+    config = assistant_config()
+    session = AssistantSession(
+        client=OllamaClient(config, client=client),
+        registry=build_registry(),
+        context=_context(app_context),
+        config=config,
+        setup_registry=build_setup_registry(),
+        setup=setup_facade(app_context.catalog),
+        confirm=confirm,
+    )
+    return session, script
+
+
+def _tool_messages(session: AssistantSession) -> list[dict[str, Any]]:
+    return [message for message in session.messages if message.get("role") == "tool"]
+
+
+def test_tier_one_tool_is_offered_only_when_a_confirmation_is_possible(app_context: Any) -> None:
+    session, _ = _setup_session(app_context, [prose_response("hi")], Confirmer())
+    assert session.setup_enabled is True
+    names = {schema["function"]["name"] for schema in session._schemas()}
+    assert {"create_volume_group", "add_tapes_to_volume_group"} <= names
+
+
+def test_nothing_runs_without_an_explicit_yes(app_context: Any) -> None:
+    """THE GATE. Mutation: execute on arrival instead of asking -> this fails.
+
+    The model asks for a volume group; the operator says no; the catalog must be
+    untouched and the model must be told, in a result it can act on.
+    """
+    confirm = Confirmer(False)
+    session, script = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            prose_response("Understood, I won't create it."),
+        ],
+        confirm,
+    )
+    session.ask("make me a pool called photos")
+
+    assert app_context.catalog.get_volume_group("photos") is None
+    assert confirm.asked, "the operator must be asked"
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert payload == {
+        "executed": False,
+        "status": "declined_by_operator",
+        "action": "create_volume_group",
+        "preview": "Create volume group 'photos' (your first pool).",
+        "reason": "the operator answered no",
+        "repeatedProposal": False,
+        "guidance": payload["guidance"],
+    }
+    assert "Do not propose this same action again" in payload["guidance"]
+    # And the model saw it: the decline is in the transcript sent upstream.
+    assert "declined_by_operator" in json.dumps(script.requests[-1])
+
+
+def test_a_yes_creates_the_volume_group(app_context: Any) -> None:
+    confirm = Confirmer(True)
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            prose_response("Done — 'photos' exists and has no tapes yet."),
+        ],
+        confirm,
+    )
+    turn = session.ask("make me a pool called photos")
+
+    group = app_context.catalog.get_volume_group("photos")
+    assert group is not None
+    assert turn.executed_actions == ("create_volume_group",)
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert payload["executed"] is True
+    assert payload["result"]["created"] is True
+    assert payload["result"]["name"] == "photos"
+
+
+def test_the_whole_pool_setup_flow(app_context: Any, seeded: dict[str, Any]) -> None:
+    """Create a pool, then add two known tapes to it — both confirmed, in one turn."""
+    app_context.catalog.add_cartridge("SP000001")
+    app_context.catalog.add_cartridge("SP000002")
+    confirm = Confirmer(True)
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "scratch"}),
+            tool_call_response(
+                "add_tapes_to_volume_group",
+                {"name": "scratch", "barcodes": ["SP000001", "sp000002"]},
+            ),
+            prose_response("Done — 'scratch' now has 2 tapes."),
+        ],
+        confirm,
+    )
+    turn = session.ask("set up a scratch pool with SP000001 and SP000002")
+
+    group = app_context.catalog.get_volume_group("scratch")
+    assert group is not None
+    assert sorted(group.barcodes) == ["SP000001", "SP000002"]
+    assert turn.executed_actions == ("create_volume_group", "add_tapes_to_volume_group")
+    # The preview names the objects, because that sentence is what the operator
+    # actually answers on.
+    assert confirm.previews == [
+        "Create volume group 'scratch' (you have 1 already).",
+        "Add tape(s) SP000001, SP000002 to volume group 'scratch'.",
+    ]
+    # The result is fed back, so the model can confirm in prose and keep going.
+    result = json.loads(_tool_messages(session)[1]["content"])["result"]
+    assert result["added"] == ["SP000001", "SP000002"]
+    assert result["tapeCount"] == 2
+    assert turn.reply == "Done — 'scratch' now has 2 tapes."
+
+
+def test_an_identical_declined_action_is_not_put_to_the_operator_twice(app_context: Any) -> None:
+    """The re-proposal cap: one refusal is an answer, two is nagging."""
+    confirm = Confirmer(False)
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            prose_response("All right — what would you like to call it instead?"),
+        ],
+        confirm,
+    )
+    session.ask("make me a pool called photos")
+
+    assert len(confirm.asked) == 1, "the operator must not be asked the same thing twice"
+    second = json.loads(_tool_messages(session)[1]["content"])
+    assert second["status"] == "declined_by_operator"
+    assert second["repeatedProposal"] is True
+    assert app_context.catalog.get_volume_group("photos") is None
+
+
+def test_a_different_action_is_still_put_to_the_operator(app_context: Any) -> None:
+    """The cap is per action, not a session-wide gag order."""
+    confirm = Confirmer([False, True])
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            tool_call_response("create_volume_group", {"name": "pictures"}),
+            prose_response("Created 'pictures'."),
+        ],
+        confirm,
+    )
+    session.ask("make me a pool")
+    assert len(confirm.asked) == 2
+    assert app_context.catalog.get_volume_group("pictures") is not None
+    assert app_context.catalog.get_volume_group("photos") is None
+
+
+def test_one_shot_mode_is_not_offered_the_setup_tools(app_context: Any) -> None:
+    """No confirmation callback, no tier 1 — not even the schema."""
+    session, script = _session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            prose_response("Here is the command to run."),
+        ],
+    )
+    assert session.setup_enabled is False
+    session.ask("make me a pool called photos")
+
+    offered = {
+        schema["function"]["name"] for schema in script.requests[0].get("tools", [])
+    }
+    assert "create_volume_group" not in offered
+    assert offered == set(READ_ONLY_TOOL_NAMES)
+    # And if the model calls it anyway, it is simply not a tool.
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert "There is no tool named 'create_volume_group'" in payload["error"]
+    assert app_context.catalog.get_volume_group("photos") is None
+
+
+def test_one_shot_prompt_points_at_the_repl(app_context: Any) -> None:
+    session, _ = _session(app_context, [prose_response("ok")])
+    assert "only in the interactive REPL" in session.messages[0]["content"]
+
+
+def test_a_half_wired_session_is_read_only_not_unconfirmed(app_context: Any) -> None:
+    """Fail-closed: a registry without a way to ask must not execute anything."""
+    client, _script = scripted_client([prose_response("ok")])
+    config = assistant_config()
+    session = AssistantSession(
+        client=OllamaClient(config, client=client),
+        registry=build_registry(),
+        context=_context(app_context),
+        config=config,
+        setup_registry=build_setup_registry(),
+        setup=setup_facade(app_context.catalog),
+        confirm=None,
+    )
+    assert session.setup_enabled is False
+    assert {schema["function"]["name"] for schema in session._schemas()} == set(
+        READ_ONLY_TOOL_NAMES
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ambiguity refuses, confirmed or not
+# ---------------------------------------------------------------------------
+
+
+def test_an_unknown_barcode_is_refused_with_candidates(app_context: Any, seeded: dict[str, Any]) -> None:
+    """The operator is never even asked: nothing can name what it would act on."""
+    confirm = Confirmer(True)
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response(
+                "add_tapes_to_volume_group",
+                {"name": VOLUME_GROUP, "barcodes": ["PH009999"]},
+            ),
+            prose_response("I could not find that tape."),
+        ],
+        confirm,
+    )
+    session.ask("add PH009999 to the photo pool")
+
+    assert confirm.asked == []
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert payload["executed"] is False
+    assert payload["status"] == "refused"
+    assert payload["code"] == "unknown_barcode"
+    assert payload["confirmedByOperator"] is False
+    # The tapes that actually share the typo'd barcode's prefix come first, then
+    # tapes in no pool at all — a short list the operator can settle in one glance.
+    assert payload["candidates"][: len(BARCODES)] == list(BARCODES)
+    assert 0 < len(payload["candidates"]) <= 5
+    assert "do not pick one for them" in payload["guidance"]
+
+
+def test_a_tape_already_in_another_pool_is_refused(app_context: Any, seeded: dict[str, Any]) -> None:
+    app_context.catalog.create_volume_group("second")
+    confirm = Confirmer(True)
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response(
+                "add_tapes_to_volume_group",
+                {"name": "second", "barcodes": [BARCODES[0]]},
+            ),
+            prose_response("That tape is spoken for."),
+        ],
+        confirm,
+    )
+    session.ask(f"add {BARCODES[0]} to second")
+
+    assert confirm.asked == []
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert payload["code"] == "tape_in_other_volume_group"
+    assert VOLUME_GROUP in payload["error"]
+    group = app_context.catalog.get_volume_group("second")
+    assert group is not None and group.barcodes == []
+
+
+def test_an_existing_volume_group_name_is_refused(app_context: Any, seeded: dict[str, Any]) -> None:
+    confirm = Confirmer(True)
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": VOLUME_GROUP}),
+            prose_response("You already have that one."),
+        ],
+        confirm,
+    )
+    session.ask(f"create {VOLUME_GROUP}")
+    assert confirm.asked == []
+    payload = json.loads(_tool_messages(session)[0]["content"])
+    assert payload["code"] == "volume_group_exists"
+
+
+def test_confirmation_is_not_a_licence_to_guess(app_context: Any, seeded: dict[str, Any]) -> None:
+    """A yes carried to the write path still refuses an unresolvable target.
+
+    Reached by executing a PendingAction directly — the shape of a confirmation that
+    was minted when the catalog looked different. The facade re-validates inside the
+    write path, so the yes buys nothing.
+    """
+    facade = setup_facade(app_context.catalog)
+    stale = PendingAction(
+        tool="add_tapes_to_volume_group",
+        arguments={"name": VOLUME_GROUP, "barcodes": ["PH009999"]},
+        preview="Add tape(s) PH009999 to volume group 'photo-archive'.",
+    )
+    with pytest.raises(SetupRefusedError) as excinfo:
+        build_setup_registry().perform(stale, facade)
+    assert excinfo.value.code == "unknown_barcode"
+    group = app_context.catalog.get_volume_group(VOLUME_GROUP)
+    assert group is not None and sorted(group.barcodes) == sorted(BARCODES)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "code"),
+    [
+        ({"name": "", "barcodes": ["PH000001"]}, "missing_name"),
+        ({"name": "x" * 100, "barcodes": ["PH000001"]}, "invalid_name"),
+        ({"name": "photos\nrm -rf", "barcodes": ["PH000001"]}, "invalid_name"),
+        ({"name": "photos", "barcodes": []}, "missing_barcodes"),
+        ({"name": "photos", "barcodes": ["../etc/passwd"]}, "invalid_barcode"),
+        ({"name": "photos", "barcodes": [f"B{index:07d}" for index in range(30)]}, "too_many_tapes"),
+    ],
+)
+def test_malformed_arguments_are_refused_not_normalised_away(
+    app_context: Any, arguments: dict[str, Any], code: str
+) -> None:
+    facade = setup_facade(app_context.catalog)
+    with pytest.raises(SetupRefusedError) as excinfo:
+        build_setup_registry().plan("add_tapes_to_volume_group", facade, arguments)
+    assert excinfo.value.code == code
+
+
+def test_adding_a_tape_that_is_already_in_the_pool_is_a_no_op(
+    app_context: Any, seeded: dict[str, Any]
+) -> None:
+    """Not ambiguity: the operator asked for a state that already holds."""
+    facade = setup_facade(app_context.catalog)
+    registry = build_setup_registry()
+    action = registry.plan(
+        "add_tapes_to_volume_group",
+        facade,
+        {"name": VOLUME_GROUP, "barcodes": [BARCODES[0]]},
+    )
+    assert "already in it" in action.preview
+    result = registry.perform(action, facade)
+    assert result["added"] == []
+    assert result["alreadyPresent"] == [BARCODES[0]]
+
+
+# ---------------------------------------------------------------------------
+# Audit trail
+# ---------------------------------------------------------------------------
+
+
+def test_every_executed_action_logs_one_structured_line(
+    app_context: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            prose_response("Created."),
+        ],
+        Confirmer(True),
+    )
+    with caplog.at_level(logging.INFO, logger="openblade.assistant.setup"):
+        session.ask("create photos")
+
+    lines = [record.getMessage() for record in caplog.records]
+    assert len(lines) == 1
+    assert "actor=assistant" in lines[0]
+    assert "tool=create_volume_group" in lines[0]
+    assert "outcome=executed" in lines[0]
+    assert '"name": "photos"' in lines[0]
+    assert '"created": true' in lines[0]
+
+
+def test_a_decline_is_logged_too(app_context: Any, caplog: pytest.LogCaptureFixture) -> None:
+    session, _ = _setup_session(
+        app_context,
+        [
+            tool_call_response("create_volume_group", {"name": "photos"}),
+            prose_response("Fine."),
+        ],
+        Confirmer(False),
+    )
+    with caplog.at_level(logging.INFO, logger="openblade.assistant.setup"):
+        session.ask("create photos")
+    assert "outcome=declined" in caplog.records[0].getMessage()
+
+
+def test_the_audit_line_cannot_be_forged_with_a_newline(
+    app_context: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Log forging: a model-supplied name must not be able to add a second line."""
+    action = PendingAction(
+        tool="create_volume_group",
+        arguments={"name": "photos\nactor=root outcome=executed"},
+        preview="…",
+    )
+    with caplog.at_level(logging.INFO, logger="openblade.assistant.setup"):
+        log_action(action, outcome="declined")
+    message = caplog.records[0].getMessage()
+    assert "\n" not in message
+    assert "\\nactor=root" in message
+
+
+# ---------------------------------------------------------------------------
+# The REPL's confirmation prompt
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [("y", True), ("Y", True), ("yes", True), ("", False), ("n", False), ("ok", False), ("yep", False)],
+)
+def test_repl_confirmation_requires_an_explicit_yes(
+    monkeypatch: pytest.MonkeyPatch, answer: str, expected: bool
+) -> None:
+    from openblade.cli import assist as assist_cli
+
+    monkeypatch.setattr("builtins.input", lambda *args: answer)
+    action = PendingAction(tool="create_volume_group", arguments={"name": "x"}, preview="Create x.")
+    assert assist_cli._confirm_action(action) is expected
+
+
+@pytest.mark.parametrize("interrupt", [EOFError, KeyboardInterrupt])
+def test_repl_confirmation_treats_an_interrupt_as_no(
+    monkeypatch: pytest.MonkeyPatch, interrupt: type[BaseException]
+) -> None:
+    from openblade.cli import assist as assist_cli
+
+    def boom(*args: Any) -> str:
+        raise interrupt()
+
+    monkeypatch.setattr("builtins.input", boom)
+    action = PendingAction(tool="create_volume_group", arguments={"name": "x"}, preview="Create x.")
+    assert assist_cli._confirm_action(action) is False
+
+
+def test_one_shot_cli_builds_a_session_without_a_confirm_callback(
+    monkeypatch: pytest.MonkeyPatch, app_context: Any
+) -> None:
+    """The CLI, not the session, is what decides that one-shot has no tier 1."""
+    from openblade.cli import assist as assist_cli
+
+    captured: dict[str, Any] = {}
+
+    def fake_create_session(context: Any, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setenv("OPENBLADE_OLLAMA_URL", "http://ollama.test:11434")
+    monkeypatch.setattr(assist_cli, "create_session", fake_create_session)
+    monkeypatch.setattr("openblade.cli.main._get_context", lambda: app_context)
+
+    assist_cli._build_session(interactive=False)
+    assert captured["confirm"] is None
+    assist_cli._build_session(interactive=True)
+    assert captured["confirm"] is assist_cli._confirm_action
