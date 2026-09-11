@@ -29,6 +29,22 @@ Data Transfer Element 1:Empty
       Storage Element 4:Empty
 """
 
+# A three-drive Scalar i3 partition (the shipped scalar-i3-50-3 shape): two drives
+# loaded from different slots, one empty, plus the i3's Import/Export station.
+SAMPLE_MTX_THREE_DRIVES = """
+Storage Changer /dev/sg3:3 Drives, 50 Slots ( 2 Import/Export )
+Data Transfer Element 0:Full (Storage Element 1 Loaded):VolumeTag=VOL001L8
+Data Transfer Element 1:Empty
+Data Transfer Element 2:Full (Storage Element 4 Loaded):VolumeTag=VOL004L8
+      Storage Element 1:Empty
+      Storage Element 2:Full :VolumeTag=VOL002L8
+      Storage Element 3:Full :VolumeTag=CLN001L1
+      Storage Element 4:Empty
+      Storage Element 5:Full :VolumeTag=VOL005L8
+      Storage Element 51 IMPORT/EXPORT:Empty
+      Storage Element 52 IMPORT/EXPORT:Full :VolumeTag=VOL052L8
+"""
+
 SAMPLE_MTX_CLEANING = """
 Storage Changer /dev/sg0:1 Drives, 20 Slots ( 0 Import/Export )
 Data Transfer Element 0:Empty
