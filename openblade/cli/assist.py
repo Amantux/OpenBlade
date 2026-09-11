@@ -1,4 +1,4 @@
-"""``openblade assist`` — the read-only operator assistant.
+"""``openblade assist`` — the operator assistant.
 
 One-shot::
 
@@ -8,8 +8,11 @@ Interactive::
 
     openblade assist          # REPL; /quit to leave
 
-The assistant never runs anything. It reads state, explains, and proposes commands
-for you to run — see ``docs/wiki/guides/assistant.md``.
+The assistant reads state, explains, and proposes commands for you to run. In the
+REPL it can also *perform* two setup actions — create a volume group, add existing
+tapes to one — and only after you answer ``y`` to a preview naming exactly what it
+would do. Everything else stays propose-only. One-shot mode has nowhere to ask, so
+it is not offered the setup tools at all. See ``docs/wiki/guides/assistant.md``.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from openblade.assistant import (
     AssistantDisabledError,
     AssistantError,
     AssistantSession,
+    PendingAction,
     create_session,
 )
 from openblade.assistant.config import DISABLED_MESSAGE, load_assistant_config
@@ -33,10 +37,14 @@ from openblade.assistant.config import DISABLED_MESSAGE, load_assistant_config
 console = Console()
 
 _BANNER = (
-    "OpenBlade assistant — read-only. It proposes commands; it never runs them.\n"
+    "OpenBlade assistant. It can create a volume group and add tapes to one, and it\n"
+    "asks you first — [y/N] — every time. Everything else it proposes; you run it.\n"
     "Type your question, or /quit to leave, /reset to clear the conversation."
 )
 _PROMPT = "openblade> "
+# Answers that mean yes. Anything else — including a bare Enter, "ok", or EOF — is a
+# no: a confirmation must be given, never merely not refused.
+_YES = frozenset({"y", "yes"})
 
 
 def _format_arguments(arguments: dict[str, Any]) -> str:
@@ -60,13 +68,33 @@ def _show_tool(name: str, arguments: dict[str, Any]) -> None:
     console.print(Text(f"· {name}{suffix}", style="dim"))
 
 
-def _build_session() -> AssistantSession:
+def _confirm_action(action: PendingAction) -> bool:
+    """Ask the operator to confirm one tier-1 action. Default is no.
+
+    The preview is printed as a ``Text`` for the same reason tool arguments are:
+    it contains operator- and model-supplied names, and a stray ``[/x]`` would
+    raise ``MarkupError`` in the middle of a confirmation prompt.
+    """
+    console.print(Text(f"\nProposed action: {action.preview}", style="yellow"))
+    try:
+        answer = input("Run it? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        console.print()
+        return False
+    return answer in _YES
+
+
+def _build_session(*, interactive: bool) -> AssistantSession:
     """Build a session over the CLI's context.
 
     ``_get_context()`` is imported lazily because ``openblade.cli.main`` imports
     this module, so a module-level import back into it would be circular. The
     disabled check happens before that call, so an unconfigured assistant never
     opens the database.
+
+    ``interactive`` is the tier-1 switch: only the REPL can ask a human, so only the
+    REPL gets a confirmation callback — and without one, ``create_session`` builds
+    no write facade at all.
     """
     config = load_assistant_config()
     if not config.enabled:
@@ -74,11 +102,19 @@ def _build_session() -> AssistantSession:
 
     from openblade.cli.main import _get_context  # local: avoids an import cycle
 
-    return create_session(_get_context(), config=config)
+    return create_session(
+        _get_context(),
+        config=config,
+        confirm=_confirm_action if interactive else None,
+    )
 
 
 def _ask(session: AssistantSession, question: str) -> None:
     turn = session.ask(question, on_tool=_show_tool)
+    for action in turn.executed_actions:
+        # One line per confirmed write, so the transcript shows what actually
+        # changed even if the model's prose is vague about it.
+        console.print(Text(f"✓ {action} applied", style="green"))
     # markup=False is load-bearing: model replies contain markdown links, array
     # syntax and quoted doc excerpts. Rich would either raise MarkupError on an
     # unbalanced tag (killing the REPL) or silently swallow "[dim]" as styling.
@@ -120,9 +156,9 @@ def assist(
         None, help="Ask one question and exit. Omit for an interactive session."
     ),
 ) -> None:
-    """Ask the read-only OpenBlade assistant about this installation."""
+    """Ask the OpenBlade assistant about this installation, or talk through setup."""
     try:
-        session = _build_session()
+        session = _build_session(interactive=question is None)
     except AssistantDisabledError as exc:
         console.print(Text(str(exc)))
         raise typer.Exit(code=1) from None
