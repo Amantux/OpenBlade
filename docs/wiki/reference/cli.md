@@ -17,13 +17,14 @@ Every command below also accepts `--help`.
 > regression-tested; see docs/runbooks/real-data-campaign.md.) Real-
 > hardware commands still refuse without both flags set.
 
-**15 commands**, in 3 sub-group(s) plus the top level.
+**16 commands**, in 4 sub-group(s) plus the top level.
 
 ## Command groups
 
 | Group | Purpose |
 | --- | --- |
 | `openblade format` | Format commands |
+| `openblade fuse` | Read-only FUSE mount over the catalog namespace |
 | `openblade hardware` | Real hardware validation commands |
 | `openblade mock` | Mock library commands |
 
@@ -70,6 +71,17 @@ Show what format would do without doing it.
 | Parameter | Kind | Type | Required | Default | Help |
 | --- | --- | --- | --- | --- | --- |
 | `--barcode` | option | `STR` | yes | - | - |
+
+### `openblade fuse mount`
+
+Mount the catalog namespace read-only. Runs in the foreground.
+
+| Parameter | Kind | Type | Required | Default | Help |
+| --- | --- | --- | --- | --- | --- |
+| `MOUNTPOINT` | argument | `STR` | yes | - | Existing empty directory to mount on |
+| `--hydrate` | option | `BOOLEAN` | no | false | Fetch uncached files from tape during read(). OFF by default: a read then blocks for a full load/mount/restore cycle (tens of seconds on real hardware) and any process that touches the file -- including `ls` previewers and indexers -- can trigger one. |
+| `--allow-other` | option | `BOOLEAN` | no | false | Expose the mount to other users on the host (needs user_allow_other in /etc/fuse.conf) |
+| `--verbose` | option | `BOOLEAN` | no | false | Log every FUSE decision to stderr |
 
 ### `openblade hardware connect-i3`
 
