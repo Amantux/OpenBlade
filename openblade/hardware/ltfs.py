@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -461,13 +462,15 @@ class RealLTFSBackend:
 
     def unmount(self, handle: MountHandle) -> OperationResult:
         active_handle = self._require_active_mount(handle)
+        tape = self.ensure_tape(str(active_handle.barcode))
+        # Take the final reading while the filesystem is still there. After the
+        # unmount there is nothing left to measure.
+        self._refresh_tape_usage(tape, active_handle.mount_path, mounted=True)
         result = LTFSCommandBackend.unmount(str(active_handle.mount_path), self.guard, self.runner)
         if result.success:
             self._active_mounts.pop(active_handle.handle_id, None)
-            tape = self.ensure_tape(str(active_handle.barcode))
             tape.mount_state = MountState.UNMOUNTED
             self.library.set_drive_mount_state(active_handle.drive_id, MountState.UNMOUNTED)
-            self._refresh_tape_usage(tape, active_handle.mount_path)
         return result
 
     def write_file(self, handle: MountHandle, source: Path, dest: PurePosixPath) -> FileInstance:
@@ -491,7 +494,7 @@ class RealLTFSBackend:
         tape = self.ensure_tape(str(active_handle.barcode))
         tape.formatted = True
         tape.mount_state = MountState.MOUNTED_RW
-        self._refresh_tape_usage(tape, active_handle.mount_path)
+        self._refresh_tape_usage(tape, active_handle.mount_path, mounted=True)
         checksum = checksum_sha256 or hashlib.sha256(content).hexdigest()
         return FileInstance(
             file_record_id=checksum,
@@ -557,11 +560,37 @@ class RealLTFSBackend:
             raise ValueError(f"Mount handle {handle.handle_id} is not active")
         return active_handle
 
-    def _refresh_tape_usage(self, tape: RealTapeContents, mount_path: Path) -> None:
-        if not mount_path.exists():
-            tape.used_bytes = 0
+    def _refresh_tape_usage(
+        self, tape: RealTapeContents, mount_path: Path, *, mounted: bool
+    ) -> None:
+        """Refresh capacity and usage from the live LTFS filesystem.
+
+        Both numbers are only observable while LTFS is actually mounted. Once it
+        is gone the mount point is an ordinary empty directory on the host disk,
+        so a directory walk reports zero and ``statvfs`` would report the HOST
+        filesystem. The previous implementation walked the directory and ran
+        *after* the unmount, which meant every tape's ``used_bytes`` was reset to
+        0 at exactly the moment ``jobs/archive.py`` wrote it back to the
+        cartridge row -- so OpenBlade believed every tape was empty after every
+        archive job and ``_choose_tape`` could never spill to the next tape.
+
+        ``statvfs`` rather than a directory walk: it is one syscall instead of an
+        O(files) stat storm on every single write, and it reports the medium's
+        real geometry. Measured on the mhvtl rig: an 8000 MB cartridge reports
+        6,569,328,640 bytes after LTFS partitioning, against the 12,000,000,000
+        this class assumes for a tape it has never mounted.
+        """
+        if not mounted:
+            # Keep the last good observation rather than inventing a new one.
             return
-        tape.used_bytes = sum(path.stat().st_size for path in mount_path.rglob("*") if path.is_file())
+        try:
+            stats = os.statvfs(mount_path)
+        except OSError:
+            return
+        if stats.f_frsize <= 0 or stats.f_blocks <= 0:
+            return
+        tape.capacity_bytes = stats.f_frsize * stats.f_blocks
+        tape.used_bytes = max(0, tape.capacity_bytes - stats.f_frsize * stats.f_bavail)
 
 
 def _relative_tape_path(path: PurePosixPath | str) -> Path:
