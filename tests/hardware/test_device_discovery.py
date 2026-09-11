@@ -79,7 +79,7 @@ def test_drive_sg_devices_readable(real_hardware_guard, drive_devices, runner):
         assert os.access(sg_or_drive, os.R_OK), f"Drive device is not readable: {sg_or_drive}"
 
 
-@pytest.mark.parametrize("drive_index", [0])
+@pytest.mark.parametrize("drive_index", [0, 1, 2])
 def test_sg_inquiry_drives(real_hardware_guard, drive_devices, runner, drive_index):
     """Requires: OPENBLADE_DRIVE_DEVICES to point at attached tape drives."""
     if drive_index >= len(drive_devices):
@@ -91,6 +91,24 @@ def test_sg_inquiry_drives(real_hardware_guard, drive_devices, runner, drive_ind
     inquiry = parse_sg_inq(result.stdout)
     assert inquiry.vendor
     assert inquiry.product
+
+
+def test_drive_serials_are_unique(real_hardware_guard, drive_devices, runner):
+    """Requires: >=2 drives. Serial-based drive correlation needs distinct serials."""
+    if len(drive_devices) < 2:
+        pytest.skip("Drive correlation only matters with two or more drives")
+    _, devices = _lsscsi_devices(runner)
+    serials = {}
+    for drive_device in drive_devices:
+        result = runner.run(["sg_inq", _resolve_scsi_path(drive_device, devices)], timeout=30)
+        assert result.returncode == 0, result.stderr
+        serials[drive_device] = parse_sg_inq(result.stdout).serial
+    missing = [device for device, serial in serials.items() if not serial]
+    if missing:
+        pytest.skip(f"Drives report no unit serial number: {missing}")
+    assert len(set(serials.values())) == len(serials), (
+        f"Drives must report distinct serials for OPENBLADE_DRIVE_SERIAL_MAP: {serials}"
+    )
 
 
 def test_sg_inquiry_changer(real_hardware_guard, changer_device, runner):

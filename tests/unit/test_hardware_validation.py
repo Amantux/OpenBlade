@@ -27,6 +27,10 @@ def test_connect_quantum_i3_returns_inventory_report_in_dry_run(tmp_path: Path) 
     assert report.slot_count == 2
     assert report.discovered_drives == ["/dev/st0", "/dev/st1"]
     assert report.sg_inquiry[0]["device"] == "/dev/sg0"
+    # A dry run probes nothing, so the report must not claim a verified correlation.
+    assert report.drive_correlation_verified is False
+    assert report.drive_correlation_source == "dry_run"
+    assert report.drive_correlation[0] == {"driveId": 0, "device": "/dev/st0", "serial": ""}
 
 
 def test_validate_ltfs_capabilities_reports_device_list_and_plan(tmp_path: Path) -> None:

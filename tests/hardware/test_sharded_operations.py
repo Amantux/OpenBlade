@@ -220,10 +220,16 @@ def test_scheduler_concurrent(real_hardware_guard, drive_devices, runner):
 def test_drive_scheduler_timeout(real_hardware_guard, drive_devices, runner):
     """Requires: scheduler contention to exceed the configured timeout."""
     del runner
-    scheduler = DriveScheduler(num_drives=max(1, min(len(drive_devices), 2)))
+    # Size the pool to the drives actually attached (was capped at 2, which made
+    # this a 2-drive test on a 3-drive library). Holding one drive and then asking
+    # for the whole pool can never be satisfied, at any drive count.
+    drive_count = max(1, len(drive_devices))
+    scheduler = DriveScheduler(num_drives=drive_count)
     handles = scheduler.acquire_drives(["TIMEOUT1"])
     try:
         with pytest.raises((DriveBusyError, TimeoutError)):
-            scheduler.acquire_drives(["TIMEOUT2", "TIMEOUT3"], timeout=0.05)
+            scheduler.acquire_drives(
+                [f"TIMEOUT{index + 2}" for index in range(drive_count)], timeout=0.05
+            )
     finally:
         scheduler.release_drives(handles)
