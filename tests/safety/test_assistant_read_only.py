@@ -1,14 +1,23 @@
 """The assistant's safety line: it reads, explains, and proposes. It never acts.
 
-These are the regression tests for that guarantee. Each one is mutation-checked:
-removing the guard it covers makes it fail (see the docstrings, which name the
-mutation, and ``test_registry_guard_rejects_a_mutating_tool``, which performs one
-inside the test).
+These are the regression tests for that guarantee.
+
+The two structural guards -- the registry allowlist and the ReadOnlyProxy attribute
+allowlist -- are mutation-checked: disabling either makes the tests in sections 1
+and 2 fail (verified; see the docstrings, and
+``test_registry_guard_rejects_a_mutating_tool``, which performs a mutation inline).
+
+Section 4 is different and is labelled as such: the prompt tests assert the text
+of an instruction, and there is no guard to remove. They catch a prompt edit that
+drops the safety contract, nothing more -- the prompt is guidance, and
+:mod:`openblade.assistant.readonly` is what actually makes execution impossible.
 """
 
 from __future__ import annotations
 
 import ast
+import copy
+import pickle
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +93,11 @@ def test_allowlist_is_the_reviewed_set() -> None:
 
 
 def test_no_tool_name_reads_as_mutating() -> None:
-    """Every exposed tool is a get/list/search. Nothing acts."""
+    """Naming hygiene only -- ``get_and_format_tape`` would pass this.
+
+    The registry allowlist above is the guard; this just keeps the exposed surface
+    legible at a glance.
+    """
     for name in build_registry().names:
         assert name.startswith(("get_", "list_", "search_", "catalog_search")), name
         assert not name.startswith(_MUTATING_PREFIXES), name
@@ -148,18 +161,33 @@ def test_library_read_allowlist_is_only_inventory() -> None:
 @pytest.mark.parametrize(
     "method",
     [
+        # Repository writes.
         "create_volume_group",
         "add_cartridge",
         "create_file_record",
         "delete_file_record",
         "save_safety_token",
         "update_job_state",
+        # Routes to the live session / ORM.
         "session",
         "_session",
+        # Escapes an earlier __getattr__ + __slots__ design actually leaked:
+        # slot descriptors are found by NORMAL lookup, so __getattr__ never ran
+        # and proxy._target handed back the live CatalogRepository.
+        "_target",
+        "_allowed",
+        "_label",
+        "__class__",
+        "__dict__",
+        "__init__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__getstate__",
+        "__getattribute__",
     ],
 )
 def test_read_only_catalog_blocks_writes(app_context: Any, method: str) -> None:
-    """Mutation: widen CATALOG_READ_METHODS or drop the __getattr__ check -> fails."""
+    """Mutation: widen CATALOG_READ_METHODS or drop the __getattribute__ check -> fails."""
     proxy = read_only_catalog(app_context.catalog)
     with pytest.raises(ReadOnlyViolationError):
         getattr(proxy, method)
@@ -187,31 +215,109 @@ def test_read_only_proxy_cannot_be_rebound(app_context: Any) -> None:
         del proxy.list_volume_groups  # type: ignore[misc]
 
 
+def test_read_only_proxy_cannot_be_re_initialised(app_context: Any) -> None:
+    """__setattr__ is not enough on its own.
+
+    ``__init__`` uses ``object.__setattr__`` internally, so while ``__setattr__``
+    was blocked, calling ``proxy.__init__(evil, {"create_volume_group"}, "catalog")``
+    re-pointed the proxy at an arbitrary object with an arbitrary allowlist. Every
+    attribute access, ``__init__`` included, must go through the guard.
+    """
+    proxy = read_only_catalog(app_context.catalog)
+    with pytest.raises(ReadOnlyViolationError):
+        proxy.__init__(app_context.catalog, frozenset({"create_volume_group"}), "catalog")
+    # Still guarded afterwards.
+    with pytest.raises(ReadOnlyViolationError):
+        getattr(proxy, "create_volume_group")  # noqa: B009 - the lookup IS the test
+
+
+def test_read_only_proxy_cannot_be_copied_or_pickled(app_context: Any) -> None:
+    """copy/pickle reach for __reduce_ex__ on the instance; that must be refused,
+    not answered with a reconstructable view of the live object."""
+    proxy = read_only_catalog(app_context.catalog)
+    with pytest.raises(ReadOnlyViolationError):
+        copy.copy(proxy)
+    with pytest.raises(ReadOnlyViolationError):
+        pickle.dumps(proxy)
+
+
 # ---------------------------------------------------------------------------
 # 3. The module itself contains no execution or write path
 # ---------------------------------------------------------------------------
 
 
+# Every Python file in the package, spelled out. A new file is a deliberate diff,
+# and the source scans below cannot silently stop covering part of the package.
+ASSISTANT_SOURCE_NAMES = frozenset(
+    {
+        "__init__.py",
+        "config.py",
+        "errors.py",
+        "prompts.py",
+        "provider.py",
+        "readonly.py",
+        "session.py",
+        "tools.py",
+    }
+)
+
+
 def _assistant_sources() -> list[Path]:
-    return sorted(ASSISTANT_DIR.glob("*.py"))
+    """rglob, not glob.
+
+    With ``glob("*.py")`` the scans below covered only the top level, so a
+    subpackage containing ``import subprocess`` and ``session.commit()`` passed the
+    entire safety suite. Verified: adding such a module left 41 tests green.
+    """
+    return sorted(ASSISTANT_DIR.rglob("*.py"))
 
 
-def test_assistant_package_has_sources() -> None:
-    """Guards the two source-scanning tests below from passing vacuously."""
-    assert len(_assistant_sources()) >= 6
+def test_assistant_sources_are_the_reviewed_set() -> None:
+    """Guards the source-scanning tests below from silently under-covering.
+
+    A new module — at the top level or in a subpackage — fails here until it is
+    named, which is the prompt to review it for writes and execution paths.
+    """
+    found = {path.relative_to(ASSISTANT_DIR).as_posix() for path in _assistant_sources()}
+    assert found == set(ASSISTANT_SOURCE_NAMES)
 
 
-@pytest.mark.parametrize("forbidden", ["subprocess", "pty", "shutil", "ctypes", "multiprocessing"])
+@pytest.mark.parametrize(
+    "forbidden",
+    [
+        # stdlib execution surfaces
+        "subprocess",
+        "pty",
+        "shutil",
+        "ctypes",
+        "multiprocessing",
+        # OpenBlade's own acting subsystems. hardware.runner.SafeRunner is exactly
+        # the thing that shells out, and jobs/ performs archives, restores and
+        # formats -- importing any of them would route round the tool registry.
+        "openblade.hardware",
+        "openblade.jobs",
+        "openblade.safety",
+        "openblade.fuse",
+        "openblade.sftp",
+        "openblade.simulator",
+    ],
+)
 def test_assistant_never_imports_an_execution_module(forbidden: str) -> None:
-    """No tool may shell out. The repo's rule is: never shell=True, and here,
-    never shell at all."""
+    """No tool may shell out, and none may reach an OpenBlade module that acts.
+
+    The repo rule is "never shell=True"; here it is "never shell, and never import
+    something that does"."""
+
+    def _blocked(module: str) -> bool:
+        return module == forbidden or module.startswith(forbidden + ".")
+
     for path in _assistant_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                assert all(alias.name.split(".")[0] != forbidden for alias in node.names), path
+                assert not any(_blocked(alias.name) for alias in node.names), path
             elif isinstance(node, ast.ImportFrom) and node.module:
-                assert node.module.split(".")[0] != forbidden, path
+                assert not _blocked(node.module), f"{path}:{node.lineno}"
 
 
 @pytest.mark.parametrize(
@@ -247,10 +353,17 @@ def test_assistant_never_calls_a_session_write(forbidden: str) -> None:
 
 
 def test_prompt_states_the_read_only_boundary() -> None:
-    lowered = SYSTEM_PROMPT.lower()
-    assert "you cannot run anything" in lowered
-    assert "propose" in lowered
-    assert "review before running" in lowered
+    assert "You are a read-only advisor. You cannot run anything." in SYSTEM_PROMPT
+    assert (
+        "there is no tool that loads, unloads, moves, formats, erases, archives, restores,\n"
+        "or writes anything at all, and no tool that shells out."
+    ) in SYSTEM_PROMPT
+    assert (
+        "When the operator needs something done, you PROPOSE the exact command and they run"
+    ) in SYSTEM_PROMPT
+    assert "Review before running. OpenBlade treats tape automation as destructive." in (
+        SYSTEM_PROMPT
+    )
 
 
 def test_prompt_bakes_in_the_two_phase_destructive_flow() -> None:
@@ -263,7 +376,14 @@ def test_prompt_bakes_in_the_two_phase_destructive_flow() -> None:
 
 
 def test_prompt_instructs_refusal_of_gate_bypass() -> None:
-    lowered = SYSTEM_PROMPT.lower()
-    assert "bypass a safety gate" in lowered
-    assert "refuse" in lowered
-    assert "for testing only" in lowered
+    """Whole sentences, because a keyword check cannot tell an instruction from its
+    negation -- `"for testing only" in prompt` passes whether the prompt forbids a
+    bypass or offers one."""
+    assert (
+        "If asked how to skip, disable, forge, patch out or otherwise bypass a safety gate"
+    ) in SYSTEM_PROMPT
+    assert "refuse. Say plainly that you will not" in SYSTEM_PROMPT
+    assert (
+        'Do not provide a partial bypass, a "for testing only" variant, or the name\n'
+        "of the source file to edit."
+    ) in SYSTEM_PROMPT

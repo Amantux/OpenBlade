@@ -8,6 +8,7 @@ The read-only safety guarantees are tested separately in
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from openblade.assistant.errors import (
     AssistantUpstreamError,
 )
 from openblade.assistant.provider import OllamaClient
-from openblade.assistant.session import AssistantSession
+from openblade.assistant.session import MAX_CALLS_PER_ROUND, AssistantSession
 from openblade.assistant.tools import build_context, build_registry
 from tests.assistant_support import (
     ARCHIVED_PATH,
@@ -480,3 +481,179 @@ def test_search_docs_with_no_docs_tree_is_empty_not_an_error(
     )
     assert result["matchCount"] == 0
     assert result["sections"] == []
+
+
+# ---------------------------------------------------------------------------
+# Regressions found by adversarial review
+# ---------------------------------------------------------------------------
+
+
+def test_malformed_url_is_curated_not_a_traceback() -> None:
+    """httpx.InvalidURL is NOT an httpx.HTTPError, so it used to escape raw."""
+    config = assistant_config(base_url="localhost:11434")  # no scheme
+    with pytest.raises(AssistantUpstreamError, match="needs a scheme"):
+        OllamaClient(config, client=httpx.Client()).chat([{"role": "user", "content": "x"}])
+
+
+def test_failed_turn_leaves_the_transcript_clean(app_context: Any) -> None:
+    """A turn that dies mid-round must not leave dangling tool_calls in history.
+
+    Otherwise the operator's next question is appended onto a malformed
+    conversation, with only /reset to fix it.
+    """
+    config = assistant_config(max_rounds=2)
+    client, _ = scripted_client([tool_call_response("get_inventory") for _ in range(2)])
+    session = AssistantSession(
+        client=OllamaClient(config, client=client),
+        registry=build_registry(),
+        context=_context(app_context),
+        config=config,
+    )
+    before = list(session.messages)
+    with pytest.raises(AssistantLoopLimitError):
+        session.ask("loop")
+    assert session.messages == before
+    assert [message["role"] for message in session.messages] == ["system"]
+
+
+def test_tool_calls_are_capped_per_round(app_context: Any) -> None:
+    """Rounds are bounded; the work inside one round must be too."""
+    flood = {
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "get_inventory", "arguments": {}}} for _ in range(200)
+            ],
+        }
+    }
+    client, script = scripted_client([flood, prose_response("done")])
+    config = assistant_config()
+    session = AssistantSession(
+        client=OllamaClient(config, client=client),
+        registry=build_registry(),
+        context=_context(app_context),
+        config=config,
+    )
+    turn = session.ask("flood me")
+    assert len(turn.tool_calls) == MAX_CALLS_PER_ROUND
+    tool_messages = [m for m in script.requests[1]["messages"] if m["role"] == "tool"]
+    assert len(tool_messages) == MAX_CALLS_PER_ROUND
+
+
+def test_build_context_wires_refresh_to_the_session(app_context: Any) -> None:
+    """``refresh`` must be the session's ``expire_all``, not a no-op."""
+    calls: list[int] = []
+    app_context.catalog.session.expire_all = lambda: calls.append(1)  # type: ignore[method-assign]
+    context = _context(app_context)
+    context.refresh()
+    assert calls == [1]
+
+
+def test_build_context_refresh_is_a_no_op_without_a_session() -> None:
+    """A plain object (or a future non-SQLAlchemy catalog) must not break."""
+
+    class Plain:
+        def list_volume_groups(self) -> list[Any]:
+            return []
+
+    context = build_context(
+        config=assistant_config(),
+        catalog=Plain(),
+        library=Plain(),
+        backend="mock",
+        real_hardware_enabled=False,
+        db_url="sqlite:///x.db",
+    )
+    context.refresh()  # must not raise
+
+
+def test_ask_refreshes_before_reading(app_context: Any) -> None:
+    """Each turn drops cached rows first.
+
+    The CLI holds one long-lived Session built with ``expire_on_commit=False``; in a
+    REPL its identity map can pin rows another process has since changed, and the
+    prompt tells the model to trust what it reads.
+    """
+    calls: list[int] = []
+    config = assistant_config()
+    client, _ = scripted_client([prose_response("hi")])
+    context = replace(_context(app_context), refresh=lambda: calls.append(1))
+    session = AssistantSession(
+        client=OllamaClient(config, client=client),
+        registry=build_registry(),
+        context=context,
+        config=config,
+    )
+    session.ask("anything")
+    assert calls == [1]
+
+
+def test_search_docs_ignores_hashes_inside_fenced_code(app_context: Any, tmp_path: Path) -> None:
+    """A `#` in a bash block is a comment, not a heading.
+
+    Unfenced, docs/sharding.md alone shredded one procedure into four fragments
+    attributed to headings that do not exist.
+    """
+    (tmp_path / "guide.md").write_text(
+        "# Real heading\n\nBody text about scheduling.\n\n"
+        "```bash\n# Acquire 3 drives simultaneously\nopenblade jobs\n```\n\nMore body.\n",
+        encoding="utf-8",
+    )
+    result = build_registry().call(
+        "search_docs", _context(app_context, tmp_path), {"query": "scheduling drives"}
+    )
+    headings = [section["heading"] for section in result["sections"]]
+    assert headings == ["Real heading"]
+    assert "Acquire 3 drives simultaneously" in result["sections"][0]["excerpt"]
+
+
+def test_search_docs_does_not_leak_the_absolute_docs_path(app_context: Any, tmp_path: Path) -> None:
+    """With a cloud endpoint, /home/<operator>/... would leave the machine."""
+    (tmp_path / "a.md").write_text("# T\n\nbody\n", encoding="utf-8")
+    result = build_registry().call(
+        "search_docs", _context(app_context, tmp_path), {"query": "body"}
+    )
+    assert result["docsRoot"] == "docs/"
+    assert str(tmp_path) not in json.dumps(result)
+
+
+def test_catalog_search_is_bounded_in_sql(app_context: Any, seeded: dict[str, Any]) -> None:
+    """The model picks the pattern, so an unbounded full-catalog scan is a DoS.
+
+    The search must reach SQL, not load every FileRecord and filter in Python.
+    """
+    calls: list[dict[str, Any]] = []
+    real = app_context.catalog.list_catalog_files
+
+    def spy(limit: int = 50, offset: int = 0, search: str | None = None) -> Any:
+        calls.append({"limit": limit, "offset": offset, "search": search})
+        return real(limit=limit, offset=offset, search=search)
+
+    app_context.catalog.list_catalog_files = spy  # type: ignore[method-assign]
+    result = build_registry().call(
+        "catalog_search", _context(app_context), {"pattern": "/photos/*/*.raw"}
+    )
+    assert calls, "catalog_search must narrow in SQL"
+    assert calls[0]["limit"] <= 500
+    assert calls[0]["search"] == "/photos/", "the glob's literal prefix filters in SQL"
+    assert result["matchCount"] == 2
+    assert result["scanTruncated"] is False
+
+
+def test_tool_context_repr_hides_the_api_key(app_context: Any) -> None:
+    """A traceback with locals must not print the Ollama key or a DSN."""
+    config = assistant_config(api_key="sk-super-secret")
+    context = build_context(
+        config=config,
+        catalog=app_context.catalog,
+        library=app_context.library,
+        backend="mock",
+        real_hardware_enabled=False,
+        db_url="postgresql://admin:s3cret@db.internal/openblade",
+        scalar_password="hunter2",
+    )
+    rendered = repr(context)
+    assert "sk-super-secret" not in rendered
+    assert "s3cret" not in rendered
+    assert "hunter2" not in rendered

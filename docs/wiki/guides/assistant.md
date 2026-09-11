@@ -18,11 +18,13 @@ That is not a promise made in a prompt — it is how the code is built:
 | Guard | Where | What it stops |
 |---|---|---|
 | Tool allowlist | `openblade/assistant/tools.py` (`READ_ONLY_TOOL_NAMES`) | A tool registered without being added to the allowlist raises at startup. New tools fail **closed**. |
-| Read-only proxies | `openblade/assistant/readonly.py` | Tools see a proxy over the catalog and library whose attribute allowlist contains only read methods. `catalog.create_volume_group` and `library.load` are not reachable — they raise, they do not return a callable. |
+| Read-only proxies | `openblade/assistant/readonly.py` | Tools see a proxy over the catalog and library whose attribute allowlist contains only read methods. `catalog.create_volume_group` and `library.load` are not reachable — they raise, they do not return a callable. The proxy keeps no instance state, so `__class__`, `__init__`, `__dict__` and `__reduce__` are refused as well: there is no route back to the live object. |
 | No write path in the loop | `openblade/assistant/session.py` | No subprocess import, no database session, no `commit()`. The loop can only call handlers the registry accepted. |
 
 All three are covered by `tests/safety/test_assistant_read_only.py`, and both
 allowlist guards are mutation-checked: disable either one and those tests fail.
+The source scans there walk the whole package (`rglob`) and assert the exact file
+list, so a new module cannot quietly fall outside the guard.
 
 It will also **refuse to help you bypass a safety gate**. Ask how to skip the format
 safety token and it will explain what that gate protects against and show you the
@@ -114,10 +116,10 @@ Eight read-only tools, and nothing else:
 | `get_config_summary` | Backend mode, drive/slot counts, the state of each safety gate. |
 | `search_docs` | Best-matching sections of `docs/` — this wiki, the runbooks, the reference docs. |
 
-**No credentials are ever exposed.** `get_config_summary` reports
-`scalarCredentialSet: true/false`, never the password, and reduces the database URL
-to its scheme (`postgresql://<redacted>`) so a DSN password cannot leak into the
-model's context.
+**No credentials are ever exposed.** Secrets are reduced at the boundary, before
+the tool context is built: the Scalar password becomes `scalarCredentialSet:
+true/false`, and the database URL becomes its scheme (`postgresql://<redacted>`), so
+a DSN password cannot reach the model's context — or a traceback, or a log line.
 
 ## Examples
 
@@ -197,9 +199,12 @@ The assistant will check what tapes you actually have, then propose the commands
 - **It reads the CLI's state**, the same `~/.openblade` database and simulator state
   that `openblade inventory` shows. It does not see a separately-running API server's
   in-memory state.
-- **Bounded at 6 tool rounds** per question. A question needing more comes back with
-  an error asking you to narrow it — raise `OPENBLADE_ASSISTANT_MAX_ROUNDS` if you
-  genuinely need more.
+- **Bounded at 6 tool rounds** per question, and 8 tool calls per round. A question
+  needing more comes back with an error asking you to narrow it — raise
+  `OPENBLADE_ASSISTANT_MAX_ROUNDS` if you genuinely need more.
+- **`catalog_search` is bounded too.** It narrows in SQL and scans at most 500
+  candidate records; a very broad pattern reports `scanTruncated` rather than
+  loading a large archive's whole catalog into memory.
 - **No HTTP API in v1.** The assistant is CLI-only; there is no `/assist` endpoint.
 - **Always read a proposed command before running it.** The assistant is an advisor,
   and the human is the safety gate that actually matters.
