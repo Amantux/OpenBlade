@@ -128,6 +128,14 @@ class OllamaClient:
                 "The Ollama endpoint did not respond in time. It may be loading the "
                 f"model {self._config.model!r}; retry, or raise OPENBLADE_OLLAMA_TIMEOUT."
             ) from None
+        except (httpx.InvalidURL, httpx.UnsupportedProtocol):
+            # InvalidURL is NOT an httpx.HTTPError, so without this branch a
+            # scheme-less OPENBLADE_OLLAMA_URL escapes as a raw traceback past
+            # every `except AssistantError` handler in the CLI.
+            raise AssistantUpstreamError(
+                "OPENBLADE_OLLAMA_URL is not a usable URL. It needs a scheme, "
+                "for example http://localhost:11434 or https://ollama.com."
+            ) from None
         except httpx.HTTPError:
             raise AssistantUpstreamError(
                 "Could not reach the Ollama endpoint configured in OPENBLADE_OLLAMA_URL. "

@@ -30,6 +30,15 @@ from openblade.assistant.tools import ToolContext, ToolRegistry, render_result
 
 ToolObserver = Callable[[str, dict[str, Any]], None]
 
+# Maximum tool calls honoured from a single model reply.
+MAX_CALLS_PER_ROUND = 8
+
+
+def _cap_tool_calls(reply: ChatReply) -> ChatReply:
+    if len(reply.tool_calls) <= MAX_CALLS_PER_ROUND:
+        return reply
+    return ChatReply(content=reply.content, tool_calls=reply.tool_calls[:MAX_CALLS_PER_ROUND])
+
 
 @dataclass(frozen=True)
 class AssistantTurn:
@@ -100,7 +109,23 @@ class AssistantSession:
             )
 
     def ask(self, question: str, *, on_tool: ToolObserver | None = None) -> AssistantTurn:
-        """Ask a question and run the tool loop until the model answers in prose."""
+        """Ask a question and run the tool loop until the model answers in prose.
+
+        On failure the transcript is rewound to where this turn started. Otherwise a
+        turn that died mid-round would leave an assistant message carrying unanswered
+        ``tool_calls`` plus a dangling ``tool`` message, and the operator's next
+        question would be appended onto that malformed history with no sign of it.
+        """
+        checkpoint = len(self.messages)
+        try:
+            return self._ask(question, on_tool)
+        except AssistantError:
+            del self.messages[checkpoint:]
+            raise
+
+    def _ask(self, question: str, on_tool: ToolObserver | None) -> AssistantTurn:
+        # Drop cached rows first, so this turn sees what other processes committed.
+        self.context.refresh()
         self.messages.append({"role": "user", "content": question})
         schemas: Sequence[dict[str, Any]] = self.registry.schemas()
         used: list[str] = []
@@ -112,6 +137,9 @@ class AssistantSession:
                 return AssistantTurn(
                     reply=reply.content, tool_calls=tuple(used), rounds=round_number
                 )
+            # A confused model can emit hundreds of calls in one reply. Rounds are
+            # bounded; without this, the work inside one round is not.
+            reply = _cap_tool_calls(reply)
             used.extend(call.name for call in reply.tool_calls)
             self._append_tool_round(reply, on_tool)
 

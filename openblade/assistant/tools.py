@@ -42,10 +42,17 @@ READ_ONLY_TOOL_NAMES: frozenset[str] = frozenset(
 
 _MAX_RESULTS = 50
 _SNIPPET_CHARS = 700
+# Upper bound on rows pulled out of SQL for one catalog_search. Glob patterns are
+# applied in Python to this bounded set, never to the whole catalog.
+_SCAN_LIMIT = 500
 
 
 JSONDict = dict[str, Any]
 ToolHandler = Callable[["ToolContext", Mapping[str, Any]], JSONDict]
+
+
+def _no_refresh() -> None:
+    """Default when the caller has no session to expire (tests, plain objects)."""
 
 
 @dataclass(frozen=True)
@@ -54,15 +61,21 @@ class ToolContext:
 
     ``catalog`` and ``library`` are :class:`ReadOnlyProxy` instances, so a tool
     body physically cannot reach a mutating repository method.
+
+    Nothing here holds a credential: the database URL arrives already redacted and
+    the Scalar password is reduced to a boolean by :func:`build_context`. ``config``
+    does carry the Ollama API key, so it is excluded from ``repr`` — a traceback
+    with locals must not print it.
     """
 
-    config: AssistantConfig
+    config: AssistantConfig = field(repr=False)
     catalog: ReadOnlyProxy
     library: ReadOnlyProxy
     backend: str
     real_hardware_enabled: bool
-    db_url: str
-    scalar_url: str | None = None
+    database_summary: str
+    refresh: Callable[[], None] = _no_refresh
+    scalar_url_set: bool = False
     scalar_password_set: bool = False
     hardware_dry_run: bool = False
     docs_dir: Path = field(default_factory=default_docs_dir)
@@ -284,8 +297,30 @@ def _get_job(context: ToolContext, arguments: Mapping[str, Any]) -> JSONDict:
     return summary
 
 
+_GLOB_CHARACTERS = "*?["
+
+
+def _is_glob(pattern: str) -> bool:
+    return any(character in pattern for character in _GLOB_CHARACTERS)
+
+
+def _literal_prefix(pattern: str) -> str:
+    """The leading glob-free run of a pattern, usable as a SQL ``ilike`` filter.
+
+    ``/photos/*/*.raw`` -> ``/photos/``. Narrowing in SQL is what keeps
+    :func:`_catalog_search` from loading a real archive's whole catalog into
+    memory; the glob itself is then applied to the bounded candidate set.
+    """
+    for index, character in enumerate(pattern):
+        if character in _GLOB_CHARACTERS:
+            return pattern[:index]
+    return pattern
+
+
 def _matches(path: str, pattern: str) -> bool:
-    if any(character in pattern for character in "*?["):
+    if _is_glob(pattern):
+        # ``*`` deliberately crosses ``/`` (fnmatch semantics), so ``/photos/*.raw``
+        # finds nested files too. ``**`` therefore behaves the same as ``*``.
         return fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(path.lower(), pattern.lower())
     return pattern.lower() in path.lower()
 
@@ -295,9 +330,19 @@ def _catalog_search(context: ToolContext, arguments: Mapping[str, Any]) -> JSOND
     if not pattern:
         return {"error": "pattern is required"}
     limit = _int_arg(arguments, "limit", 20, _MAX_RESULTS)
-    records = context.catalog.list_file_records("/")
-    matched = [record for record in records if _matches(record.path, pattern)]
+
+    # Narrow in SQL first. The model chooses this pattern and may call the tool
+    # once per round, so an unbounded full-catalog scan is a self-inflicted DoS.
+    sql_filter = _literal_prefix(pattern) if _is_glob(pattern) else pattern
+    candidates, total = context.catalog.list_catalog_files(
+        limit=_SCAN_LIMIT, offset=0, search=sql_filter or None
+    )
+    matched = [record for record in candidates if _matches(record.path, pattern)]
     matched.sort(key=lambda record: record.path)
+
+    # One lookup for every volume-group name, rather than a lazy load per record.
+    group_names = {group.id: group.name for group in context.catalog.list_volume_groups()}
+
     results: list[JSONDict] = []
     for record in matched[:limit]:
         instances = [
@@ -317,7 +362,7 @@ def _catalog_search(context: ToolContext, arguments: Mapping[str, Any]) -> JSOND
                 "path": record.path,
                 "sizeBytes": int(record.size_bytes),
                 "checksumSha256": record.checksum_sha256,
-                "volumeGroup": record.volume_group.name if record.volume_group else None,
+                "volumeGroup": group_names.get(record.volume_group_id),
                 "shardCount": record.shard_count,
                 "tapes": sorted({instance["barcode"] for instance in instances}),
                 "instances": instances,
@@ -327,6 +372,9 @@ def _catalog_search(context: ToolContext, arguments: Mapping[str, Any]) -> JSOND
         "pattern": pattern,
         "matchCount": len(matched),
         "returned": len(results),
+        # Tell the model when it is looking at a truncated view, so it says so
+        # rather than reporting "only 500 files match".
+        "scanTruncated": total > len(candidates),
         "files": results,
     }
 
@@ -352,7 +400,7 @@ def _get_config_summary(context: ToolContext, arguments: Mapping[str, Any]) -> J
     return {
         "backend": context.backend,
         "simulator": context.backend != "real",
-        "database": _redact_db_url(context.db_url),
+        "database": context.database_summary,
         "driveCount": len(inventory.drives),
         "slotCount": len(inventory.slots),
         "safetyGates": {
@@ -373,7 +421,7 @@ def _get_config_summary(context: ToolContext, arguments: Mapping[str, Any]) -> J
             "mountStateUnloadGate": "Unload is rejected unless LTFS state is 'unmounted'.",
             "sourceRetentionGate": "Source deletion is never implicit.",
         },
-        "scalarEndpointConfigured": context.scalar_url is not None,
+        "scalarEndpointConfigured": context.scalar_url_set,
         "scalarCredentialSet": context.scalar_password_set,
         "assistant": {
             "model": context.config.model,
@@ -390,11 +438,28 @@ def _iter_doc_files(docs_dir: Path) -> list[Path]:
 
 
 def _split_sections(text: str) -> list[tuple[str, str]]:
-    """Split Markdown into ``(heading, body)`` pairs, preamble first."""
+    """Split Markdown into ``(heading, body)`` pairs, preamble first.
+
+    Fence-aware: a ``#`` inside a ``` or ~~~ block is a shell comment, not a
+    heading. Without this the OpenBlade docs shred — ``docs/sharding.md`` alone has
+    bash comments that split one procedure into four fragments and attach it to
+    headings that do not exist, in the one tool whose job is accurate quoting.
+    """
     sections: list[tuple[str, str]] = []
     heading = ""
     buffer: list[str] = []
+    fence = ""
     for line in text.splitlines():
+        stripped = line.lstrip()
+        if fence:
+            if stripped.startswith(fence):
+                fence = ""
+            buffer.append(line)
+            continue
+        if stripped.startswith(("```", "~~~")):
+            fence = stripped[:3]
+            buffer.append(line)
+            continue
         if line.startswith("#"):
             if heading or any(item.strip() for item in buffer):
                 sections.append((heading, "\n".join(buffer).strip()))
@@ -441,7 +506,9 @@ def _search_docs(context: ToolContext, arguments: Mapping[str, Any]) -> JSONDict
     hits.sort(key=lambda hit: (-hit[0], hit[1], hit[2]))
     return {
         "query": query,
-        "docsRoot": str(docs_dir),
+        # Deliberately not the absolute path: it is usually /home/<operator>/...
+        # and with a cloud endpoint it would leave the machine for no benefit.
+        "docsRoot": "docs/",
         "matchCount": len(hits),
         "sections": [
             {
@@ -584,6 +651,27 @@ def build_registry(extra: Sequence[ReadOnlyTool] = ()) -> ToolRegistry:
     return ToolRegistry([*_tool_definitions(), *extra])
 
 
+def _session_refresher(catalog: object) -> Callable[[], None]:
+    """Return a callable that expires the catalog session's identity map.
+
+    The CLI holds one long-lived SQLAlchemy ``Session`` built with
+    ``expire_on_commit=False``. In a REPL that session pins whatever it read first,
+    so without this the assistant reports a job as "pending" long after another
+    process finished it — the exact failure the "look it up, don't guess" prompt
+    rule is meant to prevent. ``expire_all()`` writes nothing; it only discards
+    cached rows so the next SELECT hits the database.
+    """
+    session = getattr(catalog, "session", None)
+    expire_all = getattr(session, "expire_all", None)
+    if not callable(expire_all):
+        return _no_refresh
+
+    def refresh() -> None:
+        expire_all()
+
+    return refresh
+
+
 def build_context(
     *,
     config: AssistantConfig,
@@ -598,8 +686,10 @@ def build_context(
 ) -> ToolContext:
     """Wrap live objects in read-only proxies and drop every secret at the boundary.
 
-    ``scalar_password`` is reduced to a boolean here and never stored, so no tool
-    can report it even by accident.
+    Credentials are reduced to booleans and the DSN to a scheme *here*, before the
+    context exists — so no tool, log line or traceback can surface one even by
+    accident. This is the redaction site; :func:`_get_config_summary` only reports
+    what it is handed.
     """
     return ToolContext(
         config=config,
@@ -607,8 +697,9 @@ def build_context(
         library=read_only_library(library),
         backend=backend,
         real_hardware_enabled=real_hardware_enabled,
-        db_url=db_url,
-        scalar_url=scalar_url or None,
+        database_summary=_redact_db_url(db_url),
+        refresh=_session_refresher(catalog),
+        scalar_url_set=bool(scalar_url),
         scalar_password_set=bool(scalar_password),
         hardware_dry_run=hardware_dry_run,
         docs_dir=config.docs_dir or default_docs_dir(),
