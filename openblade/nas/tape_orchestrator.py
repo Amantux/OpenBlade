@@ -6,13 +6,17 @@ import hashlib
 import threading
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import structlog
 
 from openblade.catalog.repository import CatalogRepository
-from openblade.domain.errors import ChecksumMismatchError
+from openblade.domain.errors import (
+    ChecksumMismatchError,
+    ExportRefusedError,
+    MailslotUnsupportedError,
+)
 from openblade.domain.models import MountMode
 from openblade.domain.policies import FormatConfirmation
 from openblade.nas.types import TapeOpRecord, TapeOpRequest, TapeOpStatus, TapeOpType
@@ -117,7 +121,10 @@ class TapeOperationOrchestrator:
                 cause=str(exc),
                 exc_info=True,
             )
-            if isinstance(exc, OperationNotConfirmedError):
+            if isinstance(exc, OperationNotConfirmedError | ExportRefusedError):
+                # A refusal is not a failed operation the caller may shrug at: it
+                # is a decision with a reason, and the reason is the message. The
+                # audit row above is still written as failed.
                 raise exc
             return TapeOpRecord.model_validate(persisted)
 
@@ -165,6 +172,10 @@ class TapeOperationOrchestrator:
             return self._verify(request)
         if request.op_type is TapeOpType.EJECT:
             return self._eject(request)
+        if request.op_type is TapeOpType.IMPORT:
+            return self._import(request)
+        if request.op_type is TapeOpType.EXPORT:
+            return self._export(request)
         raise ValueError(f"Unsupported tape op {request.op_type.value}")
 
     def _validate_request(self, request: TapeOpRequest) -> None:
@@ -307,6 +318,81 @@ class TapeOperationOrchestrator:
             return self._operation_result(result, {"barcode": request.barcode, "ejected": True})
         return self._unload(request)
 
+    def _mailslot_library(self) -> Any:
+        """The library backend, or a typed refusal if it has no I/E station."""
+        from openblade.domain.backends import MailslotBackend
+
+        if not isinstance(self.library, MailslotBackend):
+            raise MailslotUnsupportedError(
+                f"{type(self.library).__name__} has no import/export station; "
+                "mailslot operations are not available on this backend"
+            )
+        return self.library
+
+    def _import(self, request: TapeOpRequest) -> dict[str, Any]:
+        """Move media from an import/export element into a storage slot.
+
+        Both element ids are resolved by the caller (MailslotService) and passed
+        explicitly -- this layer owns the move and the audit record, not the
+        slot-picking policy.
+        """
+        library = self._mailslot_library()
+        ie_slot = _required_int(request.extras, "ie_slot", "import")
+        target_slot = request.slot_id
+        if target_slot is None:
+            raise ValueError("slot_id (destination storage slot) is required for import")
+        known_slots = {slot.slot_id for slot in self.library.inventory().slots}
+        if target_slot not in known_slots:
+            raise ValueError(
+                f"destination slot {target_slot} is not a data storage slot in this library"
+            )
+        result = library.import_cartridge(ie_slot, target_slot)
+        return self._operation_result(
+            result,
+            {"barcode": request.barcode, "ie_slot": ie_slot, "target_slot": target_slot},
+        )
+
+    def _export(self, request: TapeOpRequest) -> dict[str, Any]:
+        """Move media from a storage slot into an import/export element.
+
+        The data guard lives HERE rather than only in the service, because this
+        is the choke point every surface goes through. ``extras["force"]`` is
+        the single documented override.
+        """
+        library = self._mailslot_library()
+        self._guard_export(request)
+        ie_slot = _required_int(request.extras, "ie_slot", "export")
+        source_slot = request.slot_id
+        if source_slot is None:
+            source_slot = self.library.find_slot_by_barcode(request.barcode)
+        if source_slot is None:
+            raise ValueError(
+                f"Barcode {request.barcode} is not in a storage slot; "
+                "load it back into a slot before exporting"
+            )
+        result = library.export_cartridge_to_ie(source_slot, ie_slot)
+        return self._operation_result(
+            result,
+            {"barcode": request.barcode, "source_slot": source_slot, "ie_slot": ie_slot},
+        )
+
+    def _guard_export(self, request: TapeOpRequest) -> None:
+        if request.extras.get("force") is True:
+            return
+        assess = getattr(self.repo, "list_instances_for_barcode", None)
+        if assess is None:
+            # A transient (catalog-less) repository cannot tell us what is on the
+            # cartridge. Fail closed: an unknown payload is not an empty one.
+            raise ExportRefusedError(
+                f"Cannot determine what is on cartridge {request.barcode} without a "
+                "catalog; refusing to export. Re-run against the catalog, or force."
+            )
+        from openblade.catalog.export_policy import assess_export
+
+        assessment = assess_export(cast("CatalogRepository", self.repo), request.barcode)
+        if assessment.carries_data:
+            raise ExportRefusedError(assessment.refusal_message())
+
     def _ensure_loaded(self, barcode: str, drive_id: int | None) -> tuple[int, int | None]:
         loaded_drive_id = self.library.find_drive_by_barcode(barcode)
         if loaded_drive_id is not None:
@@ -393,6 +479,11 @@ class TapeOperationOrchestrator:
             return "Format operations require explicit confirmation"
         if isinstance(exc, ChecksumMismatchError):
             return "Checksum verification failed"
+        if isinstance(exc, ExportRefusedError | MailslotUnsupportedError):
+            # Operator-written text that exists precisely to be read: it names the
+            # cartridge, the volume group, and what would go out of the door.
+            # Replacing it with "Tape export operation failed" would defeat it.
+            return str(exc)
         safe_messages = {
             TapeOpType.LOAD: "Tape load operation failed",
             TapeOpType.UNLOAD: "Tape unload operation failed",
@@ -402,6 +493,8 @@ class TapeOperationOrchestrator:
             TapeOpType.MOVE: "Tape move operation failed",
             TapeOpType.VERIFY: "Tape verify operation failed",
             TapeOpType.EJECT: "Tape eject operation failed",
+            TapeOpType.IMPORT: "Tape import operation failed",
+            TapeOpType.EXPORT: "Tape export operation failed",
         }
         return safe_messages[op_type]
 
@@ -436,6 +529,16 @@ def execute_tape_request(
     if raise_on_failed and record.status is TapeOpStatus.FAILED:
         raise TapeOperationFailedError(record.error or f"Tape {request.op_type.value} operation failed")
     return record
+
+
+def _required_int(extras: dict[str, Any], key: str, op_name: str) -> int:
+    value = extras.get(key)
+    if value is None:
+        raise ValueError(f"extras[{key!r}] is required for {op_name} operations")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"extras[{key!r}] must be an element number") from exc
 
 
 def _utcnow_iso() -> str:

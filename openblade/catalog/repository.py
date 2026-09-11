@@ -434,6 +434,23 @@ class CatalogRepository:
         stmt = select(Cartridge).where(Cartridge.barcode == barcode)
         return self.session.execute(stmt).scalar_one_or_none()
 
+    def set_cartridge_state(self, barcode: str, state: str) -> Cartridge | None:
+        """Record a cartridge's catalog state (``in_slot`` / ``exported`` / ...).
+
+        ``exported`` is the flag every restore path already reads to refuse a
+        cartridge that is no longer in the library (jobs/restore.py,
+        jobs/sharded_restore.py, jobs/archive.py). Until now nothing outside a
+        test fixture ever set it, so moving media out left the catalog claiming
+        the data was still online. The mailslot flows are what write it.
+        """
+        cartridge = self.get_cartridge(barcode)
+        if cartridge is None:
+            return None
+        cartridge.state = state
+        self.session.commit()
+        self.session.refresh(cartridge)
+        return cartridge
+
     def list_cartridges(self) -> list[Cartridge]:
         stmt = select(Cartridge).order_by(Cartridge.barcode)
         return list(self.session.execute(stmt).scalars().all())
