@@ -142,8 +142,24 @@ inventory, leaving `len(status.slots) == 8` while the header said 12. A tape in
 the mailslot was invisible.
 
 The bring-up plan flags i3 I/E slots as a likely regex divergence (Phase 3.4).
-It was right. Fixed; `MtxSlotInfo` gained an `is_import_export` flag and slot
-count now agrees with the header.
+It was right.
+
+**They are parsed into a separate list, deliberately.** The obvious fix — put
+them in `slots` with an `is_import_export` flag — is wrong, and adversarial
+review caught it before it shipped. `SlotState` carries no such flag, so the
+distinction is erased at the `library.py` boundary and every consumer would
+suddenly see 12 slots where it saw 8. The sharp edge is
+`routes_aml_move_medium.py::_first_empty_slot()`, which returns the first
+unoccupied slot: on a full library — the normal state of a production
+library — the first *empty* element is the operator mailslot, so an unload
+would eject the cartridge to the front panel. `routes_aml_library.py` would
+also have double-counted I/E slots in `slotsTotal`, on a parity-gated AML
+response.
+
+So `MtxStatus.slots` stays "data storage slots", `MtxStatus.import_export_slots`
+holds the mailslot elements, `all_slots` merges them for anyone who wants both,
+and `slot_count` (the header figure) equals the two together. Nothing
+downstream changes behaviour; the information simply stops being discarded.
 
 ### 3.3 `ltfs.py` — `device_list()` could never succeed
 
@@ -245,21 +261,86 @@ three spellings — `/dev/st1`, `/dev/nst1`, `/dev/sg2` — all now `true`.
 
 ### Regression tests
 
-Every fix ships with one, in `tests/unit/test_hardware_parsers.py`:
-`TestMtxParserAgainstRealOutput` (7), `TestLTFSParserAgainstRealOutput` (5),
-`TestResolveSgDevice` (7). They are anchored on byte-accurate captured output —
-`SAMPLE_MTX_REAL_SCALAR` and `SAMPLE_LTFS_DEVICE_LIST_REAL` — rather than on
-hand-written samples, which is precisely how the original bugs hid.
+Every fix ships with one. Parser-level tests live in
+`tests/unit/test_hardware_parsers.py` (`TestMtxParserAgainstRealOutput`,
+`TestLTFSParserAgainstRealOutput`, `TestResolveSgDevice`); the command-level
+ones — which argv is actually built, and how `device_list`/`unmount` behave —
+live in `tests/unit/test_hardware_safety.py` against a `RecordingRunner`.
 
-**All were mutation-checked.** Each fix was reverted and the corresponding tests
-confirmed to fail, then restored:
+They are anchored on byte-accurate captured output (`SAMPLE_MTX_REAL_SCALAR`,
+`SAMPLE_LTFS_DEVICE_LIST_REAL`) rather than on hand-written samples, which is
+precisely how the original bugs hid.
+
+**All were mutation-checked** — each fix reverted, the expected tests confirmed
+to fail, then restored:
 
 | Mutation | Tests that failed |
 |---|---|
-| tight `VolumeTag=` regex restored | 1 of 7 |
-| I/E-blind slot regex restored | 3 of 7 |
-| `resolve_sg_device` → naive name derivation | 5 of 7 |
-| real-format branch removed from LTFS parser | 4 of 5 |
+| tight `VolumeTag=` regex restored | 1 |
+| I/E-blind slot regex restored | 3 |
+| `resolve_sg_device` → naive name derivation | 5 |
+| real-format branch removed from LTFS parser | 4 |
+| `resolve_sg_device` dropped from the 3 LTFS call sites | 4 |
+| `device_list` back to `stdout` + `raise_on_error()` | 1 |
+| `unmount` judging success on the umount exit code | 2 |
+| unreadable `/proc` treated as "released" | 1 |
+| `device_list_ok` back to raw string equality | 1 |
+
+The last four exist **because** the first mutation round was not enough. The
+initial pass only mutation-checked the *parsers*; adversarial review pointed
+out that the plumbing around them — the three `resolve_sg_device` call sites,
+`device_list`'s stderr handling, the unmount gate — had no test that would fail
+on revert. It also caught a genuinely vacuous assertion: `assert
+wait_for_ltfs_release(...)` in the hardware tests passes against a stub that
+returns `True` unconditionally, since with no LTFS running the real function
+also returns `True` immediately. That is the "returns `[]` for a blocked URL"
+pattern the project rules call out by name.
+
+---
+
+## 3.8 What adversarial review changed
+
+Worth recording, because two of these were fixes that *worked* and were still
+wrong:
+
+- **I/E slots in the inventory** (§3.2) — reshaped from "flag them" to "keep
+  them in a separate list", because the flag was erased downstream and would
+  have made the AML unload route eject cartridges to the mailslot.
+- **`format-scratch.sh` matched barcodes by substring.** `find_slot()` used an
+  unanchored `index($0, want)`, so `format-scratch.sh OB0008L8 ""` formatted
+  the requested scratch tape *and then* `OB0001L8`, a data tape — the empty
+  argument matched the first cartridge in the library. It also never checked
+  what was actually in the drive before running `mkltfs`. Now: barcodes are
+  validated as well-formed, matched against the whole VolumeTag, and the drive
+  is re-read after loading so the **loaded** cartridge's VolumeTag must equal
+  the requested barcode before anything is written. That last step is the
+  "positive barcode confirmation" AGENTS.md requires; the first two only decide
+  what to load.
+- **`reset.sh` unloaded drives without checking for a live LTFS mount** —
+  directly against "never unload while LTFS is mounted or dirty", in the one
+  new script that issues unloads, and worse because it exists specifically to
+  clean up after *failed* runs, which is exactly when a mount is left behind.
+  Both it and `format-scratch.sh` now refuse and tell you how to clear it.
+- **`unmount()` computed `device_released` and discarded it** — callers marked
+  the drive `UNMOUNTED` regardless, so `can_unload_drive()` would green-light
+  an unload with LTFS still holding the drive. The wait was a 20-second pause
+  that changed nothing. Success now *means* the drive is free.
+- **`wait_for_ltfs_release()` failed open** — an unreadable `/proc` (hidepid, a
+  container, a different uid) read as "released". For a gate protecting an
+  unload, "I could not look" must not mean "safe".
+- **Scripts selected the changer as "first `mediumx`"** — Phase 3 cables a real
+  i3 to this same host, a real HBA usually enumerates below mhvtl's dynamic
+  host number, and a real Scalar i3 reports the same `QUANTUM` vendor string.
+  They now key on the rig's unit serial and refuse to guess.
+- **`setup.sh`/`teardown.sh` were not as well-scoped as their comments claimed.**
+  `/etc/mhvtl` and `/opt/mhvtl` are mhvtl's own defaults, not paths this rig
+  invented. Setup now backs up a pre-existing config before overwriting it and
+  moves `library_contents.30` aside rather than deleting it; `--purge` removes
+  only the media barcodes named in our own `library_contents.10` and restores
+  the backup.
+- **`MHVTL_REF` defaulted to `master`** — the patch is byte-exact against one
+  commit and the results here are from that build, so it is now pinned to the
+  full SHA.
 
 ---
 
