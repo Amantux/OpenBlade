@@ -60,6 +60,61 @@ class SetupFacadeViolationError(AssistantError):
     """A setup tool tried to reach something the write facade does not expose."""
 
 
+class MediaRegistryViolationError(AssistantError):
+    """A tier-2 media tool was registered that the media registry refuses.
+
+    Either the name is not on ``MEDIA_TOOL_NAMES`` (the fail-closed allowlist) or it
+    already belongs to another registry. The three registries are disjoint by
+    construction: a media tool name can never register as a tier-1 setup tool (the
+    tier-1 denylist sees to that), and a setup or read tool name can never register
+    as a media tool.
+    """
+
+
+class MediaFacadeViolationError(AssistantError):
+    """A media tool tried to reach something the tier-2 media facade does not expose."""
+
+
+class MediaRefusedError(AssistantError):
+    """A media action was refused because its target is not unambiguous.
+
+    The tier-1 house rule, unchanged, and applied *before* the operator is prompted:
+    an unknown barcode, a barcode that appears in two places, an occupied target
+    drive or slot, a mounted drive — each stops the action here and hands back the
+    candidates the operator might have meant. It is raised again inside the write
+    path, because a confirmation is not a licence to act on stale facts.
+    """
+
+    def __init__(self, message: str, *, code: str, candidates: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.code = code
+        self.candidates = candidates
+
+
+class MediaOperationFailedError(AssistantError):
+    """A confirmed media action ran and failed.
+
+    The message is the *curated* failure text — the orchestrator's per-op-type
+    constant, a typed ``OpenBladeError``'s operator-written message, or
+    ``safe_job_error``'s class-name-only fallback. Raw tool output (``mtx``/
+    ``mkltfs`` stderr, argv, device paths, a DSN) never reaches it, because it is
+    built at the raise site in :mod:`openblade.assistant.media_facade` rather than
+    by wrapping whatever came out of the service.
+    """
+
+
+class MediaNotAuthorizedError(AssistantError):
+    """A media action reached the write path without a matching authorization.
+
+    Raised by :meth:`MediaToolRegistry.perform` when the authorization it is handed
+    does not re-verify against the action it claims to authorize — a wrong action
+    key, the wrong confirmation grade, or a response the grade does not accept (a
+    bare ``y`` against a typed-barcode confirmation). It is a defect in the caller,
+    not data for the model, so it propagates rather than being reported back into
+    the conversation.
+    """
+
+
 class SetupRefusedError(AssistantError):
     """A setup action was refused because its target is not unambiguous.
 
