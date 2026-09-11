@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from openblade.domain.models import OperationResult
 from openblade.domain.policies import RealHardwareGuard
@@ -118,9 +118,22 @@ class MtxDriveInfo:
 class MtxStatus:
     device: str
     drives: list[MtxDriveInfo]
+    # Data storage slots ONLY. Import/export (mailslot) elements are kept
+    # separately: every consumer of `slots` treats it as "somewhere a tape may
+    # be parked or unloaded to", and an I/E slot is not that. Folding them in
+    # would, on a full library, make the first *empty* slot the operator
+    # mailslot - so an unload would eject the cartridge to the front panel.
     slots: list[MtxSlotInfo]
     drive_count: int = 0
+    # From the mtx header, which counts storage AND import/export elements -
+    # so this is len(slots) + len(import_export_slots), not len(slots).
     slot_count: int = 0
+    import_export_slots: list[MtxSlotInfo] = field(default_factory=list)
+
+    @property
+    def all_slots(self) -> list[MtxSlotInfo]:
+        """Storage and import/export elements together, in element order."""
+        return sorted(self.slots + self.import_export_slots, key=lambda slot: slot.slot_id)
 
 
 def _parse_barcode(details: str) -> str | None:
@@ -137,6 +150,7 @@ def parse_mtx_status(output: str) -> MtxStatus:
     slot_count = 0
     drives: list[MtxDriveInfo] = []
     slots: list[MtxSlotInfo] = []
+    import_export_slots: list[MtxSlotInfo] = []
 
     for raw_line in output.splitlines():
         line = raw_line.strip()
@@ -170,19 +184,20 @@ def parse_mtx_status(output: str) -> MtxStatus:
         slot_match = _SLOT_RE.match(line)
         if slot_match is not None:
             details = slot_match.group("details")
-            slots.append(
-                MtxSlotInfo(
-                    slot_id=int(slot_match.group("slot_id")),
-                    occupied="Full" in details,
-                    barcode=_parse_barcode(details),
-                    is_import_export="IMPORT/EXPORT" in slot_match.group("flags").upper(),
-                )
+            is_import_export = "IMPORT/EXPORT" in slot_match.group("flags").upper()
+            slot = MtxSlotInfo(
+                slot_id=int(slot_match.group("slot_id")),
+                occupied="Full" in details,
+                barcode=_parse_barcode(details),
+                is_import_export=is_import_export,
             )
+            (import_export_slots if is_import_export else slots).append(slot)
 
     return MtxStatus(
         device=device,
         drives=drives,
         slots=slots,
+        import_export_slots=import_export_slots,
         drive_count=drive_count,
         slot_count=slot_count,
     )

@@ -87,26 +87,38 @@ class TestMtxParserAgainstRealOutput:
 
     def test_import_export_slots_are_not_dropped(self) -> None:
         # "Storage Element 9 IMPORT/EXPORT:Empty" does not match "\\d+:", so
-        # all four I/E slots used to vanish from the inventory - leaving
-        # len(slots) disagreeing with the header's own slot count.
+        # all four I/E elements used to vanish entirely - a tape in the
+        # mailslot was invisible to the parser.
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        assert [slot.slot_id for slot in status.import_export_slots] == [9, 10, 11, 12]
+
+    def test_import_export_slots_are_kept_out_of_storage_slots(self) -> None:
+        # They must NOT land in `slots`. Consumers treat that list as "places a
+        # tape may be parked or unloaded to" - notably _first_empty_slot() in
+        # the AML moveMedium route. On a full library the first EMPTY element
+        # is the mailslot, so folding them in would unload cartridges to the
+        # operator front panel.
+        status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
+        assert [slot.slot_id for slot in status.slots] == list(range(1, 9))
+        assert all(not slot.is_import_export for slot in status.slots)
+        assert all(slot.is_import_export for slot in status.import_export_slots)
+
+    def test_slot_count_covers_both_kinds(self) -> None:
+        # mtx's header counts storage AND import/export elements, so the
+        # header figure must equal the two lists together.
         status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
         assert status.slot_count == 12
-        assert len(status.slots) == 12
-        assert [slot.slot_id for slot in status.slots] == list(range(1, 13))
+        assert len(status.slots) + len(status.import_export_slots) == status.slot_count
 
-    def test_import_export_slots_are_flagged(self) -> None:
+    def test_all_slots_merges_in_element_order(self) -> None:
         status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
-        ie_slots = [slot.slot_id for slot in status.slots if slot.is_import_export]
-        assert ie_slots == [9, 10, 11, 12]
-        assert all(not slot.is_import_export for slot in status.slots if slot.slot_id <= 8)
+        assert [slot.slot_id for slot in status.all_slots] == list(range(1, 13))
 
     def test_barcode_in_import_export_slot_is_visible(self) -> None:
-        # A tape parked in the mailslot must still be findable, otherwise
-        # find_slot_by_barcode() reports "not in inventory" for media the
-        # operator can plainly see in the I/E station.
+        # A tape parked in the mailslot must still be readable somewhere,
+        # otherwise the operator sees media the software swears is absent.
         status = parse_mtx_status(SAMPLE_MTX_REAL_SCALAR)
-        slot = next(slot for slot in status.slots if slot.slot_id == 11)
-        assert slot.is_import_export is True
+        slot = next(slot for slot in status.import_export_slots if slot.slot_id == 11)
         assert slot.occupied is True
         assert slot.barcode == "OB0009L8"
 
