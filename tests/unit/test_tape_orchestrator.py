@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
 from fastapi.testclient import TestClient
 
 from openblade.api.main import app
@@ -487,3 +488,53 @@ def test_failure_log_carries_the_real_cause_while_the_record_stays_curated() -> 
     assert failures[0]["error"] == "Tape format operation failed"
     assert failures[0]["cause"] == "SECRET mkltfs blew up"
     assert failures[0]["cause_type"] == "RuntimeError"
+
+
+def test_move_refuses_a_destination_outside_the_storage_slots() -> None:
+    """A move destination goes straight to `mtx transfer`; mtx element numbers
+    continue past the storage slots into the import/export magazine.
+
+    Real-data campaign: POST /tape-ops/execute with dest_slot_id 9 physically
+    ejected a cartridge holding 358 archived files to the mailslot, after which
+    `inventory()` could not see it and nothing on it could be restored.
+    """
+    _, library, _, orchestrator = make_orchestrator()
+    library.seed_slots(["MV0100L8"])
+    slot = library.find_slot_by_barcode("MV0100L8")
+    beyond = max(s.slot_id for s in library.inventory().slots) + 1
+
+    # Rejected during validation, like the same-slot case above, so the caller
+    # gets a 4xx rather than a queued-then-failed op.
+    with pytest.raises(ValueError, match="import/export"):
+        orchestrator.execute(
+            TapeOpRequest(
+                op_type=TapeOpType.MOVE,
+                barcode="MV0100L8",
+                slot_id=slot,
+                requested_by="tester",
+                extras={"dest_slot_id": beyond},
+            )
+        )
+
+    assert library.find_slot_by_barcode("MV0100L8") == slot, "the cartridge moved anyway"
+
+
+def test_move_to_a_real_storage_slot_still_works() -> None:
+    """The guard must not break the ordinary slot-to-slot move."""
+    _, library, _, orchestrator = make_orchestrator()
+    library.seed_slots(["MV0101L8"])
+    slot = library.find_slot_by_barcode("MV0101L8")
+    empty = next(s.slot_id for s in library.inventory().slots if s.barcode is None)
+
+    record = orchestrator.execute(
+        TapeOpRequest(
+            op_type=TapeOpType.MOVE,
+            barcode="MV0101L8",
+            slot_id=slot,
+            requested_by="tester",
+            extras={"dest_slot_id": empty},
+        )
+    )
+
+    assert record.status is TapeOpStatus.COMPLETED
+    assert library.find_slot_by_barcode("MV0101L8") == empty

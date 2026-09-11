@@ -323,7 +323,27 @@ class TapeOperationOrchestrator:
         destination = request.extras.get("dest_slot_id", request.extras.get("dest_slot", request.slot_id))
         if destination is None:
             raise ValueError("destination slot is required for move operations")
-        return int(destination)
+        destination_id = int(destination)
+        known_slots = {slot.slot_id for slot in self.library.inventory().slots}
+        if destination_id not in known_slots:
+            # This integer went straight to `mtx transfer` unvalidated, and mtx
+            # element numbers continue past the storage slots into the
+            # import/export magazine. On the rig, POST /tape-ops/execute with
+            # dest_slot_id 9 physically ejected a cartridge holding 358 archived
+            # files into the mailslot -- after which `inventory()` (storage slots
+            # only, by design) could not see it at all, so nothing on it could be
+            # restored. One unconfirmed integer orphaned a third of an archive.
+            #
+            # Moving media out of the library is an export, and the product's
+            # position on export is already explicit: routes_aml_move_medium
+            # rejects moveClass import/export on i3/i6. Refuse here too rather
+            # than let a typo do it silently.
+            raise ValueError(
+                f"destination slot {destination_id} is not a data storage slot in this "
+                f"library (valid: {min(known_slots, default=0)}-{max(known_slots, default=0)}); "
+                "moving media to an import/export element is not supported"
+            )
+        return destination_id
 
     def _find_empty_slot(self) -> int:
         inventory = self.library.inventory()
