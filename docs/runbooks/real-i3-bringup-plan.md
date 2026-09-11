@@ -107,3 +107,50 @@ data-bearing tape in the library until Phase 4 is fully green.
 | multipathd steals FC tape LUNs | FC only, discovery | blacklist before cabling |
 | `scalar_http` can't move media | if webservices transport chosen | use `scsi` transport for v1 |
 | compose lacks device passthrough | containerized deploy | bare-metal venv for bring-up |
+
+---
+
+## First-contact gate (run in this order at the real i3; ~10 minutes)
+
+Everything below is proven against the mhvtl rig (3 drives, scrambled kernel
+naming) and the in-repo AML emulator (142-test compliance suite) — so any
+failure here isolates a REAL-i3 difference, not an OpenBlade bug class already
+covered. Stop at the first failing step; each step names what a failure means.
+
+```sh
+# 0. Devices visible? (mediumx + one tape row per cabled drive)
+lsscsi -g
+#    -> no mediumx: the partition's control-path drive is not the cabled one
+#       (i3 web UI), or FC zoning/multipath is eating the LUN.
+
+# 1. Read serials; build the map (element order per the i3 drive list):
+for sg in /dev/sgN...; do sg_inq $sg | grep -iE "serial|product"; done
+export OPENBLADE_BACKEND=real OPENBLADE_REAL_HARDWARE_ENABLED=true
+export OPENBLADE_CHANGER_DEVICE=/dev/sgN
+export OPENBLADE_DRIVE_DEVICES=/dev/nst0,/dev/nst1,/dev/nst2   # nst, never st
+export OPENBLADE_DRIVE_SERIAL_MAP="SER1:0,SER2:1,SER3:2"
+#    Construction REFUSES on any serial-set mismatch — that refusal is the
+#    guard working, not a bug. Fix the map, never bypass it.
+
+# 2. Guarded discovery + inventory (read-only):
+openblade hardware connect-i3
+#    -> parse errors here mean real-i3 mtx output differs from every captured
+#       form; save `mtx -f $OPENBLADE_CHANGER_DEVICE status` verbatim.
+
+# 3. Read-only test pass:
+pytest tests/hardware/test_device_discovery.py tests/hardware/test_drive_health.py -v -m real_hardware
+
+# 4. One-time physical confirmation of the serial map (per drive element k):
+#    load a tape into element k via the i3 UI; confirm ONLY the correlated
+#    device sees it (mt -f <device> status). This is the sole check no
+#    software can do for you.
+
+# 5. LTFS validation, then scratch-only destructive tests:
+openblade hardware validate-ltfs --device /dev/nst0 --barcode <SCRATCH>
+OPENBLADE_SCRATCH_BARCODES=<S1>,<S2> pytest tests/hardware/ -v -m real_hardware
+```
+
+Optional parallel check: point the compliance suite at the real library's Web
+Services (`I3_TEST_MODE=real I3_REAL_HARDWARE_ENABLED=true I3_AML_URL=https://<i3>`)
+— read-only suites first. The same tests pass 142/0 against the emulator, so
+divergence = dialect drift worth capturing into the contract.
