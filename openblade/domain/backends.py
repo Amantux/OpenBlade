@@ -32,6 +32,26 @@ class LibraryBackend(Protocol):
 
 
 @runtime_checkable
+class MailslotBackend(Protocol):
+    """Optional import/export (mailslot) capability of a library backend.
+
+    Deliberately NOT folded into ``LibraryBackend``: a library may have zero
+    import/export elements, and ``LibraryBackend.inventory().slots`` is defined
+    as data storage slots only (see ``MtxStatus.slots``) precisely so an unload
+    can never pick the operator mailslot as "the first empty slot". Callers ask
+    ``isinstance(library, MailslotBackend)`` and get a typed refusal otherwise.
+
+    Element ids are whatever the library reports -- the i3 numbers its I/E
+    station past the storage slots, other libraries use high element addresses.
+    Nothing here may renumber them.
+    """
+
+    def import_export_slots(self) -> list[SlotState]: ...
+    def import_cartridge(self, ie_slot: int, target_slot: int) -> OperationResult: ...
+    def export_cartridge_to_ie(self, source_slot: int, ie_slot: int) -> OperationResult: ...
+
+
+@runtime_checkable
 class LTFSBackend(Protocol):
     def format(self, barcode: str, confirmation: FormatConfirmation) -> OperationResult: ...
     def mount(self, barcode: str, mode: MountMode) -> MountHandle: ...

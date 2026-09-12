@@ -74,6 +74,36 @@ class CartridgeOfflineError(OpenBladeError):
     """Cartridge is exported/offline."""
 
 
+class UnsafeCatalogPathError(SafetyViolationError):
+    """A catalog path cannot be mapped under a restore destination safely.
+
+    Catalog rows are not trusted to be well-formed: ``create_file_record``
+    normalises with ``PurePosixPath``, which does not collapse ``..``. A bulk
+    restore joins the path onto ``--dest``, so a row that reduces to nothing but
+    traversal components would write outside it. Refuse loudly instead.
+    """
+
+
+class MailslotUnsupportedError(OpenBladeError):
+    """The active library backend has no import/export (mailslot) station."""
+
+
+class ImportExportSlotError(OpenBladeError):
+    """An import/export element is missing, empty, or already occupied."""
+
+
+class ExportRefusedError(SafetyViolationError):
+    """Refused to export a cartridge that still carries archived data.
+
+    Exporting moves media out of the library: every file instance on that
+    cartridge becomes unrestorable until someone physically puts it back. The
+    campaign runbook records the unforced version of this -- one unvalidated
+    ``dest_slot_id`` ejected a cartridge holding 358 archived files, after which
+    ``inventory()`` could not see it at all. Refusing by default (``--force`` to
+    override) is the difference between an export and an accident.
+    """
+
+
 class FileNotFoundError(OpenBladeError):  # noqa: A001
     """File not found in catalog."""
 

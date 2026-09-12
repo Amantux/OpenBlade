@@ -85,6 +85,7 @@ class MockLibraryBackend:
         load_delay: float | None = None,
         fault_config: FaultConfig | None = None,
         fault_injector: FaultInjector | None = None,
+        num_import_export_slots: int = 0,
     ) -> None:
         self.library_id = library_id
         self.load_delay = _resolve_load_delay(load_delay)
@@ -94,6 +95,15 @@ class MockLibraryBackend:
         self._changer_lock = threading.Lock()
         self._slots: dict[int, _Slot] = {
             slot_id: _Slot(slot_id) for slot_id in range(1, num_slots + 1)
+        }
+        # Import/export (mailslot) elements, kept in their own map for the same
+        # reason MtxStatus keeps them out of `slots`: every consumer of storage
+        # slots treats them as "somewhere a tape may be parked", and ejecting to
+        # the front panel is not that. mtx numbers the I/E station after the
+        # storage slots on the i3, so mirror that here.
+        self._ie_slots: dict[int, _Slot] = {
+            slot_id: _Slot(slot_id)
+            for slot_id in range(num_slots + 1, num_slots + 1 + num_import_export_slots)
         }
         self._drives: dict[int, MockDrive] = {
             drive_id: MockDrive(drive_id) for drive_id in range(num_drives)
@@ -105,6 +115,8 @@ class MockLibraryBackend:
         with self._lock:
             for slot in self._slots.values():
                 slot.barcode = None
+            for ie_slot in self._ie_slots.values():
+                ie_slot.barcode = None
             for drive in self._drives.values():
                 drive.barcode = None
                 drive.drive_state = DriveState.EMPTY
@@ -189,6 +201,13 @@ class MockLibraryBackend:
                     }
                     for slot in self._slots.values()
                 ],
+                "import_export_slots": [
+                    {
+                        "slot_id": slot.slot_id,
+                        "barcode": slot.barcode.value if slot.barcode is not None else None,
+                    }
+                    for slot in self._ie_slots.values()
+                ],
                 "drives": [
                     {
                         "drive_id": drive.drive_id,
@@ -224,6 +243,15 @@ class MockLibraryBackend:
                 )
                 for item in raw["slots"]
             }
+            # Absent in payloads written before I/E slots existed: default to no
+            # mailslot rather than failing to load an older snapshot.
+            backend._ie_slots = {
+                int(item["slot_id"]): _Slot(
+                    slot_id=int(item["slot_id"]),
+                    barcode=Barcode(item["barcode"]) if item.get("barcode") else None,
+                )
+                for item in raw.get("import_export_slots", [])
+            }
             backend._drives = {
                 int(item["drive_id"]): MockDrive(
                     drive_id=int(item["drive_id"]),
@@ -237,7 +265,7 @@ class MockLibraryBackend:
                 barcode: CartridgeState(state)
                 for barcode, state in raw.get("cartridge_states", {}).items()
             }
-            for slot in backend._slots.values():
+            for slot in (*backend._slots.values(), *backend._ie_slots.values()):
                 if slot.barcode is not None:
                     backend._cartridge_states.setdefault(slot.barcode.value, CartridgeState.IN_SLOT)
             for drive in backend._drives.values():
@@ -419,7 +447,7 @@ class MockLibraryBackend:
 
     def export_cartridge(self, barcode: str) -> None:
         with self._lock:
-            for slot in self._slots.values():
+            for slot in (*self._slots.values(), *self._ie_slots.values()):
                 if slot.barcode is not None and slot.barcode.value == barcode:
                     slot.barcode = None
                     self._cartridge_states[barcode] = CartridgeState.EXPORTED
@@ -433,6 +461,109 @@ class MockLibraryBackend:
                     return
             if barcode in self._cartridge_states:
                 self._cartridge_states[barcode] = CartridgeState.EXPORTED
+
+    def seed_import_export_slots(self, slots: dict[int, str | None]) -> None:
+        """Replace the I/E station with the given element -> barcode mapping.
+
+        Element numbers are taken verbatim (the i3 numbers its I/E station after
+        the storage slots; other libraries use high element addresses), so this
+        is how a persisted snapshot is restored without renumbering.
+        """
+        with self._lock:
+            self._ie_slots = {
+                slot_id: _Slot(slot_id, Barcode(barcode) if barcode else None)
+                for slot_id, barcode in slots.items()
+            }
+            for barcode in slots.values():
+                if barcode:
+                    self._cartridge_states.setdefault(
+                        Barcode(barcode).value, CartridgeState.IN_SLOT
+                    )
+            self._validate_invariants_locked()
+
+    def import_export_slots(self) -> list[SlotState]:
+        """Import/export (mailslot) elements, in element order."""
+        with self._lock:
+            return [
+                SlotState(
+                    slot_id=slot.slot_id,
+                    barcode=slot.barcode,
+                    occupied=slot.barcode is not None,
+                )
+                for slot in sorted(self._ie_slots.values(), key=lambda item: item.slot_id)
+            ]
+
+    def import_cartridge(self, ie_slot: int, target_slot: int) -> OperationResult:
+        """Move a cartridge from an import/export element into a storage slot."""
+        self._enter_changer()
+        try:
+            self._maybe_fail(FaultType.CHANGER_TIMEOUT)
+            time.sleep(self.load_delay)
+            with self._lock:
+                source = self._ie_slots.get(ie_slot)
+                if source is None:
+                    raise SlotEmptyError(f"Import/export element {ie_slot} does not exist")
+                if source.barcode is None:
+                    raise SlotEmptyError(f"Import/export element {ie_slot} is empty")
+                target = self._slots.get(target_slot)
+                if target is None:
+                    raise SlotEmptyError(f"Storage slot {target_slot} does not exist")
+                if target.barcode is not None:
+                    raise SlotOccupiedError(f"Slot {target_slot} is occupied")
+                barcode = source.barcode
+                target.barcode = barcode
+                source.barcode = None
+                self._cartridge_states[barcode.value] = CartridgeState.IN_SLOT
+                self._validate_invariants_locked()
+                return OperationResult(
+                    True,
+                    "imported",
+                    {
+                        "barcode": str(barcode),
+                        "source_ie_slot": ie_slot,
+                        "target_slot": target_slot,
+                    },
+                )
+        finally:
+            self._leave_changer()
+
+    def export_cartridge_to_ie(self, source_slot: int, ie_slot: int) -> OperationResult:
+        """Move a cartridge from a storage slot into an import/export element."""
+        self._enter_changer()
+        try:
+            self._maybe_fail(FaultType.CHANGER_TIMEOUT)
+            time.sleep(self.load_delay)
+            with self._lock:
+                source = self._slots.get(source_slot)
+                if source is None:
+                    raise SlotEmptyError(f"Storage slot {source_slot} does not exist")
+                if source.barcode is None:
+                    raise SlotEmptyError(f"Slot {source_slot} is empty")
+                target = self._ie_slots.get(ie_slot)
+                if target is None:
+                    raise SlotEmptyError(f"Import/export element {ie_slot} does not exist")
+                if target.barcode is not None:
+                    raise SlotOccupiedError(f"Import/export element {ie_slot} is occupied")
+                barcode = source.barcode
+                target.barcode = barcode
+                source.barcode = None
+                # Still IN_SLOT, not EXPORTED: the cartridge is in the mailslot,
+                # which is inside the library until a human opens the door. The
+                # *catalog* cartridge state is what marks data offline, and the
+                # mailslot service sets that separately.
+                self._cartridge_states[barcode.value] = CartridgeState.IN_SLOT
+                self._validate_invariants_locked()
+                return OperationResult(
+                    True,
+                    "exported",
+                    {
+                        "barcode": str(barcode),
+                        "source_slot": source_slot,
+                        "ie_slot": ie_slot,
+                    },
+                )
+        finally:
+            self._leave_changer()
 
     def get_all_barcodes(self) -> list[str]:
         with self._lock:
@@ -478,7 +609,7 @@ class MockLibraryBackend:
     def _location_count_locked(self, barcode: str) -> int:
         return sum(
             1
-            for slot in self._slots.values()
+            for slot in (*self._slots.values(), *self._ie_slots.values())
             if slot.barcode is not None and slot.barcode.value == barcode
         ) + sum(
             1
@@ -491,6 +622,9 @@ class MockLibraryBackend:
         for slot_id, slot in self._slots.items():
             if slot.barcode is not None:
                 locations.setdefault(slot.barcode.value, []).append(f"slot:{slot_id}")
+        for slot_id, ie_slot in self._ie_slots.items():
+            if ie_slot.barcode is not None:
+                locations.setdefault(ie_slot.barcode.value, []).append(f"ie-slot:{slot_id}")
         for drive_id, drive in self._drives.items():
             if drive.barcode is not None:
                 locations.setdefault(drive.barcode.value, []).append(f"drive:{drive_id}")
