@@ -4,6 +4,7 @@ import pytest
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.capacity import capacity_reserve_bytes
 from openblade.domain.errors import (
     BarcodeMismatchError,
     CartridgeOfflineError,
@@ -213,28 +214,85 @@ def test_full_tape_is_rejected_for_a_sized_file_too(tmp_path: Path) -> None:
 
 
 def test_a_tape_with_exactly_enough_room_is_still_chosen(tmp_path: Path) -> None:
-    """The fix must not become an off-by-one that rejects a perfect fit."""
+    """The fix must not become an off-by-one that rejects a perfect fit.
+
+    "Enough room" now means enough room *above the LTFS-index reserve* -- the
+    review of the campaign pointed out that "zero bytes free" was the wrong
+    threshold, because the overhead that made empty files ENOSPC does not
+    disappear at one byte. See openblade/domain/capacity.py.
+    """
     from openblade.jobs.archive import _choose_tape
 
     catalog, library, ltfs, barcode = _formatted_stack()
     group = catalog.get_volume_group("photos")
     assert group is not None
     tape = ltfs.ensure_tape(barcode)
-    tape.used_bytes = tape.capacity_bytes - 4096
+    tape.used_bytes = tape.capacity_bytes - capacity_reserve_bytes(tape.capacity_bytes) - 4096
 
     assert _choose_tape(catalog, library, ltfs, group.id, 4096) == barcode
 
 
-def test_archive_job_spills_an_empty_file_onto_the_next_tape(tmp_path: Path) -> None:
-    """End-to-end: the exact shape that failed on the rig."""
+# --- The reserve (campaign review: "Reported rather than changed") ------------
+# "`_has_room_for` only rejects a tape with *exactly* zero bytes free. The stated
+# cause is LTFS index overhead, so the threshold should be a reserve, not 1 byte;
+# a tape with 512 bytes left still ENOSPCs on an empty file."
+
+
+def test_a_nearly_full_tape_does_not_take_an_empty_file(tmp_path: Path) -> None:
+    """A sliver of free space is still full -- the case the old guard let through.
+
+    The runbook's example is "512 bytes left" on a 6.57 GB cartridge; the
+    simulator's scenario tapes are 4 KiB, so the same shape here is a sliver
+    smaller than that tape's reserve.
+    """
+    from openblade.jobs.archive import _choose_tape
+
+    catalog, library, ltfs, nearly_full = _formatted_stack()
+    group = catalog.get_volume_group("photos")
+    assert group is not None
+    tape = ltfs.ensure_tape(nearly_full)
+    sliver = max(1, capacity_reserve_bytes(tape.capacity_bytes) // 2)
+    tape.used_bytes = tape.capacity_bytes - sliver
+    assert ltfs.remaining_capacity(nearly_full) > 0, "not the old zero-bytes-free case"
+
+    spare = str(library.inventory().slots[1].barcode)
+    assert _choose_tape(catalog, library, ltfs, group.id, 0) == spare
+
+
+def test_spillover_triggers_at_the_reserve_not_at_zero(tmp_path: Path) -> None:
+    """The boundary, from both sides, through the real selection path."""
+    from openblade.jobs.archive import _choose_tape
+
+    catalog, library, ltfs, barcode = _formatted_stack()
+    group = catalog.get_volume_group("photos")
+    assert group is not None
+    tape = ltfs.ensure_tape(barcode)
+    capacity = tape.capacity_bytes
+    reserve = capacity_reserve_bytes(capacity)
+    spare = str(library.inventory().slots[1].barcode)
+
+    # free == reserve -> full, even for a zero-byte file.
+    tape.used_bytes = capacity - reserve
+    assert _choose_tape(catalog, library, ltfs, group.id, 0) == spare
+
+    # free == reserve + 1 -> one byte of usable room, so it is chosen again.
+    tape.used_bytes = capacity - reserve - 1
+    assert _choose_tape(catalog, library, ltfs, group.id, 0) == barcode
+    assert _choose_tape(catalog, library, ltfs, group.id, 1) == barcode
+    assert _choose_tape(catalog, library, ltfs, group.id, 2) == spare
+
+
+def test_archive_job_spills_from_a_nearly_full_tape(tmp_path: Path) -> None:
+    """End-to-end: the rig shape, but with the tape merely *nearly* full."""
     catalog, library, ltfs, first = _formatted_stack()
     source = tmp_path / "source"
     (source / "logs").mkdir(parents=True)
     (source / "logs" / "empty.log").write_bytes(b"")
     (source / "payload.bin").write_bytes(b"z" * 1024)
 
-    # The first tape is full before the job starts; a second is formatted and blank.
-    ltfs.ensure_tape(first).used_bytes = ltfs.ensure_tape(first).capacity_bytes
+    tape = ltfs.ensure_tape(first)
+    tape.used_bytes = tape.capacity_bytes - max(1, capacity_reserve_bytes(tape.capacity_bytes) // 2)
+    assert ltfs.remaining_capacity(first) > 0, "not the old zero-bytes-free case"
     spare = str(library.inventory().slots[1].barcode)
     library.load(2, 0)
     ltfs.format(spare, FormatConfirmation(spare, SafetyToken.generate("format", spare)))
