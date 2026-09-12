@@ -59,6 +59,7 @@ from openblade.api.aml_latency import (
     capture_request_latency_metric,
     should_capture_latency_metrics,
 )
+from openblade.api.api_auth import api_auth_middleware, log_api_auth_status
 from openblade.api.routes_gateway import router as gateway_router
 from openblade.api.routes_test_runner import router as test_runner_router
 from openblade.api.service_auth import ServiceTokenForbiddenError, controller_only_error
@@ -202,6 +203,19 @@ async def apply_aml_emulator_latency(request: Request, call_next: object) -> Res
         )
 
 
+# The ONE chokepoint guarding the OpenBlade-native REST surface. Registered as
+# middleware rather than a per-route dependency deliberately: every native route
+# -- including ones added later, and the ones registered dynamically by
+# routes_aml_matrix_fallback -- is covered without anybody remembering a
+# decorator. Scope, exemptions and behaviour live in openblade.api.api_auth;
+# tests/integration/test_api_auth_sweep.py asserts the coverage from app.openapi().
+#
+# Registration order matters: this must be registered BEFORE
+# enforce_scalar_api_scope below, so that scope enforcement stays the outermost
+# middleware and emulator-only mode keeps answering 404 (not 401) for native
+# paths. Starlette builds the stack so that the last-registered runs first.
+app.middleware("http")(api_auth_middleware)
+
 app.include_router(routes_health.router, tags=["health"])
 app.include_router(routes_inventory.router, prefix="/inventory", tags=["inventory"])
 app.include_router(routes_tapes.router, prefix="/cartridges", tags=["cartridges"])
@@ -249,6 +263,7 @@ routes_aml_matrix_fallback.register_missing_matrix_routes(app)
 async def initialize_aml_state() -> None:
     from openblade.api.aml_state import ensure_initialized
 
+    log_api_auth_status()
     context = get_context()
     ensure_initialized(
         context.config.db_url,
