@@ -4,7 +4,7 @@ import pytest
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
-from openblade.domain.capacity import capacity_reserve_bytes
+from openblade.domain.capacity import capacity_reserve_bytes, has_room_for
 from openblade.domain.errors import (
     BarcodeMismatchError,
     CartridgeOfflineError,
@@ -293,6 +293,86 @@ def test_archive_job_spills_from_a_nearly_full_tape(tmp_path: Path) -> None:
     tape = ltfs.ensure_tape(first)
     tape.used_bytes = tape.capacity_bytes - max(1, capacity_reserve_bytes(tape.capacity_bytes) // 2)
     assert ltfs.remaining_capacity(first) > 0, "not the old zero-bytes-free case"
+    spare = str(library.inventory().slots[1].barcode)
+    library.load(2, 0)
+    ltfs.format(spare, FormatConfirmation(spare, SafetyToken.generate("format", spare)))
+    library.unload(0, 2)
+
+    job = catalog.create_job("archive", {"source_path": str(source), "volume_group": "photos"})
+    result = run_archive_job(
+        ArchiveRequest(source_path=source, volume_group_name="photos"),
+        library,
+        ltfs,
+        catalog,
+        job.id,
+    )
+
+    assert result.errors == []
+    assert result.files_archived == 2
+    assert first not in result.tapes_used
+
+
+def test_real_backend_hydrates_its_capacities_from_the_catalog(tmp_path: Path) -> None:
+    """Round trip: catalog row -> bootstrap -> RealLTFSBackend._tapes.
+
+    The campaign left this as "a tape this process has never mounted still
+    assumes 12 GB", which makes the first spill decision after every restart
+    wrong. The catalog is the authority because jobs/archive.py writes these
+    columns from the statvfs measurement taken while the tape was mounted.
+    """
+    import dataclasses
+
+    from openblade.bootstrap import _catalog_tape_states
+    from openblade.config import OpenBladeConfig
+    from openblade.domain.policies import RealHardwareGuard
+    from openblade.hardware.ltfs import RealLTFSBackend
+    from openblade.hardware.runner import SafeRunner
+
+    db_path = tmp_path / "catalog.db"
+    db_url = f"sqlite:///{db_path}"
+    init_db(db_url)
+    catalog = CatalogRepository(get_session())
+    group = catalog.create_volume_group("photos")
+    measured = catalog.add_cartridge("OB0001L8", group.id)
+    measured.capacity_bytes = 6_569_328_640  # what the rig actually reports
+    measured.used_bytes = 6_569_328_128  # 512 bytes free: the runbook's ENOSPC case
+    catalog.session.commit()
+
+    # A fresh process: nothing has been mounted, `_tapes` starts empty.
+    states = _catalog_tape_states(dataclasses.replace(OpenBladeConfig(), db_url=db_url))
+    backend = RealLTFSBackend(
+        library=object(),  # type: ignore[arg-type]  -- unused on this path
+        guard=RealHardwareGuard(
+            config_backend="real",
+            config_real_hardware_enabled=True,
+            operator_acknowledgment="hydration-test",
+        ),
+        runner=SafeRunner(dry_run=True),
+        mount_root=tmp_path / "mnt",
+        known_tapes=states,
+    )
+
+    tape = backend.ensure_tape("OB0001L8")
+    assert tape.capacity_bytes == 6_569_328_640, "hydration did not reach the backend"
+    assert tape.capacity_bytes != 12_000_000_000, "still the fictional default"
+    assert tape.used_bytes == 6_569_328_128
+    # ...and the consequence that matters: it is already known to be full.
+    assert has_room_for(tape.capacity_bytes, tape.used_bytes, 0) is False
+
+    # A barcode with no catalog row falls back to the default rather than crashing.
+    assert backend.ensure_tape("OB0009L8").capacity_bytes == 12_000_000_000
+
+
+def test_archive_job_spills_an_empty_file_onto_the_next_tape(tmp_path: Path) -> None:
+    """End-to-end: the exact shape that failed on the rig."""
+    catalog, library, ltfs, first = _formatted_stack()
+    source = tmp_path / "source"
+    (source / "logs").mkdir(parents=True)
+    (source / "logs" / "empty.log").write_bytes(b"")
+    (source / "payload.bin").write_bytes(b"z" * 1024)
+
+    # The first tape is full before the job starts; a second is formatted and blank.
+    ltfs.ensure_tape(first).used_bytes = ltfs.ensure_tape(first).capacity_bytes
     spare = str(library.inventory().slots[1].barcode)
     library.load(2, 0)
     ltfs.format(spare, FormatConfirmation(spare, SafetyToken.generate("format", spare)))

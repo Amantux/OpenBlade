@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -395,6 +396,7 @@ class RealLTFSBackend:
         runner: SafeRunner,
         mount_root: Path,
         capacity_bytes: int = 12_000_000_000,
+        known_tapes: Mapping[str, tuple[int, int]] | None = None,
     ) -> None:
         self.library = library
         self.guard = guard
@@ -403,13 +405,61 @@ class RealLTFSBackend:
         self.capacity_bytes = capacity_bytes
         self._active_mounts: dict[str, MountHandle] = {}
         self._tapes: dict[str, RealTapeContents] = {}
+        self._hydrate(known_tapes or {})
+
+    def _hydrate(self, known_tapes: Mapping[str, tuple[int, int]]) -> None:
+        """Seed ``_tapes`` from previously measured capacity/usage.
+
+        ``_tapes`` is per-process memory populated by ``_refresh_tape_usage``
+        while a tape is mounted, so before this existed every tape reported the
+        fictional ``capacity_bytes`` default until this process had mounted it
+        once. After any restart ``jobs/archive.py::_choose_tape`` therefore
+        believed a nearly-full 6.57 GB cartridge still had 12 GB free and kept
+        routing files at it instead of spilling -- the campaign recorded this as
+        "a tape this process has never mounted still assumes 12 GB"
+        (docs/runbooks/real-data-campaign.md §5).
+
+        The catalog's ``cartridges`` rows are the authority: ``archive.py`` writes
+        ``tape.capacity_bytes``/``used_bytes`` onto the row at the end of every
+        tape's turn, and those are the values ``statvfs`` measured on the real
+        medium. ``bootstrap`` reads them and passes them here.
+
+        Nonsense rows are ignored rather than trusted: a non-positive capacity
+        tells us nothing, and ``used`` is clamped into range so a stale row can
+        never make a tape look more full than it is.
+        """
+        for barcode, (capacity_bytes, used_bytes) in known_tapes.items():
+            if capacity_bytes <= 0:
+                logger.debug(
+                    "ignoring non-positive catalog capacity for %s: %d",
+                    barcode,
+                    capacity_bytes,
+                )
+                continue
+            normalized = Barcode(barcode).value
+            self._tapes[normalized] = RealTapeContents(
+                barcode=normalized,
+                capacity_bytes=capacity_bytes,
+                used_bytes=min(max(0, used_bytes), capacity_bytes),
+            )
 
     def ensure_tape(self, barcode: str) -> RealTapeContents:
         normalized = Barcode(barcode).value
-        return self._tapes.setdefault(
-            normalized,
-            RealTapeContents(barcode=normalized, capacity_bytes=self.capacity_bytes),
-        )
+        tape = self._tapes.get(normalized)
+        if tape is None:
+            # Not hydrated and not yet mounted in this process: nothing has ever
+            # measured this medium, so the configured default is the only answer
+            # available. Never fatal -- a brand-new scratch tape legitimately has
+            # no catalog row -- but log it, because it is also what an
+            # over-estimated spill decision looks like from the inside.
+            logger.debug(
+                "no measured capacity for %s; assuming the %d byte default",
+                normalized,
+                self.capacity_bytes,
+            )
+            tape = RealTapeContents(barcode=normalized, capacity_bytes=self.capacity_bytes)
+            self._tapes[normalized] = tape
+        return tape
 
     def remaining_capacity(self, barcode: str) -> int:
         tape = self.ensure_tape(barcode)
