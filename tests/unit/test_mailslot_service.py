@@ -184,16 +184,43 @@ class TestExport:
         assert library.find_slot_by_barcode("OB0001L8") == 1
         assert repo.get_cartridge("OB0001L8").state != "exported"
 
-    def test_export_refuses_when_a_sibling_tape_in_the_group_holds_data(self) -> None:
-        """A block_stripe file is split ACROSS tapes in the group."""
+    def test_a_blank_tape_in_an_active_group_exports_without_a_fight(self) -> None:
+        """Rotating a scratch tape out of a working group is routine.
+
+        This used to refuse, on the theory that a block_stripe file spans the
+        group. That reasoning is wrong: a shard IS a file instance, so a
+        cartridge holding part of a striped file has instances of its own and
+        the real check catches it. A cartridge with zero instances carries
+        nothing -- and refusing it with the sentence "still carries archived
+        data" was both false and a good way to teach operators that `--force`
+        is the normal way to export. (Adversarial review finding.)
+        """
         repo, library, service = make_service()
         group = repo.create_volume_group("shards")
         repo.add_cartridge("OB0001L8", group.id)
         archive_one_file(repo, library, "OB0002L8", "/shards/big.bin", "shards")
         # OB0001L8 itself carries nothing.
 
-        with pytest.raises(ExportRefusedError, match="OB0002L8"):
+        result = service.export_cartridge("OB0001L8")
+
+        assert library.find_slot_by_barcode("OB0001L8") is None
+        # ...but the sibling situation is still REPORTED, as context.
+        assert result.assessment is not None
+        assert result.assessment.volume_group_barcodes_with_data == ["OB0002L8"]
+        assert result.assessment.carries_data is False
+
+    def test_export_refuses_while_a_write_to_the_cartridge_is_in_flight(self) -> None:
+        """A `pending` instance is an archive job mid-write on that tape."""
+        repo, library, service = make_service()
+        group = repo.create_volume_group("photos")
+        repo.add_cartridge("OB0001L8", group.id)
+        record = repo.create_file_record("/photos/inflight.raw", 99, "abc", group.id)
+        repo.create_file_instance(record.id, "OB0001L8", "/photos/inflight.raw")
+
+        with pytest.raises(ExportRefusedError, match="in flight"):
             service.export_cartridge("OB0001L8")
+
+        assert library.find_slot_by_barcode("OB0001L8") == 1
 
     def test_export_with_force_moves_the_cartridge_anyway(self) -> None:
         repo, library, service = make_service()
@@ -316,6 +343,188 @@ class TestAuditTrail:
 
 
 class TestOrchestratorGuardIsUnbypassable:
+    """The orchestrator is the choke point, so attack IT, not the service.
+
+    `POST /tape-ops/execute` binds TapeOpRequest straight from a request body,
+    so every field here is attacker-supplied. The service resolving things
+    correctly proves nothing about this path.
+    """
+
+    @staticmethod
+    def _loaded_rig():
+        repo = make_repo()
+        library = MockLibraryBackend(
+            num_slots=4, num_drives=1, num_import_export_slots=2
+        )
+        library.seed_slots(["OB0001L8", "OB0002L8"])
+        ltfs = MockLTFSBackend(library)
+        group = repo.create_volume_group("photos")
+        repo.add_cartridge("OB0001L8", group.id)
+        record = repo.create_file_record("/photos/holiday.jpg", 10, "abc", group.id)
+        instance = repo.create_file_instance(record.id, "OB0001L8", "/photos/holiday.jpg")
+        repo.mark_instance_archived(instance.id)
+        return repo, library, ltfs
+
+    def test_naming_an_empty_tape_cannot_eject_a_loaded_one(self) -> None:
+        """MUTATION ANCHOR. Defect 3.9 through the new EXPORT op.
+
+        The guard assesses `request.barcode`; the move used to use
+        `request.slot_id`. Nothing tied them together, so naming a blank
+        cartridge and pointing `slot_id` at a data-carrying slot ejected the
+        wrong tape past a guard that had just reported "carries no data" --
+        and the catalog still called it online. Found by adversarial review and
+        reproduced end to end before the fix.
+
+        Restore `source_slot = request.slot_id` in
+        `TapeOperationOrchestrator._export` and this test fails.
+        """
+        from openblade.nas.tape_orchestrator import execute_tape_request
+        from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
+
+        repo, library, ltfs = self._loaded_rig()
+
+        record = execute_tape_request(
+            repo,
+            library,
+            ltfs,
+            TapeOpRequest(
+                op_type=TapeOpType.EXPORT,
+                barcode="OB0002L8",  # carries nothing
+                slot_id=1,           # ...but slot 1 holds OB0001L8, which does
+                extras={"ie_slot": 5},
+            ),
+        )
+
+        assert record.status is TapeOpStatus.FAILED
+        assert "does not name" in record.error
+        assert library.find_slot_by_barcode("OB0001L8") == 1
+        assert all(not slot.occupied for slot in library.import_export_slots())
+        assert repo.get_cartridge("OB0001L8").state != "exported"
+
+    def test_export_to_a_non_ie_element_is_refused(self) -> None:
+        """`extras["ie_slot"]` reaches `mtx transfer` verbatim; mtx validates nothing."""
+        from openblade.nas.tape_orchestrator import execute_tape_request
+        from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
+
+        repo, library, ltfs = self._loaded_rig()
+
+        record = execute_tape_request(
+            repo,
+            library,
+            ltfs,
+            TapeOpRequest(
+                op_type=TapeOpType.EXPORT,
+                barcode="OB0002L8",
+                extras={"ie_slot": 3, "force": True},  # 3 is a STORAGE slot
+            ),
+        )
+        assert record.status is TapeOpStatus.FAILED
+        assert "not an import/export element" in record.error
+        assert library.find_slot_by_barcode("OB0002L8") == 2
+
+    def test_import_from_a_non_ie_element_is_refused(self) -> None:
+        from openblade.nas.tape_orchestrator import execute_tape_request
+        from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
+
+        repo, library, ltfs = self._loaded_rig()
+
+        record = execute_tape_request(
+            repo,
+            library,
+            ltfs,
+            TapeOpRequest(
+                op_type=TapeOpType.IMPORT,
+                barcode="OB0001L8",
+                slot_id=3,
+                extras={"ie_slot": 1},  # 1 is a STORAGE slot holding OB0001L8
+            ),
+        )
+        assert record.status is TapeOpStatus.FAILED
+        assert library.find_slot_by_barcode("OB0001L8") == 1
+
+    def test_import_refuses_when_the_element_holds_a_different_cartridge(self) -> None:
+        from openblade.nas.tape_orchestrator import execute_tape_request
+        from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
+
+        repo, library, ltfs = self._loaded_rig()
+        library.export_cartridge_to_ie(2, 5)  # OB0002L8 into I/E 5
+
+        record = execute_tape_request(
+            repo,
+            library,
+            ltfs,
+            TapeOpRequest(
+                op_type=TapeOpType.IMPORT,
+                barcode="OB0001L8",  # not what is in element 5
+                slot_id=3,
+                extras={"ie_slot": 5},
+            ),
+        )
+        assert record.status is TapeOpStatus.FAILED
+        assert "does not name" in record.error
+        assert library.find_slot_by_barcode("OB0001L8") == 1
+        # OB0002L8 is still parked in the mailslot, untouched.
+        assert [
+            str(slot.barcode) for slot in library.import_export_slots() if slot.occupied
+        ] == ["OB0002L8"]
+
+    def test_import_refuses_an_occupied_destination_slot(self) -> None:
+        from openblade.nas.tape_orchestrator import execute_tape_request
+        from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
+
+        repo, library, ltfs = self._loaded_rig()
+        library.export_cartridge_to_ie(2, 5)
+
+        record = execute_tape_request(
+            repo,
+            library,
+            ltfs,
+            TapeOpRequest(
+                op_type=TapeOpType.IMPORT,
+                barcode="OB0002L8",
+                slot_id=1,  # holds OB0001L8
+                extras={"ie_slot": 5},
+            ),
+        )
+        assert record.status is TapeOpStatus.FAILED
+        assert "already holds" in record.error
+        assert library.find_slot_by_barcode("OB0001L8") == 1
+
+    def test_the_catalog_flag_is_written_by_the_orchestrator_not_the_service(
+        self,
+    ) -> None:
+        """Otherwise /tape-ops/execute moves media and leaves the catalog stale."""
+        from openblade.nas.tape_orchestrator import execute_tape_request
+        from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
+
+        repo, library, ltfs = self._loaded_rig()
+
+        record = execute_tape_request(
+            repo,
+            library,
+            ltfs,
+            TapeOpRequest(
+                op_type=TapeOpType.EXPORT,
+                barcode="OB0001L8",
+                extras={"ie_slot": 5, "force": True},
+            ),
+        )
+        assert record.status is TapeOpStatus.COMPLETED
+        assert repo.get_cartridge("OB0001L8").state == "exported"
+
+        execute_tape_request(
+            repo,
+            library,
+            ltfs,
+            TapeOpRequest(
+                op_type=TapeOpType.IMPORT,
+                barcode="OB0001L8",
+                slot_id=1,
+                extras={"ie_slot": 5},
+            ),
+        )
+        assert repo.get_cartridge("OB0001L8").state == "in_slot"
+
     def test_export_through_a_catalogless_repo_fails_closed(self) -> None:
         """A transient repo cannot say what is on the tape, so it must refuse."""
         from openblade.nas.tape_orchestrator import execute_tape_request

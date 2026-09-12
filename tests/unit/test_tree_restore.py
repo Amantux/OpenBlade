@@ -153,7 +153,7 @@ class TestPlanning:
             instance = repo.create_file_instance(record.id, BARCODES[0], path)
             repo.mark_instance_archived(instance.id)
 
-        planned = plan_tree_restore(
+        planned, _ = plan_tree_restore(
             TreeRestoreRequest(catalog_prefix="/photo", dest_dir=tmp_path), repo
         )
 
@@ -176,7 +176,7 @@ class TestPlanning:
             instance = repo.create_file_instance(record.id, barcode, path)
             repo.mark_instance_archived(instance.id)
 
-        planned = plan_tree_restore(
+        planned, _ = plan_tree_restore(
             TreeRestoreRequest(catalog_prefix="/g", dest_dir=tmp_path), repo
         )
 
@@ -189,19 +189,46 @@ class TestPlanning:
         # Deterministic within a tape, so a re-run restores in the same order.
         assert [item.catalog_path for item in planned][:2] == ["/g/b.txt", "/g/d.txt"]
 
-    def test_a_record_with_no_archived_instance_is_not_planned(
+    def test_a_record_with_no_archived_instance_is_reported_as_skipped(
         self, rig, tmp_path: Path
     ) -> None:
+        """Not restorable, not a failure -- but never silent.
+
+        A failed archive leaves exactly this shape. An operator who asks for a
+        tree and gets fewer files than the catalog lists must be told which,
+        or "completed" is a silent wrong result.
+        """
         repo, _, _ = rig
         group = repo.create_volume_group("g")
         record = repo.create_file_record("/g/pending.txt", 10, "abc", group.id)
         repo.create_file_instance(record.id, BARCODES[0], "/g/pending.txt")  # pending
 
-        planned = plan_tree_restore(
+        planned, skipped = plan_tree_restore(
             TreeRestoreRequest(catalog_prefix="/g", dest_dir=tmp_path), repo
         )
 
         assert planned == []
+        assert skipped == ["/g/pending.txt"]
+
+    def test_the_summary_names_skipped_records(self, rig, tmp_path: Path) -> None:
+        repo, library, ltfs = rig
+        group = repo.create_volume_group("g")
+        record = repo.create_file_record("/g/pending.txt", 10, "abc", group.id)
+        repo.create_file_instance(record.id, BARCODES[0], "/g/pending.txt")
+
+        job = repo.create_job("restore", {})
+        result = run_tree_restore(
+            TreeRestoreRequest(catalog_prefix="/g", dest_dir=tmp_path / "out"),
+            library,
+            ltfs,
+            repo,
+            DriveScheduler(num_drives=1),
+            job.id,
+        )
+
+        assert result.skipped == ["/g/pending.txt"]
+        assert result.to_dict()["filesSkipped"] == 1
+        assert result.to_dict()["skippedPaths"] == ["/g/pending.txt"]
 
 
 class TestStripeAcrossTapes:

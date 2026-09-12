@@ -26,11 +26,6 @@ from openblade.domain.models import SlotState
 from openblade.nas.tape_orchestrator import TapeOperationOrchestrator
 from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
 
-# Catalog cartridge states. "exported" is the one every restore path already
-# checks; importing puts the cartridge back on the normal footing.
-_STATE_EXPORTED = "exported"
-_STATE_IN_SLOT = "in_slot"
-
 
 @dataclass
 class MailslotSlot:
@@ -151,11 +146,8 @@ class MailslotService:
             )
         )
         self._raise_if_failed(record, "import")
-        # The cartridge is back in the library: whatever is catalogued on it is
-        # restorable again. Same add-then-set as export -- an imported cartridge
-        # may be one the catalog has never seen.
-        self.catalog.add_cartridge(barcode)
-        self.catalog.set_cartridge_state(barcode, _STATE_IN_SLOT)
+        # The catalog state write happens in the orchestrator, beside the move,
+        # so `POST /tape-ops/execute` gets it too. Nothing to do here.
         return MailslotMoveResult(
             op_id=record.op_id,
             barcode=barcode,
@@ -193,16 +185,10 @@ class MailslotService:
             )
         )
         self._raise_if_failed(record, "export")
-        # Every restore path reads this flag. Data that is sitting in a mailslot
-        # waiting for a human to take it is not online data.
-        #
-        # add_cartridge first because set_cartridge_state no-ops on a barcode the
-        # catalog has never seen -- and file_instances key on the BARCODE, not on
-        # a cartridges row, so a tape can carry archived data with no row at all.
-        # Skipping this would export the media and leave the catalog claiming it
-        # was still restorable.
-        self.catalog.add_cartridge(barcode)
-        self.catalog.set_cartridge_state(barcode, _STATE_EXPORTED)
+        # `cartridges.state = "exported"` is written in the orchestrator, beside
+        # the move (see _record_cartridge_state): every restore path reads that
+        # flag, and putting it here would leave it unwritten for any surface
+        # that does not come through this service.
         return MailslotMoveResult(
             op_id=record.op_id,
             barcode=barcode,
@@ -247,7 +233,15 @@ class MailslotService:
         )
 
     def _first_empty_ie_slot(self) -> int:
-        for slot in self._mailslot_library().import_export_slots():
+        slots = self._mailslot_library().import_export_slots()
+        if not slots:
+            # Distinct from "all full", which is what this used to say for a
+            # library with no mailslot at all -- the opposite of the truth.
+            raise ImportExportSlotError(
+                "This library has no import/export elements; there is nowhere to "
+                "export to"
+            )
+        for slot in slots:
             if not slot.occupied:
                 return slot.slot_id
         raise ImportExportSlotError(

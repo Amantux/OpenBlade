@@ -21,6 +21,13 @@ ARCHIVED_INSTANCE_STATES = frozenset(
     {FileInstanceState.ARCHIVED.value, FileInstanceState.VERIFIED.value}
 )
 
+# A `pending` instance is a write in flight: the archive job has claimed a tape
+# path on this cartridge and has not finished. Taking the media out from under
+# it is at least as bad as exporting finished data, so it counts too -- reported
+# separately, because "3 files, 1 still being written" is a different sentence
+# from "3 files".
+_PENDING_INSTANCE_STATES = frozenset({FileInstanceState.PENDING.value})
+
 # How many catalog paths to name in the refusal. Enough to recognise what the
 # cartridge is, bounded so a 1,073-file tape does not produce a 60 KB error.
 _SAMPLE_LIMIT = 5
@@ -33,39 +40,50 @@ class ExportAssessment:
     barcode: str
     volume_group: str | None = None
     archived_files_on_cartridge: int = 0
+    pending_files_on_cartridge: int = 0
     bytes_on_cartridge: int = 0
     sample_paths: list[str] = field(default_factory=list)
     # Sibling cartridges in the same volume group that also carry archived data.
-    # A block_stripe file is split ACROSS tapes, so removing any one member of
-    # the group can break restores of files whose other shards stay behind.
+    # CONTEXT ONLY -- deliberately NOT part of `carries_data`. This used to
+    # refuse too: the reasoning was "a block_stripe file is split across tapes,
+    # so removing any member of the group may break it". That reasoning is
+    # wrong, because a shard IS a file instance: a cartridge holding part of a
+    # striped file has instances of its own and is caught by the real check. A
+    # cartridge with zero instances carries nothing, and refusing to rotate a
+    # blank scratch tape out of an active group -- with the false sentence
+    # "still carries archived data" -- taught operators that `--force` is the
+    # normal way to export. A guard that cries wolf is a guard that gets
+    # bypassed. (Adversarial review finding.)
     volume_group_barcodes_with_data: list[str] = field(default_factory=list)
 
     @property
     def carries_data(self) -> bool:
-        return self.archived_files_on_cartridge > 0 or bool(
-            self.volume_group_barcodes_with_data
-        )
+        """True when THIS cartridge holds archived or in-flight file instances."""
+        return self.archived_files_on_cartridge > 0 or self.pending_files_on_cartridge > 0
 
     def refusal_message(self) -> str:
         """Operator-facing refusal naming exactly what would go out of the door."""
-        parts = [f"Cartridge {self.barcode} still carries archived data"]
-        if self.archived_files_on_cartridge:
-            parts.append(
-                f"{self.archived_files_on_cartridge} file instance(s), "
-                f"{self.bytes_on_cartridge} bytes on this cartridge"
-            )
+        parts = [
+            f"Cartridge {self.barcode} still carries archived data: "
+            f"{self.archived_files_on_cartridge} file instance(s), "
+            f"{self.bytes_on_cartridge} bytes"
+        ]
         if self.volume_group is not None:
             parts.append(f"volume group {self.volume_group}")
-        if self.volume_group_barcodes_with_data:
-            parts.append(
-                "other cartridges in that group also hold data "
-                f"({', '.join(self.volume_group_barcodes_with_data)}) -- a sharded "
-                "file may span them"
-            )
         if self.sample_paths:
             shown = ", ".join(self.sample_paths)
             more = self.archived_files_on_cartridge - len(self.sample_paths)
             parts.append(f"e.g. {shown}" + (f" (+{more} more)" if more > 0 else ""))
+        if self.pending_files_on_cartridge:
+            parts.append(
+                f"{self.pending_files_on_cartridge} write(s) still in flight to it"
+            )
+        if self.volume_group_barcodes_with_data:
+            parts.append(
+                "other cartridges in that group hold data too "
+                f"({', '.join(self.volume_group_barcodes_with_data)}), so a "
+                "striped file may lose a shard"
+            )
         return (
             "; ".join(parts)
             + ". Exporting makes these unrestorable until the cartridge is "
@@ -77,6 +95,7 @@ class ExportAssessment:
             "barcode": self.barcode,
             "volumeGroup": self.volume_group,
             "archivedFilesOnCartridge": self.archived_files_on_cartridge,
+            "pendingFilesOnCartridge": self.pending_files_on_cartridge,
             "bytesOnCartridge": self.bytes_on_cartridge,
             "samplePaths": list(self.sample_paths),
             "volumeGroupBarcodesWithData": list(self.volume_group_barcodes_with_data),
@@ -88,12 +107,14 @@ def assess_export(catalog: CatalogRepository, barcode: str) -> ExportAssessment:
     """Summarise the archived data that leaves with ``barcode``."""
     assessment = ExportAssessment(barcode=barcode)
 
+    instances = catalog.list_instances_for_barcode(barcode)
     archived = [
-        instance
-        for instance in catalog.list_instances_for_barcode(barcode)
-        if instance.state in ARCHIVED_INSTANCE_STATES
+        instance for instance in instances if instance.state in ARCHIVED_INSTANCE_STATES
     ]
     assessment.archived_files_on_cartridge = len(archived)
+    assessment.pending_files_on_cartridge = sum(
+        1 for instance in instances if instance.state in _PENDING_INSTANCE_STATES
+    )
     for instance in archived:
         record = catalog.get_file_record_by_id(instance.file_record_id)
         if record is None:

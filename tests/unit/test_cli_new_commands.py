@@ -404,11 +404,43 @@ class TestMailslot:
         assert "ImportExportSlotError" in result.stderr
         assert result.stdout.strip() == ""
 
-    def test_a_library_with_no_mailslot_refuses_by_type(self, cli_home) -> None:
+    def test_a_library_with_no_mailslot_says_so(self, cli_home) -> None:
+        """It must not claim the mailslot is FULL -- that is the opposite.
+
+        This test previously asserted only the exception class name, which the
+        "every import/export slot is occupied" branch also satisfies, so it
+        passed for the wrong reason. (Adversarial review finding.)
+        """
         bootstrap(cli_home, ie_slots=0)
         result = invoke("mailslot", "export", "MCK00001")
         assert result.exit_code == 1
-        assert "ImportExportSlotError" in result.stderr
+        assert "no import/export elements" in result.stderr
+        assert "occupied" not in result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_a_tree_restore_reports_skipped_records(self, cli_home, tmp_path) -> None:
+        bootstrap(cli_home)
+        source = tmp_path / "src"
+        seed_tree(source)
+        invoke("archive", "--volume-group", "photos", "--path", str(source))
+        # A catalogued record with nothing archived: the shape a failed archive
+        # leaves behind.
+        context = cli_main._get_context()
+        group = context.catalog.get_volume_group("photos")
+        record = context.catalog.create_file_record(
+            "/photos/never-written.bin", 10, "abc", group.id
+        )
+        context.catalog.create_file_instance(
+            record.id, "MCK00001", "/photos/never-written.bin"
+        )
+
+        result = invoke("restore", "tree", "/photos", "--dest", str(tmp_path / "out"))
+
+        assert result.exit_code == 0
+        payload = stdout_json(result)
+        assert payload["filesSkipped"] == 1
+        assert payload["skippedPaths"] == ["/photos/never-written.bin"]
+        assert "skipped" in result.stderr
 
 
 def test_mock_state_round_trips_the_mailslot(cli_home) -> None:

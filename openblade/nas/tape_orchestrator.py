@@ -15,6 +15,7 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import (
     ChecksumMismatchError,
     ExportRefusedError,
+    ImportExportSlotError,
     MailslotUnsupportedError,
 )
 from openblade.domain.models import MountMode
@@ -146,7 +147,17 @@ class TapeOperationOrchestrator:
         ]
 
     def _execute_locked(self, request: TapeOpRequest) -> dict[str, Any]:
-        if request.op_type in {TapeOpType.READ, TapeOpType.VERIFY}:
+        if request.op_type in {
+            TapeOpType.READ,
+            TapeOpType.VERIFY,
+            # Import/export resolve an element from the barcode and then move
+            # it. Without the lock, a concurrent restore can load that tape into
+            # a drive in between, and the export then moves whichever cartridge
+            # next occupies the slot -- the threaded version of trusting a stale
+            # slot id.
+            TapeOpType.IMPORT,
+            TapeOpType.EXPORT,
+        }:
             with self._barcode_lock(request.barcode):
                 return self._dispatch(request)
         if request.op_type in {TapeOpType.WRITE, TapeOpType.FORMAT}:
@@ -329,24 +340,71 @@ class TapeOperationOrchestrator:
             )
         return self.library
 
+    def _import_export_elements(self, library: Any) -> dict[int, Any]:
+        return {slot.slot_id: slot for slot in library.import_export_slots()}
+
+    def _require_ie_element(self, library: Any, ie_slot: int) -> Any:
+        """An I/E element that actually exists on THIS library.
+
+        ``extras["ie_slot"]`` reaches ``mtx transfer`` as a raw element number,
+        and mtx validates nothing. ``_dest_slot`` already refuses an unvalidated
+        destination for MOVE, with a comment explaining that exact incident
+        (defect 3.9); these op types have to do the same or they reopen it.
+        """
+        elements = self._import_export_elements(library)
+        element = elements.get(ie_slot)
+        if element is None:
+            raise ImportExportSlotError(
+                f"element {ie_slot} is not an import/export element in this library "
+                f"(valid: {sorted(elements) or 'none — this library has no mailslot'})"
+            )
+        return element
+
+    def _require_storage_slot(self, slot_id: int) -> Any:
+        slots = {slot.slot_id: slot for slot in self.library.inventory().slots}
+        slot = slots.get(slot_id)
+        if slot is None:
+            raise ImportExportSlotError(
+                f"slot {slot_id} is not a data storage slot in this library "
+                f"(valid: {min(slots, default=0)}-{max(slots, default=0)})"
+            )
+        return slot
+
     def _import(self, request: TapeOpRequest) -> dict[str, Any]:
         """Move media from an import/export element into a storage slot.
 
-        Both element ids are resolved by the caller (MailslotService) and passed
-        explicitly -- this layer owns the move and the audit record, not the
-        slot-picking policy.
+        Every element number is validated against the library's OWN elements,
+        and the named barcode must be the cartridge actually sitting in the
+        source element -- `barcode` is what the guard and the catalog write use,
+        so a request where the two disagree must not be executed.
         """
         library = self._mailslot_library()
         ie_slot = _required_int(request.extras, "ie_slot", "import")
+        source = self._require_ie_element(library, ie_slot)
+        if source.barcode is None:
+            raise ImportExportSlotError(f"import/export element {ie_slot} is empty")
+        if str(source.barcode) != request.barcode:
+            raise ImportExportSlotError(
+                f"import/export element {ie_slot} holds {source.barcode}, "
+                f"not {request.barcode}; refusing to move a cartridge the request "
+                "does not name"
+            )
         target_slot = request.slot_id
         if target_slot is None:
-            raise ValueError("slot_id (destination storage slot) is required for import")
-        known_slots = {slot.slot_id for slot in self.library.inventory().slots}
-        if target_slot not in known_slots:
-            raise ValueError(
-                f"destination slot {target_slot} is not a data storage slot in this library"
+            raise ImportExportSlotError(
+                "slot_id (destination storage slot) is required for import"
             )
+        target = self._require_storage_slot(target_slot)
+        if target.barcode is not None:
+            raise ImportExportSlotError(
+                f"storage slot {target_slot} already holds {target.barcode}"
+            )
+
         result = library.import_cartridge(ie_slot, target_slot)
+        # The catalog write belongs HERE, beside the move, not in the service:
+        # otherwise `POST /tape-ops/execute` moves the media and leaves the
+        # catalog's view of it stale.
+        self._record_cartridge_state(request.barcode, "in_slot")
         return self._operation_result(
             result,
             {"barcode": request.barcode, "ie_slot": ie_slot, "target_slot": target_slot},
@@ -358,23 +416,59 @@ class TapeOperationOrchestrator:
         The data guard lives HERE rather than only in the service, because this
         is the choke point every surface goes through. ``extras["force"]`` is
         the single documented override.
+
+        The source slot is resolved FROM THE BARCODE, never taken from
+        ``request.slot_id``. Trusting that field meant the guard assessed one
+        cartridge while the robot moved whichever one happened to be in the
+        named slot -- naming an empty tape and pointing `slot_id` at a loaded
+        one ejected a cartridge holding archived files past a guard that had
+        just reported "carries no data". That is defect 3.9 with extra steps.
+        ``slot_id`` is now only ever a cross-check.
         """
         library = self._mailslot_library()
+        source_slot = self.library.find_slot_by_barcode(request.barcode)
+        if source_slot is None:
+            raise ImportExportSlotError(
+                f"Barcode {request.barcode} is not in a storage slot; "
+                "unload it from its drive before exporting"
+            )
+        if request.slot_id is not None and request.slot_id != source_slot:
+            raise ImportExportSlotError(
+                f"{request.barcode} is in slot {source_slot}, not the requested "
+                f"slot {request.slot_id}; refusing to move a cartridge the request "
+                "does not name"
+            )
+        # Guard AFTER resolving, so it assesses the cartridge actually moving.
         self._guard_export(request)
         ie_slot = _required_int(request.extras, "ie_slot", "export")
-        source_slot = request.slot_id
-        if source_slot is None:
-            source_slot = self.library.find_slot_by_barcode(request.barcode)
-        if source_slot is None:
-            raise ValueError(
-                f"Barcode {request.barcode} is not in a storage slot; "
-                "load it back into a slot before exporting"
+        target = self._require_ie_element(library, ie_slot)
+        if target.barcode is not None:
+            raise ImportExportSlotError(
+                f"import/export element {ie_slot} already holds {target.barcode}"
             )
+
         result = library.export_cartridge_to_ie(source_slot, ie_slot)
+        # Every restore path reads this flag; writing it beside the move is what
+        # makes it true for /tape-ops/execute as well as for the CLI.
+        self._record_cartridge_state(request.barcode, "exported")
         return self._operation_result(
             result,
             {"barcode": request.barcode, "source_slot": source_slot, "ie_slot": ie_slot},
         )
+
+    def _record_cartridge_state(self, barcode: str, state: str) -> None:
+        """Persist a cartridge's catalog state, if this repo has a catalog.
+
+        add_cartridge first: catalog file_instances key on the BARCODE, not on a
+        cartridges row, so a tape can carry archived data with no row at all and
+        set_cartridge_state would silently no-op on it.
+        """
+        add = getattr(self.repo, "add_cartridge", None)
+        setter = getattr(self.repo, "set_cartridge_state", None)
+        if add is None or setter is None:
+            return
+        add(barcode)
+        setter(barcode, state)
 
     def _guard_export(self, request: TapeOpRequest) -> None:
         if request.extras.get("force") is True:
@@ -479,7 +573,9 @@ class TapeOperationOrchestrator:
             return "Format operations require explicit confirmation"
         if isinstance(exc, ChecksumMismatchError):
             return "Checksum verification failed"
-        if isinstance(exc, ExportRefusedError | MailslotUnsupportedError):
+        if isinstance(
+            exc, ExportRefusedError | MailslotUnsupportedError | ImportExportSlotError
+        ):
             # Operator-written text that exists precisely to be read: it names the
             # cartridge, the volume group, and what would go out of the door.
             # Replacing it with "Tape export operation failed" would defeat it.

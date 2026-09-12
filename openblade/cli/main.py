@@ -504,25 +504,42 @@ def restore(
 @restore_app.command("file")
 def restore_file(
     catalog_path: str = typer.Argument(..., help="Catalog path of the file to restore"),
-    dest: Path = typer.Option(..., "--dest", help="Destination directory or file path"),
+    dest: Path = typer.Option(
+        ...,
+        "--dest",
+        help="Destination file path, or a directory (pass --into-dir, or an "
+        "existing directory) to keep the catalog basename",
+    ),
+    into_dir: bool = typer.Option(
+        False,
+        "--into-dir",
+        help="Treat --dest as a directory even if it does not exist yet",
+    ),
 ) -> None:
     """Restore one cataloged file, spanning tapes when it is sharded.
 
     Named form of the bare `openblade restore --path ... --to ...`, with one
-    difference that matters: when `--dest` is a directory the file keeps its
-    catalog basename inside it, and a sharded file is reassembled through
+    difference that matters: a sharded file is reassembled through
     `run_sharded_restore` rather than read as a single instance.
+
+    `--dest` is a file path unless it is an EXISTING directory or `--into-dir`
+    is given. `is_dir()` alone is false for a directory that does not exist yet,
+    so `--dest /tmp/outdir` on a fresh path would otherwise write a *file*
+    called `outdir` -- which is not what the operator typed.
     """
     context = _get_context()
+    record = context.catalog.get_file_record(catalog_path)
+    if record is None:
+        # Checked BEFORE the job row is created, so a typo does not leave an
+        # orphaned `queued` restore job behind.
+        raise typer.BadParameter(f"{catalog_path} is not in the catalog")
     scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
-    dest_path = dest / PurePosixPath(catalog_path).name if dest.is_dir() else dest
+    treat_as_dir = into_dir or dest.is_dir()
+    dest_path = dest / PurePosixPath(catalog_path).name if treat_as_dir else dest
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     job = context.catalog.create_job(
         "restore", {"catalog_path": catalog_path, "dest_path": str(dest_path)}
     )
-    record = context.catalog.get_file_record(catalog_path)
-    if record is None:
-        raise typer.BadParameter(f"{catalog_path} is not in the catalog")
     sharded = bool(context.catalog.list_shard_records(record.id)) or (record.shard_count or 1) > 1
     err_console.print(
         f"Restoring {catalog_path} -> {dest_path} "
@@ -624,6 +641,14 @@ def restore_tree(
         raise typer.Exit(code=1) from None
     _save_state(context)
     console.print_json(data=result.to_dict())
+    if result.skipped:
+        # Loud on stderr as well as in the JSON: a tree that comes back short is
+        # exactly the outcome an operator must not discover later.
+        err_console.print(
+            f"[yellow]{len(result.skipped)} catalogued file(s) had nothing "
+            f"archived and were skipped[/yellow]: {', '.join(result.skipped[:5])}"
+            + (" ..." if len(result.skipped) > 5 else "")
+        )
     if not result.ok:
         err_console.print(
             f"[red]{result.files_failed} of "

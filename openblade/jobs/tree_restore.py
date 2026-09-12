@@ -27,12 +27,25 @@ from pathlib import Path, PurePosixPath
 from openblade.catalog.models import FileRecord
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
-from openblade.domain.errors import UnsafeCatalogPathError, safe_job_error
+from openblade.domain.errors import (
+    OpenBladeError,
+    UnsafeCatalogPathError,
+    safe_job_error,
+)
 from openblade.jobs.restore import RestoreRequest, run_restore_job
 from openblade.jobs.scheduler import DriveScheduler
 from openblade.jobs.sharded_restore import ShardedRestoreRequest, run_sharded_restore
 
 ProgressFn = Callable[["TreeRestoreProgress"], None]
+
+
+class ShardedRestoreFailed(OpenBladeError):
+    """``run_sharded_restore`` returned an error rather than raising.
+
+    Typed so ``safe_job_error`` passes the message through: it is already
+    curated operator text, and a bare ``RuntimeError`` would be reduced to the
+    class name.
+    """
 
 
 @dataclass
@@ -75,6 +88,11 @@ class TreeRestoreResult:
     # barcode -> number of files restored from that cartridge.
     per_tape_counts: dict[str, int] = field(default_factory=dict)
     failures: list[TreeRestoreFailure] = field(default_factory=list)
+    # Catalogued records with no archived instance -- a failed archive leaves
+    # exactly this. They are not restorable and not failures, but an operator
+    # who asked for a tree and got fewer files than the catalog lists has to be
+    # TOLD which ones, or "completed" is a silent wrong result.
+    skipped: list[str] = field(default_factory=list)
     dry_run: bool = False
 
     @property
@@ -94,6 +112,8 @@ class TreeRestoreResult:
             "perTapeCounts": dict(sorted(self.per_tape_counts.items())),
             "tapesUsed": sorted(self.per_tape_counts),
             "failures": [failure.to_dict() for failure in self.failures],
+            "filesSkipped": len(self.skipped),
+            "skippedPaths": list(self.skipped),
             "status": "completed" if self.ok else "failed",
         }
 
@@ -134,7 +154,18 @@ def _relative_parts(catalog_path: str, prefix: str) -> tuple[str, ...]:
         parts = (path.name,)
     else:
         parts = path.relative_to(PurePosixPath(prefix)).parts
-    safe = tuple(part for part in parts if part not in {"", "/", ".", ".."})
+    if any(part == ".." for part in parts):
+        # Interior `..` used to be silently STRIPPED, which is worse than it
+        # looks: `/vg/a/../x.txt` and `/vg/x.txt` then map to the same
+        # destination file and one quietly overwrites the other -- the same
+        # silent-collision failure this module exists to prevent, just arrived
+        # at differently. A path we do not trust enough to join is a path we
+        # must not rewrite either.
+        raise UnsafeCatalogPathError(
+            f"Catalog path {catalog_path!r} contains a '..' component; refusing "
+            "rather than rewriting it into a different destination"
+        )
+    safe = tuple(part for part in parts if part not in {"", "/", "."})
     if not safe:
         raise UnsafeCatalogPathError(
             f"Catalog path {catalog_path!r} has no component that can be written "
@@ -160,7 +191,7 @@ def _select_records(catalog: CatalogRepository, prefix: str) -> list[FileRecord]
 
 def plan_tree_restore(
     request: TreeRestoreRequest, catalog: CatalogRepository
-) -> list[_PlannedFile]:
+) -> tuple[list[_PlannedFile], list[str]]:
     """Resolve the prefix into per-file work, grouped by cartridge.
 
     Grouping by barcode keeps one cartridge's files together instead of
@@ -169,6 +200,7 @@ def plan_tree_restore(
     """
     prefix = _normalize_prefix(request.catalog_prefix)
     planned: list[_PlannedFile] = []
+    skipped: list[str] = []
     for record in _select_records(catalog, prefix):
         shard_records = catalog.list_shard_records(record.id)
         sharded = bool(shard_records) or (record.shard_count or 1) > 1
@@ -190,9 +222,11 @@ def plan_tree_restore(
             )
         if not barcodes:
             # Nothing archived for this record: it is catalogued but was never
-            # written (a failed archive leaves exactly this). Skip rather than
-            # fail the whole tree on it -- it is reported as a failure below only
-            # if the caller asked for it explicitly.
+            # written (a failed archive leaves exactly this). There is nothing to
+            # restore, so it is not a failure -- but it IS reported, because a
+            # tree that silently comes back short is the exact class of wrong
+            # result this module exists to prevent.
+            skipped.append(str(record.path))
             continue
         planned.append(
             _PlannedFile(
@@ -206,7 +240,7 @@ def plan_tree_restore(
             )
         )
     planned.sort(key=lambda item: (item.barcode, item.catalog_path))
-    return planned
+    return planned, sorted(skipped)
 
 
 def run_tree_restore(
@@ -221,12 +255,13 @@ def run_tree_restore(
     """Restore every archived file under ``catalog_prefix`` into ``dest_dir``."""
     prefix = _normalize_prefix(request.catalog_prefix)
     catalog.update_job_state(job_id, "running")
-    planned = plan_tree_restore(request, catalog)
+    planned, skipped = plan_tree_restore(request, catalog)
     result = TreeRestoreResult(
         job_id=job_id,
         catalog_prefix=prefix,
         dest_dir=str(request.dest_dir),
         dry_run=request.dry_run,
+        skipped=skipped,
     )
 
     if request.dry_run:
@@ -262,7 +297,10 @@ def run_tree_restore(
                     child.id,
                 )
                 if sharded_result.error:
-                    raise RuntimeError(sharded_result.error)
+                    # Already an operator-written message ("Missing shard catalog
+                    # entries"); wrapping it in a bare RuntimeError would make
+                    # safe_job_error reduce it to "Job failed (RuntimeError)".
+                    raise ShardedRestoreFailed(sharded_result.error)
                 verified = sharded_result.checksum_verified
                 barcodes = sharded_result.source_barcodes or [item.barcode]
             else:
