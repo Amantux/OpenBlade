@@ -13,7 +13,8 @@ from pathlib import Path, PurePosixPath
 
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
-from openblade.domain.errors import safe_job_error
+from openblade.domain.capacity import has_room_for
+from openblade.domain.errors import TapeFullError, safe_job_error
 from openblade.domain.models import MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
@@ -96,6 +97,25 @@ def _stripe_tape_path(source_file: Path, source_root: Path) -> str:
 
 def _archive_profile(mode: ShardMode) -> str:
     return mode.value
+
+
+def _require_lane_room(ltfs: LTFSBackend, barcode: str, size_bytes: int) -> None:
+    """Refuse to write to a lane that cannot hold ``size_bytes``.
+
+    The sharded path has no tape selection at all -- lanes come straight from the
+    request -- so unlike ``jobs/archive.py`` there is nothing to spill onto here
+    (that gap is recorded in docs/runbooks/real-data-campaign.md and is not fixed
+    by this change). What this does buy is that a full lane is a *capacity
+    decision* with the tape named, routed through the one shared policy in
+    ``openblade.domain.capacity``, instead of a raw ``OSError: [Errno 28]``
+    surfacing from LTFS half way through a batch.
+    """
+    tape = ltfs.ensure_tape(barcode)
+    if not has_room_for(int(tape.capacity_bytes), int(tape.used_bytes), size_bytes):
+        raise TapeFullError(
+            f"Tape {barcode} has no room for {size_bytes} more bytes "
+            "(including the LTFS index reserve)"
+        )
 
 
 _JOB_ERROR_MAX_CHARS = 2000
@@ -340,6 +360,7 @@ def _archive_stripe(
                 mount: object,
             ) -> tuple[Path, str, str, str, int]:
                 tape_path = _stripe_tape_path(source_file, request.source_path)
+                _require_lane_room(ltfs, barcode, source_file.stat().st_size)
                 checksum = compute_checksum(source_file)
                 ltfs.write_file(mount, source_file, PurePosixPath(tape_path))
                 stat = ltfs.stat(mount, PurePosixPath(tape_path))
@@ -487,6 +508,7 @@ def _archive_block_stripe(
                 shard_tmp_files[shard_index] = future.result()
 
         def _write_shard(spec: ShardSpec, shard_tmp: Path) -> tuple[int, str, int]:
+            _require_lane_room(ltfs, spec.barcode, shard_tmp.stat().st_size)
             checksum = compute_checksum(shard_tmp)
             mount = mounts[spec.barcode]
             ltfs.write_file(mount, shard_tmp, PurePosixPath(spec.tape_path))

@@ -394,6 +394,39 @@ def _create_scalar_http_library(config: OpenBladeConfig) -> LibraryBackend:
     return ScalarHttpLibraryBackend(session)
 
 
+def _catalog_tape_states(config: OpenBladeConfig) -> dict[str, tuple[int, int]]:
+    """Measured capacity/usage per barcode, straight from the ``cartridges`` table.
+
+    This is what hydrates ``RealLTFSBackend._tapes`` so the first spill decision
+    after a restart uses the real geometry of the medium instead of the
+    12 GB default. The catalog is the authority because ``jobs/archive.py`` is
+    what writes these columns, from the ``statvfs`` numbers measured while the
+    tape was mounted.
+
+    Never fatal: a database that is missing, unreadable or empty just means "no
+    measurements yet", which is exactly the pre-existing behaviour.
+    """
+    logger = structlog.get_logger(__name__)
+    try:
+        init_db(config.db_url)
+        session = get_session()
+    except Exception as exc:  # noqa: BLE001 - startup must survive a bad/absent DB
+        logger.debug("ltfs_capacity_hydration_skipped", error=type(exc).__name__)
+        return {}
+    try:
+        states = {
+            str(cartridge.barcode): (int(cartridge.capacity_bytes), int(cartridge.used_bytes))
+            for cartridge in CatalogRepository(session).list_cartridges()
+        }
+    except Exception as exc:  # noqa: BLE001 - see above
+        logger.debug("ltfs_capacity_hydration_failed", error=type(exc).__name__)
+        return {}
+    finally:
+        session.close()
+    logger.debug("ltfs_capacity_hydrated", tapes=len(states))
+    return states
+
+
 def _create_real_backends(config: OpenBladeConfig) -> tuple[LibraryBackend, LTFSBackend]:
     guard = require_real_hardware(config)
     runner = SafeRunner(dry_run=config.hardware_dry_run)
@@ -410,6 +443,7 @@ def _create_real_backends(config: OpenBladeConfig) -> tuple[LibraryBackend, LTFS
         guard=guard,
         runner=runner,
         mount_root=Path(config.ltfs_mount_root),
+        known_tapes=_catalog_tape_states(config),
     )
     return library, ltfs
 

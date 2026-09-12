@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from openblade.api import aml_state
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.domain.capacity import has_room_for
 from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError, safe_job_error
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.queue import JobQueue
@@ -56,17 +57,14 @@ def _is_cleaning_barcode(barcode: str) -> bool:
 def _has_room_for(ltfs: LTFSBackend, barcode: str, size_bytes: int) -> bool:
     """Can ``barcode`` still take a file of ``size_bytes``?
 
-    The subtlety is zero-byte files. ``remaining >= size_bytes`` reads as True for
-    ``0 >= 0``, so on a full tape every empty file in the source tree was routed
-    straight back to it -- and an empty file still needs a directory entry and
-    index space, so LTFS answered ENOSPC and the whole archive job died. Found by
-    the first real-data campaign, whose dataset has five empty log files and
-    whose first tape filled up; see docs/runbooks/real-data-campaign.md.
-
-    A tape with no remaining capacity cannot take anything at all, empty or not.
+    Thin adapter over :mod:`openblade.domain.capacity`. The free-space policy --
+    in particular the LTFS-index reserve that makes "nearly full" mean full --
+    lives there and nowhere else, so the classic and sharded selection paths
+    cannot drift apart. See that module for why "zero bytes free" was the wrong
+    threshold, and for what the rig could and could not be made to demonstrate.
     """
-    remaining = ltfs.remaining_capacity(barcode)
-    return remaining > 0 and remaining >= size_bytes
+    tape = ltfs.ensure_tape(barcode)
+    return has_room_for(int(tape.capacity_bytes), int(tape.used_bytes), size_bytes)
 
 
 def _choose_tape(
