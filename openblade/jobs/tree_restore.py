@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 from openblade.catalog.models import FileRecord
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
-from openblade.domain.errors import safe_job_error
+from openblade.domain.errors import UnsafeCatalogPathError, safe_job_error
 from openblade.jobs.restore import RestoreRequest, run_restore_job
 from openblade.jobs.scheduler import DriveScheduler
 from openblade.jobs.sharded_restore import ShardedRestoreRequest, run_sharded_restore
@@ -118,6 +118,14 @@ def _relative_parts(catalog_path: str, prefix: str) -> tuple[str, ...]:
     ``/photos`` + ``/photos/2024/a.jpg`` -> ``("2024", "a.jpg")``. Keeping the
     subdirectories is the whole point: flattening to the basename is what makes
     ``alpha/same.txt`` and ``beta/same.txt`` overwrite each other.
+
+    The result is joined onto ``--dest``, and catalog rows are not trusted to be
+    well-formed: ``create_file_record`` normalises with ``PurePosixPath`` which
+    does NOT collapse ``..``. A surviving ``..`` component writes outside the
+    destination, and an absolute component would reset the join to the
+    filesystem root (``Path("/a").joinpath("/etc")`` is ``/etc``). Strip both,
+    and refuse rather than fall back to ``path.name`` -- for ``/vg/..`` that
+    basename is itself ``".."``, which put the escape straight back.
     """
     path = PurePosixPath(catalog_path)
     if prefix == "/":
@@ -126,7 +134,14 @@ def _relative_parts(catalog_path: str, prefix: str) -> tuple[str, ...]:
         parts = (path.name,)
     else:
         parts = path.relative_to(PurePosixPath(prefix)).parts
-    return tuple(part for part in parts if part not in {"", "/", ".", ".."}) or (path.name,)
+    safe = tuple(part for part in parts if part not in {"", "/", ".", ".."})
+    if not safe:
+        raise UnsafeCatalogPathError(
+            f"Catalog path {catalog_path!r} has no component that can be written "
+            f"safely under a destination directory (prefix {prefix!r}); "
+            "refusing rather than writing outside --dest"
+        )
+    return safe
 
 
 def _select_records(catalog: CatalogRepository, prefix: str) -> list[FileRecord]:

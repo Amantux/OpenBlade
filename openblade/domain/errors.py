@@ -74,6 +74,16 @@ class CartridgeOfflineError(OpenBladeError):
     """Cartridge is exported/offline."""
 
 
+class UnsafeCatalogPathError(SafetyViolationError):
+    """A catalog path cannot be mapped under a restore destination safely.
+
+    Catalog rows are not trusted to be well-formed: ``create_file_record``
+    normalises with ``PurePosixPath``, which does not collapse ``..``. A bulk
+    restore joins the path onto ``--dest``, so a row that reduces to nothing but
+    traversal components would write outside it. Refuse loudly instead.
+    """
+
+
 class MailslotUnsupportedError(OpenBladeError):
     """The active library backend has no import/export (mailslot) station."""
 

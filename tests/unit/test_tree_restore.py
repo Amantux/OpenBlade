@@ -19,6 +19,7 @@ import pytest
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.errors import UnsafeCatalogPathError
 from openblade.domain.policies import FormatConfirmation, SafetyToken
 from openblade.jobs.scheduler import DriveScheduler
 from openblade.jobs.shard import ShardMode
@@ -101,6 +102,45 @@ class TestRelativeParts:
         self, catalog_path: str, prefix: str, expected: tuple[str, ...]
     ) -> None:
         assert _relative_parts(catalog_path, prefix) == expected
+
+    @pytest.mark.parametrize(
+        "catalog_path",
+        [
+            "/vg/../../etc/passwd",
+            "/vg/a/../../../../etc/shadow",
+            "/vg//double///slash.txt",
+            "/vg/./dot.txt",
+            "/vg/..",
+        ],
+    )
+    def test_no_catalog_path_can_escape_the_destination_directory(
+        self, catalog_path: str, tmp_path: Path
+    ) -> None:
+        """The destination is joined from catalog rows, so treat them as hostile.
+
+        A `..` component surviving into `dest.joinpath(*parts)` writes outside
+        `--dest`; an absolute component would reset the join to the filesystem
+        root (`Path("/a").joinpath("/etc")` is `/etc`). The invariant is "never
+        outside dest", so either outcome is acceptable: a contained path, or a
+        typed refusal. What is NOT acceptable is a path that escapes.
+
+        `/vg/..` is the case that caught a real bug: it reduces to no safe
+        component, and the old `or (path.name,)` fallback put `..` straight back
+        because that is literally the basename.
+        """
+        dest = tmp_path / "dest"
+        try:
+            parts = _relative_parts(catalog_path, "/vg")
+        except UnsafeCatalogPathError:
+            return  # refused, which is the other safe answer
+
+        resolved = dest.joinpath(*parts)
+        assert ".." not in resolved.parts
+        assert resolved.is_relative_to(dest)
+
+    def test_a_traversal_only_path_is_refused_by_type(self) -> None:
+        with pytest.raises(UnsafeCatalogPathError, match="refusing"):
+            _relative_parts("/vg/..", "/vg")
 
 
 class TestPlanning:
