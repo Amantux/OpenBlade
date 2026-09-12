@@ -50,6 +50,7 @@ Something is broken → **[Troubleshooting](guides/troubleshooting.md)**.
 |---|---|
 | [The catalog](guides/the-catalog.md) | What is stored, where the SQLite file lives, what rebuild-from-tape can and cannot recover, backup implications |
 | [Safety model](guides/safety-model.md) | The eight gates, condensed — with each one marked by where it is *actually* enforced |
+| [API authentication](guides/api-authentication.md) | The native bearer token: why it is off by default, the token file, what it does **not** cover, and rolling it out without an outage |
 | [FUSE & NAS namespace](guides/fuse-and-nas.md) | What is mountable today (nothing), what the namespace APIs do, the three hydration implementations |
 
 ### Hardware
