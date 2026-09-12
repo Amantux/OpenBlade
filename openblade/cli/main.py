@@ -13,6 +13,7 @@ from rich.table import Table
 
 from openblade.bootstrap import AppContext, create_context, reset_context
 from openblade.cli.assist import assist as assist_command
+from openblade.cli.fuse_and_health import register as register_fuse_and_health
 from openblade.config import OpenBladeConfig, load_config
 from openblade.domain.errors import DriveCorrelationError
 from openblade.domain.models import Barcode, DriveState, MountState
@@ -37,6 +38,10 @@ app.add_typer(hardware_app, name="hardware")
 # in the REPL and both only after the operator confirms — see
 # openblade/assistant/readonly.py for the enforcement points.
 app.command("assist")(assist_command)
+
+# `openblade fuse mount` + `openblade hardware drive-health` live in their own
+# module; this is the only line they need here.
+register_fuse_and_health(app, hardware_app)
 
 console = Console()
 _STATE_DIR = Path.home() / ".openblade"

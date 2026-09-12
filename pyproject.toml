@@ -27,6 +27,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# `openblade fuse mount`. fusepy over pyfuse3 deliberately: it is pure Python
+# (ctypes over libfuse2, no compiler or Cython at install time) and needs no
+# async runtime, so the mount reuses the existing synchronous catalog and
+# restore code unchanged. Requires libfuse2 and /dev/fuse on the host; the CLI
+# degrades with a curated message when this extra is not installed.
+fuse = [
+  "fusepy>=3.0.1",
+]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.23",

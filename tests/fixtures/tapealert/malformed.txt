@@ -1,0 +1,5 @@
+Tape alert page (ssc-3) [0x2e]
+  Read warning
+  : 1
+  Bogus flag name: 1
+garbage line
