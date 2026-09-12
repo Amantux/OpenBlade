@@ -1,0 +1,302 @@
+name: mhvtl weekly rehearsal
+
+# Weekly canary for the REAL hardware backend (openblade/hardware/**), run
+# against the mhvtl virtual tape library instead of a physical Scalar i3.
+#
+# Why this exists
+# ---------------
+# tests/hardware/ is marked `real_hardware` and is therefore excluded from
+# every other workflow (`full-suite` runs `-m "not real_hardware ..."`). That
+# whole code path — mtx parsing, sg device resolution, LTFS mount/unmount,
+# element addressing — has no automated coverage at all between bring-up
+# sessions. The first mhvtl rehearsal (docs/runbooks/mhvtl-rehearsal.md) found
+# SEVEN product defects, five of which would have fired on the first i3
+# session. This job is here so the eighth one shows up on a Tuesday morning
+# instead of on the appliance.
+#
+# It is a CANARY, not a gate:
+#   * no other job `needs` it, and it is deliberately NOT in `ci-gate`;
+#   * it must stay out of branch-protection required checks;
+#   * `continue-on-error` is intentionally NOT set — a canary that cannot go
+#     red reports nothing. A red run here means "go look", not "stop shipping".
+#
+# WHAT HAS NOT BEEN PROVEN YET
+# ----------------------------
+# This workflow has never executed on a GitHub-hosted runner; it was authored
+# offline. scripts/mhvtl/setup.sh was written for a bare-metal Ubuntu 22.04
+# host (kernel 5.15.0-174-generic, Secure Boot disabled) and makes three
+# assumptions a hosted runner may not satisfy:
+#
+#   1. `linux-headers-$(uname -r)` must exist in the apt archive for the
+#      RUNNING kernel. Hosted runners boot an Azure-tuned kernel whose headers
+#      package is sometimes newer or older than what the archive still carries.
+#      This is the single most likely failure, so the preflight step below
+#      prints `apt-cache policy` for it BEFORE anything else runs.
+#   2. An unsigned out-of-tree module must be loadable — i.e. no Secure Boot /
+#      module-signature enforcement. `mokutil --sb-state` is captured in the
+#      preflight for exactly this.
+#   3. systemd must be running, because setup.sh writes unit drop-ins under
+#      /run/systemd/system and starts mhvtl.target. (It does have a non-systemd
+#      fallback path that backgrounds the daemons directly.)
+#
+# Every one of those is a claim about the runner image that can only be settled
+# by a real run. The preflight step is therefore deliberately verbose and
+# non-fatal: the first red run should tell you WHICH assumption broke, not just
+# that something did.
+#
+# THE DELIBERATE CUT: LTFS
+# ------------------------
+# LTFS has no Ubuntu package; the runbook builds LinearTapeFileSystem/ltfs from
+# source, and that build needs an icu-config shim plus submodules and is the
+# slowest thing here by far. It is built once and cached (see the ltfs-build
+# step); a cache miss costs minutes, a hit costs seconds.
+#
+# If the LTFS build fails, the job does NOT die — it degrades to the subset of
+# tests/hardware/ that does not need LTFS (discovery, changer, drive health,
+# catalog integrity) and emits a ::warning::. That is the documented cut. The
+# alternative — failing the whole canary because an unrelated third-party build
+# broke — would train everyone to ignore it.
+
+on:
+  schedule:
+    # 04:37 UTC every Tuesday. Odd minute on purpose: top-of-hour schedules
+    # queue behind everyone else's and can be delayed by many minutes.
+    - cron: "37 4 * * 2"
+  workflow_dispatch:
+    inputs:
+      fault_tests:
+        description: "Run the destructive fault-injection suite (OPENBLADE_FAULT_TESTS=enabled)"
+        required: false
+        default: false
+        type: boolean
+      skip_ltfs:
+        description: "Skip the LTFS build and run only the non-LTFS suites"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mhvtl-weekly
+  cancel-in-progress: false
+
+env:
+  # Pinned in lockstep with docs/runbooks/mhvtl-rehearsal.md §1. The cache key
+  # below is derived from this, so bumping it invalidates the cached build.
+  LTFS_REF: "7c01479"
+  LTFS_REPO: "https://github.com/LinearTapeFileSystem/ltfs.git"
+  LTFS_STAGE: "/tmp/ltfs-stage"
+
+jobs:
+  mhvtl-rehearsal:
+    name: mhvtl-rehearsal
+    runs-on: ubuntu-latest
+    # Hard time-box. The measured local pass (48 tests) is minutes, not tens of
+    # minutes; the budget here is almost entirely the cold LTFS build. If this
+    # ever trips, look at the per-step durations before raising it.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - run: pip install -e '.[dev]'
+
+      # ------------------------------------------------------------------
+      # Preflight. Everything here is evidence for the first real run, so it
+      # is all `|| true` — a missing tool must not mask the answer we came for.
+      # ------------------------------------------------------------------
+      - name: Preflight — can this runner build and load an out-of-tree module?
+        run: |
+          set -x
+          uname -a || true
+          echo "--- running kernel: $(uname -r)"
+          sudo apt-get update -qq || true
+          echo "--- headers package for the RUNNING kernel (assumption 1):"
+          apt-cache policy "linux-headers-$(uname -r)" || true
+          ls -d "/lib/modules/$(uname -r)/build" || echo "NO kernel build dir yet (setup.sh installs the headers)"
+          echo "--- secure boot / module signing (assumption 2):"
+          mokutil --sb-state 2>&1 || echo "mokutil not installed"
+          cat /sys/module/module/parameters/sig_enforce 2>/dev/null || echo "sig_enforce unreadable"
+          echo "--- systemd (assumption 3):"
+          systemctl is-system-running 2>&1 || true
+          ps -p 1 -o comm= || true
+          echo "--- disk / cpu budget:"
+          df -h / || true
+          nproc || true
+
+      # ------------------------------------------------------------------
+      # LTFS — cached, best-effort. See "THE DELIBERATE CUT" in the header.
+      # ------------------------------------------------------------------
+      # The cache key has to carry the runner image identity, because the
+      # cached tree is COMPILED against that image's libicu/libfuse/libxml2 —
+      # an entry built on a previous image would install binaries that fail to
+      # load. ImageOS/ImageVersion are injected into the runner's process
+      # environment, which the `env:` expression context does not reliably
+      # expose, so read them in a shell step and hand them over as an output.
+      - name: Compute LTFS cache key
+        id: ltfs-key
+        run: |
+          echo "key=ltfs-${LTFS_REF}-${ImageOS:-unknown}-${ImageVersion:-unknown}-$(lsb_release -sr 2>/dev/null || echo nolsb)" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Restore cached LTFS build
+        id: ltfs-cache
+        if: ${{ inputs.skip_ltfs != true }}
+        uses: actions/cache@v4
+        with:
+          path: /tmp/ltfs-stage.tar
+          key: ${{ steps.ltfs-key.outputs.key }}
+
+      - name: Build LTFS from source (cache miss)
+        id: ltfs-build
+        if: ${{ inputs.skip_ltfs != true && steps.ltfs-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          set -euxo pipefail
+          sudo apt-get install -y --no-install-recommends \
+            build-essential autoconf automake libtool pkg-config git \
+            libfuse-dev libicu-dev libxml2-dev uuid-dev
+
+          # ./configure probes `icu-config`, removed in ICU 62+. The documented
+          # ICU_MODULE_CFLAGS / ICU_MODULE_LIBS escape hatch does NOT work —
+          # configure.ac overwrites both before the fallback. A pkg-config-backed
+          # shim on PATH is the only thing that works, and it is also what lets
+          # --enable-icu-6x take effect (pathname.c otherwise compiles the
+          # deprecated unorm.h path). See docs/wiki/guides/troubleshooting.md.
+          sudo tee /usr/local/bin/icu-config >/dev/null <<'SHIM'
+          #!/bin/sh
+          case "$1" in
+            --version)                 pkg-config --modversion icu-uc ;;
+            --cppflags|--cflags)       pkg-config --cflags icu-uc icu-i18n ;;
+            --ldflags|--ldflags-libsonly|--libs) pkg-config --libs icu-uc icu-i18n ;;
+            *)                         echo "" ;;
+          esac
+          SHIM
+          sudo chmod 0755 /usr/local/bin/icu-config
+          icu-config --version
+
+          # --recurse-submodules is load-bearing: without uthash_submodule the
+          # build dies with 51 errors all rooted in a missing uthash.h.
+          rm -rf /tmp/ltfs-src
+          git clone --recurse-submodules "$LTFS_REPO" /tmp/ltfs-src
+          git -C /tmp/ltfs-src checkout "$LTFS_REF"
+          git -C /tmp/ltfs-src submodule update --init --recursive
+
+          cd /tmp/ltfs-src
+          ./autogen.sh
+          ./configure --prefix=/usr/local --enable-icu-6x
+          make -j"$(nproc)"
+          rm -rf "$LTFS_STAGE"
+          make install DESTDIR="$LTFS_STAGE"
+          tar -C "$LTFS_STAGE" -cf /tmp/ltfs-stage.tar .
+
+      - name: Install LTFS from the staged build
+        id: ltfs-install
+        if: ${{ inputs.skip_ltfs != true }}
+        continue-on-error: true
+        run: |
+          set -euxo pipefail
+          # The cached tarball only carries the build products; the shared
+          # libraries it links against still have to be present at runtime.
+          sudo apt-get install -y --no-install-recommends libfuse2 libicu-dev libxml2 uuid-runtime || true
+          sudo tar -C / -xf /tmp/ltfs-stage.tar
+          sudo ldconfig
+          command -v mkltfs
+          mkltfs -h 2>&1 | head -5 || true
+
+      - name: Record whether LTFS is available
+        id: ltfs
+        run: |
+          if command -v mkltfs >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "LTFS present — running the full hardware suite."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::LTFS is unavailable (build skipped or failed). Running the non-LTFS subset only: discovery, changer, drive health, catalog integrity. The LTFS, archive/restore, sharded and performance suites are NOT covered by this run."
+          fi
+
+      # ------------------------------------------------------------------
+      # The rig itself.
+      # ------------------------------------------------------------------
+      - name: Stand up the mhvtl rig
+        timeout-minutes: 12
+        run: |
+          set -euxo pipefail
+          # setup.sh apt-get installs without updating first; the runner image's
+          # package lists can be old enough that the headers package 404s.
+          sudo apt-get update -qq
+          sudo scripts/mhvtl/setup.sh
+
+      - name: Evidence — what the rig actually looks like
+        if: always()
+        run: |
+          set -x
+          lsscsi -g || true
+          ls -l /dev/sg* /dev/nst* /dev/st* /dev/sch* 2>&1 || true
+          lsmod | grep mhvtl || true
+          ps ax | grep -E 'vtltape|vtllibrary' | grep -v grep || true
+          systemctl status 'vtltape@*' 'vtllibrary@*' --no-pager 2>&1 | head -60 || true
+          sudo dmesg | tail -80 || true
+          cat /etc/mhvtl/device.conf || true
+
+      - name: Run the hardware suite against the rig
+        timeout-minutes: 20
+        env:
+          # Two of the mhvtl daemons' device nodes are root-owned, and the
+          # hardware backend issues SCSI ioctls directly, so the suite runs as
+          # root. This is a disposable VM; there is nothing here to protect.
+          OPENBLADE_FAULT_TESTS: ${{ inputs.fault_tests == true && 'enabled' || '' }}
+        run: |
+          set -euxo pipefail
+          # env.sh DISCOVERS the device paths (they move between boots) and
+          # identifies the changer by unit serial, never by "first mediumx".
+          eval "$(scripts/mhvtl/env.sh)"
+          env | grep '^OPENBLADE_' | sort
+
+          if [ "${{ steps.ltfs.outputs.available }}" = "true" ]; then
+            suites="tests/hardware/"
+          else
+            # Documented cut: everything below needs mkltfs to have formatted
+            # the scratch cartridges. Without it those suites fail on mount
+            # rather than skip, which would make the canary permanently red for
+            # a reason that is not a product defect.
+            suites="tests/hardware/test_device_discovery.py \
+                    tests/hardware/test_changer_operations.py \
+                    tests/hardware/test_drive_health.py \
+                    tests/hardware/test_catalog_integrity.py"
+          fi
+
+          # `sudo env VAR=...` rather than `sudo -E`: -E depends on the host's
+          # sudoers allowing environment preservation, which is one more
+          # unverified runner assumption. Explicit assignments always work.
+          # PATH deliberately comes from sudo's secure_path, which already
+          # covers mtx / sg_inq / lsscsi / mkltfs.
+          sudo env \
+            OPENBLADE_BACKEND="$OPENBLADE_BACKEND" \
+            OPENBLADE_REAL_HARDWARE_ENABLED="$OPENBLADE_REAL_HARDWARE_ENABLED" \
+            OPENBLADE_CHANGER_DEVICE="$OPENBLADE_CHANGER_DEVICE" \
+            OPENBLADE_DRIVE_DEVICES="$OPENBLADE_DRIVE_DEVICES" \
+            OPENBLADE_SCRATCH_BARCODES="$OPENBLADE_SCRATCH_BARCODES" \
+            OPENBLADE_FAULT_TESTS="${OPENBLADE_FAULT_TESTS:-}" \
+            "$(command -v python)" -m pytest $suites \
+              -m real_hardware -v --tb=short -rs \
+              --junitxml=/tmp/mhvtl-hardware-results.xml
+
+      - name: Upload hardware results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mhvtl-hardware-results
+          path: /tmp/mhvtl-hardware-results.xml
+          if-no-files-found: warn
+
+      - name: Tear the rig down
+        if: always()
+        run: sudo scripts/mhvtl/teardown.sh || true
