@@ -9,10 +9,17 @@ Interactive::
     openblade assist          # REPL; /quit to leave
 
 The assistant reads state, explains, and proposes commands for you to run. In the
-REPL it can also *perform* two setup actions — create a volume group, add existing
-tapes to one — and only after you answer ``y`` to a preview naming exactly what it
-would do. Everything else stays propose-only. One-shot mode has nowhere to ask, so
-it is not offered the setup tools at all. See ``docs/wiki/guides/assistant.md``.
+REPL it can also *perform* two kinds of action, and only after you confirm a preview
+naming exactly what it would do:
+
+* tier 1 — catalog setup (create a volume group, add tapes to one): answer ``y``.
+* tier 2 — media and robotics (load, unload, move, archive, restore, format): the
+  preview names the cartridge, slot, drive and cost. Load/unload/move/archive take
+  ``y``; a format, and a restore that would overwrite a file, make you TYPE the
+  barcode or the word the preview demands. A bare ``y`` is refused there.
+
+Everything else stays propose-only. One-shot mode has nowhere to ask, so it is
+offered neither tier's tools. See ``docs/wiki/guides/assistant.md``.
 """
 
 from __future__ import annotations
@@ -29,7 +36,9 @@ from openblade.assistant import (
     AssistantDisabledError,
     AssistantError,
     AssistantSession,
+    ConfirmationGrade,
     PendingAction,
+    PendingMediaAction,
     create_session,
 )
 from openblade.assistant.config import DISABLED_MESSAGE, load_assistant_config
@@ -37,8 +46,10 @@ from openblade.assistant.config import DISABLED_MESSAGE, load_assistant_config
 console = Console()
 
 _BANNER = (
-    "OpenBlade assistant. It can create a volume group and add tapes to one, and it\n"
-    "asks you first — [y/N] — every time. Everything else it proposes; you run it.\n"
+    "OpenBlade assistant. It can set up volume groups, and load, unload, move,\n"
+    "archive, restore and format media — and it asks you first, every time. A\n"
+    "format, or a restore that would overwrite a file, makes you type the barcode\n"
+    "or the word shown; \"y\" will not do it. Everything else it proposes; you run it.\n"
     "Type your question, or /quit to leave, /reset to clear the conversation."
 )
 _PROMPT = "openblade> "
@@ -68,6 +79,37 @@ def _show_tool(name: str, arguments: dict[str, Any]) -> None:
     console.print(Text(f"· {name}{suffix}", style="dim"))
 
 
+def _confirm_media_action(action: PendingMediaAction) -> str | None:
+    """Ask the operator to confirm one tier-2 media action, returning what they typed.
+
+    This returns TEXT, not a decision. Whether the text is good enough is decided by
+    :meth:`MediaToolRegistry.authorize`, so the strength of a format confirmation
+    does not depend on this function being written correctly — typing "y" at a
+    format prompt is refused there even if this prompt accepted it.
+
+    The preview is printed as a ``Text`` for the same reason tier-1's is: it carries
+    operator- and model-supplied names, and a stray ``[/x]`` would raise
+    ``MarkupError`` in the middle of a confirmation prompt.
+    """
+    destructive = action.grade is ConfirmationGrade.TYPED
+    console.print(Text(f"\nProposed action: {action.preview}", style="red" if destructive else "yellow"))
+    prompt = (
+        f"Type {action.required_response} to confirm (anything else cancels): "
+        if destructive
+        else "Run it? [y/N] "
+    )
+    try:
+        return input(prompt)
+    except (EOFError, KeyboardInterrupt):
+        console.print()
+        return None
+
+
+def _progress(line: str) -> None:
+    """One dim line around a long media operation, so a blocking REPL is not a hang."""
+    console.print(Text(line, style="dim"))
+
+
 def _confirm_action(action: PendingAction) -> bool:
     """Ask the operator to confirm one tier-1 action. Default is no.
 
@@ -92,9 +134,9 @@ def _build_session(*, interactive: bool) -> AssistantSession:
     disabled check happens before that call, so an unconfigured assistant never
     opens the database.
 
-    ``interactive`` is the tier-1 switch: only the REPL can ask a human, so only the
-    REPL gets a confirmation callback — and without one, ``create_session`` builds
-    no write facade at all.
+    ``interactive`` is the switch for both tiers: only the REPL can ask a human, so
+    only the REPL gets confirmation callbacks — and without them, ``create_session``
+    builds neither write facade at all.
     """
     config = load_assistant_config()
     if not config.enabled:
@@ -106,26 +148,38 @@ def _build_session(*, interactive: bool) -> AssistantSession:
         _get_context(),
         config=config,
         confirm=_confirm_action if interactive else None,
+        confirm_media=_confirm_media_action if interactive else None,
+        progress=_progress if interactive else None,
     )
 
 
-def _show_executed(actions: tuple[str, ...]) -> None:
+def _show_executed(actions: tuple[str, ...], partial: tuple[str, ...] = ()) -> None:
     """One line per confirmed write, so the transcript shows what changed.
 
     Printed on the failure path too: a turn that wrote and then hit the round
-    limit still wrote, and the operator has to know.
+    limit still wrote, and the operator has to know. A failed archive or restore
+    gets its own line, because "it failed" and "nothing happened" are not the same
+    sentence when the job writes file by file.
     """
     for action in actions:
         console.print(Text(f"✓ {action} applied", style="green"))
+    for action in partial:
+        console.print(
+            Text(
+                f"⚠ {action} failed part-way — some of it may already be on tape. "
+                "Check `openblade jobs` and the catalog before retrying.",
+                style="yellow",
+            )
+        )
 
 
 def _ask(session: AssistantSession, question: str) -> None:
     try:
         turn = session.ask(question, on_tool=_show_tool)
     except AssistantError:
-        _show_executed(session.executed_this_turn)
+        _show_executed(session.executed_this_turn, session.possibly_partial_this_turn)
         raise
-    _show_executed(turn.executed_actions)
+    _show_executed(turn.executed_actions, session.possibly_partial_this_turn)
     # markup=False is load-bearing: model replies contain markdown links, array
     # syntax and quoted doc excerpts. Rich would either raise MarkupError on an
     # unbalanced tag (killing the REPL) or silently swallow "[dim]" as styling.

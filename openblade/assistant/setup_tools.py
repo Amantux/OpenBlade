@@ -35,7 +35,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from openblade.assistant.errors import (
     SetupRegistryViolationError,
@@ -365,10 +365,27 @@ def build_setup_registry(extra: list[SetupTool] | None = None) -> SetupToolRegis
     return SetupToolRegistry([*_tool_definitions(), *(extra or [])])
 
 
+class AuditableAction(Protocol):
+    """What an audited action must expose. Tier-1 and tier-2 actions both satisfy it.
+
+    Structural, not a base class: :class:`PendingAction` and
+    :class:`~openblade.assistant.media_tools.PendingMediaAction` are deliberately
+    separate types — they carry different confirmation machinery — but the audit
+    trail is one stream in one format, so an operator reading it does not have to
+    know which tier wrote a line.
+    """
+
+    @property
+    def tool(self) -> str: ...  # pragma: no cover - protocol declaration
+
+    @property
+    def arguments(self) -> dict[str, Any]: ...  # pragma: no cover - protocol declaration
+
+
 def log_action(
-    action: PendingAction, *, outcome: str, detail: Mapping[str, Any] | None = None
+    action: AuditableAction, *, outcome: str, detail: Mapping[str, Any] | None = None
 ) -> None:
-    """One structured line per tier-1 decision.
+    """One structured line per tier-1 or tier-2 decision.
 
     ``json.dumps`` is what sanitizes here: it escapes CR/LF, so a model-supplied
     name cannot forge a second log line. The catalog has no events table that the
