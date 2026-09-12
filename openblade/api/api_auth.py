@@ -286,17 +286,16 @@ async def api_auth_middleware(
         # CORS preflight carries no credentials by design.
         return await call_next(request)
 
-    resolution = get_api_token_resolution()
-    if not resolution.enabled:
+    # One place decides "is auth on?", so there is no second, unreachable
+    # fail-open branch further down that a later edit could make reachable.
+    expected = get_api_token_resolution().token
+    if expected is None:
         return await call_next(request)
 
     path = strip_forwarded_prefix(request.url.path, request.headers.get("x-forwarded-prefix", ""))
     if not requires_api_token(path):
         return await call_next(request)
 
-    expected = resolution.token
-    if expected is None:  # pragma: no cover - implied by resolution.enabled
-        return await call_next(request)
     supplied = extract_bearer_token(request.headers.get("authorization"))
     if supplied is None or not tokens_match(supplied, expected):
         reason = "missing" if supplied is None else "invalid"
