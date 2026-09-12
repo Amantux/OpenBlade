@@ -183,8 +183,16 @@ def build_drive_correlation(
     """Correlate library drive elements with host tape devices for ``config``.
 
     One place where "which devices, probed through which nodes" is decided, shared
-    by every real backend. The SCSI backend calls it with the changer's element
-    count; the AML Web Services backend calls it with the library's drive count.
+    by every real backend.
+
+    ``element_count`` is what lets ``correlate_drives`` refuse a declared element
+    outside the changer's range, and refuse a changer element with no host device
+    (which would strand a cartridge). The SCSI backend passes the changer's count.
+    The AML Web Services backend passes nothing here — it cannot, because the
+    correlation is built lazily without a session — and instead makes a strictly
+    stronger check of its own once it has one: it requires the declared element
+    ids to equal the library's actual element ADDRESSES, not merely to be the
+    right count. See ``ScalarHttpLibraryBackend._refuse_on_element_address_mismatch``.
     """
     drive_devices = _configured_drive_devices(config, discovery)
     return correlate_drives(

@@ -102,12 +102,25 @@ Set OPENBLADE_OLLAMA_URL to an Ollama endpoint to enable it:
 
 The route reads the same environment as the CLI (`OPENBLADE_OLLAMA_URL`,
 `OPENBLADE_OLLAMA_MODEL`, `OPENBLADE_OLLAMA_API_KEY`, `OPENBLADE_OLLAMA_TIMEOUT`,
-`OPENBLADE_ASSISTANT_MAX_ROUNDS`) plus two of its own:
+`OPENBLADE_ASSISTANT_MAX_ROUNDS`) plus four of its own:
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `OPENBLADE_ASSIST_RATE_BURST` | `5` | Requests allowed back-to-back per client |
 | `OPENBLADE_ASSIST_RATE_WINDOW_SECONDS` | `60` | Window those refill over |
+| `OPENBLADE_ASSIST_MAX_CONCURRENCY` | `2` | Assistant turns running at once, process-wide |
+| `OPENBLADE_ASSIST_QUEUE_TIMEOUT_SECONDS` | `30` | How long a request waits for a slot before `503` |
+
+### Why concurrency is capped so low
+
+A turn is a long blocking call — up to `max_rounds × timeout`, 12 minutes on the
+defaults. The same process serves the Quantum AML emulator surface, and starving
+that to answer a chat question is the wrong trade every time. So `/assist` runs
+turns on its own small thread budget rather than the pool shared with the rest of
+the app, and tells you it is busy instead of queueing indefinitely.
+
+Raise `OPENBLADE_ASSIST_MAX_CONCURRENCY` only if the instance is not also acting
+as a library emulator — and lower `OPENBLADE_OLLAMA_TIMEOUT` before you do.
 
 ### The rate limit, honestly described
 

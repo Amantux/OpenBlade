@@ -52,16 +52,37 @@ def _correlation(guard: RealHardwareGuard, serial_map: str = SERIAL_MAP) -> Driv
     )
 
 
-class StubSession:
-    """Answers ``GET /aml/drives`` with a scripted payload; records the paths asked."""
+#: Drive element addresses the stub library reports, matching SERIAL_MAP's ids.
+ELEMENTS = (0, 1)
 
-    def __init__(self, payload: Any = None, *, error: ScalarHttpError | None = None) -> None:
+DRIVES_PATH = "/aml/drives"
+ELEMENTS_PATH = "/aml/physicalLibrary/elements"
+
+
+class StubSession:
+    """Answers the two GETs the backend makes; records the paths asked.
+
+    Path-aware on purpose: ``drive_device`` reads the drive list *and* the element
+    list, and they mean different things. A stub that returned one payload for
+    every path would let an element-address bug pass unnoticed.
+    """
+
+    def __init__(
+        self,
+        payload: Any = None,
+        *,
+        error: ScalarHttpError | None = None,
+        elements: tuple[int, ...] | None = ELEMENTS,
+    ) -> None:
         self._payload = payload
         self._error = error
+        self._elements = elements
         self.paths: list[str] = []
 
     def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
         self.paths.append(path)
+        if path == ELEMENTS_PATH:
+            return _elements_payload(self._elements or ())
         if self._error is not None:
             raise self._error
         return self._payload if isinstance(self._payload, dict) else {}
@@ -69,6 +90,17 @@ class StubSession:
 
 def _drives_payload(*serials: str) -> dict[str, Any]:
     return {"driveList": {"drive": [{"serialNumber": serial} for serial in serials]}}
+
+
+def _elements_payload(addresses: tuple[int, ...]) -> dict[str, Any]:
+    return {
+        "elementList": {
+            "element": [
+                {"type": "drive", "address": address, "state": "empty", "barcode": None}
+                for address in addresses
+            ]
+        }
+    }
 
 
 def _backend(
@@ -108,6 +140,41 @@ class TestRefusals:
 
         assert "positional" in str(excinfo.value)
         assert "OPENBLADE_DRIVE_SERIAL_MAP" in str(excinfo.value)
+
+    def test_element_ids_in_the_wrong_number_space_are_refused(
+        self, guard: RealHardwareGuard
+    ) -> None:
+        """The wrong-drive bug, as a unit test.
+
+        The map is written in 1-based bay numbers (or mtx DTE numbering offset by
+        one) while this library addresses its drive elements 0 and 1. Every serial
+        check passes: the declared serials ARE the attached drives and ARE what the
+        library reports. Without this guard, ``drive_device(1)`` — the library's
+        SECOND element — would return the device declared for element 1, which is
+        the FIRST drive, and LTFS would be written to the wrong cartridge.
+        """
+        shifted = _correlation(guard, serial_map="10WT073820:1,10WT073819:2")
+        backend = _backend(StubSession(_drives_payload(*DRIVE_SERIALS.values())), shifted)
+
+        with pytest.raises(DriveCorrelationError) as excinfo:
+            backend.drive_device(1)
+
+        message = str(excinfo.value)
+        assert "[1, 2]" in message, "the declared element ids must be named"
+        assert "[0, 1]" in message, "the library's real element addresses must be named"
+        assert "element address" in message.lower()
+
+    def test_an_uncovered_library_element_is_refused(self, guard: RealHardwareGuard) -> None:
+        # The library has a third drive element the map does not cover. A job
+        # scheduled onto it would load a cartridge and then have no device to
+        # mount it on, stranding the tape.
+        session = StubSession(_drives_payload(*DRIVE_SERIALS.values()), elements=(0, 1, 2))
+        backend = _backend(session, _correlation(guard))
+
+        with pytest.raises(DriveCorrelationError) as excinfo:
+            backend.drive_device(0)
+
+        assert "[0, 1, 2]" in str(excinfo.value)
 
     def test_partial_library_mismatch_refuses_and_names_the_missing_serial(
         self, guard: RealHardwareGuard
@@ -170,7 +237,8 @@ class TestResolution:
         backend.drive_device(1)
 
         assert calls == 1
-        assert session.paths == ["/aml/drives"]
+        # One element-address check plus one drive-serial check, for two mounts.
+        assert session.paths == [ELEMENTS_PATH, DRIVES_PATH]
 
     def test_a_refusal_is_not_cached(self, guard: RealHardwareGuard) -> None:
         # Fixing the configuration and retrying must work without a restart, so a
@@ -211,6 +279,30 @@ class TestAbsenceOfEvidence:
             assert backend.drive_device(0) == "/dev/nst1"
 
         assert "not cross-checked" in caplog.text.lower()
+
+    def test_a_transport_failure_warns_and_proceeds_without_leaking_the_url(
+        self, guard: RealHardwareGuard, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # ScalarHttpSession only converts >=400 responses; a connect/timeout/TLS
+        # failure arrives as a bare httpx error whose text carries the target URL,
+        # and OPENBLADE_SCALAR_URL can embed credentials.
+        import httpx
+
+        secret = "connection refused to https://admin:hunter2@i3.internal"
+
+        class ExplodingSession(StubSession):
+            def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+                if path == DRIVES_PATH:
+                    raise httpx.ConnectError(secret)
+                return super().get_json(path, params=params)
+
+        backend = _backend(ExplodingSession(), _correlation(guard))
+
+        with caplog.at_level(logging.WARNING):
+            assert backend.drive_device(0) == "/dev/nst1"
+
+        assert "hunter2" not in caplog.text
+        assert "ConnectError" in caplog.text
 
     def test_empty_drive_list_is_distinguished_from_unreadable(self) -> None:
         assert (
@@ -254,6 +346,25 @@ class TestMutationCheck:
         )
 
         assert backend.drive_device(0) == "/dev/nst0"
+
+    def test_the_wrong_drive_really_happens_without_the_element_address_check(
+        self, guard: RealHardwareGuard, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Proof that the element-address guard is what stops a wrong-drive write.
+
+        Neuter only that guard and the shifted map is accepted: asking for the
+        library's element 1 — physically the FIRST drive, which is on /dev/nst0 —
+        hands back /dev/nst1, the second drive. That is a silent wrong-drive LTFS
+        write, and it is exactly what
+        ``test_element_ids_in_the_wrong_number_space_are_refused`` prevents.
+        """
+        monkeypatch.setattr(
+            ScalarHttpLibraryBackend, "_refuse_on_element_address_mismatch", lambda self, _: None
+        )
+        shifted = _correlation(guard, serial_map="10WT073820:1,10WT073819:2")
+        backend = _backend(StubSession(_drives_payload(*DRIVE_SERIALS.values())), shifted)
+
+        assert backend.drive_device(1) == "/dev/nst1"
 
 
 class TestLibraryDriveSerials:

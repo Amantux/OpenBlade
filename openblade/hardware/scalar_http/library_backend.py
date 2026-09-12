@@ -35,7 +35,21 @@ write LTFS into the wrong drive on any library whose two lists disagree.
 the element↔serial mapping by itself. It therefore requires the same
 operator-declared ``OPENBLADE_DRIVE_SERIAL_MAP`` the SCSI backend uses, and
 refuses (typed :class:`DriveCorrelationError`) rather than guessing when it is
-absent. On top of the SCSI backend's live ``sg_inq`` check, it adds one check
+absent.
+
+⚠️ **The element ids mean something different here than on the SCSI backend.**
+``correlation.py`` documents the map's element index as mtx's 0-based Data
+Transfer Element numbering, because that is what ``mtx`` reports. This backend
+never sees an mtx DTE: the id it is asked about is the library's own element
+``address`` from ``GET /aml/physicalLibrary/elements`` (see :meth:`inventory`),
+and the i3 numbers drive bays from 1. A map written in the wrong number space —
+even one merely shifted by one — passes the serial checks and then returns a
+neighbouring drive's device, which is the wrong-drive LTFS write this whole
+module exists to prevent. So the declared element ids are required to BE this
+library's element addresses, checked for exact set equality against a live
+``inventory()`` before the correlation is used, and refused otherwise.
+
+On top of the SCSI backend's live ``sg_inq`` check, it adds one check
 ``mtx`` cannot make: the declared serials are cross-checked against the serials
 this library reports on ``GET /aml/drives`` (see
 ``correlation.verify_against_library_serials``), which catches a map that
@@ -52,6 +66,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from typing import Any
+
+import httpx
 
 from openblade.domain.errors import DriveCorrelationError, OpenBladeError
 from openblade.domain.models import (
@@ -88,7 +104,9 @@ _NO_CORRELATION = (
     "drive serial sits in which drive element, so the host device for a drive "
     "cannot be derived from the library. Declare it explicitly: set "
     "OPENBLADE_DRIVE_DEVICES to the host tape devices and OPENBLADE_DRIVE_SERIAL_MAP "
-    "to '<serial>:<element>,...' (serials are shown by `openblade hardware connect-i3`). "
+    "to '<serial>:<element>,...', where <serial> is the drive's SCSI unit serial "
+    "number (`sg_inq /dev/sgN`) and <element> is that drive's element address as "
+    "reported by GET /aml/physicalLibrary/elements on this library. "
     "Refusing to guess which device is drive element {drive_id}."
 )
 
@@ -282,11 +300,16 @@ class ScalarHttpLibraryBackend:
         """
         try:
             body = self._session.get_json(self._drives_path)
-        except ScalarHttpError as error:
+        except (ScalarHttpError, httpx.HTTPError) as error:
+            # httpx.HTTPError covers connect/timeout/TLS failures, which
+            # ScalarHttpSession does not wrap (it only converts >=400 responses).
+            # Letting one escape would both break this method's "None means it
+            # could not be read" contract and put raw upstream text — which for
+            # OPENBLADE_SCALAR_URL can embed credentials — into a traceback.
             logger.warning(
                 "could not read %s for the drive-serial cross-check: %s",
                 self._drives_path,
-                error,
+                type(error).__name__,
             )
             return None
         drive_list = body.get("driveList")
@@ -319,6 +342,8 @@ class ScalarHttpLibraryBackend:
                 _UNVERIFIED_CORRELATION.format(drive_id="<unknown>", source=correlation.source)
             )
 
+        self._refuse_on_element_address_mismatch(correlation)
+
         warnings = verify_against_library_serials(
             correlation=correlation,
             library_serials=self.library_drive_serials(),
@@ -329,6 +354,43 @@ class ScalarHttpLibraryBackend:
 
         self._correlation = correlation
         return correlation
+
+    def _refuse_on_element_address_mismatch(self, correlation: DriveCorrelation) -> None:
+        """Refuse unless the declared element ids ARE this library's element addresses.
+
+        The load-bearing check, and the one the SCSI backend has no need for. The
+        id this backend is asked about comes from ``GET /aml/physicalLibrary/
+        elements`` → ``address`` (see :meth:`inventory`), while
+        ``OPENBLADE_DRIVE_SERIAL_MAP`` is documented in terms of *mtx* Data
+        Transfer Element numbering, which is 0-based and produced by a different
+        system. Nothing guarantees the two number spaces agree — the i3 web UI
+        already numbers drive bays from 1 — and if they are merely shifted, every
+        other check here still passes while ``drive_device`` hands back a
+        neighbouring drive's device and LTFS is written to the wrong cartridge.
+
+        Equality, not containment, in both directions:
+
+        * a declared element the library does not have means the map is written in
+          the wrong number space (or for another library);
+        * a library drive element the map does not cover would have a cartridge
+          loaded into it by a scheduler sized from the library, and then no device
+          to mount it — the cartridge is stranded. ``correlate_drives`` already
+          refuses that case for the SCSI backend; this is the same rule.
+        """
+        declared = {entry.drive_id for entry in correlation.entries}
+        reported = {drive.drive_id for drive in self.inventory().drives}
+        if declared == reported:
+            return
+        raise DriveCorrelationError(
+            "OPENBLADE_DRIVE_SERIAL_MAP does not describe this library's drive elements. "
+            f"Declared element(s): {sorted(declared)}. "
+            f"Library {self._library_id} reports drive element address(es): {sorted(reported)}. "
+            "The map's element ids must be the library's OWN element addresses, which is "
+            "what load/unload and this device lookup use — not the 0-based mtx Data "
+            "Transfer Element numbering, and not the 1-based bay numbers on the i3 web "
+            "UI. A map that is merely shifted would pass every other check here and then "
+            "write LTFS to the wrong drive, so refusing rather than guessing."
+        )
 
     def drive_device(self, drive_id: int) -> str:
         """Host tape device for a library drive element.

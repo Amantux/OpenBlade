@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
 
@@ -314,6 +315,86 @@ class TestReadOnlyIsStructural:
         assert _ask(client).status_code == 200
 
         assert "sneaky" in {group.name for group in context.catalog.list_volume_groups()}
+
+
+class TestIsolationAndConcurrency:
+    def test_each_turn_gets_its_own_database_session(
+        self, client: TestClient, context: AppContext, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The assistant must not share the process-global Session.
+
+        It runs on a worker thread and calls ``expire_all()`` between rounds; the
+        rest of the API touches that same Session from the event loop thread.
+        """
+        seen: list[object] = []
+        real_factory = routes_assist.create_session
+        http_client, _ = scripted_client([prose_response("ok")])
+
+        def _factory(app_context: AppContext, **kwargs: Any) -> AssistantSession:
+            seen.append(app_context.catalog)
+            return real_factory(
+                app_context, config=assistant_config(), http_client=http_client, confirm=None
+            )
+
+        monkeypatch.setattr(routes_assist, "create_session", _factory)
+
+        assert _ask(client).status_code == 200
+
+        assert len(seen) == 1
+        assert seen[0] is not context.catalog, "the turn reused the global repository"
+        assert seen[0].session is not context.catalog.session, "the turn reused the global Session"
+
+    def test_a_saturated_assistant_says_busy_rather_than_queueing_forever(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A full slot budget must 503, not hold the connection for 12 minutes."""
+
+        class _NeverFree:
+            """Stands in for a limiter whose slots are all taken."""
+
+            async def acquire(self) -> None:
+                await anyio.sleep(3600)
+
+            def release(self) -> None:  # pragma: no cover - acquire never returns
+                raise AssertionError("released a slot that was never acquired")
+
+        monkeypatch.setattr(routes_assist, "_assist_slots", _NeverFree())
+        monkeypatch.setattr(routes_assist, "ASSIST_QUEUE_TIMEOUT_SECONDS", 1)
+        script = _enable(monkeypatch, [prose_response("never reached")])
+
+        response = _ask(client)
+
+        assert response.status_code == 503
+        assert "busy" in response.json()["detail"].lower()
+        # The upstream model was never called: we shed load before spending money.
+        assert script.requests == []
+
+    def test_the_slot_is_released_after_a_failed_turn(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A leaked slot would silently shrink capacity to zero over time.
+        import httpx
+
+        def _boom(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("nope")
+
+        http_client = httpx.Client(transport=httpx.MockTransport(_boom))
+        monkeypatch.setattr(
+            routes_assist,
+            "create_session",
+            lambda app_context, **kwargs: create_session(
+                app_context, config=assistant_config(), http_client=http_client, confirm=None
+            ),
+        )
+
+        assert _ask(client).status_code == 502
+
+        assert routes_assist._assist_slots.borrowed_tokens == 0
+
+    def test_concurrency_defaults_are_small_and_env_tunable(self) -> None:
+        assert routes_assist.ASSIST_MAX_CONCURRENCY == 2
+        assert routes_assist.ASSIST_QUEUE_TIMEOUT_SECONDS == 30
+        assert routes_assist._positive_int("OPENBLADE_NOT_SET_ANYWHERE", 7) == 7
 
 
 class TestRateLimit:

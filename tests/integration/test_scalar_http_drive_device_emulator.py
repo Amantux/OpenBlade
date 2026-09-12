@@ -125,18 +125,29 @@ def guard() -> RealHardwareGuard:
 
 
 def _correlation_for(
-    serials: list[str], guard: RealHardwareGuard, *, devices: list[str] | None = None
+    serials: list[str], guard: RealHardwareGuard, elements: list[int]
 ) -> DriveCorrelation:
-    """Declare ``serials[i]`` as drive element ``i`` on ``/dev/nst{i}``."""
-    device_list = devices or [f"/dev/nst{index}" for index in range(len(serials))]
+    """Declare ``serials[i]`` as library drive element ``elements[i]`` on ``/dev/nst{i}``.
+
+    ``elements`` is passed in rather than assumed to be ``0..n-1``: the element ids
+    are the LIBRARY's element addresses, and a test that invents them proves
+    nothing about whether the mapping works against the live library.
+    """
+    device_list = [f"/dev/nst{index}" for index in range(len(serials))]
     live = dict(zip(device_list, serials, strict=True))
-    declared = ",".join(f"{serial}:{index}" for index, serial in enumerate(serials))
+    declared = ",".join(
+        f"{serial}:{element}" for serial, element in zip(serials, elements, strict=True)
+    )
     return correlate_drives(
         devices=device_list,
         serial_map=parse_drive_serial_map(declared),
         runner=FakeRunner(live),
         guard=guard,
     )
+
+
+def _live_drive_elements(backend: ScalarHttpLibraryBackend) -> list[int]:
+    return [drive.drive_id for drive in backend.inventory().drives]
 
 
 def test_emulator_publishes_drive_serials(session: ScalarHttpSession) -> None:
@@ -164,20 +175,51 @@ def test_elements_endpoint_does_not_publish_serials(session: ScalarHttpSession) 
     assert all("address" in element for element in drive_elements)
 
 
-def test_drive_device_resolves_against_the_live_library(
+def test_drive_device_resolves_against_the_live_librarys_own_element_addresses(
     session: ScalarHttpSession, guard: RealHardwareGuard
 ) -> None:
     backend = ScalarHttpLibraryBackend(session, library_id="emulator-i3")
     serials = backend.library_drive_serials()
     assert serials is not None
-    correlation = _correlation_for(serials, guard)
+    # The element ids come FROM the library, not from range(len(serials)) — that
+    # is the whole point, and asserting against an invented range would pass even
+    # against a library that numbers its drive elements 256, 257, ...
+    elements = _live_drive_elements(backend)
+    assert len(elements) == len(serials)
+    correlation = _correlation_for(serials, guard, elements)
 
     resolved = ScalarHttpLibraryBackend(
         session, library_id="emulator-i3", correlation_factory=lambda: correlation
     )
 
-    for index in range(len(serials)):
-        assert resolved.drive_device(index) == f"/dev/nst{index}"
+    for index, element in enumerate(elements):
+        assert resolved.drive_device(element) == f"/dev/nst{index}"
+
+
+def test_a_map_in_the_wrong_element_number_space_is_refused(
+    session: ScalarHttpSession, guard: RealHardwareGuard
+) -> None:
+    """The wrong-drive bug: a map whose element ids are merely shifted.
+
+    Every serial check passes — the declared serials ARE the attached drives and
+    ARE the ones the library reports — so without the element-address check this
+    returns a neighbouring drive's device and LTFS is written to the wrong
+    cartridge. It must refuse instead.
+    """
+    backend = ScalarHttpLibraryBackend(session, library_id="emulator-i3")
+    serials = backend.library_drive_serials()
+    assert serials is not None
+    shifted = [element + 1 for element in _live_drive_elements(backend)]
+    correlation = _correlation_for(serials, guard, shifted)
+
+    refusing = ScalarHttpLibraryBackend(
+        session, library_id="emulator-i3", correlation_factory=lambda: correlation
+    )
+
+    with pytest.raises(DriveCorrelationError) as excinfo:
+        refusing.drive_device(shifted[0])
+
+    assert "element address" in str(excinfo.value).lower()
 
 
 def test_a_map_from_another_library_is_refused(
@@ -186,17 +228,18 @@ def test_a_map_from_another_library_is_refused(
     backend = ScalarHttpLibraryBackend(session, library_id="emulator-i3")
     serials = backend.library_drive_serials()
     assert serials is not None and len(serials) >= 2, "need >=2 drives for a partial mismatch"
+    elements = _live_drive_elements(backend)
 
     # Keep one real serial (so the two sides demonstrably spell serials the same
     # way) and swap the rest for a drive this library has never seen.
     foreign = [serials[0], *(f"NOT-THIS-LIBRARY-{index}" for index in range(1, len(serials)))]
-    correlation = _correlation_for(foreign, guard)
+    correlation = _correlation_for(foreign, guard, elements)
     refusing = ScalarHttpLibraryBackend(
         session, library_id="emulator-i3", correlation_factory=lambda: correlation
     )
 
     with pytest.raises(DriveCorrelationError) as excinfo:
-        refusing.drive_device(0)
+        refusing.drive_device(elements[0])
 
     assert "not-this-library-1" in str(excinfo.value).lower()
 
