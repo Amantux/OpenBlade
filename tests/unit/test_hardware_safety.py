@@ -414,9 +414,7 @@ class TestRealTapeCapacityAccounting:
                 return super().run(args, timeout=timeout, redact_args=redact_args)
 
         backend.runner = _OrderRecordingRunner()
-        backend.library = type(
-            "_Lib", (), {"set_drive_mount_state": lambda self, *a, **k: None}
-        )()
+        backend.library = type("_Lib", (), {"set_drive_mount_state": lambda self, *a, **k: None})()
         mount_path = tmp_path / "CAP003L8"
         mount_path.mkdir()
         handle = MountHandle(
@@ -436,7 +434,6 @@ class TestRealTapeCapacityAccounting:
             "capacity was still the never-mounted assumption when umount ran, "
             "i.e. the reading was taken after the filesystem was gone"
         )
-
 
     def test_refresh_refuses_a_mount_point_that_is_not_a_mount(self, tmp_path: Path) -> None:
         """`mounted=True` is the caller's belief, not a fact.

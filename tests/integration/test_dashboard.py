@@ -46,7 +46,10 @@ def _prepare_archive(client: TestClient, tmp_path: Path) -> int:
         client.post(
             "/cartridges/format/confirm",
             json={"barcode": barcode, "token": token},
-            headers={**auth_headers, "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"},
+            headers={
+                **auth_headers,
+                "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose",
+            },
         ).status_code
         == 200
     )
@@ -64,7 +67,9 @@ def _prepare_archive(client: TestClient, tmp_path: Path) -> int:
     return archived_file.stat().st_size
 
 
-def test_dashboard_stats_smoke_reflects_seeded_library_state(client: TestClient, tmp_path: Path) -> None:
+def test_dashboard_stats_smoke_reflects_seeded_library_state(
+    client: TestClient, tmp_path: Path
+) -> None:
     archived_size = _prepare_archive(client, tmp_path)
     context = get_context()
     inventory = context.library.inventory()

@@ -196,7 +196,9 @@ def test_plan_rebuild_dry_run_returns_counts(rebuild_env: dict[str, object]) -> 
     _seed_tape(rebuild_env, barcodes[0], files_per_tape=2)
     _seed_tape(rebuild_env, barcodes[1], files_per_tape=1)
 
-    result = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=barcodes, dry_run=True))
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=barcodes, dry_run=True)
+    )
 
     assert result.run_id == ""
     assert result.barcodes_to_scan == barcodes
@@ -210,7 +212,9 @@ def test_plan_rebuild_missing_manifest_tracked(rebuild_env: dict[str, object]) -
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode, include_manifest=False)
 
-    result = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=True))
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
 
     assert result.barcodes_missing_manifest == [barcode]
     assert result.barcodes_to_scan == []
@@ -220,7 +224,9 @@ def test_plan_rebuild_invalid_manifest_tracked(rebuild_env: dict[str, object]) -
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode, valid_manifest=False)
 
-    result = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=True))
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
 
     assert result.barcodes_invalid == [barcode]
     assert result.safe_to_enqueue is False
@@ -230,7 +236,9 @@ def test_plan_rebuild_missing_shard_tracked(rebuild_env: dict[str, object]) -> N
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode, include_shard=False)
 
-    result = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=True))
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
 
     assert result.barcodes_missing_shard == [barcode]
     assert result.barcodes_to_scan == []
@@ -240,7 +248,9 @@ def test_plan_rebuild_creates_run_record_when_not_dry_run(rebuild_env: dict[str,
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode)
 
-    result = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=False))
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
     stored = rebuild_env["context"].catalog.get_rebuild_run(result.run_id)
 
     assert result.run_id
@@ -253,7 +263,9 @@ def test_plan_rebuild_safe_to_enqueue_false_when_invalid(rebuild_env: dict[str, 
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode, valid_manifest=False)
 
-    result = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=False))
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
 
     assert result.safe_to_enqueue is False
 
@@ -261,7 +273,9 @@ def test_plan_rebuild_safe_to_enqueue_false_when_invalid(rebuild_env: dict[str, 
 def test_execute_rebuild_restores_path_mappings(rebuild_env: dict[str, object]) -> None:
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     seeded = _seed_tape(rebuild_env, barcode)
-    plan = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=False))
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
 
     rebuild_env["planner"].execute_rebuild_run(plan.run_id)
     lookup = rebuild_env["path_mapping"].lookup(
@@ -276,7 +290,9 @@ def test_execute_rebuild_restores_path_mappings(rebuild_env: dict[str, object]) 
 def test_execute_rebuild_counts_files_recovered(rebuild_env: dict[str, object]) -> None:
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode, files_per_tape=3)
-    plan = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=False))
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
 
     result = rebuild_env["planner"].execute_rebuild_run(plan.run_id)
 
@@ -288,7 +304,9 @@ def test_execute_rebuild_counts_files_recovered(rebuild_env: dict[str, object]) 
 def test_execute_rebuild_marks_run_completed(rebuild_env: dict[str, object]) -> None:
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode)
-    plan = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=False))
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
 
     result = rebuild_env["planner"].execute_rebuild_run(plan.run_id)
 
@@ -305,7 +323,9 @@ def test_execute_rebuild_invalid_run_id_raises(rebuild_env: dict[str, object]) -
 def test_execute_rebuild_fails_if_run_not_planned(rebuild_env: dict[str, object]) -> None:
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode)
-    plan = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=False))
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
     rebuild_env["context"].catalog.update_rebuild_run(
         plan.run_id,
         {
@@ -323,7 +343,9 @@ def test_execute_rebuild_partial_failure_marks_failed(rebuild_env: dict[str, obj
     _seed_tape(rebuild_env, barcodes[0])
     _seed_tape(rebuild_env, barcodes[1])
     plan = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=barcodes, dry_run=False))
-    rebuild_env["context"].ltfs.ensure_tape(barcodes[1]).files.pop("/.openblade/catalog-shard.json", None)
+    rebuild_env["context"].ltfs.ensure_tape(barcodes[1]).files.pop(
+        "/.openblade/catalog-shard.json", None
+    )
 
     result = rebuild_env["planner"].execute_rebuild_run(plan.run_id)
 
@@ -336,7 +358,9 @@ def test_execute_rebuild_partial_failure_marks_failed(rebuild_env: dict[str, obj
 def test_list_manifest_versions_returns_versions(rebuild_env: dict[str, object]) -> None:
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode, create_versions=2)
-    plan = rebuild_env["planner"].plan_rebuild(RebuildPlanRequest(barcodes=[barcode], dry_run=False))
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
 
     rebuild_env["planner"].execute_rebuild_run(plan.run_id)
     versions = [
@@ -372,7 +396,9 @@ def test_api_get_run_returns_record(rebuild_env: dict[str, object]) -> None:
     _seed_tape(rebuild_env, barcode)
     _login(client)
 
-    plan_response = client.post("/nas/catalog/rebuild/plan", json={"barcodes": [barcode], "dry_run": False})
+    plan_response = client.post(
+        "/nas/catalog/rebuild/plan", json={"barcodes": [barcode], "dry_run": False}
+    )
     run_id = plan_response.json()["run_id"]
     response = client.get(f"/nas/catalog/rebuild/{run_id}")
 

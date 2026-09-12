@@ -45,7 +45,9 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def reset_app_context(tmp_path: Path) -> dict[str, object]:
     client.cookies.clear()
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'catalog-rebuild-worker.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'catalog-rebuild-worker.db'}")
+    )
     reset_context(context)
     context.catalog.session.query(Cartridge).delete()
     context.catalog.session.commit()
@@ -261,8 +263,9 @@ def test_auto_plan_and_execute_dry_run_first_blocks_invalid(rebuild_env: dict[st
         rebuild_env["worker"].auto_plan_and_execute([barcode], triggered_by="operator")
 
 
-
-def test_auto_plan_and_execute_no_dry_run_first_skips_preflight(rebuild_env: dict[str, object]) -> None:
+def test_auto_plan_and_execute_no_dry_run_first_skips_preflight(
+    rebuild_env: dict[str, object],
+) -> None:
     barcode = rebuild_env["context"].library.get_all_barcodes()[0]
     _seed_tape(rebuild_env, barcode, valid_manifest=False)
 
@@ -275,7 +278,6 @@ def test_auto_plan_and_execute_no_dry_run_first_skips_preflight(rebuild_env: dic
     assert result.status is RebuildRunStatus.COMPLETED
     assert result.barcodes_completed == []
     assert result.files_recovered == 0
-
 
 
 def test_recover_from_loaded_tapes_uses_library_barcodes(rebuild_env: dict[str, object]) -> None:
@@ -292,8 +294,9 @@ def test_recover_from_loaded_tapes_uses_library_barcodes(rebuild_env: dict[str, 
     assert barcodes[2] not in result.barcodes_completed
 
 
-
-def test_recover_from_loaded_tapes_empty_library_returns_empty_run(rebuild_env: dict[str, object]) -> None:
+def test_recover_from_loaded_tapes_empty_library_returns_empty_run(
+    rebuild_env: dict[str, object],
+) -> None:
     result = rebuild_env["worker"].recover_from_loaded_tapes(triggered_by="operator")
 
     assert result.status is RebuildRunStatus.COMPLETED
@@ -301,10 +304,8 @@ def test_recover_from_loaded_tapes_empty_library_returns_empty_run(rebuild_env: 
     assert result.files_recovered == 0
 
 
-
 def test_rebuild_status_returns_none_for_unknown(rebuild_env: dict[str, object]) -> None:
     assert rebuild_env["worker"].rebuild_status("missing-run") is None
-
 
 
 def test_rebuild_status_returns_record(rebuild_env: dict[str, object]) -> None:
@@ -317,7 +318,6 @@ def test_rebuild_status_returns_record(rebuild_env: dict[str, object]) -> None:
     assert stored is not None
     assert stored.id == run.id
     assert stored.status is RebuildRunStatus.COMPLETED
-
 
 
 def test_lost_db_recovery_full_scenario(rebuild_env: dict[str, object]) -> None:
@@ -357,11 +357,24 @@ def test_lost_db_recovery_full_scenario(rebuild_env: dict[str, object]) -> None:
     assert result.files_recovered == 4
     assert rebuild_env["context"].catalog.get_nas_file_record(f"{barcodes[0]}-file-0") is not None
     assert rebuild_env["context"].catalog.get_nas_file_record(f"{barcodes[1]}-file-1") is not None
-    assert rebuild_env["path_mapping"].lookup(seeded_one["manifest"].files[0].logical_path, "pool-1").found is True
-    assert rebuild_env["path_mapping"].lookup(seeded_two["manifest"].files[1].logical_path, "pool-1").found is True
-    assert rebuild_env["context"].catalog.get_nas_dataset(seeded_one["dataset_id"])["tape_set"] == [barcodes[0]]
-    assert rebuild_env["context"].catalog.get_nas_dataset(seeded_two["dataset_id"])["tape_set"] == [barcodes[1]]
-
+    assert (
+        rebuild_env["path_mapping"]
+        .lookup(seeded_one["manifest"].files[0].logical_path, "pool-1")
+        .found
+        is True
+    )
+    assert (
+        rebuild_env["path_mapping"]
+        .lookup(seeded_two["manifest"].files[1].logical_path, "pool-1")
+        .found
+        is True
+    )
+    assert rebuild_env["context"].catalog.get_nas_dataset(seeded_one["dataset_id"])["tape_set"] == [
+        barcodes[0]
+    ]
+    assert rebuild_env["context"].catalog.get_nas_dataset(seeded_two["dataset_id"])["tape_set"] == [
+        barcodes[1]
+    ]
 
 
 def test_api_activate_requires_auth(rebuild_env: dict[str, object]) -> None:
@@ -372,7 +385,6 @@ def test_api_activate_requires_auth(rebuild_env: dict[str, object]) -> None:
     response = anon.post("/nas/catalog/rebuild/activate", json={"barcodes": [barcode]})
 
     assert response.status_code in (401, 403)
-
 
 
 def test_api_activate_with_barcodes(rebuild_env: dict[str, object]) -> None:
@@ -391,7 +403,6 @@ def test_api_activate_with_barcodes(rebuild_env: dict[str, object]) -> None:
     assert response.json()["safe_to_enqueue"] is True
 
 
-
 def test_api_activate_loaded_tapes(rebuild_env: dict[str, object]) -> None:
     barcodes = rebuild_env["context"].library.get_all_barcodes()[:2]
     _seed_tape(rebuild_env, barcodes[0])
@@ -404,7 +415,6 @@ def test_api_activate_loaded_tapes(rebuild_env: dict[str, object]) -> None:
     assert response.status_code == 200
     assert response.json()["barcodes_completed"] == barcodes
     assert response.json()["datasets_recovered"] == 2
-
 
 
 def test_api_activate_returns_422_when_not_safe(rebuild_env: dict[str, object]) -> None:
@@ -423,14 +433,12 @@ def test_api_activate_returns_422_when_not_safe(rebuild_env: dict[str, object]) 
     assert barcode not in response.json()["detail"]["message"]
 
 
-
 def test_api_loaded_tapes_requires_auth() -> None:
     anon = TestClient(app)
 
     response = anon.get("/nas/catalog/rebuild/loaded-tapes")
 
     assert response.status_code in (401, 403)
-
 
 
 def test_api_loaded_tapes_returns_barcodes(rebuild_env: dict[str, object]) -> None:
@@ -442,7 +450,6 @@ def test_api_loaded_tapes_returns_barcodes(rebuild_env: dict[str, object]) -> No
 
     assert response.status_code == 200
     assert response.json() == sorted(barcodes)
-
 
 
 def test_dry_run_first_raises_when_not_safe_to_enqueue(rebuild_env: dict[str, object]) -> None:

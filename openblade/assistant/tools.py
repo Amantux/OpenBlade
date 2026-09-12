@@ -513,7 +513,10 @@ def _search_docs(context: ToolContext, arguments: Mapping[str, Any]) -> JSONDict
         relative = path.relative_to(docs_dir).as_posix()
         path_bonus = 3 * sum(1 for term in terms if term in relative.lower())
         for heading, body in _split_sections(text):
-            score = _score(terms, heading, body, phrase=query.lower().replace("`", "").strip()) + path_bonus
+            score = (
+                _score(terms, heading, body, phrase=query.lower().replace("`", "").strip())
+                + path_bonus
+            )
             if score <= path_bonus:
                 continue
             hits.append((score, relative, heading, body))

@@ -273,8 +273,12 @@ def _drive_firmware_response(drive: dict[str, Any]) -> DriveFirmwareResponse:
 
 def _system_firmware_response() -> SystemFirmwareResponse:
     info = aml_state.get_system_firmware_info()
-    staged_package = info.get("stagedPackage") if isinstance(info.get("stagedPackage"), dict) else None
-    packages = [SystemFirmwarePackage.model_validate(item) for item in info.get("uploadedPackages", [])]
+    staged_package = (
+        info.get("stagedPackage") if isinstance(info.get("stagedPackage"), dict) else None
+    )
+    packages = [
+        SystemFirmwarePackage.model_validate(item) for item in info.get("uploadedPackages", [])
+    ]
     return SystemFirmwareResponse(
         systemFirmware=SystemFirmwareInfo(
             currentVersion=str(info.get("currentVersion", "unknown")),
@@ -296,7 +300,8 @@ def _system_firmware_status_response() -> SystemFirmwareStatusResponse:
                 "state": status.get("state", "idle"),
                 "progress": int(status.get("progress", 0)),
                 "message": status.get("message", "No firmware activation pending"),
-                "currentVersion": status.get("currentVersion") or info.get("currentVersion", "unknown"),
+                "currentVersion": status.get("currentVersion")
+                or info.get("currentVersion", "unknown"),
                 "stagedVersion": status.get("stagedVersion"),
                 "lastUpdated": status.get("lastUpdated") or _timestamp(),
                 "lastActivated": status.get("lastActivated") or info.get("lastActivated"),
@@ -346,8 +351,12 @@ async def list_drive_firmware_images(
     context: AppContext = Depends(get_context),
 ) -> DriveFirmwareImageListResponse:
     _ensure_state(context)
-    images = [DriveFirmwareImage.model_validate(item) for item in aml_state.list_drive_firmware_images()]
-    return DriveFirmwareImageListResponse(firmwareImageList=DriveFirmwareImageListResource(image=images))
+    images = [
+        DriveFirmwareImage.model_validate(item) for item in aml_state.list_drive_firmware_images()
+    ]
+    return DriveFirmwareImageListResponse(
+        firmwareImageList=DriveFirmwareImageListResource(image=images)
+    )
 
 
 @router.post("/drives/firmware/images", response_model=WSResultCode)
@@ -451,7 +460,9 @@ async def upload_system_firmware(
     finally:
         await file.close()
     info = aml_state.get_system_firmware_info()
-    packages = [item for item in info.get("uploadedPackages", []) if str(item.get("name")) != filename]
+    packages = [
+        item for item in info.get("uploadedPackages", []) if str(item.get("name")) != filename
+    ]
     packages.append(package)
     info["uploadedPackages"] = packages
     info["stagedPackage"] = package
@@ -479,7 +490,9 @@ async def activate_system_firmware(
     if payload is not None and not payload.firmware.commit:
         return _ws_result("System firmware activation skipped")
     info = aml_state.get_system_firmware_info()
-    staged_package = info.get("stagedPackage") if isinstance(info.get("stagedPackage"), dict) else None
+    staged_package = (
+        info.get("stagedPackage") if isinstance(info.get("stagedPackage"), dict) else None
+    )
     if staged_package is None:
         raise HTTPException(status_code=409, detail="No staged system firmware available")
     activated_at = _timestamp()
@@ -530,7 +543,10 @@ async def update_drive_firmware(
     image_name = payload.firmware.image if payload is not None else None
     if image_name is None:
         active_image = _active_drive_image()
-        image_name = str((active_image or {}).get("name") or drive.get("firmwareImage") or "").strip() or None
+        image_name = (
+            str((active_image or {}).get("name") or drive.get("firmwareImage") or "").strip()
+            or None
+        )
     if image_name is None:
         raise HTTPException(status_code=409, detail="No drive firmware image available")
     image = _get_drive_image_or_404(_validate_identifier(image_name, field_name="image"))

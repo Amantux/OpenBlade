@@ -16,7 +16,9 @@ from openblade.config import OpenBladeConfig
 def reset_app_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENBLADE_STAGING_DIR", str(tmp_path / "staging"))
     monkeypatch.setenv("OPENBLADE_RESTORE_DIR", str(tmp_path / "restore"))
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'library-commands.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'library-commands.db'}")
+    )
     reset_context(context)
 
 

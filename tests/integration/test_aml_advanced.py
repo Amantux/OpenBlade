@@ -53,12 +53,29 @@ def test_advanced_get_endpoints_require_auth(client: TestClient, path: str) -> N
         (
             "put",
             "/aml/system/ha/config",
-            {"config": {"enabled": True, "mode": "activeStandby", "clusterName": "cluster-b", "heartbeatInterval": 10, "autoFailback": True}},
+            {
+                "config": {
+                    "enabled": True,
+                    "mode": "activeStandby",
+                    "clusterName": "cluster-b",
+                    "heartbeatInterval": 10,
+                    "autoFailback": True,
+                }
+            },
         ),
         (
             "post",
             "/aml/system/remoteLibraries",
-            {"remoteLibrary": {"name": "remote-a", "host": "remote-a.example.com", "model": "Scalar i6000", "status": "connected", "protocol": "FC", "sharedSlots": 12}},
+            {
+                "remoteLibrary": {
+                    "name": "remote-a",
+                    "host": "remote-a.example.com",
+                    "model": "Scalar i6000",
+                    "status": "connected",
+                    "protocol": "FC",
+                    "sharedSlots": 12,
+                }
+            },
         ),
         ("delete", "/aml/system/remoteLibrary/rlib-missing", None),
     ],
@@ -176,7 +193,9 @@ def test_reset_context_clears_advanced_state(tmp_path: Path) -> None:
     first_context = create_context(OpenBladeConfig(db_url=db_url))
     reset_context(first_context)
     aml_state.set_aml_advanced_ha_config({"enabled": True, "clusterName": "mutated-cluster"})
-    aml_state.create_aml_remote_library({"name": "remote-b", "host": "remote-b.example.com", "model": "Scalar i6000"})
+    aml_state.create_aml_remote_library(
+        {"name": "remote-b", "host": "remote-b.example.com", "model": "Scalar i6000"}
+    )
 
     second_context = create_context(OpenBladeConfig(db_url=db_url))
     reset_context(second_context)

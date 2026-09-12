@@ -18,7 +18,9 @@ from openblade.nas.types import (
 
 
 def make_nas_service(tmp_path: Path) -> NasService:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite+aiosqlite:///{tmp_path / 'openblade.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite+aiosqlite:///{tmp_path / 'openblade.db'}")
+    )
     return NasService(context.catalog)
 
 

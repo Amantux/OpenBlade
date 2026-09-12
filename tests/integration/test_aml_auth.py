@@ -39,11 +39,9 @@ def test_login_wrong_password_returns_401(client: TestClient) -> None:
     assert response.status_code == 401
 
 
-
 def test_login_nonexistent_user_returns_401(client: TestClient) -> None:
     response = client.post("/aml/users/login", json={"name": "missing", "password": "password123"})
     assert response.status_code == 401
-
 
 
 def test_public_ldap_enabled_endpoint_requires_no_auth(client: TestClient) -> None:
@@ -52,12 +50,10 @@ def test_public_ldap_enabled_endpoint_requires_no_auth(client: TestClient) -> No
     assert response.json() is False
 
 
-
 def test_public_lui_access_mode_requires_no_auth(client: TestClient) -> None:
     response = client.get("/aml/users/luiAccess/mode")
     assert response.status_code == 200
     assert response.json() == 2
-
 
 
 def test_list_users_requires_auth(client: TestClient) -> None:
@@ -70,14 +66,12 @@ def test_list_users_requires_auth(client: TestClient) -> None:
     assert all("password" not in user for user in users)
 
 
-
 def test_get_current_user_returns_authenticated_user(client: TestClient) -> None:
     assert client.get("/aml/users/me").status_code == 401
     _login(client)
     response = client.get("/aml/users/me")
     assert response.status_code == 200
     assert response.json() == {"name": "admin", "role": 0, "requirePasswordChange": True}
-
 
 
 def test_create_and_get_user(client: TestClient) -> None:
@@ -97,7 +91,6 @@ def test_create_and_get_user(client: TestClient) -> None:
     assert "password" not in get_response.json()
 
 
-
 def test_logout_clears_session(client: TestClient) -> None:
     _login(client)
     response = client.delete("/aml/users/login")
@@ -111,7 +104,9 @@ def test_admin_reset_requires_auth(client: TestClient) -> None:
     assert resp.status_code in (401, 403)
 
 
-def test_ldap_only_mode_blocks_local_user(client: TestClient, admin_session: dict[str, str | None]) -> None:
+def test_ldap_only_mode_blocks_local_user(
+    client: TestClient, admin_session: dict[str, str | None]
+) -> None:
     """When login mode=2, local users cannot login."""
     client.put("/aml/users/login/mode", json=2, cookies=admin_session)
     resp = client.post("/aml/users/login", json={"name": "admin", "password": "password"})
@@ -145,7 +140,9 @@ def test_mfa_rejects_invalid_code(client: TestClient, admin_session: dict[str, s
         json={"type": "totp", "authenticationCode": "000001"},
         cookies=admin_session,
     )
-    assert resp.status_code in (400, 401, 403, 422), f"Expected rejection, got {resp.status_code}: {resp.text}"
+    assert resp.status_code in (400, 401, 403, 422), (
+        f"Expected rejection, got {resp.status_code}: {resp.text}"
+    )
 
     # Disable MFA to clean up (use another valid code)
     cleanup_code = pyotp.TOTP(secret).now()
@@ -156,7 +153,9 @@ def test_mfa_rejects_invalid_code(client: TestClient, admin_session: dict[str, s
     )
 
 
-def test_ldap_get_does_not_leak_password(client: TestClient, admin_session: dict[str, str | None]) -> None:
+def test_ldap_get_does_not_leak_password(
+    client: TestClient, admin_session: dict[str, str | None]
+) -> None:
     """GET /aml/users/ldap must not return searchUserPassword."""
     client.put(
         "/aml/users/ldap",
@@ -185,18 +184,30 @@ def test_ldap_get_does_not_leak_password(client: TestClient, admin_session: dict
     assert data.get("searchUserPassword") in (None, "", "***")
 
 
-def test_ldap_put_does_not_leak_password(client: TestClient, admin_session: dict[str, str | None]) -> None:
+def test_ldap_put_does_not_leak_password(
+    client: TestClient, admin_session: dict[str, str | None]
+) -> None:
     """PUT /aml/users/ldap response must also not echo searchUserPassword."""
     ldap_payload = {
-        "enabled": False, "primaryServer": "ldap.test.com", "alternateServer": None,
-        "serverPort": 389, "secureMode": False, "searchUser": "cn=admin,dc=test,dc=com",
-        "searchUserPassword": "topsecret456", "usersContext": "ou=users,dc=test,dc=com",
-        "groupContext": "ou=groups,dc=test,dc=com", "libraryAccessGroupsUser": "users",
-        "libraryAccessGroupsAdmin": "admins", "realm": None, "keyDistributionCenter": None,
-        "domainMapping": None, "keytabFile": {"name": None, "date": None},
+        "enabled": False,
+        "primaryServer": "ldap.test.com",
+        "alternateServer": None,
+        "serverPort": 389,
+        "secureMode": False,
+        "searchUser": "cn=admin,dc=test,dc=com",
+        "searchUserPassword": "topsecret456",
+        "usersContext": "ou=users,dc=test,dc=com",
+        "groupContext": "ou=groups,dc=test,dc=com",
+        "libraryAccessGroupsUser": "users",
+        "libraryAccessGroupsAdmin": "admins",
+        "realm": None,
+        "keyDistributionCenter": None,
+        "domainMapping": None,
+        "keytabFile": {"name": None, "date": None},
     }
     resp = client.put("/aml/users/ldap", json=ldap_payload, cookies=admin_session)
     assert resp.status_code == 200
     data = resp.json()
-    assert data.get("searchUserPassword") in (None, "", "***"), \
+    assert data.get("searchUserPassword") in (None, "", "***"), (
         f"PUT /aml/users/ldap leaked credential: {data.get('searchUserPassword')}"
+    )

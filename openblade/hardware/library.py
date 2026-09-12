@@ -50,7 +50,9 @@ class RealLibraryBackend:
         )
         object.__setattr__(self, "changer", active_changer)
         object.__setattr__(self, "discovery", active_discovery)
-        object.__setattr__(self, "library_id", changer_device.removeprefix("/dev/").replace("/", "-"))
+        object.__setattr__(
+            self, "library_id", changer_device.removeprefix("/dev/").replace("/", "-")
+        )
         # Drive correlation runs at construction so a mapping that disagrees with
         # the attached hardware refuses here, before any load/write can target the
         # wrong drive.
@@ -84,7 +86,9 @@ class RealLibraryBackend:
                 DriveStatus(
                     drive_id=drive.drive_id,
                     barcode=Barcode(drive.barcode) if drive.barcode else None,
-                    drive_state=_drive_state(drive.loaded, mount_states.get(drive.drive_id, MountState.UNMOUNTED)),
+                    drive_state=_drive_state(
+                        drive.loaded, mount_states.get(drive.drive_id, MountState.UNMOUNTED)
+                    ),
                     mount_state=mount_states.get(drive.drive_id, MountState.UNMOUNTED),
                 )
                 for drive in status.drives
@@ -142,22 +146,28 @@ class RealLibraryBackend:
 
     def get_all_barcodes(self) -> list[str]:
         inventory = self.inventory()
-        barcodes = [
-            str(slot.barcode)
-            for slot in inventory.slots
-            if slot.barcode is not None
-        ]
-        barcodes.extend(str(drive.barcode) for drive in inventory.drives if drive.barcode is not None)
+        barcodes = [str(slot.barcode) for slot in inventory.slots if slot.barcode is not None]
+        barcodes.extend(
+            str(drive.barcode) for drive in inventory.drives if drive.barcode is not None
+        )
         return sorted(set(barcodes))
 
     def get_cartridge_state(self, barcode: str) -> CartridgeState | None:
         normalized = Barcode(barcode).value
         for drive in self.inventory().drives:
             if drive.barcode is not None and drive.barcode.value == normalized:
-                return CartridgeState.CLEANING if normalized.startswith("CLN") else CartridgeState.IN_DRIVE
+                return (
+                    CartridgeState.CLEANING
+                    if normalized.startswith("CLN")
+                    else CartridgeState.IN_DRIVE
+                )
         for slot in self.inventory().slots:
             if slot.barcode is not None and slot.barcode.value == normalized:
-                return CartridgeState.CLEANING if normalized.startswith("CLN") else CartridgeState.IN_SLOT
+                return (
+                    CartridgeState.CLEANING
+                    if normalized.startswith("CLN")
+                    else CartridgeState.IN_SLOT
+                )
         return None
 
     def import_export_slots(self) -> list[SlotState]:
@@ -274,7 +284,9 @@ def _sg_probe_devices(devices: list[str], discovery: LibraryDiscovery) -> dict[s
 
 def _ordered_drive_devices(discovery: LibraryDiscovery) -> list[str]:
     devices: list[str] = []
-    for drive in sorted(discovery.drives, key=lambda item: (item.host, item.bus, item.target, item.lun)):
+    for drive in sorted(
+        discovery.drives, key=lambda item: (item.host, item.bus, item.target, item.lun)
+    ):
         for candidate in (drive.block_device, drive.sg_device):
             if candidate:
                 devices.append(candidate)

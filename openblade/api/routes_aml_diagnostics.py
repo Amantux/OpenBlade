@@ -273,7 +273,14 @@ def _create_drive_task(
     opened_at = opened or _timestamp()
     closed_at = closed if closed is not None else opened_at if state == 5 else None
     task_id = f"task-{uuid4().hex[:12]}"
-    resolved_status = status or {0: "Pending", 1: "Running", 2: "Cancelled", 3: "Failed", 4: "Unknown", 5: "Completed"}.get(state, "Unknown")
+    resolved_status = status or {
+        0: "Pending",
+        1: "Running",
+        2: "Cancelled",
+        3: "Failed",
+        4: "Unknown",
+        5: "Completed",
+    }.get(state, "Unknown")
     return aml_state.set_aml_drive_operation_task(
         task_id,
         {
@@ -343,7 +350,14 @@ def _build_physical_library_elements() -> list[PhysicalLibraryElement]:
 
     for station in aml_state.get_aml_ie_stations().values():
         slots = station.get("slots", [])
-        station_barcode = next((slot.get("barcode") for slot in slots if isinstance(slot, dict) and slot.get("barcode")), None)
+        station_barcode = next(
+            (
+                slot.get("barcode")
+                for slot in slots
+                if isinstance(slot, dict) and slot.get("barcode")
+            ),
+            None,
+        )
         elements.append(
             PhysicalLibraryElement(
                 address=f"ie:{station['id']}",
@@ -371,8 +385,13 @@ async def list_drive_cleaning_reports(
     context: AppContext = Depends(get_context),
 ) -> DriveCleaningListResponse:
     _ensure_state(context)
-    reports = [DriveCleaningRecord.model_validate(item) for item in aml_state.list_aml_drive_cleaning_reports()]
-    return DriveCleaningListResponse(driveCleaningList=DriveCleaningListResource(driveCleaning=reports))
+    reports = [
+        DriveCleaningRecord.model_validate(item)
+        for item in aml_state.list_aml_drive_cleaning_reports()
+    ]
+    return DriveCleaningListResponse(
+        driveCleaningList=DriveCleaningListResource(driveCleaning=reports)
+    )
 
 
 @router.post("/drives/reports/cleaning/email", response_model=WSResultCode)
@@ -397,7 +416,9 @@ async def list_drive_clean_tasks(
     _get_drive_or_404(serial_number)
     tasks = [
         _serialize_task(item)
-        for item in aml_state.list_aml_drive_operation_tasks(task_type="clean", component_id=serial_number)
+        for item in aml_state.list_aml_drive_operation_tasks(
+            task_type="clean", component_id=serial_number
+        )
     ]
     return TaskListResponse(taskList=TaskListResource(task=tasks))
 
@@ -423,7 +444,12 @@ async def start_drive_cleaning(
         },
     )
     aml_state.set_aml_cleaning_status(
-        {"state": "completed", "startTime": cleaned_at, "completedTime": cleaned_at, "drives": [serial_number]}
+        {
+            "state": "completed",
+            "startTime": cleaned_at,
+            "completedTime": cleaned_at,
+            "drives": [serial_number],
+        }
     )
     aml_state.append_aml_drive_cleaning_report(
         {
@@ -456,7 +482,9 @@ async def get_drive_clean_task(
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
     task_id = _validate_identifier(id, field_name="id")
     _get_drive_or_404(serial_number)
-    return TaskResponse(task=_serialize_task(_get_drive_task_or_404(serial_number, "clean", task_id)))
+    return TaskResponse(
+        task=_serialize_task(_get_drive_task_or_404(serial_number, "clean", task_id))
+    )
 
 
 @router.get("/drive/{serialNumber}/operations/load", response_model=TaskListResponse)
@@ -470,7 +498,9 @@ async def list_drive_load_tasks(
     _get_drive_or_404(serial_number)
     tasks = [
         _serialize_task(item)
-        for item in aml_state.list_aml_drive_operation_tasks(task_type="load", component_id=serial_number)
+        for item in aml_state.list_aml_drive_operation_tasks(
+            task_type="load", component_id=serial_number
+        )
     ]
     return TaskListResponse(taskList=TaskListResource(task=tasks))
 
@@ -486,7 +516,9 @@ async def get_drive_load_task(
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
     task_id = _validate_identifier(id, field_name="id")
     _get_drive_or_404(serial_number)
-    return TaskResponse(task=_serialize_task(_get_drive_task_or_404(serial_number, "load", task_id)))
+    return TaskResponse(
+        task=_serialize_task(_get_drive_task_or_404(serial_number, "load", task_id))
+    )
 
 
 @router.get("/drive/{serialNumber}/operations/unload", response_model=TaskListResponse)
@@ -500,7 +532,9 @@ async def list_drive_unload_tasks(
     _get_drive_or_404(serial_number)
     tasks = [
         _serialize_task(item)
-        for item in aml_state.list_aml_drive_operation_tasks(task_type="unload", component_id=serial_number)
+        for item in aml_state.list_aml_drive_operation_tasks(
+            task_type="unload", component_id=serial_number
+        )
     ]
     return TaskListResponse(taskList=TaskListResource(task=tasks))
 
@@ -516,7 +550,9 @@ async def get_drive_unload_task(
     serial_number = _validate_identifier(serialNumber, field_name="serialNumber")
     task_id = _validate_identifier(id, field_name="id")
     _get_drive_or_404(serial_number)
-    return TaskResponse(task=_serialize_task(_get_drive_task_or_404(serial_number, "unload", task_id)))
+    return TaskResponse(
+        task=_serialize_task(_get_drive_task_or_404(serial_number, "unload", task_id))
+    )
 
 
 @router.get("/physicalLibrary/elements", response_model=PhysicalLibraryElementListResponse)
@@ -525,7 +561,9 @@ async def list_physical_library_elements(
     context: AppContext = Depends(get_context),
 ) -> PhysicalLibraryElementListResponse:
     _ensure_state(context)
-    return PhysicalLibraryElementListResponse(elementList=PhysicalLibraryElementListResource(element=_build_physical_library_elements()))
+    return PhysicalLibraryElementListResponse(
+        elementList=PhysicalLibraryElementListResource(element=_build_physical_library_elements())
+    )
 
 
 @router.get("/physicalLibrary/elements/{address}", response_model=PhysicalLibraryElementResponse)
@@ -617,7 +655,9 @@ async def list_diagnostic_tests(
 ) -> DiagnosticTestListResponse:
     _ensure_state(context)
     tests = [_serialize_diagnostic_test(item) for item in aml_state.list_aml_diagnostic_tests()]
-    return DiagnosticTestListResponse(diagnosticTestList=DiagnosticTestListResource(diagnosticTest=tests))
+    return DiagnosticTestListResponse(
+        diagnosticTestList=DiagnosticTestListResource(diagnosticTest=tests)
+    )
 
 
 @router.post("/diagnostics/tests/run", response_model=WSResultCode)

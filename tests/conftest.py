@@ -17,5 +17,7 @@ def app_context(tmp_path: Path):
 
 @pytest.fixture
 def service_token_headers():
-    token = os.environ.get("OPENBLADE_SERVICE_TOKEN", "openblade-controller-dev-token-do-not-expose")
+    token = os.environ.get(
+        "OPENBLADE_SERVICE_TOKEN", "openblade-controller-dev-token-do-not-expose"
+    )
     return {"X-Openblade-Service-Token": token}

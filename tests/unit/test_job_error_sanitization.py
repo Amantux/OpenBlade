@@ -1,6 +1,7 @@
 """jobs.error is served UNAUTHENTICATED (GET /jobs). Raw exception text —
 CommandError carries argv + tool stderr — must never reach that field.
 Typed OpenBlade errors carry curated messages and pass through."""
+
 import contextlib
 
 from openblade.domain.errors import OpenBladeError, safe_job_error
@@ -8,8 +9,9 @@ from openblade.hardware.runner import CommandError
 
 
 def test_command_error_stderr_never_reaches_the_field() -> None:
-    exc = CommandError(["mkltfs", "-d", "/dev/nst0"], 1,
-                       "SECRET-DEVICE-PATH /dev/nst0 permission denied")
+    exc = CommandError(
+        ["mkltfs", "-d", "/dev/nst0"], 1, "SECRET-DEVICE-PATH /dev/nst0 permission denied"
+    )
     msg = safe_job_error(exc)
     assert "SECRET-DEVICE-PATH" not in msg
     assert "/dev/nst0" not in msg
@@ -27,8 +29,10 @@ def test_typed_domain_error_message_passes_through() -> None:
     class DemoError(OpenBladeError):
         pass
 
-    assert safe_job_error(DemoError("Tape OB0001L8 is not formatted")) == \
-        "Tape OB0001L8 is not formatted"
+    assert (
+        safe_job_error(DemoError("Tape OB0001L8 is not formatted"))
+        == "Tape OB0001L8 is not formatted"
+    )
 
 
 def test_run_job_records_sanitized_error() -> None:

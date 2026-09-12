@@ -105,7 +105,11 @@ def _loaded_tape_barcodes(repo) -> list[str]:
     seen: set[str] = set()
     barcodes: list[str] = []
     for cartridge in repo.list_cartridges():
-        barcode = cartridge.get("barcode") if isinstance(cartridge, dict) else getattr(cartridge, "barcode", None)
+        barcode = (
+            cartridge.get("barcode")
+            if isinstance(cartridge, dict)
+            else getattr(cartridge, "barcode", None)
+        )
         value = str(barcode or "").strip()
         if not value or value in seen:
             continue
@@ -152,14 +156,18 @@ def _get_hydration_executor(service: NasService) -> HydrationExecutor:
 def _require_restore_job(service: NasService, job_id: str) -> NasRestoreJob:
     job = service.get_restore_job(job_id)
     if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found"
+        )
     return job
 
 
 def _require_dataset(service: NasService, dataset_id: str):
     dataset = service.get_dataset(dataset_id)
     if dataset is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset {dataset_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset {dataset_id} not found"
+        )
     return dataset
 
 
@@ -178,7 +186,9 @@ def _dataset_detail_or_404(service: NasService, dataset_id: str) -> dict[str, ob
     try:
         return service.get_dataset_detail(dataset_id)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset {dataset_id} not found") from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset {dataset_id} not found"
+        ) from exc
 
 
 def _manifest_payload(service: NasService, dataset_id: str) -> dict[str, object]:
@@ -250,7 +260,9 @@ def _auto_clean_required_drives() -> list[str]:
             continue
         raw_history = drive.get("history", [])
         history = [item for item in raw_history if isinstance(item, dict)]
-        loaded_media = drive.get("loadedMedia") if isinstance(drive.get("loadedMedia"), dict) else None
+        loaded_media = (
+            drive.get("loadedMedia") if isinstance(drive.get("loadedMedia"), dict) else None
+        )
         media_barcode = str((loaded_media or {}).get("barcode") or "").strip() or None
         history.insert(
             0,
@@ -273,7 +285,9 @@ def _auto_clean_required_drives() -> list[str]:
         }
         updated_drive = aml_state.update_aml_drive(serial_number, update_payload)
         if updated_drive is None and "-" in serial_number:
-            updated_drive = aml_state.update_aml_drive(serial_number.replace("-", ""), update_payload)
+            updated_drive = aml_state.update_aml_drive(
+                serial_number.replace("-", ""), update_payload
+            )
         if updated_drive is None:
             updated_drive = aml_state.update_aml_drive(f"DRV-{index:03d}", update_payload)
         if updated_drive is None:
@@ -334,7 +348,9 @@ async def list_datasets(
 
 
 @router.get("/datasets/{dataset_id}")
-async def get_dataset_detail(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+async def get_dataset_detail(
+    dataset_id: str, service: NasService = Depends(get_nas_service)
+) -> dict[str, object]:
     return _dataset_detail_or_404(service, dataset_id)
 
 
@@ -350,12 +366,16 @@ async def list_dataset_files(
 
 
 @router.get("/datasets/{dataset_id}/manifest")
-async def get_dataset_manifest(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+async def get_dataset_manifest(
+    dataset_id: str, service: NasService = Depends(get_nas_service)
+) -> dict[str, object]:
     return _manifest_payload(service, dataset_id)
 
 
 @router.post("/datasets/{dataset_id}/verify")
-async def verify_dataset(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+async def verify_dataset(
+    dataset_id: str, service: NasService = Depends(get_nas_service)
+) -> dict[str, object]:
     dataset = _require_dataset(service, dataset_id)
     context = get_context()
     ltfs = context.ltfs
@@ -370,7 +390,9 @@ async def verify_dataset(dataset_id: str, service: NasService = Depends(get_nas_
             if not record.tape_barcode:
                 checksums[record.relative_path] = ""
                 files_corrupt += 1
-                service.upsert_file_record(record.model_copy(update={"status": NasFileState.CORRUPT}))
+                service.upsert_file_record(
+                    record.model_copy(update={"status": NasFileState.CORRUPT})
+                )
                 continue
 
             try:
@@ -385,7 +407,9 @@ async def verify_dataset(dataset_id: str, service: NasService = Depends(get_nas_
             except Exception:
                 checksums[record.relative_path] = ""
                 files_corrupt += 1
-                service.upsert_file_record(record.model_copy(update={"status": NasFileState.CORRUPT}))
+                service.upsert_file_record(
+                    record.model_copy(update={"status": NasFileState.CORRUPT})
+                )
                 continue
 
             files_verified += 1
@@ -414,7 +438,9 @@ async def verify_dataset(dataset_id: str, service: NasService = Depends(get_nas_
 
 
 @router.post("/datasets/{dataset_id}/export")
-async def export_dataset(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+async def export_dataset(
+    dataset_id: str, service: NasService = Depends(get_nas_service)
+) -> dict[str, object]:
     dataset = _require_dataset(service, dataset_id)
     service.upsert_dataset(dataset.model_copy(update={"status": DatasetStatus.EXPORTED}))
     for record in service.list_file_records(dataset_id):
@@ -423,7 +449,9 @@ async def export_dataset(dataset_id: str, service: NasService = Depends(get_nas_
 
 
 @router.get("/datasets/{dataset_id}/report")
-async def get_dataset_report(dataset_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, object]:
+async def get_dataset_report(
+    dataset_id: str, service: NasService = Depends(get_nas_service)
+) -> dict[str, object]:
     return _report_payload(service, dataset_id)
 
 
@@ -540,7 +568,10 @@ async def activate_catalog_rebuild(
         )
     )
     if request.dry_run_first and not preflight.safe_to_enqueue:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=_safe_rebuild_activation_detail())
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=_safe_rebuild_activation_detail(),
+        )
 
     try:
         if request.barcodes:
@@ -560,7 +591,9 @@ async def activate_catalog_rebuild(
         raise _bad_request(exc) from exc
 
     warnings = list(dict.fromkeys(preflight.warnings + run.error_summary))
-    return _activation_result_from_run(run, warnings=warnings, safe_to_enqueue=preflight.safe_to_enqueue)
+    return _activation_result_from_run(
+        run, warnings=warnings, safe_to_enqueue=preflight.safe_to_enqueue
+    )
 
 
 @router.get("/catalog/rebuild/loaded-tapes", response_model=list[str])
@@ -580,7 +613,9 @@ async def execute_catalog_rebuild(
     try:
         return planner.execute_rebuild_run(run_id)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="rebuild run not found") from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="rebuild run not found"
+        ) from exc
     except ValueError as exc:
         raise _bad_request(exc) from exc
 
@@ -612,7 +647,9 @@ async def list_catalog_manifest_versions(
     repo=Depends(get_catalog_repository),
     _: AmlUser = Depends(require_auth),
 ) -> list[ManifestVersionRecord]:
-    return [ManifestVersionRecord.model_validate(item) for item in repo.list_manifest_versions(barcode)]
+    return [
+        ManifestVersionRecord.model_validate(item) for item in repo.list_manifest_versions(barcode)
+    ]
 
 
 @router.get("/policies", response_model=list[StoragePolicy])
@@ -637,21 +674,29 @@ async def create_or_update_policy(
 
 
 @router.get("/policies/{policy_id}", response_model=StoragePolicy)
-async def get_policy(policy_id: str, service: NasService = Depends(get_nas_service)) -> StoragePolicy:
+async def get_policy(
+    policy_id: str, service: NasService = Depends(get_nas_service)
+) -> StoragePolicy:
     policy = service.get_policy(policy_id)
     if policy is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Policy {policy_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Policy {policy_id} not found"
+        )
     return policy
 
 
 @router.delete("/policies/{policy_id}")
-async def delete_policy(policy_id: str, service: NasService = Depends(get_nas_service)) -> dict[str, bool]:
+async def delete_policy(
+    policy_id: str, service: NasService = Depends(get_nas_service)
+) -> dict[str, bool]:
     try:
         deleted = service.delete_policy(policy_id)
     except ValueError as exc:
         raise _bad_request(exc) from exc
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Policy {policy_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Policy {policy_id} not found"
+        )
     return {"deleted": True}
 
 
@@ -685,7 +730,9 @@ async def get_cache_drive(
 ) -> CacheDriveConfig:
     drive = service.get_cache_drive(drive_id)
     if drive is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Cache drive {drive_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Cache drive {drive_id} not found"
+        )
     return drive
 
 
@@ -696,7 +743,9 @@ async def delete_cache_drive(
 ) -> dict[str, bool]:
     deleted = service.delete_cache_drive(drive_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Cache drive {drive_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Cache drive {drive_id} not found"
+        )
     return {"deleted": True}
 
 
@@ -724,7 +773,9 @@ async def delete_source_stream_config(
 ) -> dict[str, bool]:
     deleted = service.delete_source_stream_config()
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source stream config not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Source stream config not found"
+        )
     return {"deleted": True}
 
 
@@ -756,7 +807,9 @@ async def get_share(
 ) -> NasShareDefinition:
     share = service.get_share("/" + share_id.lstrip("/"))
     if share is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Share /{share_id.lstrip('/')} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Share /{share_id.lstrip('/')} not found"
+        )
     return share
 
 
@@ -768,7 +821,9 @@ async def delete_share(
     normalized_share_id = "/" + share_id.lstrip("/")
     deleted = service.delete_share(normalized_share_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Share {normalized_share_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Share {normalized_share_id} not found"
+        )
     return {"deleted": True}
 
 
@@ -778,7 +833,9 @@ async def list_pools(service: NasService = Depends(get_nas_service)) -> list[Nas
 
 
 @router.post("/pools", response_model=NasPool)
-async def create_pool(pool: NasPool, service: NasService = Depends(get_nas_service)) -> JSONResponse:
+async def create_pool(
+    pool: NasPool, service: NasService = Depends(get_nas_service)
+) -> JSONResponse:
     created = service.get_pool(pool.id) is None
     try:
         saved = service.upsert_pool(pool)
@@ -794,7 +851,9 @@ async def create_pool(pool: NasPool, service: NasService = Depends(get_nas_servi
 async def get_pool(pool_id: str, service: NasService = Depends(get_nas_service)) -> NasPool:
     pool = service.get_pool(pool_id)
     if pool is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found"
+        )
     return pool
 
 
@@ -805,7 +864,9 @@ async def update_pool(
     service: NasService = Depends(get_nas_service),
 ) -> NasPool:
     if service.get_pool(pool_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found"
+        )
     try:
         return service.upsert_pool(pool.model_copy(update={"id": pool_id}))
     except ValueError as exc:
@@ -815,7 +876,9 @@ async def update_pool(
 @router.delete("/pools/{pool_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_pool(pool_id: str, service: NasService = Depends(get_nas_service)) -> Response:
     if not service.delete_pool(pool_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found"
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -828,7 +891,9 @@ async def browse_pool(
     try:
         return service.browse_pool(pool_id, path)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found") from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found"
+        ) from exc
 
 
 @router.get("/pools/{pool_id}/files/{file_path:path}", response_model=NasFileRecord)
@@ -842,7 +907,9 @@ async def get_pool_file_detail(
     except KeyError as exc:
         detail = exc.args[0] if exc.args else "file not found"
         if detail == "pool not found":
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found") from exc
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found"
+            ) from exc
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from exc
 
 
@@ -854,7 +921,9 @@ async def restore_plan(
     if request.pool_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pool_id is required")
     if service.get_pool(request.pool_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {request.pool_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {request.pool_id} not found"
+        )
     return RestorePlanner(service).plan(request)
 
 
@@ -865,7 +934,9 @@ async def request_restore(
     service: NasService = Depends(get_nas_service),
 ) -> JSONResponse:
     if service.get_pool(pool_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Pool {pool_id} not found"
+        )
 
     plan = RestorePlanner(service).plan(request.model_copy(update={"pool_id": pool_id}))
     job = NasRestoreJob(
@@ -904,7 +975,9 @@ async def get_restore_job(
 ) -> NasRestoreJob:
     job = service.get_restore_job(job_id)
     if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found"
+        )
     return job
 
 
@@ -914,11 +987,15 @@ async def cancel_restore_job(
     service: NasService = Depends(get_nas_service),
 ) -> Response:
     if not service.update_restore_job_status(job_id, RestoreJobStatus.CANCELLED.value):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Restore job {job_id} not found"
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/restore-jobs/{job_id}/run", response_model=NasRestoreJob, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/restore-jobs/{job_id}/run", response_model=NasRestoreJob, status_code=status.HTTP_202_ACCEPTED
+)
 async def run_restore_job_endpoint(
     job_id: str,
     service: NasService = Depends(get_nas_service),
@@ -1032,7 +1109,10 @@ async def archive_plan(
             updates["verify_before_archive"] = policy.verify_before_archive
         if "verify_after_archive" not in request.model_fields_set:
             updates["verify_after_archive"] = policy.verify_after_archive
-        if "shard_size_bytes" not in request.model_fields_set and policy.shard_size_bytes is not None:
+        if (
+            "shard_size_bytes" not in request.model_fields_set
+            and policy.shard_size_bytes is not None
+        ):
             updates["shard_size_bytes"] = policy.shard_size_bytes
         if "shard_strategy" not in request.model_fields_set and policy.shard_strategy is not None:
             updates["shard_strategy"] = policy.shard_strategy
@@ -1055,9 +1135,13 @@ async def start_ingest(
 ) -> StartIngestResponse:
     plan = get_archive_plan(request.plan_id)
     if plan is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Plan {request.plan_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Plan {request.plan_id} not found"
+        )
     if not plan.is_safe_to_enqueue:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Archive plan is not safe to enqueue")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Archive plan is not safe to enqueue"
+        )
     if plan.ingest_mode is IngestMode.CACHE_DRIVE:
         if request.cache_drive_id is None:
             raise HTTPException(
@@ -1102,12 +1186,16 @@ async def start_ingest(
 async def ingest_status(job_id: str) -> IngestJob:
     job = get_ingest_job(job_id)
     if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingest job {job_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingest job {job_id} not found"
+        )
     return job
 
 
 @router.post("/ingest/{job_id}/cancel", response_model=CancelIngestResponse)
 async def cancel_ingest(job_id: str) -> CancelIngestResponse:
     if not cancel_ingest_job(job_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingest job {job_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingest job {job_id} not found"
+        )
     return CancelIngestResponse(cancelled=True)

@@ -37,7 +37,9 @@ def admin_auth_headers(client: TestClient) -> dict[str, str]:
 
 
 class TestLibraryCRUD:
-    def test_default_library_exists(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_default_library_exists(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Default descriptive libraries should be seeded at startup."""
         resp = client.get("/api/libraries", headers=admin_auth_headers)
         assert resp.status_code == 200
@@ -50,7 +52,9 @@ class TestLibraryCRUD:
         assert primary["role"] == "primary"
         assert primary["sort_order"] == 0
 
-    def test_create_multiple_libraries(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_create_multiple_libraries(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Should be able to create multiple library instances."""
         for i in range(2, 5):
             resp = client.post(
@@ -68,7 +72,9 @@ class TestLibraryCRUD:
             assert data["enabled"] is True
             assert data["role"] == "primary"
 
-    def test_list_all_libraries(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_list_all_libraries(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """List endpoint returns all created libraries."""
         create = client.post(
             "/api/libraries",
@@ -127,7 +133,9 @@ class TestLibraryCRUD:
         resp = client.get(f"/api/libraries/{lib_id}", headers=admin_auth_headers)
         assert resp.status_code == 404
 
-    def test_cannot_disable_last_enabled_library(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_cannot_disable_last_enabled_library(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         libraries = client.get("/api/libraries", headers=admin_auth_headers)
         assert libraries.status_code == 200
 
@@ -147,7 +155,9 @@ class TestLibraryCRUD:
         )
         assert response.status_code == 400
 
-    def test_library_not_found(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_library_not_found(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         resp = client.get("/api/libraries/99999", headers=admin_auth_headers)
         assert resp.status_code == 404
 
@@ -159,7 +169,9 @@ class TestLibraryCRUD:
             json={"name": "noauth", "emulator_url": "http://x"},
         ).status_code in (401, 403)
 
-    def test_library_header_is_accepted_by_aml_routes(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_library_header_is_accepted_by_aml_routes(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         libraries = client.get("/api/libraries", headers=admin_auth_headers)
         assert libraries.status_code == 200
         selected = libraries.json()[1]
@@ -173,7 +185,9 @@ class TestLibraryCRUD:
         )
         assert response.status_code == 200
 
-    def test_drive_list_is_scoped_by_selected_library(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_drive_list_is_scoped_by_selected_library(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         libraries = client.get("/api/libraries", headers=admin_auth_headers)
         assert libraries.status_code == 200
         primary, secondary, vault = libraries.json()[:3]
@@ -223,7 +237,9 @@ class TestLibraryCRUD:
 
 
 class TestCartridgeLibraryScoping:
-    def test_cartridge_library_id_is_nullable(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_cartridge_library_id_is_nullable(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Cartridges created without explicit library_id should allow nullable FK values."""
         resp = client.get("/aml/media/list", headers=admin_auth_headers)
         if resp.status_code == 200:
@@ -235,7 +251,9 @@ class TestCartridgeLibraryScoping:
 
 
 class TestMultiLibraryUpload:
-    def test_upload_scoped_to_pool(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_upload_scoped_to_pool(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Uploads to different pools should be independently listed."""
         content_a = b"pool A content"
         content_b = b"pool B content"

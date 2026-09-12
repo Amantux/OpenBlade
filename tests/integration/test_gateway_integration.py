@@ -16,7 +16,9 @@ from openblade.nas.protocol_gateway import ProtocolGateway
 
 @pytest.fixture(autouse=True)
 def reset_app_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'gateway-integration.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'gateway-integration.db'}")
+    )
     reset_context(context)
     monkeypatch.setattr(protocol_gateway_module, "_gateway", ProtocolGateway())
 
@@ -37,7 +39,9 @@ def admin_auth_headers(client: TestClient) -> dict[str, str]:
 
 
 class TestGatewayLifecycle:
-    def test_gateway_full_lifecycle(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_gateway_full_lifecycle(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Start gateway, add credential, list sessions, stop gateway."""
         r = client.post("/api/gateway/start", headers=admin_auth_headers)
         assert r.status_code == 200
@@ -72,7 +76,9 @@ class TestGatewayLifecycle:
         assert r.status_code == 200
         assert r.json()["status"] == "stopped"
 
-    def test_gateway_credential_isolation(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_gateway_credential_isolation(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Gateway credentials must not be usable for web API login."""
         create = client.post(
             "/api/gateway/credentials",

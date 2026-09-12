@@ -11,7 +11,9 @@ from openblade.config import OpenBladeConfig
 
 @pytest.fixture()
 def client(tmp_path: Path) -> TestClient:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'controller-isolation.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'controller-isolation.db'}")
+    )
     reset_context(context)
     return TestClient(app)
 
@@ -69,7 +71,9 @@ def test_moveMedium_requires_service_token(client: TestClient) -> None:
     assert response.json()["code"] == "FORBIDDEN_CONTROLLER_ONLY"
 
 
-def test_moveMedium_rejected_with_user_token(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_moveMedium_rejected_with_user_token(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """moveMedium must be rejected even with valid admin user token"""
     response = client.post(
         "/aml/media/move",
@@ -97,7 +101,9 @@ def test_moveMedium_accepted_with_service_token(
     assert response.status_code != 403
 
 
-def test_wrong_service_token_rejected(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_wrong_service_token_rejected(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """Wrong service token value must be rejected even with correct header name"""
     response = client.post(
         "/aml/media/move",
@@ -108,7 +114,9 @@ def test_wrong_service_token_rejected(client: TestClient, admin_auth_headers: di
     assert response.status_code == 403
 
 
-def test_format_confirm_requires_service_token(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_format_confirm_requires_service_token(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """format-confirm must require service token even for admin users"""
     response = client.post(
         "/cartridges/format/confirm",
@@ -119,7 +127,9 @@ def test_format_confirm_requires_service_token(client: TestClient, admin_auth_he
     assert response.status_code == 403
 
 
-def test_mount_requires_service_token(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_mount_requires_service_token(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """mount/load operations must require service token"""
     response = client.post(
         "/aml/mount",

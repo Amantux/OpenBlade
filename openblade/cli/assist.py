@@ -49,7 +49,7 @@ _BANNER = (
     "OpenBlade assistant. It can set up volume groups, and load, unload, move,\n"
     "archive, restore and format media — and it asks you first, every time. A\n"
     "format, or a restore that would overwrite a file, makes you type the barcode\n"
-    "or the word shown; \"y\" will not do it. Everything else it proposes; you run it.\n"
+    'or the word shown; "y" will not do it. Everything else it proposes; you run it.\n'
     "Type your question, or /quit to leave, /reset to clear the conversation."
 )
 _PROMPT = "openblade> "
@@ -92,7 +92,9 @@ def _confirm_media_action(action: PendingMediaAction) -> str | None:
     ``MarkupError`` in the middle of a confirmation prompt.
     """
     destructive = action.grade is ConfirmationGrade.TYPED
-    console.print(Text(f"\nProposed action: {action.preview}", style="red" if destructive else "yellow"))
+    console.print(
+        Text(f"\nProposed action: {action.preview}", style="red" if destructive else "yellow")
+    )
     prompt = (
         f"Type {action.required_response} to confirm (anything else cancels): "
         if destructive

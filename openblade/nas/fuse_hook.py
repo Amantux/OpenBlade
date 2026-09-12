@@ -47,7 +47,12 @@ class FuseHook:
             record = self.service.get_pool_file_detail(pool_id, logical_path)
         except KeyError:
             result = {"action": "error", "message": "File not found"}
-            self._log_access(pool_id=pool_id, logical_path=logical_path, state="not_found", action=result["action"])
+            self._log_access(
+                pool_id=pool_id,
+                logical_path=logical_path,
+                state="not_found",
+                action=result["action"],
+            )
             return result
 
         state = self.service.derive_file_state(record)
@@ -69,7 +74,9 @@ class FuseHook:
         else:
             result = {"action": "error", "message": f"File is unavailable: {state.value}"}
 
-        self._log_access(pool_id=pool_id, logical_path=logical_path, state=state.value, action=result["action"])
+        self._log_access(
+            pool_id=pool_id, logical_path=logical_path, state=state.value, action=result["action"]
+        )
         return result
 
     def get_access_log(self) -> list[dict]:

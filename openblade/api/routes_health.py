@@ -90,7 +90,9 @@ async def get_system_config_summary(
     config = load_config()
     cors_origins = [
         origin.strip()
-        for origin in os.environ.get("OPENBLADE_CORS_ORIGINS", "http://localhost:5173,http://localhost:80").split(",")
+        for origin in os.environ.get(
+            "OPENBLADE_CORS_ORIGINS", "http://localhost:5173,http://localhost:80"
+        ).split(",")
         if origin.strip()
     ]
     gateway = get_gateway()
@@ -101,6 +103,8 @@ async def get_system_config_summary(
         version=OPENBLADE_VERSION,
         nas_enabled=True,
         gateway_enabled=gateway.status.value != "disabled",
-        catalog_db_path=config.db_url.replace("sqlite:///", "") if config.db_url.startswith("sqlite:///") else config.db_url,
+        catalog_db_path=config.db_url.replace("sqlite:///", "")
+        if config.db_url.startswith("sqlite:///")
+        else config.db_url,
         library_count=len(context.catalog.list_library_instances()),
     )

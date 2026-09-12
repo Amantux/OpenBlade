@@ -112,7 +112,10 @@ async def get_catalog_file(
 ) -> CatalogFileDetailResponse:
     record = _get_record_or_404(context, file_id)
     summary = _serialize_record(record)
-    return CatalogFileDetailResponse(**summary.model_dump(), instances=[_serialize_instance(instance) for instance in record.instances])
+    return CatalogFileDetailResponse(
+        **summary.model_dump(),
+        instances=[_serialize_instance(instance) for instance in record.instances],
+    )
 
 
 @router.get("/{file_id}/instances", response_model=list[FileInstanceResponse])

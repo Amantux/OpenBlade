@@ -101,7 +101,9 @@ class MediaPatch(BaseModel):
     partition: str | None = None
     slotAddress: str | None = None
     state: str | None = None
-    writeProtected: bool | None = Field(default=None, validation_alias=AliasChoices("writeProtected", "writeProtect"))
+    writeProtected: bool | None = Field(
+        default=None, validation_alias=AliasChoices("writeProtected", "writeProtect")
+    )
     worm: bool | None = None
     generations: int | None = None
     loadCount: int | None = None
@@ -291,14 +293,22 @@ def _validate_media_patch(payload: MediaPatch) -> dict[str, Any]:
     updates.pop("barcode", None)
     for field_name in ("type", "partition", "slotAddress", "state", "description"):
         if field_name in updates:
-            updates[field_name] = _validate_identifier(str(updates[field_name]), field_name=field_name)
+            updates[field_name] = _validate_identifier(
+                str(updates[field_name]), field_name=field_name
+            )
     return updates
 
 
-def _validate_pool_payload(payload: MediaPoolConfig | MediaPoolPatch | PoolCreateRequest | PoolUpdateRequest) -> dict[str, Any]:
+def _validate_pool_payload(
+    payload: MediaPoolConfig | MediaPoolPatch | PoolCreateRequest | PoolUpdateRequest,
+) -> dict[str, Any]:
     if isinstance(payload, (PoolCreateRequest, PoolUpdateRequest)):
         nested = payload.pool
-        updates = nested.model_dump(exclude_unset=True) if nested is not None else payload.model_dump(exclude_unset=True, exclude={"pool"})
+        updates = (
+            nested.model_dump(exclude_unset=True)
+            if nested is not None
+            else payload.model_dump(exclude_unset=True, exclude={"pool"})
+        )
     else:
         updates = payload.model_dump(exclude_unset=True)
 
@@ -309,15 +319,21 @@ def _validate_pool_payload(payload: MediaPoolConfig | MediaPoolPatch | PoolCreat
 
     for field_name in ("name", "policy", "color"):
         if field_name in updates:
-            updates[field_name] = _validate_identifier(str(updates[field_name]), field_name=field_name)
+            updates[field_name] = _validate_identifier(
+                str(updates[field_name]), field_name=field_name
+            )
     if "targetLtoGeneration" in updates and updates["targetLtoGeneration"] is not None:
-        updates["targetLtoGeneration"] = _validate_identifier(str(updates["targetLtoGeneration"]), field_name="targetLtoGeneration")
+        updates["targetLtoGeneration"] = _validate_identifier(
+            str(updates["targetLtoGeneration"]), field_name="targetLtoGeneration"
+        )
 
     if "maxDrives" in updates:
         try:
             updates["maxDrives"] = max(1, int(updates["maxDrives"]))
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="maxDrives must be a positive integer") from exc
+            raise HTTPException(
+                status_code=400, detail="maxDrives must be a positive integer"
+            ) from exc
 
     if "quotaGB" in updates:
         quota = updates["quotaGB"]
@@ -327,7 +343,9 @@ def _validate_pool_payload(payload: MediaPoolConfig | MediaPoolPatch | PoolCreat
             try:
                 updates["quotaGB"] = max(1, int(quota))
             except (TypeError, ValueError) as exc:
-                raise HTTPException(status_code=400, detail="quotaGB must be a positive integer") from exc
+                raise HTTPException(
+                    status_code=400, detail="quotaGB must be a positive integer"
+                ) from exc
 
     return updates
 
@@ -343,7 +361,6 @@ def _lto_capacity_gb(tape_type: str) -> int:
     }.get(generation, 6000)
 
 
-
 def _estimate_used_gb(barcode: str, capacity_gb: int) -> int:
     if capacity_gb <= 0:
         return 0
@@ -352,10 +369,8 @@ def _estimate_used_gb(barcode: str, capacity_gb: int) -> int:
     return round(capacity_gb * percent_used / 100)
 
 
-
 def _find_pool_name(barcode: str) -> str | None:
     return aml_state.find_aml_media_pool_name(barcode)
-
 
 
 def _enrich_media(media: dict[str, Any]) -> dict[str, Any]:
@@ -363,14 +378,15 @@ def _enrich_media(media: dict[str, Any]) -> dict[str, Any]:
     capacity_gb = _lto_capacity_gb(str(enriched.get("type", "")))
     used_gb = _estimate_used_gb(str(enriched.get("barcode", "")), capacity_gb)
     percent_used = round((used_gb / capacity_gb) * 100) if capacity_gb > 0 else 0
-    enriched.update({
-        "capacityGB": capacity_gb,
-        "usedGB": used_gb,
-        "percentUsed": percent_used,
-        "poolName": _find_pool_name(str(enriched.get("barcode", ""))),
-    })
+    enriched.update(
+        {
+            "capacityGB": capacity_gb,
+            "usedGB": used_gb,
+            "percentUsed": percent_used,
+            "poolName": _find_pool_name(str(enriched.get("barcode", ""))),
+        }
+    )
     return enriched
-
 
 
 def _serialize_media(media: dict[str, Any]) -> Media:
@@ -395,7 +411,6 @@ def _get_media_or_404(barcode: str) -> dict[str, Any]:
 def _pool_id_from_name(name: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
     return normalized or f"pool-{hashlib.sha256(name.encode('utf-8')).hexdigest()[:8]}"
-
 
 
 def _get_pool_or_404(pool_id: str) -> dict[str, Any]:
@@ -515,7 +530,9 @@ async def list_media_types(
                 "capacity": "Unknown",
                 "generations": [media_type],
             }
-    return TypeListResponse(typeList=TypeListResource(type=[_serialize_type(item) for _, item in sorted(types.items())]))
+    return TypeListResponse(
+        typeList=TypeListResource(type=[_serialize_type(item) for _, item in sorted(types.items())])
+    )
 
 
 @router.get("/media/pools", response_model=PoolListResponse)
@@ -524,7 +541,11 @@ async def list_media_pools(
     context: AppContext = Depends(get_context),
 ) -> PoolListResponse:
     _ensure_state(context)
-    return PoolListResponse(poolList=PoolListResource(pool=[_serialize_pool(item) for item in aml_state.list_aml_media_pools()]))
+    return PoolListResponse(
+        poolList=PoolListResource(
+            pool=[_serialize_pool(item) for item in aml_state.list_aml_media_pools()]
+        )
+    )
 
 
 @router.get("/media/pools/{pool_id}", response_model=PoolResponse)
@@ -726,14 +747,16 @@ async def import_media(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    aml_state.import_aml_media([
-        {
-            "barcode": _validate_identifier(item.barcode, field_name="barcode"),
-            "type": _validate_identifier(item.type, field_name="type"),
-            "partition": item.partition,
-        }
-        for item in payload.mediaList.media
-    ])
+    aml_state.import_aml_media(
+        [
+            {
+                "barcode": _validate_identifier(item.barcode, field_name="barcode"),
+                "type": _validate_identifier(item.type, field_name="type"),
+                "partition": item.partition,
+            }
+            for item in payload.mediaList.media
+        ]
+    )
     return _ws_result("Imported media")
 
 
@@ -745,7 +768,9 @@ async def export_media(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    barcodes = [_validate_identifier(item, field_name="barcode") for item in payload.barcodeList.barcode]
+    barcodes = [
+        _validate_identifier(item, field_name="barcode") for item in payload.barcodeList.barcode
+    ]
     missing = [barcode for barcode in barcodes if aml_state.get_aml_media(barcode) is None]
     if missing:
         raise HTTPException(status_code=404, detail=f"Media not found: {missing[0]}")
@@ -753,7 +778,9 @@ async def export_media(
     return _ws_result("Exported media")
 
 
-@router.post("/media/move", response_model=WSResultCode, dependencies=[Depends(require_service_token)])
+@router.post(
+    "/media/move", response_model=WSResultCode, dependencies=[Depends(require_service_token)]
+)
 async def move_media(
     payload: MoveRequest,
     current_user: AmlUser = Depends(require_auth),
@@ -778,7 +805,9 @@ async def move_media(
         drive_id = _parse_drive_address(destination)
         if drive_id is not None:
             if source_slot is None:
-                raise HTTPException(status_code=400, detail="Source media must be in a slot before loading")
+                raise HTTPException(
+                    status_code=400, detail="Source media must be in a slot before loading"
+                )
             request = TapeOpRequest(
                 op_type=TapeOpType.LOAD,
                 barcode=barcode,
@@ -909,8 +938,12 @@ async def search_media(
     context: AppContext = Depends(get_context),
 ) -> MediaListResponse:
     _ensure_state(context)
-    items = aml_state.search_aml_media(partition=partition, media_type=type, state=state, barcode=barcode)
-    return MediaListResponse(mediaList=MediaListResource(media=[_serialize_media(item) for item in items]))
+    items = aml_state.search_aml_media(
+        partition=partition, media_type=type, state=state, barcode=barcode
+    )
+    return MediaListResponse(
+        mediaList=MediaListResource(media=[_serialize_media(item) for item in items])
+    )
 
 
 @router.get("/media/scratch", response_model=MediaListResponse)
@@ -922,7 +955,9 @@ async def list_scratch_media(
 ) -> MediaListResponse:
     _ensure_state(context)
     items = aml_state.list_aml_scratch_media(partition=partition, media_type=type)
-    return MediaListResponse(mediaList=MediaListResource(media=[_serialize_media(item) for item in items]))
+    return MediaListResponse(
+        mediaList=MediaListResource(media=[_serialize_media(item) for item in items])
+    )
 
 
 @router.get("/media", response_model=MediaListResponse)
@@ -931,7 +966,11 @@ async def list_media(
     context: AppContext = Depends(get_context),
 ) -> MediaListResponse:
     _ensure_state(context)
-    return MediaListResponse(mediaList=MediaListResource(media=[_serialize_media(item) for item in aml_state.list_aml_media()]))
+    return MediaListResponse(
+        mediaList=MediaListResource(
+            media=[_serialize_media(item) for item in aml_state.list_aml_media()]
+        )
+    )
 
 
 @router.get("/media/{barcode}/history", response_model=HistoryListResponse)

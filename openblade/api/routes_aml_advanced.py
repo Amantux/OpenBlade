@@ -760,7 +760,11 @@ def _serialize_wwn(blade: dict[str, Any]) -> WwnInfo:
 
 
 def _serialize_iscsi_config(blade: dict[str, Any]) -> IscsiConfig:
-    payload = {key: value for key, value in blade.items() if key not in {"sessions", "targets", "initiators"}}
+    payload = {
+        key: value
+        for key, value in blade.items()
+        if key not in {"sessions", "targets", "initiators"}
+    }
     return IscsiConfig.model_validate(payload)
 
 
@@ -770,7 +774,9 @@ def _ha_status_payload() -> dict[str, Any]:
     active = next((item for item in nodes if item.get("role") == "active"), None)
     peer = next((item for item in nodes if item.get("role") != "active"), None)
     return {
-        "state": "standalone" if not config.get("enabled") else str(active.get("state", "active") if active else "active"),
+        "state": "standalone"
+        if not config.get("enabled")
+        else str(active.get("state", "active") if active else "active"),
         "role": str(active.get("role", "active") if active else "active"),
         "peerReachable": bool(peer and peer.get("healthy") and config.get("enabled")),
         "lastFailover": config.get("lastFailover"),
@@ -795,7 +801,9 @@ def _serialize_partition_encryption(name: str, partition: dict[str, Any]) -> Par
         "mode": str(encryption.get("mode", encryption.get("type", "none"))),
         "keyManager": encryption.get("keyManager"),
         "keyAlias": encryption.get("keyAlias"),
-        "status": str(encryption.get("status", "enabled" if encryption.get("enabled") else "disabled")),
+        "status": str(
+            encryption.get("status", "enabled" if encryption.get("enabled") else "disabled")
+        ),
     }
     return PartitionEncryption.model_validate(payload)
 
@@ -910,7 +918,9 @@ async def put_fc_hpf(
     return _ws_result(f"Updated HPF configuration for FC blade {serial}")
 
 
-@router.put("/devices/blade/fibreChannel/{serialNumber}/hpf/intervention", response_model=WSResultCode)
+@router.put(
+    "/devices/blade/fibreChannel/{serialNumber}/hpf/intervention", response_model=WSResultCode
+)
 async def clear_fc_hpf_intervention(
     serialNumber: str,
     current_user: AmlUser = Depends(require_auth),
@@ -948,7 +958,9 @@ async def put_fc_zoning(
     serial = _validate_identifier(serialNumber, field_name="serialNumber")
     blade = _get_fc_blade_or_404(serial)
     updates = payload.zoning.model_dump(exclude_none=True)
-    aml_state.update_fc_blade_by_serial(serial, {"zoning": {**dict(blade.get("zoning", {})), **updates}})
+    aml_state.update_fc_blade_by_serial(
+        serial, {"zoning": {**dict(blade.get("zoning", {})), **updates}}
+    )
     return _ws_result(f"Updated zoning configuration for FC blade {serial}")
 
 
@@ -959,7 +971,9 @@ async def get_ltfs_section(
     context: AppContext = Depends(get_context),
 ) -> LtfsSectionResponse:
     _ensure_state(context)
-    section = _get_ltfs_section_or_404(_validate_positive_int(sectionNumber, field_name="sectionNumber"))
+    section = _get_ltfs_section_or_404(
+        _validate_positive_int(sectionNumber, field_name="sectionNumber")
+    )
     return LtfsSectionResponse(section=_serialize_ltfs_section(section))
 
 
@@ -985,7 +999,9 @@ async def get_ltfs_section_status(
     context: AppContext = Depends(get_context),
 ) -> LtfsStatusResponse:
     _ensure_state(context)
-    section = _get_ltfs_section_or_404(_validate_positive_int(sectionNumber, field_name="sectionNumber"))
+    section = _get_ltfs_section_or_404(
+        _validate_positive_int(sectionNumber, field_name="sectionNumber")
+    )
     state = "mounted" if section.get("mounted") else section.get("status", "ready")
     health = "ok" if section.get("status") in {"ready", "mounted"} else "warning"
     status_payload = {
@@ -1010,7 +1026,12 @@ async def mount_ltfs_section(
     section = _get_ltfs_section_or_404(section_no)
     aml_state.update_aml_ltfs_section(
         section_no,
-        {"mounted": True, "status": "mounted", "lastMounted": _timestamp(), "mountPoint": section.get("mountPoint", "/ltfs/partition1")},
+        {
+            "mounted": True,
+            "status": "mounted",
+            "lastMounted": _timestamp(),
+            "mountPoint": section.get("mountPoint", "/ltfs/partition1"),
+        },
     )
     return _ws_result(f"Mounted LTFS section {section_no}")
 
@@ -1036,7 +1057,9 @@ async def list_ltfs_section_drives(
     context: AppContext = Depends(get_context),
 ) -> LtfsDriveListResponse:
     _ensure_state(context)
-    section = _get_ltfs_section_or_404(_validate_positive_int(sectionNumber, field_name="sectionNumber"))
+    section = _get_ltfs_section_or_404(
+        _validate_positive_int(sectionNumber, field_name="sectionNumber")
+    )
     drives = [LtfsDrive.model_validate(item) for item in section.get("drives", [])]
     return LtfsDriveListResponse(driveList=LtfsDriveListResource(drive=drives))
 
@@ -1048,7 +1071,9 @@ async def list_ltfs_section_media(
     context: AppContext = Depends(get_context),
 ) -> LtfsMediaListResponse:
     _ensure_state(context)
-    section = _get_ltfs_section_or_404(_validate_positive_int(sectionNumber, field_name="sectionNumber"))
+    section = _get_ltfs_section_or_404(
+        _validate_positive_int(sectionNumber, field_name="sectionNumber")
+    )
     media = [LtfsMedia.model_validate(item) for item in section.get("media", [])]
     return LtfsMediaListResponse(mediaList=LtfsMediaListResource(media=media))
 
@@ -1061,11 +1086,15 @@ async def list_fc_ports(
 ) -> FcPortListResponse:
     _ensure_state(context)
     blade = _get_fc_blade_or_404(_validate_identifier(serialNumber, field_name="serialNumber"))
-    ports = [_serialize_fc_port(str(blade["serialNumber"]), port) for port in blade.get("ports", [])]
+    ports = [
+        _serialize_fc_port(str(blade["serialNumber"]), port) for port in blade.get("ports", [])
+    ]
     return FcPortListResponse(portList=FcPortListResource(port=ports))
 
 
-@router.get("/devices/blade/fibreChannel/{serialNumber}/port/{portNumber}", response_model=FcPortResponse)
+@router.get(
+    "/devices/blade/fibreChannel/{serialNumber}/port/{portNumber}", response_model=FcPortResponse
+)
 async def get_fc_port(
     serialNumber: str,
     portNumber: int,
@@ -1078,7 +1107,9 @@ async def get_fc_port(
     return FcPortResponse(port=_serialize_fc_port(serial, port))
 
 
-@router.put("/devices/blade/fibreChannel/{serialNumber}/port/{portNumber}", response_model=WSResultCode)
+@router.put(
+    "/devices/blade/fibreChannel/{serialNumber}/port/{portNumber}", response_model=WSResultCode
+)
 async def put_fc_port(
     serialNumber: str,
     portNumber: int,
@@ -1091,12 +1122,20 @@ async def put_fc_port(
     serial = _validate_identifier(serialNumber, field_name="serialNumber")
     port_no = _validate_positive_int(portNumber, field_name="portNumber")
     _get_fc_blade_or_404(serial)
-    if aml_state.update_fc_port_by_number(serial, port_no, payload.port.model_dump(exclude_none=True)) is None:
+    if (
+        aml_state.update_fc_port_by_number(
+            serial, port_no, payload.port.model_dump(exclude_none=True)
+        )
+        is None
+    ):
         raise HTTPException(status_code=404, detail="FC port not found")
     return _ws_result(f"Updated FC port {port_no} on blade {serial}")
 
 
-@router.get("/devices/blade/fibreChannel/{serialNumber}/port/{portNumber}/statistics", response_model=FcPortStatisticsResponse)
+@router.get(
+    "/devices/blade/fibreChannel/{serialNumber}/port/{portNumber}/statistics",
+    response_model=FcPortStatisticsResponse,
+)
 async def get_fc_port_statistics(
     serialNumber: str,
     portNumber: int,
@@ -1133,7 +1172,9 @@ async def put_fc_wwn(
     blade = _get_fc_blade_or_404(serial)
     current = dict(blade.get("wwn", {}))
     updates = payload.wwn.model_dump(exclude_none=True)
-    aml_state.update_fc_blade_by_serial(serial, {"wwn": {**current, **updates, "serialNumber": serial}})
+    aml_state.update_fc_blade_by_serial(
+        serial, {"wwn": {**current, **updates, "serialNumber": serial}}
+    )
     return _ws_result(f"Updated WWN settings for FC blade {serial}")
 
 
@@ -1187,7 +1228,9 @@ async def list_iscsi_targets(
     return IscsiTargetListResponse(targetList=IscsiTargetListResource(target=targets))
 
 
-@router.get("/devices/blade/iSCSI/{serialNumber}/initiators", response_model=IscsiInitiatorListResponse)
+@router.get(
+    "/devices/blade/iSCSI/{serialNumber}/initiators", response_model=IscsiInitiatorListResponse
+)
 async def list_iscsi_initiators(
     serialNumber: str,
     _: AmlUser = Depends(require_auth),
@@ -1196,7 +1239,9 @@ async def list_iscsi_initiators(
     _ensure_state(context)
     blade = _get_iscsi_blade_or_404(_validate_identifier(serialNumber, field_name="serialNumber"))
     initiators = [IscsiInitiator.model_validate(item) for item in blade.get("initiators", [])]
-    return IscsiInitiatorListResponse(initiatorList=IscsiInitiatorListResource(initiator=initiators))
+    return IscsiInitiatorListResponse(
+        initiatorList=IscsiInitiatorListResource(initiator=initiators)
+    )
 
 
 @router.get("/system/ha/config", response_model=HaConfigResponse)
@@ -1351,7 +1396,9 @@ async def put_drive_encryption(
     serial = _validate_identifier(serialNumber, field_name="serialNumber")
     drive = _get_drive_or_404(serial)
     updates = payload.encryption.model_dump(exclude_none=True)
-    aml_state.update_aml_drive(serial, {"encryptionState": {**dict(drive.get("encryptionState", {})), **updates}})
+    aml_state.update_aml_drive(
+        serial, {"encryptionState": {**dict(drive.get("encryptionState", {})), **updates}}
+    )
     return _ws_result(f"Updated encryption settings for drive {serial}")
 
 
@@ -1366,13 +1413,31 @@ async def put_drive_data_path(
     _require_admin(current_user)
     serial = _validate_identifier(serialNumber, field_name="serialNumber")
     drive = _get_drive_or_404(serial)
-    current = dict(drive.get("dataPath", {"serialNumber": serial, "status": "healthy", "activePaths": 2, "preferredPath": "auto", "lastTest": None, "lastResult": "pass"}))
+    current = dict(
+        drive.get(
+            "dataPath",
+            {
+                "serialNumber": serial,
+                "status": "healthy",
+                "activePaths": 2,
+                "preferredPath": "auto",
+                "lastTest": None,
+                "lastResult": "pass",
+            },
+        )
+    )
     updates = {key: value for key, value in payload.items() if value is not None}
-    updated = aml_state.update_aml_drive(serial, {"dataPath": {**current, **updates, "serialNumber": serial}}) or _get_drive_or_404(serial)
-    return DataPathStatusResponse(dataPath=DataPathStatus.model_validate(updated.get("dataPath", current)))
+    updated = aml_state.update_aml_drive(
+        serial, {"dataPath": {**current, **updates, "serialNumber": serial}}
+    ) or _get_drive_or_404(serial)
+    return DataPathStatusResponse(
+        dataPath=DataPathStatus.model_validate(updated.get("dataPath", current))
+    )
 
 
-@router.get("/devices/blade/fibreChannel/{serialNumber}/dataPath", response_model=DataPathStatusResponse)
+@router.get(
+    "/devices/blade/fibreChannel/{serialNumber}/dataPath", response_model=DataPathStatusResponse
+)
 async def get_fc_data_path(
     serialNumber: str,
     _: AmlUser = Depends(require_auth),
@@ -1383,7 +1448,9 @@ async def get_fc_data_path(
     return DataPathStatusResponse(dataPath=_serialize_data_path(blade))
 
 
-@router.post("/devices/blade/fibreChannel/{serialNumber}/dataPath/test", response_model=WSResultCode)
+@router.post(
+    "/devices/blade/fibreChannel/{serialNumber}/dataPath/test", response_model=WSResultCode
+)
 async def test_fc_data_path(
     serialNumber: str,
     current_user: AmlUser = Depends(require_auth),
@@ -1396,7 +1463,14 @@ async def test_fc_data_path(
     current = dict(blade.get("dataPath", {}))
     aml_state.update_fc_blade_by_serial(
         serial,
-        {"dataPath": {**current, "status": "healthy", "lastTest": _timestamp(), "lastResult": "pass"}},
+        {
+            "dataPath": {
+                **current,
+                "status": "healthy",
+                "lastTest": _timestamp(),
+                "lastResult": "pass",
+            }
+        },
     )
     return _ws_result(f"Completed data path test for FC blade {serial}")
 
@@ -1407,7 +1481,9 @@ async def get_sharing_config(
     context: AppContext = Depends(get_context),
 ) -> SharingConfigResponse:
     _ensure_state(context)
-    return SharingConfigResponse(config=SharingConfig.model_validate(aml_state.get_aml_sharing_config()))
+    return SharingConfigResponse(
+        config=SharingConfig.model_validate(aml_state.get_aml_sharing_config())
+    )
 
 
 @router.put("/system/sharing/config", response_model=WSResultCode)
@@ -1436,7 +1512,9 @@ async def get_sharing_status(
     context: AppContext = Depends(get_context),
 ) -> SharingStatusResponse:
     _ensure_state(context)
-    return SharingStatusResponse(status=SharingStatus.model_validate(aml_state.get_aml_sharing_status()))
+    return SharingStatusResponse(
+        status=SharingStatus.model_validate(aml_state.get_aml_sharing_status())
+    )
 
 
 @router.get("/system/sharing/clients", response_model=SharingClientListResponse)
@@ -1455,8 +1533,12 @@ async def list_remote_libraries(
     context: AppContext = Depends(get_context),
 ) -> RemoteLibraryListResponse:
     _ensure_state(context)
-    libraries = [RemoteLibrary.model_validate(item) for item in aml_state.list_aml_remote_libraries()]
-    return RemoteLibraryListResponse(remoteLibraryList=RemoteLibraryListResource(remoteLibrary=libraries))
+    libraries = [
+        RemoteLibrary.model_validate(item) for item in aml_state.list_aml_remote_libraries()
+    ]
+    return RemoteLibraryListResponse(
+        remoteLibraryList=RemoteLibraryListResource(remoteLibrary=libraries)
+    )
 
 
 @router.post("/system/remoteLibraries", response_model=WSResultCode)
@@ -1493,7 +1575,9 @@ async def put_remote_library(
     _require_admin(current_user)
     library_id = _validate_identifier(id, field_name="id")
     _get_remote_library_or_404(library_id)
-    aml_state.update_aml_remote_library(library_id, payload.remoteLibrary.model_dump(exclude_none=True))
+    aml_state.update_aml_remote_library(
+        library_id, payload.remoteLibrary.model_dump(exclude_none=True)
+    )
     return _ws_result(f"Updated remote library {library_id}")
 
 
@@ -1526,5 +1610,9 @@ async def list_supported_media(
     context: AppContext = Depends(get_context),
 ) -> SupportedMediaListResponse:
     _ensure_state(context)
-    media_types = [SupportedMedia.model_validate(item) for item in aml_state.list_aml_supported_media()]
-    return SupportedMediaListResponse(supportedMediaList=SupportedMediaListResource(mediaType=media_types))
+    media_types = [
+        SupportedMedia.model_validate(item) for item in aml_state.list_aml_supported_media()
+    ]
+    return SupportedMediaListResponse(
+        supportedMediaList=SupportedMediaListResource(mediaType=media_types)
+    )

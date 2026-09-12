@@ -26,14 +26,18 @@ def test_access_endpoints_require_admin_auth(client: TestClient) -> None:
     assert client.get("/aml/access/devices").status_code == 401
 
 
-def test_license_routes_seed_demo_licenses(client: TestClient, admin_session: dict[str, str | None]) -> None:
+def test_license_routes_seed_demo_licenses(
+    client: TestClient, admin_session: dict[str, str | None]
+) -> None:
     response = client.get("/aml/access/licenses", cookies=admin_session)
     assert response.status_code == 200
     serials = {item["serialNumber"] for item in response.json()["license"]}
     assert {"LIC-BASE-001", "LIC-PART-001"}.issubset(serials)
 
 
-def test_group_host_and_device_lifecycle(client: TestClient, admin_session: dict[str, str | None]) -> None:
+def test_group_host_and_device_lifecycle(
+    client: TestClient, admin_session: dict[str, str | None]
+) -> None:
     devices_response = client.get("/aml/access/devices", cookies=admin_session)
     assert devices_response.status_code == 200
     devices = devices_response.json()["device"]

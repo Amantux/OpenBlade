@@ -182,7 +182,9 @@ def generate(root: Path, *, seed: int = SEED, clean: bool = True) -> list[Entry]
     for path in sorted(created):
         rel = path.relative_to(root).as_posix()
         checksum, size = _sha256_file(path)
-        entries.append(Entry(path=rel, kind="empty" if size == 0 else "file", size=size, sha256=checksum))
+        entries.append(
+            Entry(path=rel, kind="empty" if size == 0 else "file", size=size, sha256=checksum)
+        )
     entries.append(
         Entry(
             path=link.relative_to(root).as_posix(),

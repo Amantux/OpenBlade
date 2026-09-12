@@ -74,7 +74,14 @@ class ArchivePlanner:
                 field="ingest_mode",
             )
 
-        fitting_tape = next((barcode for barcode in tapes if self._tape_capacity(request, barcode) >= plan.total_bytes), None)
+        fitting_tape = next(
+            (
+                barcode
+                for barcode in tapes
+                if self._tape_capacity(request, barcode) >= plan.total_bytes
+            ),
+            None,
+        )
         if fitting_tape is not None:
             plan.tape_assignments = [
                 TapeAssignment(
@@ -111,7 +118,11 @@ class ArchivePlanner:
                 used_bytes = assignment.estimated_bytes if assignment is not None else 0
                 remaining_bytes = capacity - used_bytes
 
-                if assignment is not None and group_bytes > remaining_bytes and group_bytes <= capacity:
+                if (
+                    assignment is not None
+                    and group_bytes > remaining_bytes
+                    and group_bytes <= capacity
+                ):
                     tape_index += 1
                     continue
 
@@ -141,7 +152,9 @@ class ArchivePlanner:
 
                 fitting_files = group[:split_index]
                 assignment.files.extend(self._relative_files(fitting_files, request.source_path))
-                assignment.estimated_bytes += sum(self._file_size(request, path) for path in fitting_files)
+                assignment.estimated_bytes += sum(
+                    self._file_size(request, path) for path in fitting_files
+                )
                 group = group[split_index:]
                 group_bytes = sum(self._file_size(request, path) for path in group)
                 tape_index += 1
@@ -158,7 +171,9 @@ class ArchivePlanner:
         remaining = {barcode: self._tape_capacity(request, barcode) for barcode in tapes}
         assignments: dict[str, TapeAssignment] = {}
         tape_positions = {barcode: index for index, barcode in enumerate(tapes)}
-        shard_size_bytes = request.shard_size_bytes if request.shard_size_bytes is not None else None
+        shard_size_bytes = (
+            request.shard_size_bytes if request.shard_size_bytes is not None else None
+        )
         shard_fill_bytes = {barcode: 0 for barcode in tapes}
         oversized_shard_files: list[str] = []
 
@@ -209,20 +224,27 @@ class ArchivePlanner:
                     break
         elif strategy is ShardStrategy.CAPACITY_WEIGHTED:
             for file_path in files:
-                preferred_tape = max(tapes, key=lambda barcode: (remaining[barcode], -tape_positions[barcode]))
+                preferred_tape = max(
+                    tapes, key=lambda barcode: (remaining[barcode], -tape_positions[barcode])
+                )
                 if not assign_file(preferred_tape, file_path):
                     break
         elif strategy is ShardStrategy.DIRECTORY_BATCH:
             for group in self._directory_groups(files):
                 group_bytes = sum(self._file_size(request, path) for path in group)
-                preferred_tape = max(tapes, key=lambda barcode: (remaining[barcode], -tape_positions[barcode]))
+                preferred_tape = max(
+                    tapes, key=lambda barcode: (remaining[barcode], -tape_positions[barcode])
+                )
                 if remaining[preferred_tape] >= group_bytes:
                     for file_path in group:
                         if not assign_file(preferred_tape, file_path):
                             break
                 else:
                     for file_path in group:
-                        preferred_tape = max(tapes, key=lambda barcode: (remaining[barcode], -tape_positions[barcode]))
+                        preferred_tape = max(
+                            tapes,
+                            key=lambda barcode: (remaining[barcode], -tape_positions[barcode]),
+                        )
                         if not assign_file(preferred_tape, file_path):
                             break
                     if plan.enqueue_blockers:
@@ -243,12 +265,20 @@ class ArchivePlanner:
             for file_path in sized_files:
                 preferred_tape = min(
                     tapes,
-                    key=lambda barcode: (tape_loads[barcode], -remaining[barcode], tape_positions[barcode]),
+                    key=lambda barcode: (
+                        tape_loads[barcode],
+                        -remaining[barcode],
+                        tape_positions[barcode],
+                    ),
                 )
                 if not assign_file(preferred_tape, file_path):
                     break
                 relative_path = self._make_relative(file_path, request.source_path)
-                placed_tape = next(barcode for barcode, assignment in assignments.items() if relative_path in assignment.files)
+                placed_tape = next(
+                    barcode
+                    for barcode, assignment in assignments.items()
+                    if relative_path in assignment.files
+                )
                 tape_loads[placed_tape] += self._file_size(request, file_path)
 
         ordered_assignments = [assignments[barcode] for barcode in tapes if barcode in assignments]
@@ -256,7 +286,9 @@ class ArchivePlanner:
         plan.estimated_parallelism = min(len(ordered_assignments), request.max_parallelism)
         plan.estimated_tape_swaps = 0
         if oversized_shard_files and shard_size_bytes is not None:
-            sample = ", ".join(self._make_relative(path, request.source_path) for path in oversized_shard_files[:3])
+            sample = ", ".join(
+                self._make_relative(path, request.source_path) for path in oversized_shard_files[:3]
+            )
             if len(oversized_shard_files) > 3:
                 sample += ", ..."
             self._add_capacity_warning(
@@ -288,7 +320,9 @@ class ArchivePlanner:
 
         if should_shard:
             for reason in reasons:
-                self._add_capacity_warning(plan, f"Balanced planning switched to sharded mode: {reason}")
+                self._add_capacity_warning(
+                    plan, f"Balanced planning switched to sharded mode: {reason}"
+                )
             balanced_request = request.model_copy(
                 update={
                     "policy_type": PolicyType.NONCRITICAL_SHARDED,
@@ -298,7 +332,9 @@ class ArchivePlanner:
             self._plan_noncritical_sharded(balanced_request, plan)
             return
 
-        critical_request = request.model_copy(update={"policy_type": PolicyType.CRITICAL_SEQUENTIAL})
+        critical_request = request.model_copy(
+            update={"policy_type": PolicyType.CRITICAL_SEQUENTIAL}
+        )
         self._plan_critical_sequential(critical_request, plan)
 
     def _apply_common_checks(self, request: ArchivePlanRequest, plan: ArchivePlan) -> None:
@@ -314,7 +350,9 @@ class ArchivePlanner:
             )
 
     def _ordered_tapes(self, request: ArchivePlanRequest) -> list[str]:
-        preferred = [barcode for barcode in request.available_tapes if not self._is_scratch_tape(barcode)]
+        preferred = [
+            barcode for barcode in request.available_tapes if not self._is_scratch_tape(barcode)
+        ]
         scratch = [barcode for barcode in request.available_tapes if self._is_scratch_tape(barcode)]
         return preferred + scratch
 
@@ -346,7 +384,9 @@ class ArchivePlanner:
             groups.append(current_group)
         return groups
 
-    def _first_split_index(self, request: ArchivePlanRequest, files: list[str], capacity: int) -> int:
+    def _first_split_index(
+        self, request: ArchivePlanRequest, files: list[str], capacity: int
+    ) -> int:
         consumed = 0
         for index, file_path in enumerate(files):
             size = self._file_size(request, file_path)
@@ -357,7 +397,7 @@ class ArchivePlanner:
 
     def _make_relative(self, filepath: str, source_path: str | None) -> str:
         if source_path and filepath.startswith(source_path):
-            rel = filepath[len(source_path):]
+            rel = filepath[len(source_path) :]
             return rel.lstrip("/")
         return filepath.lstrip("/")
 
@@ -368,11 +408,19 @@ class ArchivePlanner:
         normalized = barcode.upper()
         return normalized.startswith("SCR") or "SCRATCH" in normalized
 
-    def _add_capacity_warning(self, plan: ArchivePlan, message: str, field: str | None = None) -> None:
-        plan.capacity_warnings.append(ArchivePlanWarning(level="warning", message=message, field=field))
+    def _add_capacity_warning(
+        self, plan: ArchivePlan, message: str, field: str | None = None
+    ) -> None:
+        plan.capacity_warnings.append(
+            ArchivePlanWarning(level="warning", message=message, field=field)
+        )
 
-    def _add_safety_warning(self, plan: ArchivePlan, message: str, field: str | None = None) -> None:
-        plan.safety_warnings.append(ArchivePlanWarning(level="warning", message=message, field=field))
+    def _add_safety_warning(
+        self, plan: ArchivePlan, message: str, field: str | None = None
+    ) -> None:
+        plan.safety_warnings.append(
+            ArchivePlanWarning(level="warning", message=message, field=field)
+        )
 
     def _block_plan(self, plan: ArchivePlan, message: str) -> None:
         if message not in plan.enqueue_blockers:

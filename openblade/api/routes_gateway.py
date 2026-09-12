@@ -1,4 +1,5 @@
 """REST API for managing the OpenBlade protocol gateway (SFTP/SCP)."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -69,14 +70,22 @@ def start_gateway() -> GatewayCommandResponse:
         gw.start()
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return GatewayCommandResponse(status=gw.status.value, message="SFTP gateway started", last_error=gw.config.get("last_error"))
+    return GatewayCommandResponse(
+        status=gw.status.value,
+        message="SFTP gateway started",
+        last_error=gw.config.get("last_error"),
+    )
 
 
 @router.post("/stop", response_model=GatewayCommandResponse, dependencies=[Depends(require_auth)])
 def stop_gateway() -> GatewayCommandResponse:
     gw = get_gateway()
     gw.stop()
-    return GatewayCommandResponse(status=gw.status.value, message="SFTP gateway stopped", last_error=gw.config.get("last_error"))
+    return GatewayCommandResponse(
+        status=gw.status.value,
+        message="SFTP gateway stopped",
+        last_error=gw.config.get("last_error"),
+    )
 
 
 @router.get("/credentials", dependencies=[Depends(require_auth)])
@@ -108,7 +117,9 @@ def update_credential(username: str, data: CredentialUpdate):
             username,
             password=data.password,
             enabled=data.enabled,
-            allowed_paths=[path.value for path in data.allowed_paths] if data.allowed_paths is not None else None,
+            allowed_paths=[path.value for path in data.allowed_paths]
+            if data.allowed_paths is not None
+            else None,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -151,7 +162,9 @@ def list_sessions(active_only: bool = False):
     ]
 
 
-@router.get("/inbox-paths", response_model=list[InboxPathOption], dependencies=[Depends(require_auth)])
+@router.get(
+    "/inbox-paths", response_model=list[InboxPathOption], dependencies=[Depends(require_auth)]
+)
 def list_inbox_paths() -> list[InboxPathOption]:
     """List available inbox path options for credential configuration."""
     descriptions = {

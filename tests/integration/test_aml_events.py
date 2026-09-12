@@ -28,6 +28,7 @@ def authed(client: TestClient) -> TestClient:
 # Events
 # ---------------------------------------------------------------------------
 
+
 def test_list_events_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/events")
     assert resp.status_code == 401
@@ -52,6 +53,7 @@ def test_clear_events_requires_admin(client: TestClient) -> None:
 # RAS Tickets
 # ---------------------------------------------------------------------------
 
+
 def test_list_tickets_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/ras/tickets")
     assert resp.status_code == 200
@@ -60,7 +62,9 @@ def test_list_tickets_returns_200(authed: TestClient) -> None:
 def test_create_ticket(authed: TestClient) -> None:
     resp = authed.post(
         "/aml/ras/ticket",
-        json={"ticket": {"severity": "warning", "component": "drive", "description": "Test ticket"}},
+        json={
+            "ticket": {"severity": "warning", "component": "drive", "description": "Test ticket"}
+        },
     )
     assert resp.status_code in {200, 201}
     if resp.status_code in {200, 201}:
@@ -74,7 +78,9 @@ def test_ticket_status_validation_rejects_invalid(authed: TestClient) -> None:
     # First create a ticket to get an id
     create_resp = authed.post(
         "/aml/ras/ticket",
-        json={"ticket": {"severity": "info", "component": "system", "description": "Validation test"}},
+        json={
+            "ticket": {"severity": "info", "component": "system", "description": "Validation test"}
+        },
     )
     assert create_resp.status_code in {200, 201}
     ticket_id = (create_resp.json().get("ticket") or create_resp.json()).get("id", "")
@@ -91,7 +97,9 @@ def test_ticket_status_valid_values_accepted(authed: TestClient) -> None:
     """Spec lifecycle statuses must be accepted."""
     create_resp = authed.post(
         "/aml/ras/ticket",
-        json={"ticket": {"severity": "info", "component": "system", "description": "Lifecycle test"}},
+        json={
+            "ticket": {"severity": "info", "component": "system", "description": "Lifecycle test"}
+        },
     )
     assert create_resp.status_code in {200, 201}
     ticket_id = (create_resp.json().get("ticket") or create_resp.json()).get("id", "")
@@ -118,7 +126,13 @@ def test_ticket_summary_returns_200(authed: TestClient) -> None:
 def test_dashboard_summary_returns_live_counts(authed: TestClient) -> None:
     authed.post(
         "/aml/ras/ticket",
-        json={"ticket": {"severity": "warning", "component": "drive", "description": "Dashboard summary test"}},
+        json={
+            "ticket": {
+                "severity": "warning",
+                "component": "drive",
+                "description": "Dashboard summary test",
+            }
+        },
     )
     summary_resp = authed.get("/aml/summary")
     assert summary_resp.status_code == 200
@@ -127,13 +141,17 @@ def test_dashboard_summary_returns_live_counts(authed: TestClient) -> None:
     assert payload["drives"]["total"] >= payload["drives"]["online"]
     assert payload["slots"]["total"] >= payload["slots"]["used"]
     assert payload["jobs"]["total"] >= payload["jobs"]["active"]
-    assert payload["events"]["total"] >= payload["events"]["critical"] + payload["events"]["warning"] + payload["events"]["info"]
+    assert (
+        payload["events"]["total"]
+        >= payload["events"]["critical"] + payload["events"]["warning"] + payload["events"]["info"]
+    )
     assert payload["openTickets"] >= 1
 
 
 # ---------------------------------------------------------------------------
 # Logs
 # ---------------------------------------------------------------------------
+
 
 def test_list_logs_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/logs")
@@ -159,6 +177,7 @@ def test_clear_log_requires_admin(client: TestClient) -> None:
 # Alerts
 # ---------------------------------------------------------------------------
 
+
 def test_list_alerts_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/alerts")
     assert resp.status_code == 200
@@ -178,6 +197,7 @@ def test_acknowledge_alert_not_found(authed: TestClient) -> None:
 # Notifications
 # ---------------------------------------------------------------------------
 
+
 def test_list_notifications_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/notifications")
     assert resp.status_code == 200
@@ -191,6 +211,7 @@ def test_delete_notification_requires_admin(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Subscriptions
 # ---------------------------------------------------------------------------
+
 
 def test_list_subscriptions_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/events/subscribe")

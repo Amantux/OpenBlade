@@ -228,8 +228,7 @@ class MailslotService:
             return slot
         known = [slot.slot_id for slot in self._mailslot_library().import_export_slots()]
         raise ImportExportSlotError(
-            f"Import/export slot {ie_slot} does not exist "
-            f"(this library has {known or 'none'})"
+            f"Import/export slot {ie_slot} does not exist (this library has {known or 'none'})"
         )
 
     def _first_empty_ie_slot(self) -> int:
@@ -238,8 +237,7 @@ class MailslotService:
             # Distinct from "all full", which is what this used to say for a
             # library with no mailslot at all -- the opposite of the truth.
             raise ImportExportSlotError(
-                "This library has no import/export elements; there is nowhere to "
-                "export to"
+                "This library has no import/export elements; there is nowhere to export to"
             )
         for slot in slots:
             if not slot.occupied:
@@ -252,6 +250,4 @@ class MailslotService:
         for slot in self.library.inventory().slots:
             if slot.barcode is None:
                 return slot.slot_id
-        raise ImportExportSlotError(
-            "No empty storage slot is available to import into"
-        )
+        raise ImportExportSlotError("No empty storage slot is available to import into")

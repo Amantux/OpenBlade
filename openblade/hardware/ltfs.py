@@ -215,8 +215,7 @@ def wait_for_ltfs_release(
             return True
         if monotonic() >= deadline:
             logger.error(
-                "LTFS still holds %s after %.0fs (pids %s); the drive is not "
-                "safe to unload",
+                "LTFS still holds %s after %.0fs (pids %s); the drive is not safe to unload",
                 mount_point,
                 timeout_seconds,
                 holders,
@@ -489,10 +488,14 @@ class RealLTFSBackend:
         mount_path.mkdir(parents=True, exist_ok=True)
         device = self.library.drive_device(drive_id)
         if mode == MountMode.READ_ONLY:
-            result = LTFSCommandBackend.mount_readonly(device, str(mount_path), self.guard, self.runner)
+            result = LTFSCommandBackend.mount_readonly(
+                device, str(mount_path), self.guard, self.runner
+            )
             target_state = MountState.MOUNTED_RO
         else:
-            result = LTFSCommandBackend.mount_readwrite(device, str(mount_path), self.guard, self.runner)
+            result = LTFSCommandBackend.mount_readwrite(
+                device, str(mount_path), self.guard, self.runner
+            )
             target_state = MountState.MOUNTED_RW
         if not result.success:
             raise RuntimeError(result.message)
@@ -554,7 +557,9 @@ class RealLTFSBackend:
             archived_at=datetime.now(timezone.utc),
         )
 
-    def read_bytes(self, barcode_or_path: str, path: PurePosixPath | str | None = None) -> bytes | None:
+    def read_bytes(
+        self, barcode_or_path: str, path: PurePosixPath | str | None = None
+    ) -> bytes | None:
         if path is None:
             target = PurePosixPath(str(barcode_or_path))
             for handle in self._active_mounts.values():

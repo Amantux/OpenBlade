@@ -39,7 +39,9 @@ def nas_service() -> NasService:
 def seed_dataset_bundle(*, dataset_id: str = "dataset-1", pool_id: str = "pool-1") -> str:
     service = nas_service()
     service.upsert_pool(NasPool(id=pool_id, name="Pool One"))
-    service.upsert_policy(StoragePolicy(id="policy-1", name="Balanced Policy", policy_type=PolicyType.BALANCED))
+    service.upsert_policy(
+        StoragePolicy(id="policy-1", name="Balanced Policy", policy_type=PolicyType.BALANCED)
+    )
     dataset = service.upsert_dataset(
         NasDataset(
             id=dataset_id,
@@ -117,7 +119,9 @@ def test_get_dataset_manifest_returns_200_with_shard_map() -> None:
     assert response.json()["generated_at"].endswith("Z")
 
 
-def write_file_to_tape(*, barcode: str, dataset_name: str, relative_path: str, content: bytes) -> None:
+def write_file_to_tape(
+    *, barcode: str, dataset_name: str, relative_path: str, content: bytes
+) -> None:
     """Put real bytes on a simulated tape so ``verify`` can read them back.
 
     ``POST /nas/datasets/{id}/verify`` mounts the tape and stats the file (see
@@ -196,7 +200,9 @@ def test_post_fuse_open_returns_200_with_action() -> None:
     dataset_id = seed_dataset_bundle()
     assert dataset_id
 
-    response = client.post("/nas/fuse/open", json={"pool_id": "pool-1", "logical_path": "docs/a.txt"})
+    response = client.post(
+        "/nas/fuse/open", json={"pool_id": "pool-1", "logical_path": "docs/a.txt"}
+    )
 
     assert response.status_code == 200
     assert response.json()["action"] == "queue_hydration"

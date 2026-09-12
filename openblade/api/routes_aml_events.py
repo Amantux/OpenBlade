@@ -22,7 +22,11 @@ _ALLOWED_LOG_LEVELS = {"TRACE", "DEBUG", "INFO", "WARN", "WARNING", "ERROR", "CR
 _EVENT_TYPES: list[dict[str, str]] = [
     {"name": "library", "description": "General library lifecycle events", "severity": "info"},
     {"name": "drive", "description": "Drive maintenance and health events", "severity": "warning"},
-    {"name": "robotics", "description": "Robotics motion and service events", "severity": "warning"},
+    {
+        "name": "robotics",
+        "description": "Robotics motion and service events",
+        "severity": "warning",
+    },
     {"name": "media", "description": "Media inventory and movement events", "severity": "info"},
     {"name": "system", "description": "Controller and platform events", "severity": "critical"},
 ]
@@ -372,7 +376,9 @@ def _validate_text(value: str, *, field_name: str) -> str:
     return normalized
 
 
-def _validate_severity(value: str | None, *, field_name: str = "severity", required: bool = True) -> str | None:
+def _validate_severity(
+    value: str | None, *, field_name: str = "severity", required: bool = True
+) -> str | None:
     if value is None:
         if required:
             raise HTTPException(status_code=400, detail=f"{field_name} is required")
@@ -457,7 +463,9 @@ def _get_notification_or_404(notification_id: str) -> dict[str, Any]:
     return notification
 
 
-def _record_event(*, severity: str, component: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+def _record_event(
+    *, severity: str, component: str, message: str, details: dict[str, Any] | None = None
+) -> dict[str, Any]:
     event = {
         "id": str(uuid4()),
         "timestamp": _timestamp(),
@@ -493,7 +501,10 @@ def _refresh_log(name: str, log: dict[str, Any]) -> dict[str, Any]:
 
 
 def _event_summary(events: list[dict[str, Any]]) -> EventSummary:
-    counts = {severity: sum(1 for event in events if str(event.get("severity", "")).lower() == severity) for severity in _ALLOWED_SEVERITIES}
+    counts = {
+        severity: sum(1 for event in events if str(event.get("severity", "")).lower() == severity)
+        for severity in _ALLOWED_SEVERITIES
+    }
     ordered = sorted(events, key=lambda item: str(item.get("timestamp", "")), reverse=True)
     return EventSummary(
         critical=counts["critical"],
@@ -507,10 +518,18 @@ def _event_summary(events: list[dict[str, Any]]) -> EventSummary:
 def _ticket_summary(tickets: list[dict[str, Any]]) -> TicketSummary:
     return TicketSummary(
         open=sum(1 for ticket in tickets if str(ticket.get("status", "open")).lower() == "open"),
-        acknowledged=sum(1 for ticket in tickets if str(ticket.get("status", "")).lower() == "acknowledged"),
-        resolved=sum(1 for ticket in tickets if str(ticket.get("status", "")).lower() == "resolved"),
-        critical=sum(1 for ticket in tickets if str(ticket.get("severity", "")).lower() == "critical"),
-        warning=sum(1 for ticket in tickets if str(ticket.get("severity", "")).lower() == "warning"),
+        acknowledged=sum(
+            1 for ticket in tickets if str(ticket.get("status", "")).lower() == "acknowledged"
+        ),
+        resolved=sum(
+            1 for ticket in tickets if str(ticket.get("status", "")).lower() == "resolved"
+        ),
+        critical=sum(
+            1 for ticket in tickets if str(ticket.get("severity", "")).lower() == "critical"
+        ),
+        warning=sum(
+            1 for ticket in tickets if str(ticket.get("severity", "")).lower() == "warning"
+        ),
     )
 
 
@@ -538,10 +557,17 @@ def _health_summary(context: AppContext) -> HealthSummary:
     alerts = aml_state.list_aml_alerts()
     tapealerts = aml_state.list_aml_tapealerts()
 
-    robotics = "warning" if any(str(robot.get("status", "online")).lower() != "online" for robot in robots) else "good"
+    robotics = (
+        "warning"
+        if any(str(robot.get("status", "online")).lower() != "online" for robot in robots)
+        else "good"
+    )
     drive_statuses: list[str] = []
     for drive in drives:
-        if str(drive.get("status", "online")).lower() == "offline" or int(drive.get("errorCount", 0)) >= 5:
+        if (
+            str(drive.get("status", "online")).lower() == "offline"
+            or int(drive.get("errorCount", 0)) >= 5
+        ):
             drive_statuses.append("critical")
         elif bool(drive.get("cleaningRequired", False)) or int(drive.get("errorCount", 0)) > 0:
             drive_statuses.append("warning")
@@ -550,21 +576,40 @@ def _health_summary(context: AppContext) -> HealthSummary:
     drives_health = _component_status(*drive_statuses) if drive_statuses else "good"
 
     media_flags = [str(item.get("severity", "info")).lower() for item in tapealerts]
-    media = "critical" if "critical" in media_flags else "warning" if "warning" in media_flags else "good"
-    network = "warning" if any(str(blade.get("status", "online")).lower() != "online" for blade in eth_blades) else "good"
+    media = (
+        "critical"
+        if "critical" in media_flags
+        else "warning"
+        if "warning" in media_flags
+        else "good"
+    )
+    network = (
+        "warning"
+        if any(str(blade.get("status", "online")).lower() != "online" for blade in eth_blades)
+        else "good"
+    )
     system_items = [
         str(ticket.get("severity", "info")).lower()
         for ticket in tickets
-        if str(ticket.get("component", "")).lower() == "system" and str(ticket.get("status", "open")).lower() != "resolved"
+        if str(ticket.get("component", "")).lower() == "system"
+        and str(ticket.get("status", "open")).lower() != "resolved"
     ] + [
         str(alert.get("severity", "info")).lower()
         for alert in alerts
         if str(alert.get("component", "")).lower() == "system"
     ]
-    system = "critical" if "critical" in system_items else "warning" if "warning" in system_items else "good"
+    system = (
+        "critical"
+        if "critical" in system_items
+        else "warning"
+        if "warning" in system_items
+        else "good"
+    )
 
     overall = _component_status(library, robotics, drives_health, media, network, system)
-    open_tickets = sum(1 for ticket in tickets if str(ticket.get("status", "open")).lower() != "resolved")
+    open_tickets = sum(
+        1 for ticket in tickets if str(ticket.get("status", "open")).lower() != "resolved"
+    )
     return HealthSummary(
         overall=overall,
         components=HealthComponents(
@@ -575,7 +620,9 @@ def _health_summary(context: AppContext) -> HealthSummary:
             network=network,
             system=system,
         ),
-        activeAlerts=min(len(alerts), profile["alerts_count"]) if active_library is not None else len(alerts),
+        activeAlerts=min(len(alerts), profile["alerts_count"])
+        if active_library is not None
+        else len(alerts),
         openTickets=open_tickets,
     )
 
@@ -600,10 +647,19 @@ def _dashboard_summary(context: AppContext) -> DashboardSummary:
         or str(drive.get("state", "")).lower() in {"faulted", "failed", "offline", "error"}
     )
 
-    slot_total = profile["slot_count"] if active_library is not None else sum(
-        int(partition.get("slotCount", 0)) + int(partition.get("ieSlotCount", 0)) for partition in partitions
+    slot_total = (
+        profile["slot_count"]
+        if active_library is not None
+        else sum(
+            int(partition.get("slotCount", 0)) + int(partition.get("ieSlotCount", 0))
+            for partition in partitions
+        )
     )
-    slot_used = profile["occupied_slot_count"] if active_library is not None else len(aml_state.list_aml_media())
+    slot_used = (
+        profile["occupied_slot_count"]
+        if active_library is not None
+        else len(aml_state.list_aml_media())
+    )
     slot_utilization_percent = round((slot_used / slot_total) * 100) if slot_total else 0
 
     job_statuses = [str(job.get("status", "unknown")).lower() for job in all_jobs]
@@ -617,10 +673,14 @@ def _dashboard_summary(context: AppContext) -> DashboardSummary:
     return DashboardSummary(
         overall=health.overall,
         drives=DriveSummary(total=drive_total, online=drive_online, attention=drive_attention),
-        slots=SlotSummary(total=slot_total, used=slot_used, utilizationPercent=slot_utilization_percent),
+        slots=SlotSummary(
+            total=slot_total, used=slot_used, utilizationPercent=slot_utilization_percent
+        ),
         jobs=JobSummary(
             total=profile["active_job_count"] if active_library is not None else len(all_jobs),
-            active=profile["active_job_count"] if active_library is not None else sum(1 for status in job_statuses if status in active_statuses),
+            active=profile["active_job_count"]
+            if active_library is not None
+            else sum(1 for status in job_statuses if status in active_statuses),
             pending=sum(1 for status in job_statuses if status in pending_statuses),
             completed=sum(1 for status in job_statuses if status in completed_statuses),
             failed=sum(1 for status in job_statuses if status in failed_statuses),
@@ -696,7 +756,9 @@ async def list_event_types(
     context: AppContext = Depends(get_context),
 ) -> TypeListResponse:
     _ensure_state(context)
-    return TypeListResponse(typeList=TypeListResource(type=[EventType.model_validate(item) for item in _EVENT_TYPES]))
+    return TypeListResponse(
+        typeList=TypeListResource(type=[EventType.model_validate(item) for item in _EVENT_TYPES])
+    )
 
 
 @router.post("/events/subscribe", response_model=WSResultCode)
@@ -709,9 +771,18 @@ async def subscribe_events(
     _require_admin(current_user)
     severity = _validate_severity(payload.subscription.severity, required=False)
     callback = _validate_text(payload.subscription.callback, field_name="callback")
-    components = [_validate_text(item, field_name="components") for item in payload.subscription.components]
-    aml_state.add_aml_event_subscription({"severity": severity, "components": components, "callback": callback})
-    _record_event(severity="info", component="system", message="Event subscription added", details={"callback": callback})
+    components = [
+        _validate_text(item, field_name="components") for item in payload.subscription.components
+    ]
+    aml_state.add_aml_event_subscription(
+        {"severity": severity, "components": components, "callback": callback}
+    )
+    _record_event(
+        severity="info",
+        component="system",
+        message="Event subscription added",
+        details={"callback": callback},
+    )
     return _ws_result("Subscribed to events")
 
 
@@ -734,7 +805,9 @@ async def get_event(
     context: AppContext = Depends(get_context),
 ) -> EventResponse:
     _ensure_state(context)
-    return EventResponse(event=_serialize_event(_get_event_or_404(_validate_text(resource_id, field_name="id"))))
+    return EventResponse(
+        event=_serialize_event(_get_event_or_404(_validate_text(resource_id, field_name="id")))
+    )
 
 
 @router.get("/ras/tickets", response_model=TicketListResponse)
@@ -756,7 +829,9 @@ async def list_ras_tickets(
         if severity_filter and str(ticket.get("severity", "")).lower() != severity_filter:
             continue
         filtered.append(ticket)
-    return TicketListResponse(ticketList=TicketListResource(ticket=[_serialize_ticket(item) for item in filtered[:limit]]))
+    return TicketListResponse(
+        ticketList=TicketListResource(ticket=[_serialize_ticket(item) for item in filtered[:limit]])
+    )
 
 
 @router.post("/ras/ticket", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
@@ -807,7 +882,9 @@ async def get_ras_ticket(
     context: AppContext = Depends(get_context),
 ) -> TicketResponse:
     _ensure_state(context)
-    return TicketResponse(ticket=_serialize_ticket(_get_ticket_or_404(_validate_text(resource_id, field_name="id"))))
+    return TicketResponse(
+        ticket=_serialize_ticket(_get_ticket_or_404(_validate_text(resource_id, field_name="id")))
+    )
 
 
 @router.put("/ras/ticket/{id}", response_model=TicketResponse)
@@ -862,7 +939,11 @@ async def acknowledge_ras_ticket(
     ticket = _get_ticket_or_404(ticket_id)
     aml_state.update_aml_ras_ticket(ticket_id, {"status": "acknowledged"})
     _create_notification(notification_type="ras", message=f"RAS ticket {ticket_id} acknowledged")
-    _record_event(severity=str(ticket.get("severity", "info")), component=str(ticket.get("component", "system")), message=f"RAS ticket {ticket_id} acknowledged")
+    _record_event(
+        severity=str(ticket.get("severity", "info")),
+        component=str(ticket.get("component", "system")),
+        message=f"RAS ticket {ticket_id} acknowledged",
+    )
     return _ws_result(f"Acknowledged RAS ticket {ticket_id}")
 
 
@@ -880,7 +961,12 @@ async def resolve_ras_ticket(
     resolution = _validate_text(payload.resolution.description, field_name="description")
     aml_state.update_aml_ras_ticket(ticket_id, {"status": "resolved", "resolution": resolution})
     _create_notification(notification_type="ras", message=f"RAS ticket {ticket_id} resolved")
-    _record_event(severity="info", component=str(ticket.get("component", "system")), message=f"RAS ticket {ticket_id} resolved", details={"resolution": resolution})
+    _record_event(
+        severity="info",
+        component=str(ticket.get("component", "system")),
+        message=f"RAS ticket {ticket_id} resolved",
+        details={"resolution": resolution},
+    )
     return _ws_result(f"Resolved RAS ticket {ticket_id}")
 
 
@@ -951,10 +1037,14 @@ async def set_log_level(
     _ensure_state(context)
     _require_admin(current_user)
     current = aml_state.get_aml_log_level()
-    aml_state.set_aml_log_level({
-        "level": _validate_log_level(payload.logLevel.level),
-        "components": dict(current.get("components") if isinstance(current.get("components"), dict) else {}),
-    })
+    aml_state.set_aml_log_level(
+        {
+            "level": _validate_log_level(payload.logLevel.level),
+            "components": dict(
+                current.get("components") if isinstance(current.get("components"), dict) else {}
+            ),
+        }
+    )
     _create_notification(notification_type="logs", message="Log level updated")
     return _ws_result("Updated log level")
 
@@ -968,10 +1058,18 @@ async def get_log_content(
     context: AppContext = Depends(get_context),
 ) -> LogContentResponse:
     _ensure_state(context)
-    log = _refresh_log(_validate_text(name, field_name="name"), _get_log_or_404(_validate_text(name, field_name="name")))
+    log = _refresh_log(
+        _validate_text(name, field_name="name"),
+        _get_log_or_404(_validate_text(name, field_name="name")),
+    )
     content = log.get("lines") if isinstance(log.get("lines"), list) else []
     return LogContentResponse(
-        logContent=LogContent(name=str(log["name"]), lines=[str(line) for line in content[offset : offset + lines]], totalLines=len(content), offset=offset)
+        logContent=LogContent(
+            name=str(log["name"]),
+            lines=[str(line) for line in content[offset : offset + lines]],
+            totalLines=len(content),
+            offset=offset,
+        )
     )
 
 
@@ -1009,7 +1107,9 @@ async def list_alerts(
     severity_filter = _validate_severity(severity, required=False)
     component_filter = component.strip().lower() if component else None
     alerts = []
-    for alert in sorted(aml_state.list_aml_alerts(), key=lambda item: str(item.get("timestamp", "")), reverse=True):
+    for alert in sorted(
+        aml_state.list_aml_alerts(), key=lambda item: str(item.get("timestamp", "")), reverse=True
+    ):
         if severity_filter and str(alert.get("severity", "")).lower() != severity_filter:
             continue
         if component_filter and str(alert.get("component", "")).lower() != component_filter:
@@ -1046,7 +1146,9 @@ async def get_alert(
     context: AppContext = Depends(get_context),
 ) -> AlertResponse:
     _ensure_state(context)
-    return AlertResponse(alert=_serialize_alert(_get_alert_or_404(_validate_text(resource_id, field_name="id"))))
+    return AlertResponse(
+        alert=_serialize_alert(_get_alert_or_404(_validate_text(resource_id, field_name="id")))
+    )
 
 
 @router.post("/alert/{id}/acknowledge", response_model=WSResultCode)
@@ -1085,7 +1187,9 @@ async def list_tapealerts(
 ) -> TapeAlertListResponse:
     _ensure_state(context)
     return TapeAlertListResponse(
-        tapeAlertList=TapeAlertListResource(tapeAlert=[_serialize_tapealert(item) for item in aml_state.list_aml_tapealerts()])
+        tapeAlertList=TapeAlertListResource(
+            tapeAlert=[_serialize_tapealert(item) for item in aml_state.list_aml_tapealerts()]
+        )
     )
 
 
@@ -1122,9 +1226,15 @@ async def list_notifications(
     context: AppContext = Depends(get_context),
 ) -> NotificationListResponse:
     _ensure_state(context)
-    notifications = sorted(aml_state.list_aml_notifications(), key=lambda item: str(item.get("timestamp", "")), reverse=True)
+    notifications = sorted(
+        aml_state.list_aml_notifications(),
+        key=lambda item: str(item.get("timestamp", "")),
+        reverse=True,
+    )
     return NotificationListResponse(
-        notificationList=NotificationListResource(notification=[_serialize_notification(item) for item in notifications])
+        notificationList=NotificationListResource(
+            notification=[_serialize_notification(item) for item in notifications]
+        )
     )
 
 
@@ -1145,7 +1255,9 @@ async def get_unread_notification_count(
     context: AppContext = Depends(get_context),
 ) -> UnreadCountResponse:
     _ensure_state(context)
-    count = sum(1 for item in aml_state.list_aml_notifications() if not bool(item.get("read", False)))
+    count = sum(
+        1 for item in aml_state.list_aml_notifications() if not bool(item.get("read", False))
+    )
     return UnreadCountResponse(unreadCount=UnreadCount(count=count))
 
 

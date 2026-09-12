@@ -27,7 +27,9 @@ def test_clean_file_has_no_violations(tmp_path: Path) -> None:
 
 
 def test_forbidden_write_bytes_detected(tmp_path: Path) -> None:
-    file_path = _write_file(tmp_path, "openblade/service.py", "ltfs.write_bytes(handle, '/x', b'data')\n")
+    file_path = _write_file(
+        tmp_path, "openblade/service.py", "ltfs.write_bytes(handle, '/x', b'data')\n"
+    )
 
     violations = scan_file(file_path, tmp_path)
 
@@ -36,7 +38,9 @@ def test_forbidden_write_bytes_detected(tmp_path: Path) -> None:
 
 
 def test_forbidden_read_bytes_detected(tmp_path: Path) -> None:
-    file_path = _write_file(tmp_path, "openblade/service.py", "payload = ltfs.read_bytes('VOL001', '/x')\n")
+    file_path = _write_file(
+        tmp_path, "openblade/service.py", "payload = ltfs.read_bytes('VOL001', '/x')\n"
+    )
 
     violations = scan_file(file_path, tmp_path)
 
@@ -166,7 +170,9 @@ def test_scan_directory_skips_before_scanning(tmp_path: Path, monkeypatch) -> No
 
 
 def test_pattern_in_comment_is_flagged(tmp_path: Path) -> None:
-    file_path = _write_file(tmp_path, "openblade/service.py", "# ltfs.write_bytes(path, data)\nx = 1\n")
+    file_path = _write_file(
+        tmp_path, "openblade/service.py", "# ltfs.write_bytes(path, data)\nx = 1\n"
+    )
 
     violations = scan_file(file_path, tmp_path)
 
@@ -175,7 +181,9 @@ def test_pattern_in_comment_is_flagged(tmp_path: Path) -> None:
 
 
 def test_pattern_in_docstring_is_flagged(tmp_path: Path) -> None:
-    file_path = _write_file(tmp_path, "openblade/service.py", '"""ltfs.read_bytes(path)"""\nx = 1\n')
+    file_path = _write_file(
+        tmp_path, "openblade/service.py", '"""ltfs.read_bytes(path)"""\nx = 1\n'
+    )
 
     violations = scan_file(file_path, tmp_path)
 
@@ -185,7 +193,14 @@ def test_pattern_in_docstring_is_flagged(tmp_path: Path) -> None:
 
 def test_format_report_includes_error_code() -> None:
     result = GuardResult(
-        violations=[GuardViolation(file="openblade/service.py", line_number=3, line="library.load(1, 0)", pattern="library.load(")],
+        violations=[
+            GuardViolation(
+                file="openblade/service.py",
+                line_number=3,
+                line="library.load(1, 0)",
+                pattern="library.load(",
+            )
+        ],
         files_scanned=1,
     )
 
@@ -196,7 +211,14 @@ def test_format_report_includes_error_code() -> None:
 
 def test_format_report_includes_line_number() -> None:
     result = GuardResult(
-        violations=[GuardViolation(file="openblade/service.py", line_number=7, line="ltfs.format('VOL001', token)", pattern="ltfs.format(")],
+        violations=[
+            GuardViolation(
+                file="openblade/service.py",
+                line_number=7,
+                line="ltfs.format('VOL001', token)",
+                pattern="ltfs.format(",
+            )
+        ],
         files_scanned=1,
     )
 
@@ -210,6 +232,15 @@ def test_guard_result_passed_true_when_no_violations() -> None:
 
 
 def test_guard_result_passed_false_when_violations() -> None:
-    result = GuardResult(violations=[GuardViolation(file="openblade/service.py", line_number=1, line="library.load(1, 0)", pattern="library.load(")])
+    result = GuardResult(
+        violations=[
+            GuardViolation(
+                file="openblade/service.py",
+                line_number=1,
+                line="library.load(1, 0)",
+                pattern="library.load(",
+            )
+        ]
+    )
 
     assert result.passed is False

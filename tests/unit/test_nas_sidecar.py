@@ -183,7 +183,9 @@ preserve_tree: false
         verify_after_archive=True,
     )
 
-    effective = resolver.resolve_effective_policy(str(directory), share_default_policy=share_default)
+    effective = resolver.resolve_effective_policy(
+        str(directory), share_default_policy=share_default
+    )
 
     assert effective.policy_id == "sidecar-policy"
     assert effective.policy_name == "sidecar-policy"
@@ -206,7 +208,9 @@ def test_partial_sidecar_merge(fs, resolver: SidecarResolver) -> None:
         copies_required=2,
     )
 
-    effective = resolver.resolve_effective_policy(str(directory), share_default_policy=share_default)
+    effective = resolver.resolve_effective_policy(
+        str(directory), share_default_policy=share_default
+    )
 
     assert effective.ingest_mode == IngestMode.SOURCE_STREAM
     assert effective.copies == 2
@@ -233,7 +237,9 @@ def test_policy_name_resolves_storage_policy_fields(fs) -> None:
     )
     resolver = SidecarResolver(nas_service=StubNasService(resolved_policy))
 
-    effective = resolver.resolve_effective_policy(str(directory), share_default_policy=share_default)
+    effective = resolver.resolve_effective_policy(
+        str(directory), share_default_policy=share_default
+    )
 
     assert effective.policy_id == "resolved-policy"
     assert effective.policy_name == "Resolved Policy"

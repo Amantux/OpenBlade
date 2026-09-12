@@ -1,4 +1,5 @@
 """test_09_restore_cycle.py — Restore/hydration: plan → queue → progress → verify."""
+
 from __future__ import annotations
 
 import httpx
@@ -8,7 +9,9 @@ pytestmark = pytest.mark.i3
 
 
 class TestRestorePlan:
-    def test_restore_plan_endpoint_exists(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_restore_plan_endpoint_exists(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.post(
             "/restore/plan",
             headers=auth_headers,
@@ -16,7 +19,9 @@ class TestRestorePlan:
         )
         assert resp.status_code != 404, "Restore plan endpoint is missing"
 
-    def test_restore_plan_returns_tape_info(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_restore_plan_returns_tape_info(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.post(
             "/restore/plan",
             headers=auth_headers,
@@ -32,11 +37,15 @@ class TestRestorePlan:
 
 
 class TestRestoreQueue:
-    def test_restore_queue_endpoint_exists(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_restore_queue_endpoint_exists(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/storage/restore-queue", headers=auth_headers)
         assert resp.status_code != 404, "Restore queue endpoint is missing"
 
-    def test_restore_queue_returns_list(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_restore_queue_returns_list(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/restore/jobs", headers=auth_headers)
         if resp.status_code == 404:
             pytest.skip("Restore jobs endpoint not available")
@@ -44,7 +53,9 @@ class TestRestoreQueue:
         data = resp.json()
         assert isinstance(data, (list, dict))
 
-    def test_enqueue_restore_job(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_enqueue_restore_job(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.post(
             "/restore/jobs",
             headers=auth_headers,
@@ -58,7 +69,9 @@ class TestRestoreQueue:
 
 
 class TestRestoreParallel:
-    def test_parallel_restore_planner_fields(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_parallel_restore_planner_fields(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         """Restore planner should report parallel groups when allow_parallel=True."""
         resp = i3_client.post(
             "/restore/plan",

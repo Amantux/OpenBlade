@@ -29,6 +29,7 @@ def authed(client: TestClient) -> TestClient:
 # Drive cleaning reports
 # ---------------------------------------------------------------------------
 
+
 def test_drive_cleaning_report_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/drives/reports/cleaning")
     assert resp.status_code == 401
@@ -40,7 +41,9 @@ def test_drive_cleaning_report_returns_200(authed: TestClient) -> None:
 
 
 def test_drive_cleaning_email_requires_admin(client: TestClient) -> None:
-    resp = client.post("/aml/drives/reports/cleaning/email", json={"email": {"recipient": "a@b.com"}})
+    resp = client.post(
+        "/aml/drives/reports/cleaning/email", json={"email": {"recipient": "a@b.com"}}
+    )
     assert resp.status_code == 401
 
 
@@ -56,6 +59,7 @@ def test_drive_cleaning_email_returns_200(authed: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Drive clean tasks
 # ---------------------------------------------------------------------------
+
 
 def test_list_clean_tasks_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/drive/DRV-001/operations/clean")
@@ -94,6 +98,7 @@ def test_get_clean_task_not_found(authed: TestClient) -> None:
 # Drive load/unload tasks
 # ---------------------------------------------------------------------------
 
+
 def test_list_load_tasks_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/drive/DRV-001/operations/load")
     assert resp.status_code == 200
@@ -118,6 +123,7 @@ def test_get_unload_task_not_found(authed: TestClient) -> None:
 # Physical library elements
 # ---------------------------------------------------------------------------
 
+
 def test_physical_elements_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/physicalLibrary/elements")
     assert resp.status_code == 401
@@ -137,6 +143,7 @@ def test_physical_element_address_not_found(authed: TestClient) -> None:
 # Robotics — route ordering regression
 # ---------------------------------------------------------------------------
 
+
 def test_robotics_list_returns_200(authed: TestClient) -> None:
     """Static /physicalLibrary/robotics must not be swallowed by /{id}."""
     resp = authed.get("/aml/physicalLibrary/robotics")
@@ -151,6 +158,7 @@ def test_robotics_detail_not_found(authed: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Towers & magazines
 # ---------------------------------------------------------------------------
+
 
 def test_towers_list_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/physicalLibrary/towers")
@@ -312,7 +320,9 @@ def test_start_drive_cleaning_updates_existing_report_for_target_drive(authed: T
     assert before_response.status_code == 200
     before_reports = before_response.json()["driveCleaningList"]["driveCleaning"]
     target_serial = str(before_reports[0]["serialNumber"])
-    target_before = next(item for item in before_reports if str(item["serialNumber"]) == target_serial)
+    target_before = next(
+        item for item in before_reports if str(item["serialNumber"]) == target_serial
+    )
 
     clean_response = authed.post(f"/aml/drive/{target_serial}/operations/clean")
     assert clean_response.status_code == 200
@@ -332,6 +342,7 @@ def test_start_drive_cleaning_updates_existing_report_for_target_drive(authed: T
 # ---------------------------------------------------------------------------
 # Diagnostics tests — route ordering regression
 # ---------------------------------------------------------------------------
+
 
 def test_diagnostics_tests_list_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/diagnostics/tests")

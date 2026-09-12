@@ -41,8 +41,7 @@ def _wait_for_ingest(job_id: str) -> dict[str, object]:
         payload = status_response.json()
         if payload["status"] in {"failed", "cancelled"}:
             pytest.fail(
-                f"Ingest job {job_id} reached {payload['status']}: "
-                f"{payload.get('errors', [])}"
+                f"Ingest job {job_id} reached {payload['status']}: {payload.get('errors', [])}"
             )
         if payload["status"] == "archived":
             return payload
@@ -295,7 +294,10 @@ def test_nas_i3_end_to_end_archive_recall_hash_verified(iteration: int, tmp_path
                 read_result = ltfs.read_file(handle, tape_path, readback_path)
                 assert read_result.success
                 tape_bytes = readback_path.read_bytes()
-                assert hashlib.sha256(tape_bytes).hexdigest() == source_hashes[str(record["relative_path"])]
+                assert (
+                    hashlib.sha256(tape_bytes).hexdigest()
+                    == source_hashes[str(record["relative_path"])]
+                )
                 stat = ltfs.stat(handle, tape_path)
                 assert stat.checksum_sha256 == source_hashes[str(record["relative_path"])]
                 assert stat.size_bytes == int(record["size_bytes"])

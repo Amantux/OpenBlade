@@ -276,7 +276,9 @@ class NasService:
         raise KeyError("file not found")
 
     def list_datasets(self, pool_id: str | None = None) -> list[NasDataset]:
-        return [NasDataset.model_validate(row) for row in self.repository.list_nas_datasets(pool_id)]
+        return [
+            NasDataset.model_validate(row) for row in self.repository.list_nas_datasets(pool_id)
+        ]
 
     def get_dataset(self, dataset_id: str) -> NasDataset | None:
         row = self.repository.get_nas_dataset(dataset_id)

@@ -79,7 +79,9 @@ def _mark_aml_drive_idle(barcode: str, drive_id: int, slot_id: int | None) -> No
         aml_state.update_aml_drive(drive_name, {"state": "idle", "loadedMedia": None})
     media = aml_state.get_aml_media(barcode)
     if media is not None and slot_id is not None:
-        aml_state.update_aml_media(barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"})
+        aml_state.update_aml_media(
+            barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"}
+        )
 
 
 def _load_if_needed(

@@ -102,7 +102,10 @@ class ArchiveLifecycleManager:
             final_file_state=self._current_file_state(file_record.id, fallback=file_record.status),
         )
         step_calls = [
-            ("verify_checksum", lambda: self._step_verify_checksum(file_record, barcode, tape_path)),
+            (
+                "verify_checksum",
+                lambda: self._step_verify_checksum(file_record, barcode, tape_path),
+            ),
             (
                 "write_manifest",
                 lambda: self._step_write_manifest(file_record, barcode, tape_path, policy_name),
@@ -200,7 +203,9 @@ class ArchiveLifecycleManager:
                         success=False,
                         steps_failed=["resolve_tape_path"],
                         errors=[f"missing tape path for file {current.id}"],
-                        final_file_state=self._current_file_state(current.id, fallback=current.status),
+                        final_file_state=self._current_file_state(
+                            current.id, fallback=current.status
+                        ),
                     )
                 else:
                     file_result = self.complete_file_archive(
@@ -258,7 +263,9 @@ class ArchiveLifecycleManager:
             result.errors.append("dataset not marked archived")
         return result
 
-    def _step_verify_checksum(self, file_record: NasFileRecord, barcode: str, tape_path: str) -> bool:
+    def _step_verify_checksum(
+        self, file_record: NasFileRecord, barcode: str, tape_path: str
+    ) -> bool:
         """Verify tape bytes exist and match file_record.checksum_sha256 when available."""
         tape_bytes = self.metadata_writer._read_bytes(barcode, tape_path)
         if tape_bytes is None:
@@ -278,9 +285,11 @@ class ArchiveLifecycleManager:
     ) -> bool:
         dataset = self._require_dataset(file_record.dataset_id)
         existing = self.metadata_writer.read_manifest(barcode)
-        files = [] if existing is None else [
-            entry for entry in existing.files if entry.file_record_id != file_record.id
-        ]
+        files = (
+            []
+            if existing is None
+            else [entry for entry in existing.files if entry.file_record_id != file_record.id]
+        )
         files.append(
             ManifestFileEntry(
                 logical_path=file_record.relative_path,
@@ -298,15 +307,22 @@ class ArchiveLifecycleManager:
         manifest = ManifestJson(
             barcode=barcode,
             openblade_tape_id=existing.openblade_tape_id if existing is not None else barcode,
-            volume_group=(existing.volume_group if existing is not None else dataset.volume_group_id) or "",
-            pools=_ordered_unique([
-                *(existing.pools if existing is not None else []),
-                *([file_record.pool_id] if file_record.pool_id else []),
-            ]),
-            datasets=_ordered_unique([
-                *(existing.datasets if existing is not None else []),
-                file_record.dataset_id,
-            ]),
+            volume_group=(
+                existing.volume_group if existing is not None else dataset.volume_group_id
+            )
+            or "",
+            pools=_ordered_unique(
+                [
+                    *(existing.pools if existing is not None else []),
+                    *([file_record.pool_id] if file_record.pool_id else []),
+                ]
+            ),
+            datasets=_ordered_unique(
+                [
+                    *(existing.datasets if existing is not None else []),
+                    file_record.dataset_id,
+                ]
+            ),
             tape_sets=list(existing.tape_sets if existing is not None else []),
             shard_sets=list(existing.shard_sets if existing is not None else []),
             files=files,
@@ -324,9 +340,11 @@ class ArchiveLifecycleManager:
     ) -> bool:
         dataset = self._require_dataset(dataset_id)
         existing = self.shard_writer.read_shard(barcode)
-        files = [] if existing is None else [
-            entry for entry in existing.files if entry.file_record_id != file_record.id
-        ]
+        files = (
+            []
+            if existing is None
+            else [entry for entry in existing.files if entry.file_record_id != file_record.id]
+        )
         files.append(
             CatalogShardFileEntry(
                 logical_path=file_record.relative_path,
@@ -344,9 +362,11 @@ class ArchiveLifecycleManager:
         )
         files.sort(key=lambda entry: (entry.logical_path, entry.file_record_id))
         dataset_files = [entry for entry in files if entry.dataset_id == dataset_id]
-        datasets = [] if existing is None else [
-            entry for entry in existing.datasets if entry.dataset_id != dataset_id
-        ]
+        datasets = (
+            []
+            if existing is None
+            else [entry for entry in existing.datasets if entry.dataset_id != dataset_id]
+        )
         datasets.append(
             CatalogShardDatasetEntry(
                 dataset_id=dataset_id,
@@ -363,7 +383,10 @@ class ArchiveLifecycleManager:
         shard = CatalogShard(
             barcode=barcode,
             openblade_tape_id=existing.openblade_tape_id if existing is not None else barcode,
-            volume_group=(existing.volume_group if existing is not None else dataset.volume_group_id) or "",
+            volume_group=(
+                existing.volume_group if existing is not None else dataset.volume_group_id
+            )
+            or "",
             generated_at=_utcnow_iso(),
             datasets=sorted(datasets, key=lambda entry: entry.dataset_id),
             files=files,

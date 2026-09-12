@@ -1023,9 +1023,7 @@ def test_only_the_facade_and_the_composition_root_name_the_media_services() -> N
     be a second, unconfirmed path to the same write.
     """
     others = [
-        path
-        for path in _assistant_sources()
-        if path.name not in {MEDIA_PATH_OWNER, "__init__.py"}
+        path for path in _assistant_sources() if path.name not in {MEDIA_PATH_OWNER, "__init__.py"}
     ]
     assert _symbol_offenders(others, MEDIA_SERVICE_SYMBOLS) == []
     assert _symbol_offenders([ASSISTANT_DIR / MEDIA_PATH_OWNER], MEDIA_SERVICE_SYMBOLS)
@@ -1235,9 +1233,7 @@ def test_a_format_cannot_be_smuggled_through_the_yes_no_grade(app_context: Any) 
     attempt must not burn the operator's live authorization.
     """
     registry, facade, action = _planned(app_context, "format_tape", barcode="VOL001L9")
-    forged = MediaAuthorization(
-        action_key=action.key, grade=ConfirmationGrade.YES_NO, response="y"
-    )
+    forged = MediaAuthorization(action_key=action.key, grade=ConfirmationGrade.YES_NO, response="y")
     with pytest.raises(MediaNotAuthorizedError):
         registry.perform(action, facade, forged)
     assert app_context.catalog.get_safety_token(action.token) is not None, "not consumed"
@@ -1355,9 +1351,7 @@ def test_one_shot_mode_offers_neither_tier(app_context: Any) -> None:
     assert not (offered & SETUP_TOOL_NAMES)
 
 
-@pytest.mark.parametrize(
-    "missing", ["media_registry", "media", "confirm_media"]
-)
+@pytest.mark.parametrize("missing", ["media_registry", "media", "confirm_media"])
 def test_a_half_wired_media_session_is_read_only(app_context: Any, missing: str) -> None:
     """Missing any one of the three parts means tier 2 is off, not unconfirmed."""
     parts: dict[str, Any] = {
@@ -1468,9 +1462,7 @@ def test_the_facade_holds_no_reachable_instance_state(app_context: Any) -> None:
     """
     facade = media_facade_for(app_context)
     assert object.__getattribute__(facade, "__dict__") == {}
-    assert all(
-        type(referent).__name__ in {"dict", "type"} for referent in gc.get_referents(facade)
-    )
+    assert all(type(referent).__name__ in {"dict", "type"} for referent in gc.get_referents(facade))
 
 
 # ---------------------------------------------------------------------------
@@ -1600,9 +1592,7 @@ def test_a_declined_format_is_not_re_proposed_under_another_spelling(
 
     session = _media_session(app_context, confirm_media=refuse)
     session._run_media_tool(ToolCall(name="format_tape", arguments={"barcode": "VOL001L9"}))
-    result = json.loads(
-        session._run_media_tool(ToolCall(name="format_tape", arguments=spelling))
-    )
+    result = json.loads(session._run_media_tool(ToolCall(name="format_tape", arguments=spelling)))
     assert result["status"] == "declined_by_operator"
     assert result["repeatedProposal"] is True
     assert asked == ["format_tape"], "asked exactly once, whatever the spelling"

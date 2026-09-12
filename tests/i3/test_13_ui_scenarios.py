@@ -2,6 +2,7 @@
 
 Each test class represents one operator workflow as it would appear in the UI.
 """
+
 from __future__ import annotations
 
 import httpx
@@ -15,7 +16,9 @@ pytestmark = pytest.mark.i3
 class TestDashboardScenario:
     """Operator opens dashboard — key stats should be readable."""
 
-    def test_dashboard_endpoint(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_dashboard_endpoint(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/dashboard/summary", headers=auth_headers)
         assert resp.status_code in (200, 404)
 
@@ -25,7 +28,9 @@ class TestDashboardScenario:
         data = resp.json()
         assert data, "Dashboard health card should have content"
 
-    def test_library_list_for_grid(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_library_list_for_grid(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/api/libraries", headers=auth_headers)
         assert resp.status_code == 200
 
@@ -39,11 +44,15 @@ class TestInventoryBrowseScenario:
         resp = i3_client.get("/aml/library/inventory", headers=auth_headers)
         assert resp.status_code == 200
 
-    def test_physical_map_loads(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_physical_map_loads(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/aml/library/physical", headers=auth_headers)
         assert resp.status_code == 200
 
-    def test_cartridge_list_loads(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_cartridge_list_loads(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/aml/media", headers=auth_headers)
         assert resp.status_code == 200
 
@@ -73,11 +82,15 @@ class TestLoadTapeScenario:
 class TestCatalogBrowseScenario:
     """Operator browses catalog records for an archived dataset."""
 
-    def test_catalog_records_load(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_catalog_records_load(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/catalog", headers=auth_headers)
         assert resp.status_code in (200, 307)
 
-    def test_catalog_rebuild_status(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_catalog_rebuild_status(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/catalog/rebuild/status", headers=auth_headers)
         assert resp.status_code in (200, 404)
 
@@ -89,7 +102,9 @@ class TestJobQueueScenario:
         resp = i3_client.get("/jobs", headers=auth_headers)
         assert resp.status_code in (200, 307)
 
-    def test_jobs_response_is_structured(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_jobs_response_is_structured(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/jobs", headers=auth_headers)
         if resp.status_code in (307,):
             pytest.skip("Jobs behind redirect")

@@ -198,9 +198,7 @@ class AssistantSession:
             self.messages.append(self._system_message())
 
     def _system_message(self) -> dict[str, Any]:
-        return system_message(
-            setup_enabled=self.setup_enabled, media_enabled=self.media_enabled
-        )
+        return system_message(setup_enabled=self.setup_enabled, media_enabled=self.media_enabled)
 
     @property
     def setup_enabled(self) -> bool:

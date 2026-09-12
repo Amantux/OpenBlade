@@ -115,7 +115,9 @@ def test_contract_declares_standalone_packaging_assets() -> None:
     runtime_env_example_path = REPO_ROOT / packaging["runtime_env_example"]
     assert compose_path.exists(), f"Standalone compose file not found: {compose_path}"
     assert runner_path.exists(), f"Standalone runner script not found: {runner_path}"
-    assert runtime_env_example_path.exists(), f"Runtime env template not found: {runtime_env_example_path}"
+    assert runtime_env_example_path.exists(), (
+        f"Runtime env template not found: {runtime_env_example_path}"
+    )
 
 
 def test_standalone_compose_matches_contract_defaults_and_boundary() -> None:
@@ -143,10 +145,13 @@ def test_cross_repo_contract_metadata_is_explicit_and_consistent() -> None:
     assert contract["contract_schema_version"] == "1.0.0"
     assert cross_repo["contract_line"] == contract["compatibility_policy"]["contract_semver"]
     assert cross_repo["api_compatibility_guarantees"]["manual_scope"] == contract["scope_policy"]
-    assert cross_repo["api_compatibility_guarantees"]["matrix_minimum_case_count"] == contract[
-        "minimum_cases_per_endpoint"
-    ]
-    assert {"/health", "/aml/"}.issubset(set(cross_repo["api_compatibility_guarantees"]["required_endpoints"]))
+    assert (
+        cross_repo["api_compatibility_guarantees"]["matrix_minimum_case_count"]
+        == contract["minimum_cases_per_endpoint"]
+    )
+    assert {"/health", "/aml/"}.issubset(
+        set(cross_repo["api_compatibility_guarantees"]["required_endpoints"])
+    )
 
     repo_root = Path(__file__).resolve().parents[2]
     required_paths = [
@@ -156,7 +161,9 @@ def test_cross_repo_contract_metadata_is_explicit_and_consistent() -> None:
         *artifacts["workflow_files"],
     ]
     for relative_path in required_paths:
-        assert (repo_root / relative_path).exists(), f"Missing contract artifact path: {relative_path}"
+        assert (repo_root / relative_path).exists(), (
+            f"Missing contract artifact path: {relative_path}"
+        )
 
     for check in checks:
         workflow_path = repo_root / check["workflow_file"]

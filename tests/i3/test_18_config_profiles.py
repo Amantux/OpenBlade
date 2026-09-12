@@ -43,6 +43,7 @@ _EMU_ENV = (
 # Builder invariants — every named profile must be internally consistent.
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.parametrize("name", sorted(NAMED_PROFILES))
 def test_named_profile_is_internally_consistent(name: str) -> None:
     profile = NAMED_PROFILES[name]
@@ -112,12 +113,11 @@ def test_invalid_profile_fails_fast(mix, slot_count, occupancy) -> None:
 # Live reflection — the running app must report the env-selected shape.
 # --------------------------------------------------------------------------- #
 
+
 def _client_for_profile(tmp_path) -> TestClient:
     # The mock robotics backend is built at context creation, so the env must be set
     # before create_context(); aml_state reads it per-request.
-    reset_context(
-        create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'profile.db'}"))
-    )
+    reset_context(create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'profile.db'}")))
     return TestClient(app)
 
 
@@ -156,5 +156,7 @@ def test_running_app_reflects_selected_profile(
     assert len(inventory.get("drives") or []) == expected_drive_count
 
     drives_payload = client.get("/aml/drives", headers=auth).json()
-    drives = drives_payload.get("drives") or (drives_payload.get("driveList") or {}).get("drive") or []
+    drives = (
+        drives_payload.get("drives") or (drives_payload.get("driveList") or {}).get("drive") or []
+    )
     assert len(drives) == expected_drive_count

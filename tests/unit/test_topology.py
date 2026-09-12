@@ -24,26 +24,33 @@ def _ok_probe(_method: str, _path: str) -> int:
 
 
 def test_healthy_topology_passes() -> None:
-    findings = verify_topology(probe=_ok_probe, context=_wired_context(), emulator_urls=["http://e:8010"])
+    findings = verify_topology(
+        probe=_ok_probe, context=_wired_context(), emulator_urls=["http://e:8010"]
+    )
     assert is_healthy_topology(findings)
 
 
 def test_auth_gated_endpoints_count_as_present() -> None:
     # 401/403 mean "registered + auth working", not a topology failure.
-    findings = verify_topology(probe=lambda m, p: 401, context=_wired_context(), emulator_urls=["x"])
+    findings = verify_topology(
+        probe=lambda m, p: 401, context=_wired_context(), emulator_urls=["x"]
+    )
     assert is_healthy_topology(findings)
 
 
 def test_missing_endpoint_blocks() -> None:
     def probe(_m: str, path: str) -> int:
         return 404 if path == "/jobs/" else 200
+
     findings = verify_topology(probe=probe, context=_wired_context(), emulator_urls=["x"])
     assert not is_healthy_topology(findings)
     assert any(f.code == "missing_endpoint" and "/jobs/" in f.message for f in findings)
 
 
 def test_server_error_endpoint_blocks() -> None:
-    findings = verify_topology(probe=lambda m, p: 503, context=_wired_context(), emulator_urls=["x"])
+    findings = verify_topology(
+        probe=lambda m, p: 503, context=_wired_context(), emulator_urls=["x"]
+    )
     assert not is_healthy_topology(findings)
     assert any(f.code == "endpoint_error" for f in findings)
 

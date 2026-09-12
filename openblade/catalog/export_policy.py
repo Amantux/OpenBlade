@@ -75,9 +75,7 @@ class ExportAssessment:
             more = self.archived_files_on_cartridge - len(self.sample_paths)
             parts.append(f"e.g. {shown}" + (f" (+{more} more)" if more > 0 else ""))
         if self.pending_files_on_cartridge:
-            parts.append(
-                f"{self.pending_files_on_cartridge} write(s) still in flight to it"
-            )
+            parts.append(f"{self.pending_files_on_cartridge} write(s) still in flight to it")
         if self.volume_group_barcodes_with_data:
             parts.append(
                 "other cartridges in that group hold data too "
@@ -85,8 +83,7 @@ class ExportAssessment:
                 "striped file may lose a shard"
             )
         return (
-            "; ".join(parts)
-            + ". Exporting makes these unrestorable until the cartridge is "
+            "; ".join(parts) + ". Exporting makes these unrestorable until the cartridge is "
             "imported again. Pass --force if that is what you mean."
         )
 
@@ -108,9 +105,7 @@ def assess_export(catalog: CatalogRepository, barcode: str) -> ExportAssessment:
     assessment = ExportAssessment(barcode=barcode)
 
     instances = catalog.list_instances_for_barcode(barcode)
-    archived = [
-        instance for instance in instances if instance.state in ARCHIVED_INSTANCE_STATES
-    ]
+    archived = [instance for instance in instances if instance.state in ARCHIVED_INSTANCE_STATES]
     assessment.archived_files_on_cartridge = len(archived)
     assessment.pending_files_on_cartridge = sum(
         1 for instance in instances if instance.state in _PENDING_INSTANCE_STATES

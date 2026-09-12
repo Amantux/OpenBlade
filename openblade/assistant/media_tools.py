@@ -254,7 +254,9 @@ def _number(arguments: Mapping[str, Any], *names: str) -> int | None:
     try:
         return int(str(raw).strip())
     except (TypeError, ValueError):
-        raise MediaRefusedError(f"{raw!r} is not a slot or drive number.", code="invalid_number") from None
+        raise MediaRefusedError(
+            f"{raw!r} is not a slot or drive number.", code="invalid_number"
+        ) from None
 
 
 def _yes_no(_: dict[str, Any], __: JSONDict) -> tuple[ConfirmationGrade, str | None]:
@@ -272,9 +274,7 @@ def _normalize_load(arguments: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _plan_load(facade: MediaFacade, arguments: dict[str, Any]) -> JSONDict:
-    result: JSONDict = facade.plan_load_tape(
-        barcode=arguments["barcode"], drive=arguments["drive"]
-    )
+    result: JSONDict = facade.plan_load_tape(barcode=arguments["barcode"], drive=arguments["drive"])
     return result
 
 
@@ -349,9 +349,7 @@ def _normalize_move(arguments: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _plan_move(facade: MediaFacade, arguments: dict[str, Any]) -> JSONDict:
-    result: JSONDict = facade.plan_move_tape(
-        barcode=arguments["barcode"], slot=arguments["slot"]
-    )
+    result: JSONDict = facade.plan_move_tape(barcode=arguments["barcode"], slot=arguments["slot"])
     return result
 
 
@@ -399,8 +397,7 @@ def _describe_format(_: dict[str, Any], plan: JSONDict) -> str:
         f"  Everything on the cartridge is destroyed: {lost}{where}, "
         f"{human_bytes(plan.get('usedBytes'))} recorded as used of "
         f"{human_bytes(plan.get('capacityBytes'))} capacity.",
-        "  WORM: not reported by this backend — check the cartridge label yourself if "
-        "it matters.",
+        "  WORM: not reported by this backend — check the cartridge label yourself if it matters.",
         f"  The format writes {plan.get('wouldWrite')}.",
         f"  A one-time safety token was issued by the dry run and expires in "
         f"{plan.get('tokenTtlSeconds')}s — if it expires while you check the "
@@ -419,7 +416,7 @@ def _describe_format(_: dict[str, Any], plan: JSONDict) -> str:
     for warning in plan.get("warnings") or []:
         lines.append(f"  Dry run: {warning}")
     lines.append(
-        f"  Type the barcode {barcode} to confirm. Anything else — including \"y\" — cancels."
+        f'  Type the barcode {barcode} to confirm. Anything else — including "y" — cancels.'
     )
     return "\n".join(lines)
 
@@ -435,9 +432,7 @@ def _apply_format(facade: MediaFacade, action: PendingMediaAction) -> JSONDict:
     without it — the facade refuses a missing token, and ``FormatService.confirm``
     refuses one that is not in ``safety_tokens``.
     """
-    result: JSONDict = facade.format_tape(
-        barcode=action.arguments["barcode"], token=action.token
-    )
+    result: JSONDict = facade.format_tape(barcode=action.arguments["barcode"], token=action.token)
     return result
 
 
@@ -499,9 +494,7 @@ def _normalize_restore(arguments: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _plan_restore(facade: MediaFacade, arguments: dict[str, Any]) -> JSONDict:
-    result: JSONDict = facade.plan_restore_path(
-        path=arguments["path"], dest=arguments["dest"]
-    )
+    result: JSONDict = facade.plan_restore_path(path=arguments["path"], dest=arguments["dest"])
     return result
 
 
@@ -835,8 +828,7 @@ class MediaToolRegistry:
             )
         if authorization.action_key != action.key:
             raise MediaNotAuthorizedError(
-                f"The authorization presented for {action.tool} was issued for a "
-                "different action."
+                f"The authorization presented for {action.tool} was issued for a different action."
             )
         if authorization.grade is not action.grade:
             raise MediaNotAuthorizedError(

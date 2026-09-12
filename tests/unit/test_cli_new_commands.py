@@ -61,8 +61,16 @@ def stdout_json(result) -> object:
 
 def bootstrap(cli_home: Path, *, ie_slots: int = 4) -> None:
     result = invoke(
-        "mock", "init", "--slots", "6", "--drives", "2",
-        "--cartridges", "3", "--ie-slots", str(ie_slots),
+        "mock",
+        "init",
+        "--slots",
+        "6",
+        "--drives",
+        "2",
+        "--cartridges",
+        "3",
+        "--ie-slots",
+        str(ie_slots),
     )
     assert result.exit_code == 0, result.output
     for barcode in ("MCK00001", "MCK00002", "MCK00003"):
@@ -101,9 +109,7 @@ class TestBackwardsCompatibleInvocations:
         assert stdout_json(result)["status"] == "completed"
         assert dest.read_bytes() == b"hello"
 
-    def test_bare_archive_still_takes_volume_group_and_path(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_bare_archive_still_takes_volume_group_and_path(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         source = tmp_path / "src"
         source.mkdir()
@@ -114,18 +120,14 @@ class TestBackwardsCompatibleInvocations:
         assert result.exit_code == 0, result.output
         assert stdout_json(result)["status"] == "completed"
 
-    def test_restore_without_options_or_subcommand_says_what_to_do(
-        self, cli_home
-    ) -> None:
+    def test_restore_without_options_or_subcommand_says_what_to_do(self, cli_home) -> None:
         result = runner.invoke(cli_main.app, ["restore"])
         assert result.exit_code != 0
         assert "--path" in result.output and "restore tree" in result.output
 
 
 class TestRestoreTree:
-    def test_restores_the_tree_and_prints_one_json_summary(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_restores_the_tree_and_prints_one_json_summary(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         source = tmp_path / "src"
         expected = seed_tree(source)
@@ -162,17 +164,13 @@ class TestRestoreTree:
         invoke("archive", "--volume-group", "photos", "--path", str(source))
         dest = tmp_path / "out"
 
-        result = invoke(
-            "restore", "tree", "/photos", "--dest", str(dest), "--dry-run"
-        )
+        result = invoke("restore", "tree", "/photos", "--dest", str(dest), "--dry-run")
 
         assert result.exit_code == 0
         assert stdout_json(result)["dryRun"] is True
         assert not dest.exists()
 
-    def test_a_failed_file_exits_non_zero_with_the_curated_error(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_a_failed_file_exits_non_zero_with_the_curated_error(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         source = tmp_path / "src"
         seed_tree(source)
@@ -207,9 +205,7 @@ class TestRestoreFile:
         assert payload["sourceBarcodes"] == ["MCK00001"]
         assert (dest / "one.txt").read_bytes() == b"hello"
 
-    def test_unknown_path_is_a_parameter_error_not_a_traceback(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_unknown_path_is_a_parameter_error_not_a_traceback(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         result = runner.invoke(
             cli_main.app, ["restore", "file", "/nope.txt", "--dest", str(tmp_path)]
@@ -219,17 +215,23 @@ class TestRestoreFile:
 
 
 class TestArchiveSharded:
-    def test_stripe_across_two_lanes_prints_one_json_document(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_stripe_across_two_lanes_prints_one_json_document(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         source = tmp_path / "src"
         seed_tree(source)
 
         result = invoke(
-            "archive", "sharded", str(source),
-            "--volume-group", "shards", "--mode", "stripe",
-            "--lane-barcode", "MCK00001", "--lane-barcode", "MCK00002",
+            "archive",
+            "sharded",
+            str(source),
+            "--volume-group",
+            "shards",
+            "--mode",
+            "stripe",
+            "--lane-barcode",
+            "MCK00001",
+            "--lane-barcode",
+            "MCK00002",
         )
 
         assert result.exit_code == 0, result.output
@@ -241,26 +243,30 @@ class TestArchiveSharded:
         assert payload["blockSizeMb"] == 128  # the API route's default
         assert payload["errors"] == []
 
-    def test_hyphenated_and_underscored_mode_names_both_work(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_hyphenated_and_underscored_mode_names_both_work(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         source = tmp_path / "src"
         source.mkdir()
         (source / "big.bin").write_bytes(bytes(range(256)) * 2000)
 
         result = invoke(
-            "archive", "sharded", str(source),
-            "--volume-group", "shards", "--mode", "block-stripe",
-            "--lane-barcode", "MCK00001", "--lane-barcode", "MCK00002",
+            "archive",
+            "sharded",
+            str(source),
+            "--volume-group",
+            "shards",
+            "--mode",
+            "block-stripe",
+            "--lane-barcode",
+            "MCK00001",
+            "--lane-barcode",
+            "MCK00002",
         )
 
         assert result.exit_code == 0, result.output
         assert stdout_json(result)["mode"] == "block_stripe"
 
-    def test_block_stripe_with_one_lane_is_refused_like_the_api(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_block_stripe_with_one_lane_is_refused_like_the_api(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         source = tmp_path / "src"
         seed_tree(source)
@@ -268,9 +274,15 @@ class TestArchiveSharded:
         result = runner.invoke(
             cli_main.app,
             [
-                "archive", "sharded", str(source),
-                "--volume-group", "shards", "--mode", "block-stripe",
-                "--lane-barcode", "MCK00001",
+                "archive",
+                "sharded",
+                str(source),
+                "--volume-group",
+                "shards",
+                "--mode",
+                "block-stripe",
+                "--lane-barcode",
+                "MCK00001",
             ],
         )
 
@@ -284,24 +296,32 @@ class TestArchiveSharded:
         result = runner.invoke(
             cli_main.app,
             [
-                "archive", "sharded", str(source),
-                "--volume-group", "shards", "--mode", "raid5",
-                "--lane-barcode", "MCK00001",
+                "archive",
+                "sharded",
+                str(source),
+                "--volume-group",
+                "shards",
+                "--mode",
+                "raid5",
+                "--lane-barcode",
+                "MCK00001",
             ],
         )
         assert result.exit_code != 0
         assert "block_stripe" in result.output
 
-    def test_missing_source_is_refused_before_any_media_moves(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_missing_source_is_refused_before_any_media_moves(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         result = runner.invoke(
             cli_main.app,
             [
-                "archive", "sharded", str(tmp_path / "nope"),
-                "--volume-group", "shards",
-                "--lane-barcode", "MCK00001",
+                "archive",
+                "sharded",
+                str(tmp_path / "nope"),
+                "--volume-group",
+                "shards",
+                "--lane-barcode",
+                "MCK00001",
             ],
         )
         assert result.exit_code != 0
@@ -331,9 +351,7 @@ class TestMailslot:
         assert export_payload["destinationSlotChosen"] is True
 
         listing = stdout_json(invoke("mailslot", "list"))
-        assert listing["occupied"] == [
-            {"slotId": 7, "occupied": True, "barcode": "MCK00003"}
-        ]
+        assert listing["occupied"] == [{"slotId": 7, "occupied": True, "barcode": "MCK00003"}]
 
         imported = invoke("mailslot", "import", "7")
         assert imported.exit_code == 0, imported.output
@@ -342,9 +360,7 @@ class TestMailslot:
         assert import_payload["destinationSlot"] == 3
         assert stdout_json(invoke("mailslot", "list"))["occupiedCount"] == 0
 
-    def test_the_chosen_slot_is_named_on_stderr_not_mixed_into_stdout(
-        self, cli_home
-    ) -> None:
+    def test_the_chosen_slot_is_named_on_stderr_not_mixed_into_stdout(self, cli_home) -> None:
         bootstrap(cli_home)
         result = invoke("mailslot", "export", "MCK00003")
         stdout_json(result)
@@ -361,9 +377,7 @@ class TestMailslot:
         assert payload["destinationSlot"] == 6
         assert payload["destinationSlotChosen"] is False
 
-    def test_export_refuses_a_cartridge_with_data_and_names_it(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_export_refuses_a_cartridge_with_data_and_names_it(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         source = tmp_path / "src"
         seed_tree(source)
@@ -379,9 +393,7 @@ class TestMailslot:
         assert result.stdout.strip() == ""
         assert stdout_json(invoke("mailslot", "list"))["occupiedCount"] == 0
 
-    def test_export_with_force_reports_what_went_out_of_the_door(
-        self, cli_home, tmp_path
-    ) -> None:
+    def test_export_with_force_reports_what_went_out_of_the_door(self, cli_home, tmp_path) -> None:
         bootstrap(cli_home)
         source = tmp_path / "src"
         seed_tree(source)
@@ -395,9 +407,7 @@ class TestMailslot:
         assert payload["exported"]["archivedFilesOnCartridge"] == 3
         assert payload["exported"]["volumeGroup"] == "photos"
 
-    def test_import_from_an_empty_element_exits_one_with_a_typed_error(
-        self, cli_home
-    ) -> None:
+    def test_import_from_an_empty_element_exits_one_with_a_typed_error(self, cli_home) -> None:
         bootstrap(cli_home)
         result = invoke("mailslot", "import", "8")
         assert result.exit_code == 1
@@ -430,9 +440,7 @@ class TestMailslot:
         record = context.catalog.create_file_record(
             "/photos/never-written.bin", 10, "abc", group.id
         )
-        context.catalog.create_file_instance(
-            record.id, "MCK00001", "/photos/never-written.bin"
-        )
+        context.catalog.create_file_instance(record.id, "MCK00001", "/photos/never-written.bin")
 
         result = invoke("restore", "tree", "/photos", "--dest", str(tmp_path / "out"))
 
@@ -451,6 +459,4 @@ def test_mock_state_round_trips_the_mailslot(cli_home) -> None:
     # A fresh command re-reads mock_state.json from scratch.
     payload = stdout_json(invoke("mailslot", "list"))
 
-    assert payload["occupied"] == [
-        {"slotId": 7, "occupied": True, "barcode": "MCK00002"}
-    ]
+    assert payload["occupied"] == [{"slotId": 7, "occupied": True, "barcode": "MCK00002"}]

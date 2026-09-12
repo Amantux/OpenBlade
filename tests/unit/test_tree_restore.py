@@ -326,9 +326,7 @@ class TestStripeAcrossTapes:
 
 
 class TestBlockStripeSpanningTapes:
-    def test_a_file_split_across_tapes_comes_back_whole(
-        self, rig, tmp_path: Path
-    ) -> None:
+    def test_a_file_split_across_tapes_comes_back_whole(self, rig, tmp_path: Path) -> None:
         repo, library, ltfs = rig
         source = tmp_path / "src"
         source.mkdir()
@@ -430,9 +428,7 @@ class TestDryRun:
 
         job = repo.create_job("restore", {})
         result = run_tree_restore(
-            TreeRestoreRequest(
-                catalog_prefix=str(source), dest_dir=dest, dry_run=True
-            ),
+            TreeRestoreRequest(catalog_prefix=str(source), dest_dir=dest, dry_run=True),
             library,
             ltfs,
             repo,

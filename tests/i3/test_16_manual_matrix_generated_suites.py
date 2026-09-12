@@ -38,7 +38,6 @@ def test_generated_suites_exactly_cover_manual_matrix_case_templates() -> None:
     assert generated_templates == expected_templates
 
 
-
 def test_each_manual_endpoint_has_minimum_generated_cases() -> None:
     matrix = load_manual_matrix()
     generated_cases = build_generated_spec_cases(matrix)
@@ -51,7 +50,6 @@ def test_each_manual_endpoint_has_minimum_generated_cases() -> None:
         assert len(cases_by_endpoint[endpoint_id]) >= required_minimum
 
 
-
 def test_each_endpoint_includes_known_bad_negative_and_state_transition_cases() -> None:
     generated_cases = build_generated_spec_cases()
     cases_by_endpoint = group_generated_cases_by_endpoint(generated_cases)
@@ -61,7 +59,6 @@ def test_each_endpoint_includes_known_bad_negative_and_state_transition_cases() 
         assert any(case.is_state_transition for case in endpoint_cases), endpoint_id
 
 
-
 def test_each_endpoint_spans_required_return_state_classes() -> None:
     generated_cases = build_generated_spec_cases()
     cases_by_endpoint = group_generated_cases_by_endpoint(generated_cases)
@@ -69,7 +66,6 @@ def test_each_endpoint_spans_required_return_state_classes() -> None:
     for endpoint_id, endpoint_cases in cases_by_endpoint.items():
         endpoint_classes = {case.return_state_class for case in endpoint_cases}
         assert REQUIRED_ENDPOINT_RETURN_STATE_CLASSES.issubset(endpoint_classes), endpoint_id
-
 
 
 def test_return_state_classes_have_policy_minimum_generated_depth() -> None:

@@ -11,6 +11,7 @@ Env vars:
     OPENBLADE_API_TOKEN       native-REST bearer token, if the target enforces one
     OPENBLADE_API_TOKEN_FILE  file holding that token (takes precedence)
 """
+
 from __future__ import annotations
 
 import os
@@ -26,6 +27,7 @@ from tests.i3.timing import get_profile, get_profile_name
 # Markers
 # ---------------------------------------------------------------------------
 
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "i3: Quantum i3 emulator + protocol tests")
     config.addinivalue_line("markers", "real_i3: tests that require a physical Quantum i3")
@@ -34,6 +36,7 @@ def pytest_configure(config: pytest.Config) -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _i3_base_url() -> str:
     return os.environ.get("I3_AML_URL", "http://localhost:8000").rstrip("/")
@@ -115,6 +118,7 @@ def _attach_native_api_token(request: httpx.Request) -> None:
 # Core fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="session")
 def i3_mode() -> str:
     return os.environ.get("I3_TEST_MODE", "emulator").strip().lower()
@@ -184,6 +188,7 @@ def auth_headers(i3_client: httpx.Client, i3_credentials: tuple[str, str]) -> di
         pass
     # Fall back to basic auth embedded in header
     import base64
+
     creds = base64.b64encode(f"{user}:{password}".encode()).decode()
     return {"Authorization": f"Basic {creds}"}
 

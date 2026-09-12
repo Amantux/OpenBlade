@@ -91,16 +91,14 @@ def catalog_fingerprint(context: AppContext, source: Path) -> list[dict[str, Any
                 "shard_profile": record.shard_profile,
                 "block_size": record.block_size,
                 "instances": sorted(
-                    (instance.barcode, instance.state)
-                    for instance in record.instances
+                    (instance.barcode, instance.state) for instance in record.instances
                 ),
                 "shards": [
                     {
                         "index": shard.shard_index,
                         "size": shard.size_bytes,
                         "instances": sorted(
-                            (instance.barcode, instance.state)
-                            for instance in shard.instances
+                            (instance.barcode, instance.state) for instance in shard.instances
                         ),
                     }
                     for shard in shards
@@ -168,11 +166,17 @@ def test_cli_and_api_paths_produce_the_same_catalog(
     result = runner.invoke(
         cli_main.app,
         [
-            "archive", "sharded", str(cli_source),
-            "--volume-group", "shards",
-            "--mode", mode.value,
-            "--lane-barcode", LANES[0],
-            "--lane-barcode", LANES[1],
+            "archive",
+            "sharded",
+            str(cli_source),
+            "--volume-group",
+            "shards",
+            "--mode",
+            mode.value,
+            "--lane-barcode",
+            LANES[0],
+            "--lane-barcode",
+            LANES[1],
         ],
         catch_exceptions=False,
     )

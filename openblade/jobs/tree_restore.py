@@ -231,9 +231,7 @@ def plan_tree_restore(
         planned.append(
             _PlannedFile(
                 catalog_path=str(record.path),
-                dest_path=request.dest_dir.joinpath(
-                    *_relative_parts(str(record.path), prefix)
-                ),
+                dest_path=request.dest_dir.joinpath(*_relative_parts(str(record.path), prefix)),
                 size_bytes=int(record.size_bytes or 0),
                 barcode=barcodes[0],
                 sharded=sharded,
@@ -268,9 +266,7 @@ def run_tree_restore(
         for item in planned:
             result.files_restored += 1
             result.bytes_restored += item.size_bytes
-            result.per_tape_counts[item.barcode] = (
-                result.per_tape_counts.get(item.barcode, 0) + 1
-            )
+            result.per_tape_counts[item.barcode] = result.per_tape_counts.get(item.barcode, 0) + 1
         catalog.update_job_state(job_id, "completed")
         return result
 
@@ -287,9 +283,7 @@ def run_tree_restore(
             item.dest_path.parent.mkdir(parents=True, exist_ok=True)
             if item.sharded:
                 sharded_result = run_sharded_restore(
-                    ShardedRestoreRequest(
-                        catalog_path=item.catalog_path, dest_path=item.dest_path
-                    ),
+                    ShardedRestoreRequest(catalog_path=item.catalog_path, dest_path=item.dest_path),
                     library,
                     ltfs,
                     catalog,
@@ -305,9 +299,7 @@ def run_tree_restore(
                 barcodes = sharded_result.source_barcodes or [item.barcode]
             else:
                 plain_result = run_restore_job(
-                    RestoreRequest(
-                        catalog_path=item.catalog_path, dest_path=item.dest_path
-                    ),
+                    RestoreRequest(catalog_path=item.catalog_path, dest_path=item.dest_path),
                     library,
                     ltfs,
                     catalog,

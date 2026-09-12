@@ -17,27 +17,34 @@ Every command below also accepts `--help`.
 > regression-tested; see docs/runbooks/real-data-campaign.md.) Real-
 > hardware commands still refuse without both flags set.
 
-**17 commands**, in 4 sub-group(s) plus the top level.
+**21 commands**, in 7 sub-group(s) plus the top level.
 
 ## Command groups
 
 | Group | Purpose |
 | --- | --- |
+| `openblade archive` | Archive commands |
 | `openblade format` | Format commands |
 | `openblade fuse` | Read-only FUSE mount over the catalog namespace |
 | `openblade hardware` | Real hardware validation commands |
+| `openblade mailslot` | Import/export (mailslot) commands |
 | `openblade mock` | Mock library commands |
+| `openblade restore` | Restore commands |
 
 ## Commands
 
-### `openblade archive`
+### `openblade archive sharded`
 
-Enqueue an archive job.
+Archive across several drives in parallel (the CLI half of POST /archive/sharded).
 
 | Parameter | Kind | Type | Required | Default | Help |
 | --- | --- | --- | --- | --- | --- |
-| `--volume-group` | option | `STR` | yes | - | - |
-| `--path` | option | `STR` | yes | - | - |
+| `SOURCE` | argument | `PATH` | yes | - | Source file or directory to archive |
+| `--volume-group` | option | `STR` | yes | - | Target volume group |
+| `--mode` | option | `STR` | no | `stripe` | stripe | block-stripe |
+| `--lanes` | option | `INT RANGE` | no | none | Number of lane cartridges to use (default: all in the group) |
+| `--lane-barcode` | option | `STR` | no | none | Explicit lane barcode; repeatable, overrides --lanes |
+| `--block-size-mb` | option | `INT RANGE` | no | `128` | - |
 
 ### `openblade assist`
 
@@ -122,6 +129,31 @@ Show job status.
 | --- | --- | --- | --- | --- | --- |
 | `JOB_ID` | argument | `STR` | no | none | - |
 
+### `openblade mailslot export`
+
+Move a cartridge out of storage into the I/E station.
+
+| Parameter | Kind | Type | Required | Default | Help |
+| --- | --- | --- | --- | --- | --- |
+| `BARCODE` | argument | `STR` | yes | - | Barcode of the cartridge to export |
+| `--ie-slot` | option | `INT` | no | none | Import/export element to use (default: first empty) |
+| `--force` | option | `BOOLEAN` | no | false | Export even though the cartridge carries archived data |
+
+### `openblade mailslot import`
+
+Move a cartridge from an I/E slot into library storage.
+
+| Parameter | Kind | Type | Required | Default | Help |
+| --- | --- | --- | --- | --- | --- |
+| `IE_SLOT` | argument | `INT` | yes | - | Import/export element holding the cartridge |
+| `--to-slot` | option | `INT` | no | none | Storage slot to import into (default: first empty) |
+
+### `openblade mailslot list`
+
+Show the import/export (I/E) station: which slots hold which barcodes.
+
+Takes no arguments or options.
+
 ### `openblade mock init`
 
 Initialize a mock library and save state.
@@ -131,6 +163,7 @@ Initialize a mock library and save state.
 | `--slots` | option | `INT` | no | `20` | Number of slots |
 | `--drives` | option | `INT` | no | `1` | Number of drives |
 | `--cartridges` | option | `INT` | no | `5` | Number of cartridges |
+| `--ie-slots` | option | `INT RANGE` | no | `4` | Number of import/export (mailslot) elements; 4 matches the Scalar i3 |
 
 ### `openblade mock inventory`
 
@@ -156,14 +189,25 @@ Unload cartridge from drive to slot.
 | `--drive` | option | `INT` | no | `0` | - |
 | `--slot` | option | `INT` | yes | - | - |
 
-### `openblade restore`
+### `openblade restore file`
 
-Restore a file from tape.
+Restore one cataloged file, spanning tapes when it is sharded.
 
 | Parameter | Kind | Type | Required | Default | Help |
 | --- | --- | --- | --- | --- | --- |
-| `--path` | option | `STR` | yes | - | Catalog path |
-| `--to` | option | `STR` | yes | - | Local destination path |
+| `CATALOG_PATH` | argument | `STR` | yes | - | Catalog path of the file to restore |
+| `--dest` | option | `PATH` | yes | - | Destination file path, or a directory (pass --into-dir, or an existing directory) to keep the catalog basename |
+| `--into-dir` | option | `BOOLEAN` | no | false | Treat --dest as a directory even if it does not exist yet |
+
+### `openblade restore tree`
+
+Restore every archived file under a catalog prefix, spanning tapes.
+
+| Parameter | Kind | Type | Required | Default | Help |
+| --- | --- | --- | --- | --- | --- |
+| `CATALOG_PREFIX` | argument | `STR` | yes | - | Catalog path prefix, e.g. /photo-archive |
+| `--dest` | option | `PATH` | yes | - | Destination directory |
+| `--dry-run` | option | `BOOLEAN` | no | false | Plan only; move no media |
 
 ### `openblade volume-group`
 

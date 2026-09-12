@@ -34,7 +34,9 @@ def fs(tmp_path: Path) -> CatalogFilesystem:
     return CatalogFilesystem(repo, cache_dir=str(tmp_path / "cache"))
 
 
-def test_offline_read_errors_until_hydrated_then_succeeds(fs: CatalogFilesystem, tmp_path: Path) -> None:
+def test_offline_read_errors_until_hydrated_then_succeeds(
+    fs: CatalogFilesystem, tmp_path: Path
+) -> None:
     dest = tmp_path / "out.bin"
     # Offline (not cached): a read must fail clearly, not hang or fabricate.
     with pytest.raises(CartridgeOfflineError):
@@ -60,7 +62,9 @@ def test_eviction_forces_rehydration(fs: CatalogFilesystem, tmp_path: Path) -> N
         fs.read("/data/file.bin", str(dest))
 
 
-def test_concurrent_reads_of_offline_file_error_consistently(fs: CatalogFilesystem, tmp_path: Path) -> None:
+def test_concurrent_reads_of_offline_file_error_consistently(
+    fs: CatalogFilesystem, tmp_path: Path
+) -> None:
     def _attempt(index: int) -> str:
         try:
             fs.read("/data/file.bin", str(tmp_path / f"out-{index}.bin"))

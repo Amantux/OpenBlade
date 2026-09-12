@@ -56,7 +56,9 @@ async def list_cartridges(context: AppContext = Depends(get_context)) -> list[Ca
     ]
 
 
-@router.post("/{barcode}/format/dry-run", response_model=DryRunResponse, dependencies=[Depends(require_auth)])
+@router.post(
+    "/{barcode}/format/dry-run", response_model=DryRunResponse, dependencies=[Depends(require_auth)]
+)
 async def format_dry_run(
     barcode: str,
     context: AppContext = Depends(get_context),

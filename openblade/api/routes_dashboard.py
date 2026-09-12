@@ -49,7 +49,11 @@ async def get_dashboard_stats(
     aml_state.ensure_initialized(context.config.db_url)
     groups = context.catalog.list_volume_groups()
     files = context.catalog.list_file_records("/")
-    assigned_tapes = [cartridge for cartridge in context.catalog.list_cartridges() if cartridge.volume_group_id is not None]
+    assigned_tapes = [
+        cartridge
+        for cartridge in context.catalog.list_cartridges()
+        if cartridge.volume_group_id is not None
+    ]
     catalog_tapes = context.catalog.list_catalog_tape_barcodes()
     inventory = context.library.inventory()
 
@@ -63,7 +67,9 @@ async def get_dashboard_stats(
 
     total_tape_capacity_bytes = sum(cartridge.capacity_bytes for cartridge in assigned_tapes)
     available_tape_capacity_bytes = max(total_tape_capacity_bytes - total_bytes, 0)
-    utilization_percent = round((total_bytes / total_tape_capacity_bytes) * 100) if total_tape_capacity_bytes else 0
+    utilization_percent = (
+        round((total_bytes / total_tape_capacity_bytes) * 100) if total_tape_capacity_bytes else 0
+    )
 
     return DashboardStatsResponse(
         storage=StorageSummary(

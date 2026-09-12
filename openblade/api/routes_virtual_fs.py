@@ -21,7 +21,9 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-def get_virtual_filesystem(repo: CatalogRepository = Depends(get_catalog_repository)) -> VirtualFilesystem:
+def get_virtual_filesystem(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> VirtualFilesystem:
     """Return the shared virtual filesystem instance for the active catalog session."""
     service = repo.session.info.get("virtual_filesystem")
     if not isinstance(service, VirtualFilesystem):

@@ -36,7 +36,9 @@ BARCODE = "VOL001L9"
 
 @pytest.fixture
 def archive_env(tmp_path: Path):
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'archive-lifecycle.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'archive-lifecycle.db'}")
+    )
     reset_context(context)
     clear_ingest_state()
     service = NasService(context.catalog)
@@ -143,7 +145,9 @@ def _make_ingest_plan(cache_root: Path) -> ArchivePlan:
 def test_complete_file_archive_returns_success_with_all_steps(archive_env) -> None:
     file_record, tape_path, _ = _seed_file(archive_env)
 
-    result = archive_env["manager"].complete_file_archive(file_record, BARCODE, tape_path, "critical")
+    result = archive_env["manager"].complete_file_archive(
+        file_record, BARCODE, tape_path, "critical"
+    )
 
     assert result.success is True
     assert result.steps_completed == [
@@ -172,7 +176,9 @@ def test_complete_file_archive_records_path_mapping_lookup(archive_env) -> None:
 
     archive_env["manager"].complete_file_archive(file_record, BARCODE, tape_path)
 
-    lookup = archive_env["path_mapping"].lookup(file_record.relative_path, file_record.pool_id or "")
+    lookup = archive_env["path_mapping"].lookup(
+        file_record.relative_path, file_record.pool_id or ""
+    )
     assert lookup.found is True
     assert lookup.primary_barcode == BARCODE
 
@@ -246,7 +252,9 @@ def test_complete_dataset_archive_succeeds_when_all_files_succeed(archive_env) -
     assert result.files_failed == 0
 
 
-def test_complete_dataset_archive_marks_dataset_archived_only_when_all_files_succeed(archive_env) -> None:
+def test_complete_dataset_archive_marks_dataset_archived_only_when_all_files_succeed(
+    archive_env,
+) -> None:
     file_records, tape_paths = _seed_two_files(archive_env)
 
     result = archive_env["manager"].complete_dataset_archive(
@@ -261,7 +269,9 @@ def test_complete_dataset_archive_marks_dataset_archived_only_when_all_files_suc
     assert dataset is not None and dataset.status is DatasetStatus.ARCHIVED
 
 
-def test_complete_dataset_archive_does_not_mark_dataset_archived_when_any_file_fails(archive_env) -> None:
+def test_complete_dataset_archive_does_not_mark_dataset_archived_when_any_file_fails(
+    archive_env,
+) -> None:
     file_records, tape_paths = _seed_two_files(archive_env)
     archive_env["context"].ltfs.ensure_tape(BARCODE).files.pop(tape_paths[file_records[1].id])
 
@@ -293,7 +303,9 @@ def test_complete_dataset_archive_reports_completed_and_failed_counts(archive_en
 
 
 def test_ingest_job_marks_file_records_offline_on_tape_after_lifecycle(tmp_path: Path) -> None:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'ingest-lifecycle.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'ingest-lifecycle.db'}")
+    )
     reset_context(context)
     clear_ingest_state()
     service = NasService(context.catalog)
@@ -335,7 +347,9 @@ def test_complete_file_archive_populates_path_mapping_record_fields(archive_env)
 
     archive_env["manager"].complete_file_archive(file_record, BARCODE, tape_path)
 
-    lookup = archive_env["path_mapping"].lookup(file_record.relative_path, file_record.pool_id or "")
+    lookup = archive_env["path_mapping"].lookup(
+        file_record.relative_path, file_record.pool_id or ""
+    )
     assert lookup.dataset_id == archive_env["dataset"].id
     assert lookup.checksum == file_record.checksum_sha256
 

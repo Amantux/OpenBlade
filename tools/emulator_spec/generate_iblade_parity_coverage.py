@@ -9,7 +9,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 MATRIX_PATH = ROOT / "openblade" / "emulator_contract" / "openblade_iblade_rev_a_parity.json"
-COVERAGE_JSON_PATH = ROOT / "openblade" / "emulator_contract" / "openblade_iblade_parity_coverage.json"
+COVERAGE_JSON_PATH = (
+    ROOT / "openblade" / "emulator_contract" / "openblade_iblade_parity_coverage.json"
+)
 COVERAGE_MD_PATH = ROOT / "openblade" / "emulator_contract" / "openblade_iblade_parity_coverage.md"
 VALID_STATUSES = {"implemented", "partial", "missing"}
 
@@ -44,8 +46,12 @@ def _feature_row(feature: dict[str, Any]) -> dict[str, Any]:
     feature_id = str(feature.get("id", ""))
     legacy_id = str(feature.get("legacy_id", ""))
     status = str(feature.get("status", "")).strip().lower()
-    impl_hints = [str(item) for item in feature.get("implementation_trace_hints", []) if isinstance(item, str)]
-    test_hints = [str(item) for item in feature.get("test_trace_hints", []) if isinstance(item, str)]
+    impl_hints = [
+        str(item) for item in feature.get("implementation_trace_hints", []) if isinstance(item, str)
+    ]
+    test_hints = [
+        str(item) for item in feature.get("test_trace_hints", []) if isinstance(item, str)
+    ]
     gaps = [str(item) for item in feature.get("gaps", []) if isinstance(item, str)]
 
     impl_covered, impl_total = _trace_coverage(impl_hints)
@@ -85,7 +91,9 @@ def _build_coverage(matrix: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         status_counts[status] += 1
         if status == "implemented":
             if not row["implementation_trace_ok"]:
-                errors.append(f"Implemented feature {row['id']} has missing implementation trace files")
+                errors.append(
+                    f"Implemented feature {row['id']} has missing implementation trace files"
+                )
             if not row["test_trace_ok"]:
                 errors.append(f"Implemented feature {row['id']} has missing test trace files")
             if row["gap_count"] > 0:
@@ -138,7 +146,9 @@ def _render_markdown(coverage: dict[str, Any]) -> str:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--matrix", type=Path, default=MATRIX_PATH, help="Path to parity matrix JSON")
+    parser.add_argument(
+        "--matrix", type=Path, default=MATRIX_PATH, help="Path to parity matrix JSON"
+    )
     parser.add_argument(
         "--allow-partial",
         action="store_true",
@@ -156,7 +166,9 @@ def main() -> int:
             print(f"- {error}")
         return 1
 
-    COVERAGE_JSON_PATH.write_text(json.dumps(coverage, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    COVERAGE_JSON_PATH.write_text(
+        json.dumps(coverage, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     COVERAGE_MD_PATH.write_text(_render_markdown(coverage), encoding="utf-8")
     print(
         "Generated iBlade parity coverage artifact: "

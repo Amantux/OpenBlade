@@ -110,7 +110,11 @@ def _requirement_entries(
     table_id: int,
     latency: LatencyProfile,
 ) -> list[dict[str, object]]:
-    payload_note = "path and query parameters only" if method.upper() == "GET" else "request payload defined by manual table"
+    payload_note = (
+        "path and query parameters only"
+        if method.upper() == "GET"
+        else "request payload defined by manual table"
+    )
     return [
         {
             "id": f"{endpoint_id}::endpoint",

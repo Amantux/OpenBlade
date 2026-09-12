@@ -74,6 +74,12 @@ def test_get_drive_unknown_raises(backend: ScalarHttpLibraryBackend) -> None:
 
 def test_backend_satisfies_library_read_protocol(backend: ScalarHttpLibraryBackend) -> None:
     # The methods the archive/restore orchestration and LTFS layer call.
-    for name in ("inventory", "get_drive", "get_slot", "find_slot_by_barcode",
-                 "find_drive_by_barcode", "get_all_barcodes"):
+    for name in (
+        "inventory",
+        "get_drive",
+        "get_slot",
+        "find_slot_by_barcode",
+        "find_drive_by_barcode",
+        "get_all_barcodes",
+    ):
         assert callable(getattr(backend, name))

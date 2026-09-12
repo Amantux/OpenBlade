@@ -37,7 +37,10 @@ def _admin_auth_headers(client: TestClient) -> dict[str, str]:
 def _format_and_assign(client: TestClient, volume_group: str, barcode: str) -> None:
     auth_headers = _admin_auth_headers(client)
     assert client.post("/volume-groups/", json={"name": volume_group}).status_code == 201
-    assert client.post(f"/volume-groups/{volume_group}/assign", json={"barcode": barcode}).status_code == 200
+    assert (
+        client.post(f"/volume-groups/{volume_group}/assign", json={"barcode": barcode}).status_code
+        == 200
+    )
     dry_run = client.post(f"/cartridges/{barcode}/format/dry-run", headers=auth_headers)
     assert dry_run.status_code == 200
     token = dry_run.json()["token"]
@@ -45,13 +48,18 @@ def _format_and_assign(client: TestClient, volume_group: str, barcode: str) -> N
         client.post(
             "/cartridges/format/confirm",
             json={"barcode": barcode, "token": token},
-            headers={**auth_headers, "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"},
+            headers={
+                **auth_headers,
+                "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose",
+            },
         ).status_code
         == 200
     )
 
 
-def _archive_one_file(client: TestClient, source_dir: Path, volume_group: str, file_name: str, content: str) -> None:
+def _archive_one_file(
+    client: TestClient, source_dir: Path, volume_group: str, file_name: str, content: str
+) -> None:
     source_dir.mkdir()
     (source_dir / file_name).write_text(content)
     response = client.post(
@@ -71,7 +79,9 @@ def test_ltfs_browse_and_tapes_return_empty_lists_for_empty_catalog(client: Test
     assert tapes_response.json() == []
 
 
-def test_ltfs_browse_filters_by_tape_and_path_prefix_and_tapes_are_unique(client: TestClient, tmp_path: Path) -> None:
+def test_ltfs_browse_filters_by_tape_and_path_prefix_and_tapes_are_unique(
+    client: TestClient, tmp_path: Path
+) -> None:
     barcodes = _data_barcodes(limit=2)
     assert len(barcodes) == 2
     _format_and_assign(client, "alpha", barcodes[0])

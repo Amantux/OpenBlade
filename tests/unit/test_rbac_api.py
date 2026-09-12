@@ -55,7 +55,10 @@ def test_list_users_requires_auth(tmp_path) -> None:
 def test_create_user_requires_auth(tmp_path) -> None:
     client = make_client(tmp_path, "rbac-api-2.db")
 
-    response = client.post("/aml/auth/users", json={"username": "alice", "password": "secret-password", "role_id": "operator"})
+    response = client.post(
+        "/aml/auth/users",
+        json={"username": "alice", "password": "secret-password", "role_id": "operator"},
+    )
 
     assert response.status_code == 401
 

@@ -53,7 +53,9 @@ def _build_safety_response(context: AppContext) -> SafetyCheckResponse:
 
     recent_ops = context.catalog.list_tape_ops(limit=100)
     unsafe_formats = [
-        op for op in recent_ops if str(op.get("op_type")) == TapeOpType.FORMAT.value and str(op.get("status")) == "failed"
+        op
+        for op in recent_ops
+        if str(op.get("op_type")) == TapeOpType.FORMAT.value and str(op.get("status")) == "failed"
     ]
     checks.append(
         SafetyCheckItem(

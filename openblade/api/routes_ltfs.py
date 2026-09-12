@@ -19,7 +19,6 @@ router = APIRouter()
 _active_mounts: dict[str, object] = {}  # barcode -> MountHandle
 
 
-
 class LtfsBrowseEntryResponse(BaseModel):
     path: str
     size: int
@@ -76,8 +75,7 @@ async def ltfs_format(payload: dict, context: AppContext = Depends(get_context))
         raise HTTPException(
             status_code=422,
             detail=(
-                "safetyToken is required; obtain one from "
-                "POST /cartridges/{barcode}/format/dry-run"
+                "safetyToken is required; obtain one from POST /cartridges/{barcode}/format/dry-run"
             ),
         )
     from openblade.domain.errors import FormatRequiresConfirmationError
@@ -104,7 +102,9 @@ async def ltfs_mount(payload: dict, context: AppContext = Depends(get_context)) 
 
         # If driveId provided, attempt a load operation so ltfs.mount will find it
         if drive_id is not None:
-            load_req = TapeOpRequest(op_type=TapeOpType.LOAD, barcode=barcode, drive_id=int(drive_id))
+            load_req = TapeOpRequest(
+                op_type=TapeOpType.LOAD, barcode=barcode, drive_id=int(drive_id)
+            )
             execute_tape_request(None, context.library, context.ltfs, load_req)
         # Now call ltfs.mount
         handle = context.ltfs.mount(barcode, MountMode.READ_ONLY)
@@ -142,4 +142,3 @@ async def ltfs_status(context: AppContext = Depends(get_context)) -> dict:
         return context.ltfs.to_json()
     except Exception:
         return {"status": "unknown"}
-

@@ -549,8 +549,7 @@ def restore_file(
     )
     sharded = bool(context.catalog.list_shard_records(record.id)) or (record.shard_count or 1) > 1
     err_console.print(
-        f"Restoring {catalog_path} -> {dest_path} "
-        f"({'sharded' if sharded else 'single-instance'})"
+        f"Restoring {catalog_path} -> {dest_path} ({'sharded' if sharded else 'single-instance'})"
     )
     try:
         if sharded:
@@ -630,9 +629,7 @@ def restore_tree(
 
     try:
         result = run_tree_restore(
-            TreeRestoreRequest(
-                catalog_prefix=catalog_prefix, dest_dir=dest, dry_run=dry_run
-            ),
+            TreeRestoreRequest(catalog_prefix=catalog_prefix, dest_dir=dest, dry_run=dry_run),
             context.library,
             context.ltfs,
             context.catalog,
@@ -849,8 +846,7 @@ def mailslot_import(
     _save_state(context)
     err_console.print(
         f"Imported {result.barcode} from I/E slot {result.source_slot} into storage slot "
-        f"{result.destination_slot}"
-        + (" (chosen automatically)" if result.slot_was_chosen else "")
+        f"{result.destination_slot}" + (" (chosen automatically)" if result.slot_was_chosen else "")
     )
     console.print_json(data=result.to_dict())
 
@@ -888,8 +884,7 @@ def mailslot_export(
     _save_state(context)
     err_console.print(
         f"Exported {result.barcode} from storage slot {result.source_slot} to I/E slot "
-        f"{result.destination_slot}"
-        + (" (chosen automatically)" if result.slot_was_chosen else "")
+        f"{result.destination_slot}" + (" (chosen automatically)" if result.slot_was_chosen else "")
     )
     console.print_json(data=result.to_dict())
 

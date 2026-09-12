@@ -119,9 +119,7 @@ class TestMtxParserHighElementAddresses:
             config_real_hardware_enabled=True,
             operator_acknowledgment="high-address round-trip test",
         )
-        backend = MtxChangerBackend(
-            device="/dev/sg2", runner=SafeRunner(dry_run=True), guard=guard
-        )
+        backend = MtxChangerBackend(device="/dev/sg2", runner=SafeRunner(dry_run=True), guard=guard)
         result = backend.load(slot=4098, drive=2)
         assert result.details["args"][-2:] == ["4098", "2"]
         result = backend.unload(drive=2, slot=4099)

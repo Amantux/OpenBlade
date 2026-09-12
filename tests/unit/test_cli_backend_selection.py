@@ -134,7 +134,10 @@ def test_load_state_recovers_from_an_incompatible_state_file(
     state_path.write_text(
         json.dumps(
             {
-                "library": {"library_id": "mock-i3-001", "slots": [{"slot_id": 1, "barcode": None}]},
+                "library": {
+                    "library_id": "mock-i3-001",
+                    "slots": [{"slot_id": 1, "barcode": None}],
+                },
                 "ltfs": {"capacity_bytes": 1024, "tapes": {}},
             }
         )
@@ -173,7 +176,7 @@ def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
     # Invoke via `-m` with PYTHONPATH pinned to THIS repo: the venv's
     # editable-install console script can resolve `openblade` from a
     # DIFFERENT checkout (worktrees share one venv), silently testing other
-    # code. `shutil` retained for no other caller. 
+    # code. `shutil` retained for no other caller.
     del shutil
     repo_root = Path(__file__).resolve().parents[2]
 
@@ -210,7 +213,17 @@ def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
     # "tape operation queued"/"completed" log lines. Those are what used to
     # land on stdout ahead of the JSON.
     confirm = subprocess.run(
-        [sys.executable, "-m", "openblade.cli.main", "format", "confirm", "--barcode", "MCK00001", "--token", token],
+        [
+            sys.executable,
+            "-m",
+            "openblade.cli.main",
+            "format",
+            "confirm",
+            "--barcode",
+            "MCK00001",
+            "--token",
+            token,
+        ],
         capture_output=True,
         text=True,
         env=env,

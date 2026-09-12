@@ -390,9 +390,7 @@ def _create_scalar_http_library(
         raise RealHardwareDisabledError(
             "OPENBLADE_ROBOTICS_TRANSPORT=webservices requires OPENBLADE_SCALAR_URL"
         )
-    client = httpx.Client(
-        base_url=config.scalar_url, verify=config.scalar_verify_tls, timeout=30.0
-    )
+    client = httpx.Client(base_url=config.scalar_url, verify=config.scalar_verify_tls, timeout=30.0)
     session = ScalarHttpSession(
         client, username=config.scalar_user, password=config.scalar_password
     )

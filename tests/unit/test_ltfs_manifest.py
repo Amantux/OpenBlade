@@ -123,8 +123,7 @@ def test_write_checksums_file_uses_standard_format() -> None:
     )
 
     assert backend.files["/.openblade/checksums.sha256"].decode("utf-8") == (
-        "aaa  /.openblade/manifest.json\n"
-        "bbb  /.openblade/tape.json\n"
+        "aaa  /.openblade/manifest.json\nbbb  /.openblade/tape.json\n"
     )
 
 
@@ -279,5 +278,6 @@ def test_metadata_path_rejects_traversal_attempt() -> None:
     """_metadata_path must reject path traversal outside /.openblade/ (hotfix Alpha)."""
     _, writer = _writer()
     import pytest
+
     with pytest.raises(ValueError):
         writer._metadata_path("../etc/passwd")

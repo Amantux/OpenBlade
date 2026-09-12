@@ -163,9 +163,7 @@ def clean_path(raw: object, what: str) -> Path:
     if not text:
         raise MediaRefusedError(f"A {what} is required.", code=f"missing_{what}")
     if not text.isprintable():
-        raise MediaRefusedError(
-            f"That {what} contains control characters.", code=f"invalid_{what}"
-        )
+        raise MediaRefusedError(f"That {what} contains control characters.", code=f"invalid_{what}")
     path = Path(text)
     if not path.is_absolute():
         raise MediaRefusedError(
@@ -379,6 +377,7 @@ def _require_unmounted(bundle: MediaBundle, drive: Any) -> None:
 # Robotics: load / unload / move
 # ---------------------------------------------------------------------------
 
+
 def _run_tape_op(bundle: MediaBundle, request: TapeOpRequest) -> Any:
     """One robotics operation through the authorized choke point, curated on failure.
 
@@ -417,7 +416,6 @@ def _run_service(what: str, call: Callable[[], Any]) -> Any:
         raise
     except Exception as exc:  # noqa: BLE001 - curated, never echoed raw
         raise MediaOperationFailedError(f"{what} failed: {safe_job_error(exc)}") from None
-
 
 
 def _resolve_load(bundle: MediaBundle, *, barcode: object, drive: object) -> JSONDict:
@@ -573,9 +571,7 @@ def _resolve_move(bundle: MediaBundle, *, barcode: object, slot: object) -> JSON
         )
     source = int(location.slot_id or 0)
     if destination == source:
-        raise MediaRefusedError(
-            f"Tape {code} is already in slot {source}.", code="same_slot"
-        )
+        raise MediaRefusedError(f"Tape {code} is already in slot {source}.", code="same_slot")
     _require_free_slot(inventory, destination)
     return {"barcode": code, "sourceSlotId": source, "destinationSlotId": destination}
 
@@ -620,7 +616,9 @@ def _format_consequences(bundle: MediaBundle, barcode: str) -> JSONDict:
         "archivedFileCount": len(instances),
         "usedBytes": int(getattr(cartridge, "used_bytes", 0) or 0) if cartridge else 0,
         "capacityBytes": int(getattr(cartridge, "capacity_bytes", 0) or 0) if cartridge else 0,
-        "volumeGroup": groups.get(getattr(cartridge, "volume_group_id", None)) if cartridge else None,
+        "volumeGroup": groups.get(getattr(cartridge, "volume_group_id", None))
+        if cartridge
+        else None,
         "formatted": bool(getattr(cartridge, "formatted", False)) if cartridge else False,
         "samplePaths": sorted(str(instance.tape_path) for instance in instances)[:_MAX_CANDIDATES],
     }
@@ -746,23 +744,19 @@ def _resolve_archive(bundle: MediaBundle, *, path: object, volume_group: object)
             code="missing_volume_group",
         )
     if not source.exists():
-        raise MediaRefusedError(
-            f"There is nothing at {source}.", code="source_not_found"
-        )
+        raise MediaRefusedError(f"There is nothing at {source}.", code="source_not_found")
     group = bundle.catalog.get_volume_group(group_name)
     if group is None:
         raise MediaRefusedError(
             f"There is no volume group named {group_name!r}.",
             code="unknown_volume_group",
-            candidates=tuple(
-                sorted(item.name for item in bundle.catalog.list_volume_groups())
-            )[:_MAX_CANDIDATES],
+            candidates=tuple(sorted(item.name for item in bundle.catalog.list_volume_groups()))[
+                :_MAX_CANDIDATES
+            ],
         )
     files = _source_files(source)
     if not files:
-        raise MediaRefusedError(
-            f"{source} contains no files to archive.", code="empty_source"
-        )
+        raise MediaRefusedError(f"{source} contains no files to archive.", code="empty_source")
     if len(files) > MAX_ARCHIVE_FILES:
         raise MediaRefusedError(
             f"{source} holds {len(files)} files; one confirmed assistant action "
@@ -835,7 +829,9 @@ def _archive_path(bundle: MediaBundle, *, path: object, volume_group: object = N
         "filesArchived": len(stored),
         "filesExpected": len(expected),
         "bytesArchived": sum(int(record.size_bytes) for record in stored),
-        "tapes": sorted({str(instance.barcode) for record in stored for instance in record.instances}),
+        "tapes": sorted(
+            {str(instance.barcode) for record in stored for instance in record.instances}
+        ),
         "allFilesInCatalog": len(stored) == len(expected),
     }
 

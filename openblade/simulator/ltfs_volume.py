@@ -379,7 +379,9 @@ class MockLTFSBackend:
             )
             tape.used_bytes = projected_used_bytes
 
-    def read_bytes(self, barcode_or_path: str, path: PurePosixPath | str | None = None) -> bytes | None:
+    def read_bytes(
+        self, barcode_or_path: str, path: PurePosixPath | str | None = None
+    ) -> bytes | None:
         if path is None:
             self._maybe_raise_injected_fault(InjectedFaultType.READ_ERROR, "")
             target_path = str(barcode_or_path)
@@ -389,7 +391,9 @@ class MockLTFSBackend:
                     if record is not None:
                         return record.content
             return None
-        self._maybe_raise_injected_fault(InjectedFaultType.READ_ERROR, Barcode(str(barcode_or_path)).value)
+        self._maybe_raise_injected_fault(
+            InjectedFaultType.READ_ERROR, Barcode(str(barcode_or_path)).value
+        )
         tape = self.ensure_tape(str(barcode_or_path))
         with self._lock:
             record = tape.files.get(str(path))

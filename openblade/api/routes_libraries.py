@@ -18,6 +18,7 @@ from openblade.catalog.repository import CatalogRepository
 
 router = APIRouter(prefix="/api/libraries", tags=["libraries"])
 
+
 class LibraryCreate(BaseModel):
     name: str
     emulator_url: str | None = None
@@ -117,7 +118,9 @@ async def _probe_library(library: LibraryInstance) -> dict[str, object]:
         return defaults
 
 
-def _library_response_payload(library: LibraryInstance, probe: dict[str, object]) -> dict[str, object]:
+def _library_response_payload(
+    library: LibraryInstance, probe: dict[str, object]
+) -> dict[str, object]:
     return {
         "id": library.id,
         "name": library.name,
@@ -136,8 +139,13 @@ def _enabled_library_count(repo: CatalogRepository) -> int:
 
 
 @router.get("", response_model=list[LibraryResponse], dependencies=[Depends(require_auth)])
-async def list_libraries(repo: CatalogRepository = Depends(get_repository)) -> list[LibraryResponse]:
-    libraries = sorted(repo.list_library_instances(), key=lambda library: (library.sort_order, library.name.lower()))
+async def list_libraries(
+    repo: CatalogRepository = Depends(get_repository),
+) -> list[LibraryResponse]:
+    libraries = sorted(
+        repo.list_library_instances(),
+        key=lambda library: (library.sort_order, library.name.lower()),
+    )
     probes = await asyncio.gather(*(_probe_library(library) for library in libraries))
     return [
         LibraryResponse.model_validate(_library_response_payload(library, probe))
@@ -160,7 +168,9 @@ async def create_library(
         # keep validation consistent with previous behavior
         raise HTTPException(status_code=422, detail="emulator_url is required")
     library = repo.create_library_instance(**payload)
-    return LibraryResponse.model_validate(_library_response_payload(library, await _probe_library(library)))
+    return LibraryResponse.model_validate(
+        _library_response_payload(library, await _probe_library(library))
+    )
 
 
 @router.get("/{library_id}", response_model=LibraryResponse, dependencies=[Depends(require_auth)])
@@ -171,7 +181,9 @@ async def get_library(
     library = repo.get_library_instance(library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Library not found")
-    return LibraryResponse.model_validate(_library_response_payload(library, await _probe_library(library)))
+    return LibraryResponse.model_validate(
+        _library_response_payload(library, await _probe_library(library))
+    )
 
 
 @router.put("/{library_id}", response_model=LibraryResponse, dependencies=[Depends(require_auth)])
@@ -189,7 +201,9 @@ async def update_library(
     updated = repo.update_library_instance(library_id, **updates)
     if not updated:
         raise HTTPException(status_code=404, detail="Library not found")
-    return LibraryResponse.model_validate(_library_response_payload(updated, await _probe_library(updated)))
+    return LibraryResponse.model_validate(
+        _library_response_payload(updated, await _probe_library(updated))
+    )
 
 
 @router.delete("/{library_id}", dependencies=[Depends(require_auth)])

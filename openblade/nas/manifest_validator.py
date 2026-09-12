@@ -63,7 +63,9 @@ class ManifestValidator:
     MANIFEST_SCHEMA = "openblade.manifest.v1"
     CATALOG_SHARD_SCHEMA = "openblade.catalog_shard.v1"
 
-    def __init__(self, metadata_writer: TapeMetadataWriter, shard_writer: CatalogShardWriter) -> None:
+    def __init__(
+        self, metadata_writer: TapeMetadataWriter, shard_writer: CatalogShardWriter
+    ) -> None:
         self.writer = metadata_writer
         self.shard_writer = shard_writer
 
@@ -73,7 +75,9 @@ class ManifestValidator:
         Checks: manifest present, schema version correct, checksum match, file_count consistent.
         """
         result = ManifestValidationResult(barcode=barcode, valid=False)
-        payload = self._read_json_payload(barcode, self.MANIFEST_PATH, "manifest.json", result.errors)
+        payload = self._read_json_payload(
+            barcode, self.MANIFEST_PATH, "manifest.json", result.errors
+        )
         if payload is None:
             return result
 
@@ -270,10 +274,7 @@ class VersionedManifestWriter:
         Returns paths matching /.openblade/versions/manifest.*.tmp pattern.
         """
         prefix = f"{self.VERSIONS_DIR}/manifest."
-        return [
-            p for p in self.writer.list_metadata_files(barcode, prefix)
-            if p.endswith(".tmp")
-        ]
+        return [p for p in self.writer.list_metadata_files(barcode, prefix) if p.endswith(".tmp")]
 
     @staticmethod
     def _validate_temp_path(temp_path: str) -> None:

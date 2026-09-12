@@ -44,7 +44,10 @@ def authed(tmp_path: Path) -> TestClient:
     aml_state.set_aml_job("verify-active", {"status": "active", "type": "archive"})
     aml_state.set_aml_mount("verify-mount", {"state": "mounted", "barcode": "VERify01"})
     client = TestClient(app)
-    assert client.post("/aml/users/login", json={"name": "admin", "password": "password"}).status_code == 200
+    assert (
+        client.post("/aml/users/login", json={"name": "admin", "password": "password"}).status_code
+        == 200
+    )
     return client
 
 
@@ -70,7 +73,9 @@ def _emitted_series(text: str) -> list[tuple[str, dict[str, str]]]:
         match = re.match(r"(openblade_[A-Za-z0-9_:]+)(?:\{([^}]*)\})?\s", line)
         if not match:
             continue
-        labels = dict(re.findall(r'([A-Za-z_][A-Za-z0-9_]*)="((?:[^"\\]|\\.)*)"', match.group(2) or ""))
+        labels = dict(
+            re.findall(r'([A-Za-z_][A-Za-z0-9_]*)="((?:[^"\\]|\\.)*)"', match.group(2) or "")
+        )
         series.append((match.group(1), labels))
     return series
 
@@ -87,7 +92,9 @@ def _referenced_selectors() -> dict[str, list[tuple[str, list[tuple[str, str, st
             for rule in group.get("rules", []):
                 expr = str(rule.get("expr", ""))
                 for sel in re.finditer(r"(openblade_[A-Za-z0-9_]+)(?:\{([^}]*)\})?", expr):
-                    matchers = re.findall(r'([A-Za-z_][A-Za-z0-9_]*)\s*(=~|!=|!~|=)\s*"([^"]*)"', sel.group(2) or "")
+                    matchers = re.findall(
+                        r'([A-Za-z_][A-Za-z0-9_]*)\s*(=~|!=|!~|=)\s*"([^"]*)"', sel.group(2) or ""
+                    )
                     found.append((sel.group(1), matchers))
         refs[path.name] = found
     return refs
@@ -131,11 +138,15 @@ def test_every_alert_label_selector_matches_an_emitted_series(authed: TestClient
                 # Zero-cardinality even after seeding: cannot verify labels, but flag
                 # exact-match selectors so a never-emitted series can't hide here.
                 if any(op == "=" for _, op, _ in matchers):
-                    problems.append(f"{fname}: {name} has exact-match labels but emits no series to verify")
+                    problems.append(
+                        f"{fname}: {name} has exact-match labels but emits no series to verify"
+                    )
                 continue
             for key, op, val in matchers:
                 if not any(key in labels for labels in samples):
-                    problems.append(f"{fname}: {name} is never emitted with label '{key}' — alert cannot match")
+                    problems.append(
+                        f"{fname}: {name} is never emitted with label '{key}' — alert cannot match"
+                    )
                 elif op == "=" and not any(labels.get(key) == val for labels in samples):
                     problems.append(f'{fname}: {name}{{{key}="{val}"}} matches no emitted series')
     assert not problems, "untriggerable label selectors: " + "; ".join(problems)

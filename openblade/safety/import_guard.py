@@ -51,13 +51,13 @@ FORBIDDEN_PATTERNS: list[str] = [
 
 ALLOWED_FILES: set[str] = {
     # --- Authorized hardware access points ---
-    "openblade/nas/tape_orchestrator.py",      # the orchestrator — owns all tape ops
-    "openblade/hardware/discovery.py",         # guarded real-hardware discovery
-    "openblade/hardware/library.py",           # guarded real-library adapter
-    "openblade/hardware/ltfs.py",              # guarded LTFS command backend
-    "openblade/hardware/mtx.py",               # guarded changer wrapper
-    "openblade/hardware/sg.py",                # guarded sg inquiry wrapper
-    "openblade/hardware/validation.py",        # guarded hardware validation workflows
+    "openblade/nas/tape_orchestrator.py",  # the orchestrator — owns all tape ops
+    "openblade/hardware/discovery.py",  # guarded real-hardware discovery
+    "openblade/hardware/library.py",  # guarded real-library adapter
+    "openblade/hardware/ltfs.py",  # guarded LTFS command backend
+    "openblade/hardware/mtx.py",  # guarded changer wrapper
+    "openblade/hardware/sg.py",  # guarded sg inquiry wrapper
+    "openblade/hardware/validation.py",  # guarded hardware validation workflows
     # --- Simulator (not real hardware) ---
     "openblade/simulator/ltfs_volume.py",
     "openblade/simulator/library.py",
@@ -65,9 +65,9 @@ ALLOWED_FILES: set[str] = {
     "openblade/safety/import_guard.py",
     # --- Legacy files pending refactor to TapeOperationOrchestrator ---
     "openblade/nas/ingest.py",
-    "openblade/nas/hydration.py",         # restore data path: reads archived bytes from tape (ltfs.read_bytes)
+    "openblade/nas/hydration.py",  # restore data path: reads archived bytes from tape (ltfs.read_bytes)
     "openblade/nas/ltfs_manifest.py",
-    "openblade/nas/health_service.py",         # needs library.inventory() for health check
+    "openblade/nas/health_service.py",  # needs library.inventory() for health check
     "openblade/jobs/archive.py",
     "openblade/jobs/inventory.py",
     "openblade/jobs/restore.py",
@@ -91,11 +91,11 @@ ALLOWED_FILES: set[str] = {
     # it and mirror real i3/iBlade production behavior; routing them through it would
     # break their contract or the orchestrator's own safety model:
     "openblade/api/routes_aml_move_medium.py",  # i3 AML Web Services robotics: moveMedium is coordinate-based (no barcode); wire contract
-    "openblade/api/routes_aml_operations.py",   # i3 AML operations: coordinate-based load; wire contract
-    "openblade/api/routes_ltfs.py",             # stateful LTFS mount/unmount HTTP API (holds handles open across calls)
-    "openblade/api/nas_config.py",              # batch dataset verify: holds many RO mounts open at once for efficiency
-    "openblade/api/routes_upload.py",           # read-only library.inventory() for empty-slot lookup (not a tape data op)
-    "openblade/bootstrap.py",                   # startup tape provisioning (ltfs.ensure_tape) before services/orchestrator exist
+    "openblade/api/routes_aml_operations.py",  # i3 AML operations: coordinate-based load; wire contract
+    "openblade/api/routes_ltfs.py",  # stateful LTFS mount/unmount HTTP API (holds handles open across calls)
+    "openblade/api/nas_config.py",  # batch dataset verify: holds many RO mounts open at once for efficiency
+    "openblade/api/routes_upload.py",  # read-only library.inventory() for empty-slot lookup (not a tape data op)
+    "openblade/bootstrap.py",  # startup tape provisioning (ltfs.ensure_tape) before services/orchestrator exist
 }
 
 

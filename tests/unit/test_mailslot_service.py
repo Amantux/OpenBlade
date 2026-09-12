@@ -38,9 +38,7 @@ def make_service(
     *, ie_slots: int = 4, slots: int = 6
 ) -> tuple[CatalogRepository, MockLibraryBackend, MailslotService]:
     repo = make_repo()
-    library = MockLibraryBackend(
-        num_slots=slots, num_drives=1, num_import_export_slots=ie_slots
-    )
+    library = MockLibraryBackend(num_slots=slots, num_drives=1, num_import_export_slots=ie_slots)
     library.seed_slots(["OB0001L8", "OB0002L8"])
     ltfs = MockLTFSBackend(library)
     return repo, library, MailslotService(repo, library, ltfs)
@@ -276,9 +274,7 @@ class TestExport:
         job = repo.create_job("restore", {})
         with pytest.raises(CartridgeOfflineError):
             run_restore_job(
-                RestoreRequest(
-                    catalog_path="/photos/holiday.jpg", dest_path=Path("/tmp/nope")
-                ),
+                RestoreRequest(catalog_path="/photos/holiday.jpg", dest_path=Path("/tmp/nope")),
                 library,
                 ltfs,
                 repo,
@@ -353,9 +349,7 @@ class TestOrchestratorGuardIsUnbypassable:
     @staticmethod
     def _loaded_rig():
         repo = make_repo()
-        library = MockLibraryBackend(
-            num_slots=4, num_drives=1, num_import_export_slots=2
-        )
+        library = MockLibraryBackend(num_slots=4, num_drives=1, num_import_export_slots=2)
         library.seed_slots(["OB0001L8", "OB0002L8"])
         ltfs = MockLTFSBackend(library)
         group = repo.create_volume_group("photos")
@@ -390,7 +384,7 @@ class TestOrchestratorGuardIsUnbypassable:
             TapeOpRequest(
                 op_type=TapeOpType.EXPORT,
                 barcode="OB0002L8",  # carries nothing
-                slot_id=1,           # ...but slot 1 holds OB0001L8, which does
+                slot_id=1,  # ...but slot 1 holds OB0001L8, which does
                 extras={"ie_slot": 5},
             ),
         )
@@ -464,9 +458,9 @@ class TestOrchestratorGuardIsUnbypassable:
         assert "does not name" in record.error
         assert library.find_slot_by_barcode("OB0001L8") == 1
         # OB0002L8 is still parked in the mailslot, untouched.
-        assert [
-            str(slot.barcode) for slot in library.import_export_slots() if slot.occupied
-        ] == ["OB0002L8"]
+        assert [str(slot.barcode) for slot in library.import_export_slots() if slot.occupied] == [
+            "OB0002L8"
+        ]
 
     def test_import_refuses_an_occupied_destination_slot(self) -> None:
         from openblade.nas.tape_orchestrator import execute_tape_request
@@ -530,9 +524,7 @@ class TestOrchestratorGuardIsUnbypassable:
         from openblade.nas.tape_orchestrator import execute_tape_request
         from openblade.nas.types import TapeOpRequest, TapeOpType
 
-        library = MockLibraryBackend(
-            num_slots=4, num_drives=1, num_import_export_slots=2
-        )
+        library = MockLibraryBackend(num_slots=4, num_drives=1, num_import_export_slots=2)
         library.seed_slots(["OB0001L8"])
         ltfs = MockLTFSBackend(library)
 
@@ -555,9 +547,7 @@ class TestOrchestratorGuardIsUnbypassable:
         from openblade.nas.tape_orchestrator import execute_tape_request
         from openblade.nas.types import TapeOpRequest, TapeOpType
 
-        library = MockLibraryBackend(
-            num_slots=4, num_drives=1, num_import_export_slots=2
-        )
+        library = MockLibraryBackend(num_slots=4, num_drives=1, num_import_export_slots=2)
         library.seed_slots(["OB0001L8"])
         ltfs = MockLTFSBackend(library)
 
@@ -590,11 +580,9 @@ class TestOrchestratorGuardIsUnbypassable:
             _TransientTapeOpRepository,
         )
 
-        library = MockLibraryBackend(
-            num_slots=2, num_drives=1, num_import_export_slots=2
-        )
+        library = MockLibraryBackend(num_slots=2, num_drives=1, num_import_export_slots=2)
         library.seed_slots(["OB0001L8", "OB0002L8"])
-        library.load(1, 0)                    # slot 1 is now free...
+        library.load(1, 0)  # slot 1 is now free...
         library.add_cartridge(1, "OB0003L8")  # ...and immediately refilled
         orchestrator = TapeOperationOrchestrator(
             _TransientTapeOpRepository(), library, MockLTFSBackend(library)
@@ -608,25 +596,19 @@ class TestOrchestratorGuardIsUnbypassable:
 
 class TestSimulatorState:
     def test_import_export_elements_are_not_storage_slots(self) -> None:
-        library = MockLibraryBackend(
-            num_slots=3, num_drives=1, num_import_export_slots=2
-        )
+        library = MockLibraryBackend(num_slots=3, num_drives=1, num_import_export_slots=2)
         assert [slot.slot_id for slot in library.inventory().slots] == [1, 2, 3]
         assert [slot.slot_id for slot in library.import_export_slots()] == [4, 5]
 
     def test_a_tape_in_the_mailslot_is_not_found_by_slot_lookup(self) -> None:
-        library = MockLibraryBackend(
-            num_slots=3, num_drives=1, num_import_export_slots=2
-        )
+        library = MockLibraryBackend(num_slots=3, num_drives=1, num_import_export_slots=2)
         library.seed_slots(["OB0001L8"])
         library.export_cartridge_to_ie(1, 4)
         # Nothing that unloads or loads may pick it up from the mailslot.
         assert library.find_slot_by_barcode("OB0001L8") is None
 
     def test_json_round_trip_preserves_the_mailslot(self) -> None:
-        library = MockLibraryBackend(
-            num_slots=3, num_drives=1, num_import_export_slots=2
-        )
+        library = MockLibraryBackend(num_slots=3, num_drives=1, num_import_export_slots=2)
         library.seed_slots(["OB0001L8"])
         library.export_cartridge_to_ie(1, 4)
 

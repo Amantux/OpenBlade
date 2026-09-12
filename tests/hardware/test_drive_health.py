@@ -155,7 +155,9 @@ def test_read_tape_alerts_degrades_gracefully(real_hardware_guard, drive_devices
         print(f"  set: {flag.number} {flag.name} ({flag.severity})")
 
 
-def test_read_tape_alerts_on_the_changer_is_unsupported(real_hardware_guard, changer_device, runner):
+def test_read_tape_alerts_on_the_changer_is_unsupported(
+    real_hardware_guard, changer_device, runner
+):
     """Requires: a media changer. It answers 0x2e with a non-TapeAlert payload."""
     from openblade.config import load_config
     from openblade.hardware.safety import require_real_hardware

@@ -69,7 +69,12 @@ class TapeOperationOrchestrator:
                 "created_at": created_at,
             }
         )
-        logger.info("tape operation queued", op_id=op_id, op_type=request.op_type.value, barcode=request.barcode)
+        logger.info(
+            "tape operation queued",
+            op_id=op_id,
+            op_type=request.op_type.value,
+            barcode=request.barcode,
+        )
         self.repo.update_tape_op(
             op_id,
             {
@@ -193,7 +198,10 @@ class TapeOperationOrchestrator:
         barcode = request.barcode.strip()
         if not barcode:
             raise ValueError("barcode must be non-empty")
-        if request.op_type in {TapeOpType.READ, TapeOpType.WRITE, TapeOpType.VERIFY} and not request.tape_path:
+        if (
+            request.op_type in {TapeOpType.READ, TapeOpType.WRITE, TapeOpType.VERIFY}
+            and not request.tape_path
+        ):
             raise ValueError("tape_path is required for read, write, and verify operations")
         if request.op_type is TapeOpType.WRITE and request.content is None:
             raise ValueError("content is required for write operations")
@@ -202,16 +210,25 @@ class TapeOperationOrchestrator:
             dest_slot = self._dest_slot(request)
             if source_slot == dest_slot:
                 raise ValueError("source slot and destination slot must differ")
-        if request.op_type is TapeOpType.FORMAT and request.extras.get("confirmed_format") is not True:
+        if (
+            request.op_type is TapeOpType.FORMAT
+            and request.extras.get("confirmed_format") is not True
+        ):
             raise OperationNotConfirmedError("Format operations require explicit confirmation")
 
     def _load(self, request: TapeOpRequest) -> dict[str, Any]:
-        slot_id = request.slot_id if request.slot_id is not None else self.library.find_slot_by_barcode(request.barcode)
+        slot_id = (
+            request.slot_id
+            if request.slot_id is not None
+            else self.library.find_slot_by_barcode(request.barcode)
+        )
         if slot_id is None:
             raise ValueError(f"Barcode {request.barcode} is not present in a slot")
         drive_id = request.drive_id if request.drive_id is not None else 0
         result = self.library.load(slot_id, drive_id)
-        return self._operation_result(result, {"barcode": request.barcode, "drive_id": drive_id, "slot_id": slot_id})
+        return self._operation_result(
+            result, {"barcode": request.barcode, "drive_id": drive_id, "slot_id": slot_id}
+        )
 
     def _unload(self, request: TapeOpRequest) -> dict[str, Any]:
         drive_id = request.drive_id
@@ -221,7 +238,9 @@ class TapeOperationOrchestrator:
             raise ValueError(f"Barcode {request.barcode} is not loaded in a drive")
         slot_id = request.slot_id if request.slot_id is not None else self._find_empty_slot()
         result = self.library.unload(drive_id, slot_id)
-        return self._operation_result(result, {"barcode": request.barcode, "drive_id": drive_id, "slot_id": slot_id})
+        return self._operation_result(
+            result, {"barcode": request.barcode, "drive_id": drive_id, "slot_id": slot_id}
+        )
 
     def _format(self, request: TapeOpRequest) -> dict[str, Any]:
         confirmation = request.extras.get("format_confirmation")
@@ -391,9 +410,7 @@ class TapeOperationOrchestrator:
             )
         target_slot = request.slot_id
         if target_slot is None:
-            raise ImportExportSlotError(
-                "slot_id (destination storage slot) is required for import"
-            )
+            raise ImportExportSlotError("slot_id (destination storage slot) is required for import")
         target = self._require_storage_slot(target_slot)
         if target.barcode is not None:
             raise ImportExportSlotError(
@@ -507,7 +524,9 @@ class TapeOperationOrchestrator:
         return 0
 
     def _source_slot(self, request: TapeOpRequest) -> int:
-        source_slot = request.extras.get("source_slot_id", request.extras.get("source_slot", request.slot_id))
+        source_slot = request.extras.get(
+            "source_slot_id", request.extras.get("source_slot", request.slot_id)
+        )
         if source_slot is None:
             slot_id = self.library.find_slot_by_barcode(request.barcode)
             if slot_id is None:
@@ -516,7 +535,9 @@ class TapeOperationOrchestrator:
         return int(source_slot)
 
     def _dest_slot(self, request: TapeOpRequest) -> int:
-        destination = request.extras.get("dest_slot_id", request.extras.get("dest_slot", request.slot_id))
+        destination = request.extras.get(
+            "dest_slot_id", request.extras.get("dest_slot", request.slot_id)
+        )
         if destination is None:
             raise ValueError("destination slot is required for move operations")
         destination_id = int(destination)
@@ -573,9 +594,7 @@ class TapeOperationOrchestrator:
             return "Format operations require explicit confirmation"
         if isinstance(exc, ChecksumMismatchError):
             return "Checksum verification failed"
-        if isinstance(
-            exc, ExportRefusedError | MailslotUnsupportedError | ImportExportSlotError
-        ):
+        if isinstance(exc, ExportRefusedError | MailslotUnsupportedError | ImportExportSlotError):
             # Operator-written text that exists precisely to be read: it names the
             # cartridge, the volume group, and what would go out of the door.
             # Replacing it with "Tape export operation failed" would defeat it.
@@ -620,10 +639,14 @@ def execute_tape_request(
     raise_on_failed: bool = False,
 ) -> TapeOpRecord:
     """Execute a tape operation through the orchestrator."""
-    active_repo: CatalogRepository | _TransientTapeOpRepository = repo or _TransientTapeOpRepository()
+    active_repo: CatalogRepository | _TransientTapeOpRepository = (
+        repo or _TransientTapeOpRepository()
+    )
     record = TapeOperationOrchestrator(active_repo, library, ltfs).execute(request)
     if raise_on_failed and record.status is TapeOpStatus.FAILED:
-        raise TapeOperationFailedError(record.error or f"Tape {request.op_type.value} operation failed")
+        raise TapeOperationFailedError(
+            record.error or f"Tape {request.op_type.value} operation failed"
+        )
     return record
 
 

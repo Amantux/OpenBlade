@@ -25,7 +25,9 @@ from openblade.nas.types import (
 
 
 def make_nas_service(tmp_path: Path) -> NasService:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'nas-dataset-detail.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'nas-dataset-detail.db'}")
+    )
     reset_context(context)
     return NasService(context.catalog)
 
@@ -86,9 +88,27 @@ def test_get_dataset_detail_tape_set_derived_from_file_records(tmp_path: Path) -
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="a.txt", tape_barcode="VOL002L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="b.txt", tape_barcode="VOL001L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="c.txt", tape_barcode="VOL002L9")
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="a.txt",
+        tape_barcode="VOL002L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="b.txt",
+        tape_barcode="VOL001L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="c.txt",
+        tape_barcode="VOL002L9",
+    )
 
     detail = service.get_dataset_detail(dataset.id)
 
@@ -99,9 +119,27 @@ def test_get_dataset_detail_shard_map_is_correct(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="docs/a.txt", tape_barcode="VOL001L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="docs/b.txt", tape_barcode="VOL001L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="media/c.txt", tape_barcode="VOL002L9")
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="docs/a.txt",
+        tape_barcode="VOL001L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="docs/b.txt",
+        tape_barcode="VOL001L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="media/c.txt",
+        tape_barcode="VOL002L9",
+    )
 
     detail = service.get_dataset_detail(dataset.id)
 
@@ -128,9 +166,27 @@ def test_get_dataset_detail_copies_completed_counts_distinct_tapes(tmp_path: Pat
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="a.bin", tape_barcode="VOL001L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="b.bin", tape_barcode="VOL001L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="c.bin", tape_barcode="VOL002L9")
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="a.bin",
+        tape_barcode="VOL001L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="b.bin",
+        tape_barcode="VOL001L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="c.bin",
+        tape_barcode="VOL002L9",
+    )
 
     detail = service.get_dataset_detail(dataset.id)
 
@@ -152,7 +208,13 @@ def test_verify_seeds_checksums_for_files_without_checksum(tmp_path: Path, monke
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    record = seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="docs/a.txt", checksum_sha256=None)
+    record = seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="docs/a.txt",
+        checksum_sha256=None,
+    )
     expected = "verified-tape-checksum"
 
     context = get_context()
@@ -219,7 +281,9 @@ def test_manifest_returns_expected_structure(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    record = seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="docs/a.txt", size_bytes=99)
+    record = seed_file(
+        service, dataset_id=dataset.id, pool_id=pool.id, relative_path="docs/a.txt", size_bytes=99
+    )
 
     manifest = asyncio.run(get_dataset_manifest(dataset.id, service))
 
@@ -246,7 +310,13 @@ def test_report_includes_dataset_metadata_and_checksums(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    record = seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="docs/a.txt", checksum_sha256="abc")
+    record = seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="docs/a.txt",
+        checksum_sha256="abc",
+    )
 
     report = asyncio.run(get_dataset_report(dataset.id, service))
 

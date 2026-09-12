@@ -70,7 +70,9 @@ def run(registry: Any, facade: Any, action: Any, response: str) -> dict[str, Any
 
 def free_slot(app_context: Any) -> int:
     """The highest empty storage slot. Hard-coding one breaks when the seed changes."""
-    empty = [int(slot.slot_id) for slot in app_context.library.inventory().slots if not slot.barcode]
+    empty = [
+        int(slot.slot_id) for slot in app_context.library.inventory().slots if not slot.barcode
+    ]
     assert empty, "the fixture library should have an empty slot"
     return max(empty)
 
@@ -242,9 +244,7 @@ def test_perform_refuses_a_missing_authorization(registry: Any, facade: Any) -> 
         registry.perform(action, facade, None)
 
 
-def test_perform_refuses_an_authorization_for_another_action(
-    registry: Any, facade: Any
-) -> None:
+def test_perform_refuses_an_authorization_for_another_action(registry: Any, facade: Any) -> None:
     """MUTATION CHECK: delete the ``action_key`` check -> this fails.
 
     The attack it blocks: confirm a harmless load, then replay that authorization
@@ -265,9 +265,7 @@ def test_perform_refuses_a_downgraded_grade(registry: Any, facade: Any) -> None:
     The attack: forge a YES_NO authorization for an action that is graded TYPED.
     """
     action = plan(registry, facade, "format_tape", barcode=FIRST_BARCODE)
-    forged = MediaAuthorization(
-        action_key=action.key, grade=ConfirmationGrade.YES_NO, response="y"
-    )
+    forged = MediaAuthorization(action_key=action.key, grade=ConfirmationGrade.YES_NO, response="y")
     with pytest.raises(MediaNotAuthorizedError) as excinfo:
         registry.perform(action, facade, forged)
     assert "typed" in str(excinfo.value)
@@ -280,9 +278,7 @@ def test_perform_reverifies_the_typed_response(registry: Any, facade: Any) -> No
     response that does not actually satisfy the grade.
     """
     action = plan(registry, facade, "format_tape", barcode=FIRST_BARCODE)
-    forged = MediaAuthorization(
-        action_key=action.key, grade=ConfirmationGrade.TYPED, response="y"
-    )
+    forged = MediaAuthorization(action_key=action.key, grade=ConfirmationGrade.TYPED, response="y")
     with pytest.raises(MediaNotAuthorizedError) as excinfo:
         registry.perform(action, facade, forged)
     assert "does not satisfy" in str(excinfo.value)
@@ -387,9 +383,7 @@ def test_unloading_a_tape_that_is_in_a_slot_refuses(registry: Any, facade: Any) 
     assert excinfo.value.code == "not_loaded"
 
 
-def test_unload_without_a_target_refuses_rather_than_guessing(
-    registry: Any, facade: Any
-) -> None:
+def test_unload_without_a_target_refuses_rather_than_guessing(registry: Any, facade: Any) -> None:
     """Two drives loaded, no target named: a guess here unloads the wrong tape."""
     run(registry, facade, plan(registry, facade, "load_tape", barcode=FIRST_BARCODE, drive=0), "y")
     run(registry, facade, plan(registry, facade, "load_tape", barcode=SECOND_BARCODE, drive=1), "y")
@@ -407,9 +401,7 @@ def test_unload_refuses_when_drive_and_barcode_disagree(registry: Any, facade: A
     assert excinfo.value.code == "drive_barcode_mismatch"
 
 
-def test_unload_refuses_while_ltfs_is_mounted(
-    registry: Any, facade: Any, app_context: Any
-) -> None:
+def test_unload_refuses_while_ltfs_is_mounted(registry: Any, facade: Any, app_context: Any) -> None:
     """The project non-negotiable, enforced before the operator is asked.
 
     MUTATION CHECK: remove ``_require_unmounted`` from ``_resolve_unload`` and this
@@ -629,9 +621,7 @@ def test_restore_round_trips_byte_identically(
         "y",
     )
     destination = tmp_path / "restored.raw"
-    action = plan(
-        registry, facade, "restore_path", path="/pool/one.raw", dest=str(destination)
-    )
+    action = plan(registry, facade, "restore_path", path="/pool/one.raw", dest=str(destination))
     assert action.grade is ConfirmationGrade.YES_NO, "nothing is overwritten"
     assert "Nothing is overwritten" in action.preview
     result = run(registry, facade, action, "y")
@@ -659,9 +649,7 @@ def test_restore_over_an_existing_file_demands_the_typed_word(
     )
     destination = tmp_path / "existing.raw"
     destination.write_bytes(b"something the operator still wants")
-    action = plan(
-        registry, facade, "restore_path", path="/pool/one.raw", dest=str(destination)
-    )
+    action = plan(registry, facade, "restore_path", path="/pool/one.raw", dest=str(destination))
     assert action.grade is ConfirmationGrade.TYPED
     assert action.required_response == OVERWRITE_WORD
     assert "ALREADY EXISTS" in action.preview

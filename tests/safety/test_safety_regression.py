@@ -160,7 +160,11 @@ def test_format_endpoint_requires_token(app_context) -> None:
     assert login.status_code == 200
     session_id = login.cookies.get("sessionID")
     assert session_id is not None
-    barcode = next(item["barcode"] for item in client.get("/cartridges/").json() if not item["barcode"].startswith("CLN"))
+    barcode = next(
+        item["barcode"]
+        for item in client.get("/cartridges/").json()
+        if not item["barcode"].startswith("CLN")
+    )
     response = client.post(
         "/cartridges/format/confirm",
         json={"barcode": barcode, "token": "bad-token"},

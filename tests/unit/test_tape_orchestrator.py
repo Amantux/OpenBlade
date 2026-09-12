@@ -34,7 +34,6 @@ class ObservedLibrary(MockLibraryBackend):
         return super().load(source_slot, drive_id)
 
 
-
 def format_extras(barcode: str) -> dict:
     """Extras for a legitimately confirmed format.
 
@@ -56,7 +55,6 @@ def make_repo() -> CatalogRepository:
     return CatalogRepository(get_session())
 
 
-
 def make_orchestrator(
     repo: CatalogRepository | None = None,
     library: MockLibraryBackend | None = None,
@@ -68,14 +66,16 @@ def make_orchestrator(
     return repo, library, ltfs, TapeOperationOrchestrator(repo, library, ltfs)
 
 
-
-def seed_read_data(library: MockLibraryBackend, ltfs: MockLTFSBackend, barcode: str, path: str, content: bytes) -> None:
+def seed_read_data(
+    library: MockLibraryBackend, ltfs: MockLTFSBackend, barcode: str, path: str, content: bytes
+) -> None:
     library.seed_slots([barcode])
     ltfs.write_bytes(barcode, path, content)
 
 
-
-def prepare_write_target(orchestrator: TapeOperationOrchestrator, library: MockLibraryBackend, barcode: str) -> None:
+def prepare_write_target(
+    orchestrator: TapeOperationOrchestrator, library: MockLibraryBackend, barcode: str
+) -> None:
     library.seed_slots([barcode])
     orchestrator.execute(
         TapeOpRequest(
@@ -87,12 +87,10 @@ def prepare_write_target(orchestrator: TapeOperationOrchestrator, library: MockL
     )
 
 
-
 def make_client(tmp_path, db_name: str) -> TestClient:
     context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / db_name}"))
     reset_context(context)
     return TestClient(app)
-
 
 
 def test_load_op_persists_log() -> None:
@@ -100,14 +98,19 @@ def test_load_op_persists_log() -> None:
     library.seed_slots(["LD0001L8"])
 
     record = orchestrator.execute(
-        TapeOpRequest(op_type=TapeOpType.LOAD, barcode="LD0001L8", drive_id=0, slot_id=1, requested_by="tester")
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode="LD0001L8",
+            drive_id=0,
+            slot_id=1,
+            requested_by="tester",
+        )
     )
 
     stored = repo.get_tape_op(record.op_id)
     assert stored is not None
     assert stored["status"] == TapeOpStatus.COMPLETED.value
     assert stored["barcode"] == "LD0001L8"
-
 
 
 def test_write_op_persists_log() -> None:
@@ -131,18 +134,21 @@ def test_write_op_persists_log() -> None:
     assert stored["tape_path"] == "/data.bin"
 
 
-
 def test_read_op_returns_bytes_count() -> None:
     _, library, ltfs, orchestrator = make_orchestrator()
     seed_read_data(library, ltfs, "RD0001L8", "/read.txt", b"hello-world")
 
     record = orchestrator.execute(
-        TapeOpRequest(op_type=TapeOpType.READ, barcode="RD0001L8", tape_path="/read.txt", requested_by="tester")
+        TapeOpRequest(
+            op_type=TapeOpType.READ,
+            barcode="RD0001L8",
+            tape_path="/read.txt",
+            requested_by="tester",
+        )
     )
 
     assert record.status is TapeOpStatus.COMPLETED
     assert record.result["bytes_read"] == 11
-
 
 
 def test_verify_op_success() -> None:
@@ -164,7 +170,6 @@ def test_verify_op_success() -> None:
     assert record.result["verified"] is True
 
 
-
 def test_verify_op_checksum_mismatch_returns_failed() -> None:
     _, library, ltfs, orchestrator = make_orchestrator()
     seed_read_data(library, ltfs, "VF0002L8", "/verify.txt", b"actual")
@@ -183,7 +188,6 @@ def test_verify_op_checksum_mismatch_returns_failed() -> None:
     assert record.error == "Checksum verification failed"
 
 
-
 def test_format_op_requires_confirmation() -> None:
     _, library, _, orchestrator = make_orchestrator()
     library.seed_slots(["FM0001L8"])
@@ -196,7 +200,6 @@ def test_format_op_requires_confirmation() -> None:
         pass
     else:
         raise AssertionError("expected OperationNotConfirmedError")
-
 
 
 def test_format_op_confirmed_succeeds() -> None:
@@ -214,7 +217,6 @@ def test_format_op_confirmed_succeeds() -> None:
 
     assert record.status is TapeOpStatus.COMPLETED
     assert ltfs.ensure_tape("FM0002L8").formatted is True
-
 
 
 def test_move_op_same_slot_raises() -> None:
@@ -237,7 +239,6 @@ def test_move_op_same_slot_raises() -> None:
         raise AssertionError("expected ValueError")
 
 
-
 def test_failed_op_has_safe_error_message() -> None:
     repo = make_repo()
     library = FailingLibrary(num_slots=4, num_drives=1)
@@ -246,12 +247,17 @@ def test_failed_op_has_safe_error_message() -> None:
     orchestrator = TapeOperationOrchestrator(repo, library, ltfs)
 
     record = orchestrator.execute(
-        TapeOpRequest(op_type=TapeOpType.LOAD, barcode="FL0001L8", drive_id=0, slot_id=1, requested_by="tester")
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode="FL0001L8",
+            drive_id=0,
+            slot_id=1,
+            requested_by="tester",
+        )
     )
 
     assert record.status is TapeOpStatus.FAILED
     assert record.error == "Tape load operation failed"
-
 
 
 def test_failed_op_no_raw_exception_in_error() -> None:
@@ -262,7 +268,13 @@ def test_failed_op_no_raw_exception_in_error() -> None:
     orchestrator = TapeOperationOrchestrator(repo, library, ltfs)
 
     record = orchestrator.execute(
-        TapeOpRequest(op_type=TapeOpType.LOAD, barcode="FL0002L8", drive_id=0, slot_id=1, requested_by="tester")
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode="FL0002L8",
+            drive_id=0,
+            slot_id=1,
+            requested_by="tester",
+        )
     )
 
     error_text = record.error or ""
@@ -276,13 +288,16 @@ def test_failed_op_no_raw_exception_in_error() -> None:
     assert "line " not in error_text
 
 
-
 def test_list_ops_by_barcode() -> None:
     _, library, ltfs, orchestrator = make_orchestrator()
     seed_read_data(library, ltfs, "LS0001L8", "/one.txt", b"one")
     seed_read_data(library, ltfs, "LS0002L8", "/two.txt", b"two")
-    orchestrator.execute(TapeOpRequest(op_type=TapeOpType.READ, barcode="LS0001L8", tape_path="/one.txt"))
-    orchestrator.execute(TapeOpRequest(op_type=TapeOpType.READ, barcode="LS0002L8", tape_path="/two.txt"))
+    orchestrator.execute(
+        TapeOpRequest(op_type=TapeOpType.READ, barcode="LS0001L8", tape_path="/one.txt")
+    )
+    orchestrator.execute(
+        TapeOpRequest(op_type=TapeOpType.READ, barcode="LS0002L8", tape_path="/two.txt")
+    )
 
     records = orchestrator.list_ops(barcode="LS0001L8")
 
@@ -290,12 +305,13 @@ def test_list_ops_by_barcode() -> None:
     assert records[0].barcode == "LS0001L8"
 
 
-
 def test_list_ops_by_status() -> None:
     _, library, ltfs, orchestrator = make_orchestrator()
     seed_read_data(library, ltfs, "ST0001L8", "/ok.txt", b"ok")
     seed_read_data(library, ltfs, "ST0002L8", "/bad.txt", b"bad")
-    orchestrator.execute(TapeOpRequest(op_type=TapeOpType.READ, barcode="ST0001L8", tape_path="/ok.txt"))
+    orchestrator.execute(
+        TapeOpRequest(op_type=TapeOpType.READ, barcode="ST0001L8", tape_path="/ok.txt")
+    )
     orchestrator.execute(
         TapeOpRequest(
             op_type=TapeOpType.VERIFY,
@@ -311,12 +327,10 @@ def test_list_ops_by_status() -> None:
     assert records[0].status is TapeOpStatus.FAILED
 
 
-
 def test_get_op_returns_none_for_unknown() -> None:
     _, _, _, orchestrator = make_orchestrator()
 
     assert orchestrator.get_op("missing-op") is None
-
 
 
 def test_op_log_created_before_execution() -> None:
@@ -327,11 +341,16 @@ def test_op_log_created_before_execution() -> None:
     orchestrator = TapeOperationOrchestrator(repo, library, ltfs)
 
     orchestrator.execute(
-        TapeOpRequest(op_type=TapeOpType.LOAD, barcode="OB0001L8", drive_id=0, slot_id=1, requested_by="tester")
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode="OB0001L8",
+            drive_id=0,
+            slot_id=1,
+            requested_by="tester",
+        )
     )
 
     assert library.observed_created is True
-
 
 
 def test_op_log_completed_after_execution() -> None:
@@ -339,14 +358,19 @@ def test_op_log_completed_after_execution() -> None:
     library.seed_slots(["DN0001L8"])
 
     record = orchestrator.execute(
-        TapeOpRequest(op_type=TapeOpType.LOAD, barcode="DN0001L8", drive_id=0, slot_id=1, requested_by="tester")
+        TapeOpRequest(
+            op_type=TapeOpType.LOAD,
+            barcode="DN0001L8",
+            drive_id=0,
+            slot_id=1,
+            requested_by="tester",
+        )
     )
 
     stored = repo.get_tape_op(record.op_id)
     assert stored is not None
     assert stored["completed_at"] is not None
     assert stored["status"] == TapeOpStatus.COMPLETED.value
-
 
 
 def test_write_op_result_has_checksum() -> None:
@@ -368,14 +392,14 @@ def test_write_op_result_has_checksum() -> None:
     assert record.result["checksum"] == hashlib.sha256(content).hexdigest()
 
 
-
 def test_api_execute_requires_auth(tmp_path) -> None:
     client = make_client(tmp_path, "tape-ops-api-1.db")
 
-    response = client.post("/tape-ops/execute", json={"op_type": "read", "barcode": "AP0001L8", "tape_path": "/x"})
+    response = client.post(
+        "/tape-ops/execute", json={"op_type": "read", "barcode": "AP0001L8", "tape_path": "/x"}
+    )
 
     assert response.status_code == 401
-
 
 
 def test_api_get_op_requires_auth(tmp_path) -> None:
@@ -384,7 +408,6 @@ def test_api_get_op_requires_auth(tmp_path) -> None:
     response = client.get("/tape-ops/some-op")
 
     assert response.status_code == 401
-
 
 
 def test_api_list_ops_requires_auth(tmp_path) -> None:

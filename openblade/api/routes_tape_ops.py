@@ -64,7 +64,9 @@ async def get_tape_op(
     """Return a single tape operation audit record."""
     record = orchestrator.get_op(op_id)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tape operation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Tape operation not found"
+        )
     return record
 
 

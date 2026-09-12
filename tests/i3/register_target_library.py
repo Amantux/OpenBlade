@@ -100,7 +100,9 @@ def main() -> int:
             result = {"action": "created", "library": response.json()}
         else:
             library_id = int(existing["id"])
-            response = client.put(f"/api/libraries/{library_id}", headers=auth_headers, json=payload)
+            response = client.put(
+                f"/api/libraries/{library_id}", headers=auth_headers, json=payload
+            )
             response.raise_for_status()
             result = {"action": "updated", "library": response.json()}
 

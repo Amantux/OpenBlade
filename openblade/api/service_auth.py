@@ -37,8 +37,7 @@ def get_controller_service_token() -> str:
             "Set a strong secret token before starting in production."
         )
     _log.warning(
-        "Using default insecure service token. "
-        "Set %s env var before deploying to production.",
+        "Using default insecure service token. Set %s env var before deploying to production.",
         SERVICE_TOKEN_ENV_VAR,
     )
     return _DEFAULT_SERVICE_TOKEN

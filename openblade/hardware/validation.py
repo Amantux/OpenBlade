@@ -105,11 +105,15 @@ def validate_ltfs_capabilities(
         if mount_point is None:
             raise ValueError("mount_point is required when exercise_mounts is enabled")
         mount_point.mkdir(parents=True, exist_ok=True)
-        readonly_mount = LTFSCommandBackend.mount_readonly(device, str(mount_point), guard, active_runner)
+        readonly_mount = LTFSCommandBackend.mount_readonly(
+            device, str(mount_point), guard, active_runner
+        )
         readonly_mount_ok = readonly_mount.success
         if readonly_mount.success:
             LTFSCommandBackend.unmount(str(mount_point), guard, active_runner)
-        readwrite_mount = LTFSCommandBackend.mount_readwrite(device, str(mount_point), guard, active_runner)
+        readwrite_mount = LTFSCommandBackend.mount_readwrite(
+            device, str(mount_point), guard, active_runner
+        )
         readwrite_mount_ok = readwrite_mount.success
         if readwrite_mount.success:
             LTFSCommandBackend.unmount(str(mount_point), guard, active_runner)
@@ -155,7 +159,9 @@ def _drive_devices(discovery: LibraryDiscovery) -> list[str]:
     return devices
 
 
-def _inquiry_payloads(discovery: LibraryDiscovery, runner: SafeRunner, guard) -> list[dict[str, str]]:
+def _inquiry_payloads(
+    discovery: LibraryDiscovery, runner: SafeRunner, guard
+) -> list[dict[str, str]]:
     payloads: list[dict[str, str]] = []
     for device in _inquiry_devices(discovery):
         inquiry = sg_inq(device, runner, guard)

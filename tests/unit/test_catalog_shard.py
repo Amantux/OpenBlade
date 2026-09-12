@@ -90,7 +90,10 @@ def test_catalog_shard_sync_totals_auto_computes_counts() -> None:
     shard = CatalogShard(
         barcode="VOL001L8",
         openblade_tape_id="tape-1",
-        files=[_file_entry(size=10), _file_entry(logical_path="/datasets/b.txt", file_record_id="file-2", size=20)],
+        files=[
+            _file_entry(size=10),
+            _file_entry(logical_path="/datasets/b.txt", file_record_id="file-2", size=20),
+        ],
     )
 
     assert shard.file_count == 2
@@ -231,7 +234,9 @@ def test_file_entries_from_path_mappings_defaults_tape_path_to_logical_path() ->
 def test_file_entries_from_path_mappings_filters_to_requested_barcode() -> None:
     _, writer = _writer()
 
-    entries = writer.file_entries_from_path_mappings([_path_mapping(primary_barcode="VOL999L8", all_barcodes=["VOL999L8"])], "VOL001L8")
+    entries = writer.file_entries_from_path_mappings(
+        [_path_mapping(primary_barcode="VOL999L8", all_barcodes=["VOL999L8"])], "VOL001L8"
+    )
 
     assert entries == []
 

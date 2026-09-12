@@ -256,11 +256,17 @@ def control_plane_over_http() -> None:
         assert backend.load(slot.slot_id, drive.drive_id).success
         loaded = backend.get_drive(drive.drive_id)
         assert loaded.barcode is not None and loaded.barcode.value == barcode
-        ok("moveMedium load (robotics)", f"{barcode}: slot {slot.slot_id} -> drive {drive.drive_id}")
+        ok(
+            "moveMedium load (robotics)",
+            f"{barcode}: slot {slot.slot_id} -> drive {drive.drive_id}",
+        )
 
         assert backend.unload(drive.drive_id, slot.slot_id).success
         assert backend.get_drive(drive.drive_id).barcode is None
-        ok("moveMedium unload (robotics)", f"{barcode}: drive {drive.drive_id} -> slot {slot.slot_id}")
+        ok(
+            "moveMedium unload (robotics)",
+            f"{barcode}: drive {drive.drive_id} -> slot {slot.slot_id}",
+        )
 
 
 def policy_driven_nas_flow() -> None:
@@ -295,41 +301,50 @@ def policy_driven_nas_flow() -> None:
         relative_paths = sorted(source_hashes)
         file_sizes = {rel: (source / rel).stat().st_size for rel in relative_paths}
 
-        assert client.post(
-            "/nas/policies",
-            json={
-                "id": "nas-sharded",
-                "name": "NAS sharded",
-                "policy_type": "noncritical_sharded",
-                "default_ingest_mode": "cache_drive",
-                "copies_required": 1,
-                "allow_sharding": True,
-                "shard_size_bytes": 256 * 1024,
-                "max_parallelism": 2,
-            },
-        ).status_code == 201
-        assert client.post(
-            "/nas/pools",
-            json={
-                "id": "archive-pool",
-                "name": "Archive Pool",
-                "default_policy_id": "nas-sharded",
-                "replication_factor": 1,
-                "backup_order_mode": "parallel",
-                "access_mode": "read_write",
-            },
-        ).status_code == 201
-        assert client.post(
-            "/nas/cache-drives",
-            json={
-                "id": "cache-mvp",
-                "name": "Cache MVP",
-                "root_path": str(cache_root),
-                "max_bytes": 8 * 1024 * 1024,
-                "min_free_bytes": 256 * 1024,
-                "support_reflink_or_hardlink": True,
-            },
-        ).status_code == 201
+        assert (
+            client.post(
+                "/nas/policies",
+                json={
+                    "id": "nas-sharded",
+                    "name": "NAS sharded",
+                    "policy_type": "noncritical_sharded",
+                    "default_ingest_mode": "cache_drive",
+                    "copies_required": 1,
+                    "allow_sharding": True,
+                    "shard_size_bytes": 256 * 1024,
+                    "max_parallelism": 2,
+                },
+            ).status_code
+            == 201
+        )
+        assert (
+            client.post(
+                "/nas/pools",
+                json={
+                    "id": "archive-pool",
+                    "name": "Archive Pool",
+                    "default_policy_id": "nas-sharded",
+                    "replication_factor": 1,
+                    "backup_order_mode": "parallel",
+                    "access_mode": "read_write",
+                },
+            ).status_code
+            == 201
+        )
+        assert (
+            client.post(
+                "/nas/cache-drives",
+                json={
+                    "id": "cache-mvp",
+                    "name": "Cache MVP",
+                    "root_path": str(cache_root),
+                    "max_bytes": 8 * 1024 * 1024,
+                    "min_free_bytes": 256 * 1024,
+                    "support_reflink_or_hardlink": True,
+                },
+            ).status_code
+            == 201
+        )
         ok("policy + pool + cache-drive configured", "policy=nas-sharded -> pool=archive-pool")
 
         tapes = sorted(
@@ -375,7 +390,10 @@ def policy_driven_nas_flow() -> None:
                 break
             time.sleep(0.05)
         assert status.get("status") == "archived", status
-        ok("NAS ingest completed", f"dataset={dataset_id}, files_processed={status['files_processed']}")
+        ok(
+            "NAS ingest completed",
+            f"dataset={dataset_id}, files_processed={status['files_processed']}",
+        )
 
         records = client.get(f"/nas/datasets/{dataset_id}/files").json()
         assert len(records) == len(relative_paths)

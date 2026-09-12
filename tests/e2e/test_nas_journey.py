@@ -47,8 +47,13 @@ def auth(client: TestClient) -> dict[str, str]:
 
 def _drop_local_copies(file_id: str) -> None:
     record = get_context().catalog.get_nas_file_record(file_id)
-    candidates = [ru._safe_resolve(ru._staging_dir(), file_id), ru._safe_resolve(ru._restore_dir(), file_id)]
-    candidates += [Path(str(record[k])) for k in ("cache_path", "source_path") if record and record.get(k)]
+    candidates = [
+        ru._safe_resolve(ru._staging_dir(), file_id),
+        ru._safe_resolve(ru._restore_dir(), file_id),
+    ]
+    candidates += [
+        Path(str(record[k])) for k in ("cache_path", "source_path") if record and record.get(k)
+    ]
     for candidate in candidates:
         if candidate.exists():
             candidate.unlink()

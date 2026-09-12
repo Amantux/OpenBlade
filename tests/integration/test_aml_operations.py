@@ -32,6 +32,7 @@ def _controller_headers() -> dict[str, str]:
 # Jobs
 # ---------------------------------------------------------------------------
 
+
 def test_list_jobs_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/jobs")
     assert resp.status_code == 401
@@ -41,7 +42,11 @@ def test_list_jobs_returns_list(authed: TestClient) -> None:
     resp = authed.get("/aml/jobs")
     assert resp.status_code == 200
     data = resp.json()
-    jobs = data.get("jobs") or (data.get("jobList") or {}).get("job") or data if isinstance(data, list) else []
+    jobs = (
+        data.get("jobs") or (data.get("jobList") or {}).get("job") or data
+        if isinstance(data, list)
+        else []
+    )
     assert isinstance(jobs, list)
 
 
@@ -65,6 +70,7 @@ def test_operations_queue(authed: TestClient) -> None:
 # Mount / Unmount — job lifecycle regression
 # ---------------------------------------------------------------------------
 
+
 def test_mount_creates_completed_job(authed: TestClient) -> None:
     """Regression: after mount the job must be completed (not stuck as active)."""
     mount_resp = authed.post(
@@ -81,7 +87,11 @@ def test_mount_creates_completed_job(authed: TestClient) -> None:
         assert queue_resp.status_code == 200
         queue_data = queue_resp.json()
         active_ops = queue_data.get("queue") or queue_data.get("operations") or []
-        mount_jobs = [j for j in active_ops if isinstance(j, dict) and "mount" in str(j.get("type", "")).lower()]
+        mount_jobs = [
+            j
+            for j in active_ops
+            if isinstance(j, dict) and "mount" in str(j.get("type", "")).lower()
+        ]
         assert mount_jobs == [], "Mount job must be archived, not stuck in active queue"
 
         # History must contain the completed mount job
@@ -109,6 +119,7 @@ def test_unmount_returns_success(authed: TestClient) -> None:
 # Move
 # ---------------------------------------------------------------------------
 
+
 def test_move_requires_admin(client: TestClient) -> None:
     resp = client.post("/aml/move", json={"move": {"source": "slot-1", "destination": "slot-2"}})
     assert resp.status_code == 401
@@ -123,11 +134,7 @@ def test_move_accepts_numeric_slot_addresses(authed: TestClient) -> None:
     inventory_resp = authed.get("/aml/library/inventory")
     assert inventory_resp.status_code == 200
     inventory_payload = inventory_resp.json()
-    inventory_slots = (
-        inventory_payload.get("slots")
-        or inventory_payload.get("slot")
-        or []
-    )
+    inventory_slots = inventory_payload.get("slots") or inventory_payload.get("slot") or []
 
     media_resp = authed.get("/aml/media")
     assert media_resp.status_code == 200
@@ -160,6 +167,7 @@ def test_move_accepts_numeric_slot_addresses(authed: TestClient) -> None:
 # Inventory
 # ---------------------------------------------------------------------------
 
+
 def test_start_inventory_requires_admin(client: TestClient) -> None:
     resp = client.post("/aml/inventory")
     assert resp.status_code == 401
@@ -181,6 +189,7 @@ def test_inventory_status(authed: TestClient) -> None:
 # Robotics
 # ---------------------------------------------------------------------------
 
+
 def test_robotics_status_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/operations/robotics/status")
     assert resp.status_code == 200
@@ -198,6 +207,7 @@ def test_robotics_test_sets_last_test_time(authed: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Cleaning
 # ---------------------------------------------------------------------------
+
 
 def test_cleaning_status_returns_200(authed: TestClient) -> None:
     resp = authed.get("/aml/operations/cleaning/status")
@@ -238,6 +248,7 @@ def test_start_cleaning_updates_drive_cleaning_report(authed: TestClient) -> Non
 # ---------------------------------------------------------------------------
 # Import / Export
 # ---------------------------------------------------------------------------
+
 
 def test_import_status(authed: TestClient) -> None:
     resp = authed.get("/aml/import/status")
