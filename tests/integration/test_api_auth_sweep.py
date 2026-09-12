@@ -49,9 +49,15 @@ _EXTRA_NATIVE_PATHS: tuple[tuple[str, str], ...] = (
 # stay green. (Verified — that exact mutation passed until this was rewritten.)
 _AML_SURFACE_PREFIXES = ("/aml", "/iblade")
 _EXPECTED_OPEN_PATHS = frozenset({"/health", "/healthz", "/readyz"})
+# Mounted under an AML prefix but OpenBlade-native, so gated. /aml/proxy is an
+# SSRF-shaped outbound probe sitting behind the AML session's default
+# admin/password; it is not a matrix endpoint.
+_NATIVE_UNDER_AML_PREFIX = ("/aml/proxy",)
 
 
 def _is_aml_path(path: str) -> bool:
+    if any(path == prefix or path.startswith(prefix + "/") for prefix in _NATIVE_UNDER_AML_PREFIX):
+        return False
     return any(path == prefix or path.startswith(prefix + "/") for prefix in _AML_SURFACE_PREFIXES)
 
 
@@ -129,12 +135,32 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def _is_native_401(response: object) -> bool:
+    """True only for THIS layer's 401, not the AML session layer's.
+
+    64 of the gated operations carry a pre-existing ``Depends(require_auth)`` and
+    already answer 401 with the token layer switched off. Asserting the status
+    alone would make the sweep vacuous for a third of the surface it claims to
+    cover -- it would pass with the middleware deleted. The two 401s are
+    distinguishable by body: ours is ``{"error": "Unauthorized", ...}``, the AML
+    one is ``{"code": "AML_AUTH_REQUIRED", ...}``.
+    """
+    status = getattr(response, "status_code", None)
+    if status != 401:
+        return False
+    try:
+        body = response.json()  # type: ignore[attr-defined]
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("error") == api_auth.UNAUTHORIZED_BODY["error"]
+
+
 def _unprotected(client: TestClient) -> list[str]:
-    """Native operations that answered something other than 401 without a token."""
+    """Native operations that did not answer with THIS layer's 401."""
     leaks: list[str] = []
     for method, path in NATIVE_OPERATIONS:
         response = client.request(method.upper(), _concrete(path))
-        if response.status_code != 401:
+        if not _is_native_401(response):
             leaks.append(f"{method.upper()} {path} -> {response.status_code}")
     return leaks
 
@@ -163,9 +189,12 @@ def test_every_native_route_401s_without_a_token(
     auth_enabled: None, client: TestClient, method: str, path: str
 ) -> None:
     response = client.request(method.upper(), _concrete(path))
-    assert response.status_code == 401, (
-        f"{method.upper()} {path} returned {response.status_code}; it is not covered "
-        "by the api_auth chokepoint"
+    # The body matters, not just the status: 64 of these routes carry their own
+    # Depends(require_auth) and 401 even with this layer removed. See
+    # _is_native_401.
+    assert _is_native_401(response), (
+        f"{method.upper()} {path} returned {response.status_code} "
+        f"{response.text[:120]!r}; it is not covered by the api_auth chokepoint"
     )
 
 
@@ -203,6 +232,94 @@ def test_the_sweep_does_not_take_its_route_list_from_the_code_it_tests() -> None
         "api_auth exempts a path the sweep expects to be gated: "
         f"{sorted(set(NATIVE_OPERATIONS) - from_implementation)}"
     )
+
+
+def test_sweep_is_not_satisfied_by_the_aml_session_401(
+    auth_enabled: None, client: TestClient
+) -> None:
+    """The 64 routes with their own require_auth must still prove OUR gate.
+
+    Mutation-equivalent: if the sweep asserted only ``status_code == 401`` these
+    would pass with the middleware deleted. Pin that their 401 is this layer's.
+    """
+    already_gated = ("get", "/api/libraries")
+    assert already_gated in NATIVE_OPERATIONS
+    response = client.request("GET", "/api/libraries")
+    assert _is_native_401(response)
+    assert response.json().get("code") != "AML_AUTH_REQUIRED"
+
+
+def test_auth_is_registered_inside_the_scalar_scope_middleware() -> None:
+    """Emulator-only mode must answer 404 for native paths, never 401.
+
+    Starlette runs the LAST-registered middleware first, so api_auth must be
+    registered before enforce_scalar_api_scope in main.py. Swapping those two
+    lines leaks the existence of native routes to a scope-locked deployment and
+    nothing else would go red.
+    """
+    names = [
+        m.kwargs.get("dispatch").__name__
+        for m in app.user_middleware
+        if m.kwargs and m.kwargs.get("dispatch") is not None
+    ]
+    assert "enforce_scalar_api_scope" in names
+    assert "api_auth_middleware" in names
+    assert names.index("enforce_scalar_api_scope") < names.index("api_auth_middleware"), (
+        "api_auth must be registered BEFORE enforce_scalar_api_scope so scope "
+        "enforcement stays outermost"
+    )
+
+
+def test_no_prefix_strip_turns_a_gated_path_into_an_exempt_one() -> None:
+    """Pin the invariant that makes X-Forwarded-Prefix stripping safe.
+
+    ``strip_forwarded_prefix`` trusts a client-controlled header. It is safe only
+    because no native route is mounted at a path whose tail looks like ``/aml``,
+    ``/iblade`` or a health path. Assert that against the real route table rather
+    than leaving it as prose in a docstring, so adding ``/fleet/aml/...`` later
+    fails here instead of silently opening the layer.
+    """
+    offenders = []
+    for _method, path in NATIVE_OPERATIONS:
+        segments = path.strip("/").split("/")
+        for cut in range(1, len(segments)):
+            tail = "/" + "/".join(segments[cut:])
+            if not api_auth.requires_api_token(tail):
+                offenders.append(f"{path} -> {tail}")
+    assert not offenders, (
+        "a gated native path has an exempt-looking tail; prefix stripping could "
+        f"be abused to skip the gate: {offenders}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Deployment shapes: the router and the classifier must agree
+# ---------------------------------------------------------------------------
+def test_root_path_deployments_classify_on_the_routed_path(auth_enabled: None) -> None:
+    """Under ``uvicorn --root-path /ob`` the mount prefix is in the ASGI scope.
+
+    Classifying the raw path there wrongly gated /ob/health and /ob/aml/... --
+    fail-closed, but it breaks monitors and the AML wire contract.
+    """
+    assert api_auth.classification_path({"path": "/ob/health", "root_path": "/ob"}) == "/health"
+    assert (
+        api_auth.classification_path({"path": "/ob/aml/system", "root_path": "/ob"})
+        == "/aml/system"
+    )
+    assert api_auth.classification_path({"path": "/ob/jobs/", "root_path": "/ob"}) == "/jobs/"
+    # No root_path: fall back to the X-Forwarded-Prefix header.
+    assert api_auth.classification_path({"path": "/ob/health"}, "/ob") == "/health"
+    # Neither: the path is already what the router matches.
+    assert api_auth.classification_path({"path": "/health"}) == "/health"
+
+
+def test_native_routes_mounted_under_an_aml_prefix_are_still_gated() -> None:
+    """/aml/proxy is OpenBlade's own SSRF-shaped probe, not emulator contract."""
+    assert api_auth.requires_api_token("/aml/proxy/libraries/1/probe") is True
+    assert api_auth.is_aml_surface_path("/aml/proxy") is False
+    # ... and the real emulator surface is untouched by that exception.
+    assert api_auth.is_aml_surface_path("/aml/system") is True
+    assert api_auth.is_aml_surface_path("/aml/proxyfoo") is True
 
 
 # ---------------------------------------------------------------------------

@@ -45,6 +45,18 @@ API_TOKEN_FILE_ENV_VAR = "OPENBLADE_API_TOKEN_FILE"
 #: own session auth and are never gated by the native bearer token.
 AML_SURFACE_PREFIXES: tuple[str, ...] = ("/aml", "/iblade")
 
+#: Paths that sit under an AML prefix but are NOT part of the emulator wire
+#: contract -- OpenBlade-native features that merely happen to be mounted there.
+#: They ARE gated; the prefix is a mount point, not a statement about ownership.
+#:
+#: /aml/proxy (routes_proxy.py) opens an outbound HTTP connection to an
+#: operator-supplied host:port and relays a username/password to it. It is not a
+#: matrix endpoint (it 404s in scalar_api_only mode), and the only thing standing
+#: in front of it is the AML session -- whose shipped default credential is
+#: admin/password. An SSRF-and-credential-relay endpoint behind a default
+#: password is exactly what this token layer exists to cover.
+NATIVE_PATHS_UNDER_AML_PREFIX: tuple[str, ...] = ("/aml/proxy",)
+
 #: Native paths that stay open even when auth is enabled, so external monitors
 #: and container health checks keep working without a credential. Kept as small
 #: as possible: liveness/readiness only, no inventory or configuration data.
@@ -204,12 +216,18 @@ def _has_prefix(path: str, prefix: str) -> bool:
 def strip_forwarded_prefix(path: str, forwarded_prefix: str) -> str:
     """Remove a reverse-proxy mount prefix from ``path`` for classification.
 
-    ``apply_forwarded_root_path`` in ``main`` honours ``X-Forwarded-Prefix``, so
-    behind such a proxy the AML surface arrives as ``/<prefix>/aml/...``. The
-    header is client-controlled, but stripping can only ever *shorten* the path,
+    Only used when the ASGI server did not put the mount prefix in
+    ``scope["root_path"]`` -- see :func:`classification_path`, which prefers the
+    scope. ``apply_forwarded_root_path`` in ``main`` sets ``root_path`` from
+    ``X-Forwarded-Prefix``, but it runs *inside* this middleware, so at our point
+    in the stack the header is still the only signal in that deployment.
+
+    The header is client-controlled; stripping can only ever *shorten* the path,
     and no native route is mounted at a path whose tail is ``/aml`` or
-    ``/iblade`` — so this cannot be used to reach a native route while the
-    classifier sees an AML one.
+    ``/iblade``, so this cannot be used to reach a native route while the
+    classifier sees an AML one. ``test_no_prefix_strip_turns_a_gated_path_into_
+    an_exempt_one`` pins that invariant against the real route table rather than
+    leaving it as an argument in a docstring.
     """
     prefix = forwarded_prefix.strip().rstrip("/")
     if not prefix.startswith("/") or not _has_prefix(path, prefix):
@@ -217,8 +235,32 @@ def strip_forwarded_prefix(path: str, forwarded_prefix: str) -> str:
     return path[len(prefix) :] or "/"
 
 
+def classification_path(scope: Mapping[str, object], forwarded_prefix: str = "") -> str:
+    """The path to classify: exactly what Starlette's router will match on.
+
+    Starlette routes on ``scope["path"]`` minus ``scope["root_path"]``. Deriving
+    the mount prefix any other way lets the classifier and the router disagree --
+    under ``uvicorn --root-path /ob`` the old header-only version classified
+    ``/ob/health`` and ``/ob/aml/...`` as gated native paths, which fails closed
+    but silently breaks the health exemption and the AML wire contract.
+    """
+    raw_path = scope.get("path")
+    path = raw_path if isinstance(raw_path, str) and raw_path else "/"
+    raw_root = scope.get("root_path")
+    root_path = raw_root if isinstance(raw_root, str) else ""
+    if root_path and _has_prefix(path, root_path.rstrip("/")):
+        return path[len(root_path.rstrip("/")) :] or "/"
+    return strip_forwarded_prefix(path, forwarded_prefix)
+
+
 def is_aml_surface_path(path: str) -> bool:
-    """True for the Quantum AML emulator surface, which this module never gates."""
+    """True for the Quantum AML emulator surface, which this module never gates.
+
+    The native exceptions are checked first: a path under ``/aml`` is only the
+    emulator's if it is not one of OpenBlade's own routes mounted there.
+    """
+    if any(_has_prefix(path, prefix) for prefix in NATIVE_PATHS_UNDER_AML_PREFIX):
+        return False
     return any(_has_prefix(path, prefix) for prefix in AML_SURFACE_PREFIXES)
 
 
@@ -258,11 +300,22 @@ def tokens_match(supplied: str, expected: str) -> bool:
 
 
 def unauthorized_response() -> JSONResponse:
-    """The curated 401 — never contains the supplied token."""
+    """The curated 401 — never contains the supplied token.
+
+    Carries the security headers itself. ``add_security_headers`` in ``main`` is
+    registered earlier and is therefore *inside* this middleware, so it never
+    sees a short-circuited 401; without these the rejection would be the only
+    response in the app missing nosniff/X-Frame-Options.
+    """
     return JSONResponse(
         status_code=401,
         content=dict(UNAUTHORIZED_BODY),
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={
+            "WWW-Authenticate": "Bearer",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+        },
     )
 
 
@@ -292,7 +345,7 @@ async def api_auth_middleware(
     if expected is None:
         return await call_next(request)
 
-    path = strip_forwarded_prefix(request.url.path, request.headers.get("x-forwarded-prefix", ""))
+    path = classification_path(request.scope, request.headers.get("x-forwarded-prefix", ""))
     if not requires_api_token(path):
         return await call_next(request)
 

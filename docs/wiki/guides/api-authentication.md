@@ -129,12 +129,23 @@ without a credential.
 | `/inventory`, `/jobs`, `/archive`, `/restore`, `/ltfs`, `/catalog`, `/cartridges`, `/volume-groups`, `/dashboard`, `/storage`, `/nas`, `/virtual`, `/safety`, `/tape-ops`, `/api/*` | token required | open |
 | `/docs`, `/redoc`, `/openapi.json` | token required | open |
 | `/health`, `/healthz`, `/readyz` | **open** | open |
+| `/aml/proxy/*` | token **and** AML session | AML session |
 | `/aml/*`, `/iblade/*` | AML session (unchanged) | AML session (unchanged) |
 
 `/health`, `/healthz` and `/readyz` stay open on purpose so container health
 checks, load balancers and uptime monitors keep working without a credential.
 They report liveness, readiness and the backend name — no inventory, no
-configuration, no catalog data. `/version` and `/error-codes` are *not* exempt.
+configuration, no catalog data. `/version` and `/error-codes` are *not* exempt,
+though note `/healthz` reports the version anyway, so gating `/version` hides
+nothing.
+
+**`/aml/proxy` is the one exception to the prefix rule.** It sits under `/aml`
+but is an OpenBlade-native feature, not part of the emulator wire contract — it
+opens an outbound connection to an operator-supplied host and relays a
+username/password to it. Leaving that behind the AML session alone, whose
+shipped default credential is `admin`/`password`, is not a defensible place to
+draw the line, so it requires the token too. The prefix is a mount point, not a
+statement about ownership.
 
 CORS preflight (`OPTIONS`) is not gated; preflight requests carry no credentials
 by definition.
@@ -231,9 +242,15 @@ this works in both modes and is what the i3 compliance suite does.
 ## Troubleshooting
 
 **Everything returns 401, including with the token.** Check the server actually
-loaded the token you think it did — a `OPENBLADE_API_TOKEN_FILE` with a stray
-trailing space in the *path*, or a file the service user cannot read, fails
-startup rather than falling back. Look for the startup line.
+loaded the token you think it did. A token file the service user cannot read
+fails startup rather than falling back, so look for the startup line first.
+Whitespace around the path and around the file's contents is stripped, so that
+is not the cause.
+
+**The browser console shows a CORS error instead of a 401.** Expected. The
+rejection happens ahead of the CORS layer, so a cross-origin 401 arrives without
+`Access-Control-Allow-Origin` and the browser reports a network failure. It is a
+normal 401 to any non-browser client — confirm with `curl`.
 
 **`/api/libraries` returns 401 with a valid token.** That is the AML session,
 not the API token. See [the wrinkle above](#a-wrinkle-worth-knowing-two-credentials-one-header).

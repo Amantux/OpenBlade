@@ -19,7 +19,7 @@ from collections.abc import Generator
 import httpx
 import pytest
 
-from openblade.api.api_auth import is_aml_surface_path, resolve_api_token
+from openblade.api.api_auth import get_api_token_resolution, is_aml_surface_path
 from tests.i3.timing import get_profile, get_profile_name
 
 # ---------------------------------------------------------------------------
@@ -55,8 +55,13 @@ def _native_api_token() -> str | None:
 
     ``None`` when the target runs with native auth disabled, which is the
     default and what every existing workflow does.
+
+    Uses the cached accessor, not ``resolve_api_token()``: the latter stats and
+    re-reads the token file on every single request, and a transient read error
+    would raise ``ApiAuthConfigError`` from inside an httpx event hook -- turning
+    a config problem into a confusing traceback on every test in the suite.
     """
-    return resolve_api_token().token
+    return get_api_token_resolution().token
 
 
 def _attach_native_api_token(request: httpx.Request) -> None:
@@ -84,11 +89,25 @@ def _attach_native_api_token(request: httpx.Request) -> None:
 
     existing = request.headers.get("Authorization", "")
     scheme, _, value = existing.partition(" ")
-    if scheme.lower() == "bearer" and value.strip() and value.strip() != token:
-        cookie = request.headers.get("Cookie", "")
-        if "sessionID=" not in cookie:
-            session_cookie = f"sessionID={value.strip()}"
-            request.headers["Cookie"] = f"{cookie}; {session_cookie}" if cookie else session_cookie
+    value = value.strip()
+    if value and value != token:
+        if scheme.lower() == "bearer":
+            # An AML session id: move it to the cookie so it survives.
+            cookie = request.headers.get("Cookie", "")
+            if "sessionID=" not in cookie:
+                session = f"sessionID={value}"
+                request.headers["Cookie"] = f"{cookie}; {session}" if cookie else session
+        else:
+            # auth_headers falls back to Basic when /aml/auth/login is
+            # unavailable. There is nowhere to put a Basic credential once the
+            # API token claims Authorization, so say so rather than overwriting
+            # it and leaving a bare 401 to debug.
+            raise RuntimeError(
+                f"Cannot carry a {scheme or 'non-bearer'} AML credential alongside the "
+                "native API token: both want the Authorization header. The AML login "
+                "endpoint is presumably down -- fix that, or run the suite without "
+                "OPENBLADE_API_TOKEN set."
+            )
     request.headers["Authorization"] = f"Bearer {token}"
 
 
