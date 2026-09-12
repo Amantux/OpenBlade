@@ -59,8 +59,12 @@ consumes it. Independently, the orchestrator refuses any format whose
 > ✅ **Fixed during the real-data campaign:** `POST /ltfs/format` now refuses
 > without a `safetyToken` from a prior dry run — the `{"confirm": true}`-only
 > bypass described in earlier revisions of this page is closed and
-> regression-tested. The route still has **no authentication**; if you expose
-> the API beyond localhost, put it behind auth or block it.
+> regression-tested. Authentication on the route is now **available but off by
+> default** — set `OPENBLADE_API_TOKEN` (or `OPENBLADE_API_TOKEN_FILE`) and every
+> native route, this one included, requires `Authorization: Bearer <token>`. See
+> [API authentication](api-authentication.md). Until you set it the route is
+> reachable by anyone who can reach the port; expose it beyond localhost only
+> behind that token, a reverse proxy that authenticates, or a firewall.
 
 ## 3. The mount-state unload gate ⚠️
 
@@ -124,6 +128,34 @@ separate act.
 
 There is no read-only hardware mode flag. The default is `mock` — i.e. no
 hardware at all. The effect is safe; the description is not accurate.
+
+---
+
+## Not a gate, but it decides who can reach the gates: API authentication ⚠️
+
+None of the eight gates above asks *who is calling*. Gates 2–6 constrain what a
+caller may do; they assume the caller is entitled to be there at all. That
+assumption is only true if the port is.
+
+The native REST API ships with **authentication off by default**, which means
+every operation the gates permit — enqueue an archive, mount, unload, format with
+a freshly-minted token, run the test runner — is available to anyone who can open
+a socket. This is fine on a loopback-only port and unacceptable on anything else.
+
+Set `OPENBLADE_API_TOKEN` or `OPENBLADE_API_TOKEN_FILE` and every native route
+requires `Authorization: Bearer <token>`, enforced in one middleware ahead of
+routing so there is no per-route list to get wrong. `/health`, `/healthz` and
+`/readyz` stay open for monitors; the `/aml/*` and `/iblade/*` emulator surface
+keeps its own separate session login and is unaffected either way.
+
+It is a coarse instrument: one token, no scopes, no read-only mode, no per-user
+attribution. Holding the token means holding every gate's key. Full detail,
+including the file-based form and a rollout order that does not break your
+clients, is in [API authentication](api-authentication.md).
+
+When auth is disabled the server logs a `!!! NATIVE API AUTHENTICATION IS
+DISABLED !!!` warning at every start. Treat that line in a non-loopback
+deployment as an open finding.
 
 ---
 
@@ -194,6 +226,7 @@ mount state through the same validator but does not re-check unload legality.
 
 ## Related
 
+- [API authentication](api-authentication.md)
 - [Formatting tapes](formatting-tapes.md)
 - [Drives & changer ops](drives-and-changer.md)
 - [Hardware bring-up](hardware-bring-up.md)

@@ -8,6 +8,8 @@ Env vars:
     I3_AML_PASSWORD           AML password (default: password)
     I3_TIMING_PROFILE         instant | realistic | hardware
     I3_REAL_HARDWARE_ENABLED  safety gate — must be "true" to run real-i3 tests
+    OPENBLADE_API_TOKEN       native-REST bearer token, if the target enforces one
+    OPENBLADE_API_TOKEN_FILE  file holding that token (takes precedence)
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from collections.abc import Generator
 import httpx
 import pytest
 
+from openblade.api.api_auth import get_api_token_resolution, is_aml_surface_path
 from tests.i3.timing import get_profile, get_profile_name
 
 # ---------------------------------------------------------------------------
@@ -37,12 +40,75 @@ def _i3_base_url() -> str:
 
 
 def _skip_if_real_mode_not_enabled() -> None:
-    if os.environ.get("I3_TEST_MODE", "emulator") == "real":
-        if os.environ.get("I3_REAL_HARDWARE_ENABLED", "false").lower() != "true":
-            pytest.skip(
-                "Real i3 mode requires I3_REAL_HARDWARE_ENABLED=true. "
-                "Set both I3_TEST_MODE=real and I3_REAL_HARDWARE_ENABLED=true to proceed."
+    if (
+        os.environ.get("I3_TEST_MODE", "emulator") == "real"
+        and os.environ.get("I3_REAL_HARDWARE_ENABLED", "false").lower() != "true"
+    ):
+        pytest.skip(
+            "Real i3 mode requires I3_REAL_HARDWARE_ENABLED=true. "
+            "Set both I3_TEST_MODE=real and I3_REAL_HARDWARE_ENABLED=true to proceed."
+        )
+
+
+def _native_api_token() -> str | None:
+    """The bearer token the target enforces on its OpenBlade-native surface.
+
+    ``None`` when the target runs with native auth disabled, which is the
+    default and what every existing workflow does.
+
+    Uses the cached accessor, not ``resolve_api_token()``: the latter stats and
+    re-reads the token file on every single request, and a transient read error
+    would raise ``ApiAuthConfigError`` from inside an httpx event hook -- turning
+    a config problem into a confusing traceback on every test in the suite.
+    """
+    return get_api_token_resolution().token
+
+
+def _attach_native_api_token(request: httpx.Request) -> None:
+    """Authenticate native-surface requests, leaving the AML surface alone.
+
+    The i3 suite drives both surfaces through one client:
+
+    * ``/aml/*`` and ``/iblade/*`` authenticate with the AML session credential
+      the ``auth_headers`` fixture produces, so their Authorization header must
+      survive untouched.
+    * Everything else is OpenBlade-native and needs the API token in
+      Authorization instead.
+
+    A few native routes (``/api/libraries``, ``/status/*``) want *both*: the API
+    token at the edge and an AML session at the route. Two credentials, one
+    header -- so the AML session moves to the ``sessionID`` cookie, which is the
+    channel ``routes_aml_auth.require_auth`` prefers anyway.
+
+    A no-op when the target runs with native auth disabled, which is the default
+    and what every existing workflow does.
+    """
+    token = _native_api_token()
+    if token is None or is_aml_surface_path(request.url.path):
+        return
+
+    existing = request.headers.get("Authorization", "")
+    scheme, _, value = existing.partition(" ")
+    value = value.strip()
+    if value and value != token:
+        if scheme.lower() == "bearer":
+            # An AML session id: move it to the cookie so it survives.
+            cookie = request.headers.get("Cookie", "")
+            if "sessionID=" not in cookie:
+                session = f"sessionID={value}"
+                request.headers["Cookie"] = f"{cookie}; {session}" if cookie else session
+        else:
+            # auth_headers falls back to Basic when /aml/auth/login is
+            # unavailable. There is nowhere to put a Basic credential once the
+            # API token claims Authorization, so say so rather than overwriting
+            # it and leaving a bare 401 to debug.
+            raise RuntimeError(
+                f"Cannot carry a {scheme or 'non-bearer'} AML credential alongside the "
+                "native API token: both want the Authorization header. The AML login "
+                "endpoint is presumably down -- fix that, or run the suite without "
+                "OPENBLADE_API_TOKEN set."
             )
+    request.headers["Authorization"] = f"Bearer {token}"
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +155,11 @@ def i3_client(i3_base_url: str) -> Generator[httpx.Client, None, None]:
     This client does NOT hold a session token — individual tests handle auth
     as needed, or use auth_headers fixture for pre-authenticated requests.
     """
-    with httpx.Client(base_url=i3_base_url, timeout=120.0) as client:
+    with httpx.Client(
+        base_url=i3_base_url,
+        timeout=120.0,
+        event_hooks={"request": [_attach_native_api_token]},
+    ) as client:
         yield client
 
 
