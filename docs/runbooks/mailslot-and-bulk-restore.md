@@ -22,9 +22,9 @@ export OPENBLADE_DRIVE_SERIAL_MAP="OBLADE_D01:0,OBLADE_D02:1,OBLADE_D03:2"
 |---|---|
 | `openblade mailslot list` | Every I/E element and what is in it. |
 | `openblade mailslot import <ie-slot> [--to-slot N]` | I/E → storage. Without `--to-slot` it picks the first empty storage slot **and names it** in the output. |
-| `openblade mailslot export <barcode> [--ie-slot N] [--force]` | Storage → first empty I/E. **Refuses** when the cartridge or its volume group still carries archived data. |
+| `openblade mailslot export <barcode> [--ie-slot N] [--force]` | Storage → first empty I/E. **Refuses** when the cartridge itself carries archived data, or a write to it is still in flight. |
 | `openblade restore tree <catalog-prefix> --dest DIR [--dry-run]` | Every archived file under a prefix, spanning tapes. |
-| `openblade restore file <catalog-path> --dest DIR` | One file, using the sharded reassembly path when the catalog says it is sharded. |
+| `openblade restore file <catalog-path> --dest PATH [--into-dir]` | One file, using the sharded reassembly path when the catalog says it is sharded. `--dest` is a file path unless it is an existing directory or `--into-dir` is given. |
 | `openblade archive sharded <src> --volume-group G --mode stripe\|block-stripe [--lanes N \| --lane-barcode B …] [--block-size-mb N]` | The CLI half of `POST /archive/sharded`. |
 
 `restore` and `archive` became command *groups*. The bare forms
@@ -39,7 +39,7 @@ chosen-slot narration go to stderr, so `openblade restore tree … | jq` works.
 
 ## 2. Rig transcript
 
-`git rev-parse --short HEAD` = `7478224`, changer `/dev/sg2`.
+`git rev-parse --short HEAD` = `0463867` (post-review), changer `/dev/sg2`.
 
 ### 2.1 list → export → list → import
 
@@ -88,11 +88,12 @@ Archived a 4-file tree (`alpha/same.txt`, `beta/same.txt`, `beta/deep/n.txt`,
 ```
 $ openblade restore tree /rigtree --dest $HOME/out
 {
-  "catalogPrefix": "/rigtree", "destDir": "/tmp/obrig-final/out",
+  "catalogPrefix": "/rigtree", "destDir": "/tmp/obrig-v2/out",
   "filesRestored": 4, "filesFailed": 0,
   "bytesRestored": 250028, "filesVerified": 4,
   "perTapeCounts": {"OB0001L8": 4}, "tapesUsed": ["OB0001L8"],
-  "failures": [], "status": "completed"
+  "failures": [], "filesSkipped": 0, "skippedPaths": [],
+  "status": "completed"
 }
 exit=0
 
@@ -122,11 +123,11 @@ $ openblade mailslot export OB0001L8
 exit=1
 stdout bytes = 0
 
-Export refused: Cartridge OB0001L8 still carries archived data; 4 file
-instance(s), 250028 bytes on this cartridge; volume group rigtree; e.g.
-/rigtree/alpha/same.txt, /rigtree/beta/deep/n.txt, /rigtree/beta/same.txt,
-/rigtree/blob.bin. Exporting makes these unrestorable until the cartridge is
-imported again. Pass --force if that is what you mean.
+Export refused: Cartridge OB0001L8 still carries archived data: 4 file
+instance(s), 250028 bytes; volume group rigtree; e.g. /rigtree/alpha/same.txt,
+/rigtree/beta/deep/n.txt, /rigtree/beta/same.txt, /rigtree/blob.bin. Exporting
+makes these unrestorable until the cartridge is imported again. Pass --force if
+that is what you mean.
 
 $ mtx -f /dev/sg2 status | grep -E "Element 1:|IMPORT"
       Storage Element 1:Full :VolumeTag=OB0001L8
@@ -134,6 +135,23 @@ $ mtx -f /dev/sg2 status | grep -E "Element 1:|IMPORT"
 ```
 
 Nothing moved, stdout stayed empty, exit 1.
+
+And the other half of the guard — the one that keeps it *credible*. `OB0008L8`
+is blank but sits in the same volume group as `OB0001L8`, which holds all four
+files. Rotating it out is routine and is **not** refused:
+
+```
+$ openblade mailslot export OB0008L8
+{"barcode": "OB0008L8", "destinationSlot": 9,
+ "exported": {"archivedFilesOnCartridge": 0, "carriesData": false,
+              "volumeGroup": "rigtree",
+              "volumeGroupBarcodesWithData": ["OB0001L8"]}}
+exit=0
+```
+
+The sibling situation is reported as context, not used to refuse. An earlier
+draft *did* refuse here, with the sentence "still carries archived data" — which
+was false, and would have taught operators that `--force` is how you export.
 
 ### 2.4 sharded archive + tree restore across three tapes
 
@@ -179,7 +197,24 @@ the orchestrator is guarded, including `POST /tape-ops/execute`. It fails
 are the only way to reach the mailslot, and they carry their own guard. There is
 a regression test for this.
 
-**The guard is mutation-checked** (both halves), see the test commit message.
+**The first draft of those op types reopened it anyway, and an adversarial
+review caught it.** `_guard_export` assessed `request.barcode` while `_export`
+moved whatever was in `request.slot_id`; `POST /tape-ops/execute` binds both
+from the request body, so naming a blank cartridge and pointing `slot_id` at a
+loaded slot ejected the wrong tape past a guard that had just said "carries no
+data". Two siblings of the same shape came with it: `ie_slot` reached
+`mtx transfer` with no validation at all, and the catalog `exported` flag was
+written only by `MailslotService`, so the API path moved media and left every
+restore believing the data was online. All three are closed — the source slot is
+resolved from the barcode and `slot_id` is only a cross-check; every element
+number is validated against the library's own elements; the catalog write lives
+beside the move. Worth stating plainly: *the fix for defect 3.9 did not
+generalise to a new code path, and only an attack on the API surface found it.*
+
+**The guard is mutation-checked** — five mutations, each restored byte-for-byte:
+delete the `carries_data` refusal (4 tests fail), make the catalog-less branch
+permissive (1), re-trust `request.slot_id` in `_export` (1), drop the `ie_slot`
+element validation (1), drop the catalog state write (4).
 
 **Export writes `cartridges.state = "exported"`.** That flag was read by
 `jobs/restore.py`, `jobs/sharded_restore.py` and `jobs/archive.py` and set by
@@ -217,6 +252,16 @@ nothing can load or unload to it by accident.
 - **Restore-to-a-directory basename collapse** is unchanged in the *single-file*
   paths. `restore tree` avoids it; `openblade restore --path … --to <dir>` does
   not.
+- **A catalogued record with nothing archived is reported, not restored.** A
+  failed archive leaves exactly that shape; the summary carries `filesSkipped`
+  and `skippedPaths` and the CLI says so on stderr, because a tree that silently
+  comes back short is the failure this command exists to prevent.
+- **`--force` is still a plain flag, not a two-phase token.** `openblade format`
+  requires a dry-run plan plus a one-time `SafetyToken`; export does not, and an
+  API caller can pass `extras: {"force": true}` as a bare JSON boolean. Export
+  destroys *availability* rather than data, and the operator is shown exactly
+  what is on the cartridge first — but the asymmetry with FORMAT is deliberate
+  only in the sense that nobody has decided otherwise. Worth a decision.
 - **`docs/wiki/reference/cli.md` is stale on this branch** and
   `tests/unit/test_wiki_reference_generated.py` is red because of it. The page is
   a build artifact of `tools/gen_wiki_reference.py`; regenerating it is owned
