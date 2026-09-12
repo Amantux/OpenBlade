@@ -13,12 +13,12 @@ from openblade.api.api_auth import (
     API_TOKEN_ENV_VAR,
     API_TOKEN_FILE_ENV_VAR,
     ApiAuthConfigError,
+    classification_path,
     extract_bearer_token,
     is_aml_surface_path,
     is_open_path,
     requires_api_token,
     resolve_api_token,
-    strip_forwarded_prefix,
     tokens_match,
     unauthorized_response,
 )
@@ -232,18 +232,49 @@ def test_native_paths_require_a_token(path: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("path", "prefix", "expected"),
+    ("scope", "expected"),
     [
-        ("/proxy/aml/system", "/proxy", "/aml/system"),
-        ("/proxy/aml/system", "/proxy/", "/aml/system"),
-        ("/proxy", "/proxy", "/"),
-        ("/proxyfoo/aml", "/proxy", "/proxyfoo/aml"),
-        ("/aml/system", "", "/aml/system"),
-        ("/aml/system", "not-a-path", "/aml/system"),
+        # Server-set root_path is stripped: that is what the router matches on.
+        ({"path": "/ob/aml/system", "root_path": "/ob"}, "/aml/system"),
+        ({"path": "/ob/health", "root_path": "/ob"}, "/health"),
+        ({"path": "/ob", "root_path": "/ob"}, "/"),
+        ({"path": "/ob/jobs/", "root_path": "/ob/"}, "/jobs/"),
+        # Not a real prefix of the path: left alone.
+        ({"path": "/obfoo/aml", "root_path": "/ob"}, "/obfoo/aml"),
+        # No root_path: the path already IS the routed path.
+        ({"path": "/aml/system", "root_path": ""}, "/aml/system"),
+        ({"path": "/catalog/aml"}, "/catalog/aml"),
+        ({}, "/"),
     ],
 )
-def test_strip_forwarded_prefix(path: str, prefix: str, expected: str) -> None:
-    assert strip_forwarded_prefix(path, prefix) == expected
+def test_classification_path_uses_only_the_server_set_root_path(
+    scope: dict[str, str], expected: str
+) -> None:
+    assert classification_path(scope) == expected
+
+
+def test_classification_path_ignores_client_headers() -> None:
+    """Regression guard for a proven bypass.
+
+    The classifier once stripped X-Forwarded-Prefix, letting a client shrink the
+    classified path to any suffix of the real one while the router matched the
+    original. The function now takes no header at all — pin that, so nobody
+    reintroduces the parameter as a convenience.
+    """
+    signature = inspect.signature(classification_path)
+    assert list(signature.parameters) == ["scope"], (
+        "classification_path must depend only on the ASGI scope; a "
+        "client-controlled value must never reach the auth decision"
+    )
+    # The docstring discusses the header at length; the CODE must not read it.
+    code = "\n".join(
+        line
+        for line in inspect.getsource(api_auth).splitlines()
+        if not line.strip().startswith(("#", '"', "*"))
+    )
+    assert "headers.get" not in code.split("def api_auth_middleware")[-1].split("supplied =")[0], (
+        "classification must not consult a request header"
+    )
 
 
 # ---------------------------------------------------------------------------

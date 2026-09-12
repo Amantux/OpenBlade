@@ -213,44 +213,41 @@ def _has_prefix(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
-def strip_forwarded_prefix(path: str, forwarded_prefix: str) -> str:
-    """Remove a reverse-proxy mount prefix from ``path`` for classification.
-
-    Only used when the ASGI server did not put the mount prefix in
-    ``scope["root_path"]`` -- see :func:`classification_path`, which prefers the
-    scope. ``apply_forwarded_root_path`` in ``main`` sets ``root_path`` from
-    ``X-Forwarded-Prefix``, but it runs *inside* this middleware, so at our point
-    in the stack the header is still the only signal in that deployment.
-
-    The header is client-controlled; stripping can only ever *shorten* the path,
-    and no native route is mounted at a path whose tail is ``/aml`` or
-    ``/iblade``, so this cannot be used to reach a native route while the
-    classifier sees an AML one. ``test_no_prefix_strip_turns_a_gated_path_into_
-    an_exempt_one`` pins that invariant against the real route table rather than
-    leaving it as an argument in a docstring.
-    """
-    prefix = forwarded_prefix.strip().rstrip("/")
-    if not prefix.startswith("/") or not _has_prefix(path, prefix):
-        return path
-    return path[len(prefix) :] or "/"
-
-
-def classification_path(scope: Mapping[str, object], forwarded_prefix: str = "") -> str:
+def classification_path(scope: Mapping[str, object]) -> str:
     """The path to classify: exactly what Starlette's router will match on.
 
-    Starlette routes on ``scope["path"]`` minus ``scope["root_path"]``. Deriving
-    the mount prefix any other way lets the classifier and the router disagree --
-    under ``uvicorn --root-path /ob`` the old header-only version classified
-    ``/ob/health`` and ``/ob/aml/...`` as gated native paths, which fails closed
-    but silently breaks the health exemption and the AML wire contract.
+    Starlette routes on ``scope["path"]`` minus ``scope["root_path"]``, and
+    ``root_path`` is set by the *server* (``uvicorn --root-path``,
+    ``FastAPI(root_path=...)``). Classifying anything else lets the classifier
+    and the router disagree about which route a request reaches, which is the
+    whole ballgame for an auth gate.
+
+    In particular this deliberately ignores ``X-Forwarded-Prefix``. An earlier
+    version stripped that header when ``root_path`` was empty, so the AML surface
+    would stay exempt behind a prefix-stripping proxy. Because the header is
+    client-controlled and stripping matches on segment boundaries, an attacker
+    could reduce the classified path to ANY suffix of the real path while the
+    router still matched the original -- e.g. ``GET /catalog/aml/instances`` with
+    ``X-Forwarded-Prefix: /catalog`` classified as ``/aml/instances`` (exempt)
+    and routed to ``/catalog/{file_id}``. 53 native operations were reachable
+    with no credential; with a resource actually named ``aml`` they were fully
+    live. The old safety argument ("no native route is mounted at a path whose
+    tail is /aml") reasoned about route *templates* and forgot that parameter
+    *values* are attacker-supplied.
+
+    Consequence, accepted deliberately: behind a proxy that strips a prefix and
+    announces it only via ``X-Forwarded-Prefix``, the AML surface is classified
+    as native and therefore gated. That fails CLOSED, is visible immediately, and
+    the operator fixes it with server-side config (``--root-path``) rather than a
+    header anyone can forge.
     """
     raw_path = scope.get("path")
     path = raw_path if isinstance(raw_path, str) and raw_path else "/"
     raw_root = scope.get("root_path")
-    root_path = raw_root if isinstance(raw_root, str) else ""
-    if root_path and _has_prefix(path, root_path.rstrip("/")):
-        return path[len(root_path.rstrip("/")) :] or "/"
-    return strip_forwarded_prefix(path, forwarded_prefix)
+    root_path = (raw_root if isinstance(raw_root, str) else "").rstrip("/")
+    if root_path and _has_prefix(path, root_path):
+        return path[len(root_path) :] or "/"
+    return path
 
 
 def is_aml_surface_path(path: str) -> bool:
@@ -345,7 +342,7 @@ async def api_auth_middleware(
     if expected is None:
         return await call_next(request)
 
-    path = classification_path(request.scope, request.headers.get("x-forwarded-prefix", ""))
+    path = classification_path(request.scope)
     if not requires_api_token(path):
         return await call_next(request)
 

@@ -54,8 +54,10 @@ the method, path and source address only.
 ### Leaving it off
 
 If neither variable is set, authentication is disabled and behaviour is
-byte-for-byte what it was before — but the server says so, loudly, once per
-start:
+unchanged — every status code and body is what it was before; the middleware
+short-circuits on its first line. (Strictly, the request passes through one more
+middleware layer than it used to, which is visible only as a hair more overhead
+on streaming responses.) The server says so, loudly, once per start:
 
 ```
 WARNING  openblade.api.api_auth  !!! NATIVE API AUTHENTICATION IS DISABLED !!!
@@ -117,12 +119,14 @@ secrets:
 
 ## What is protected
 
-Everything on the native surface, with three exemptions. There is no per-route
-opt-in list to maintain: enforcement is a single middleware in
-`openblade/api/api_auth.py` that classifies by path, so a route added tomorrow is
-protected the day it exists. `tests/integration/test_api_auth_sweep.py` walks
-`app.openapi()` and fails if any native operation answers anything but 401
-without a credential.
+Everything on the native surface, exempting only the three health paths, the AML
+emulator surface, and CORS preflight. There is no per-route opt-in list to
+maintain: enforcement is a single middleware in `openblade/api/api_auth.py` that
+classifies by path, so a route added tomorrow is protected the day it exists.
+`tests/integration/test_api_auth_sweep.py` walks `app.openapi()` and fails
+unless every native operation answers *this layer's* 401 without a credential —
+matching on the body, not just the status, because dozens of these routes have
+their own session check that would 401 anyway.
 
 | Path | Auth enabled | Auth disabled |
 |---|---|---|
@@ -149,6 +153,23 @@ statement about ownership.
 
 CORS preflight (`OPTIONS`) is not gated; preflight requests carry no credentials
 by definition.
+
+### Behind a reverse proxy that strips a path prefix
+
+Tell the **server**, not the request. Start with `uvicorn --root-path /openblade`
+(or set `FastAPI(root_path=...)`) so the mount prefix arrives in the ASGI scope,
+which is where the router reads it from.
+
+Do **not** expect `X-Forwarded-Prefix` to do this job for authentication. The
+classifier deliberately ignores it: the header is client-controlled, and an
+earlier version that honoured it could be tricked into classifying a native path
+as an exempt one (`GET /catalog/aml/instances` with `X-Forwarded-Prefix:
+/catalog` read as `/aml/instances`), skipping the gate on dozens of routes. An
+auth decision must never depend on something the caller can set.
+
+If you run behind such a proxy *without* configuring `--root-path`, the AML
+surface arrives as `/<prefix>/aml/...`, is classified as native, and gets gated.
+That fails closed — visibly, and fixed by setting `--root-path`.
 
 ---
 

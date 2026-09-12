@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 
 from openblade.api import api_auth
 from openblade.api.main import app
-from openblade.bootstrap import create_context, reset_context
+from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
 
 TOKEN = "sweep-token-do-not-reuse"
@@ -119,13 +119,21 @@ def auth_disabled(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _app_context(tmp_path_factory: pytest.TempPathFactory) -> None:
-    # Module-scoped: the sweep issues ~400 requests and rebuilding the app
+def _app_context(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    # Module-scoped: the sweep issues ~800 requests and rebuilding the app
     # context (and its SQLite schema) per parameter turns a 15-second run into
-    # ten minutes. Nothing here mutates catalog state -- the auth-enabled cases
-    # 401 before routing ever happens, and the authenticated cases are reads.
+    # ten minutes.
+    #
+    # Writes DO reach handlers in one place -- test_sweep_catches_an_exempted_
+    # router deliberately un-gates /jobs, so _unprotected() then issues real
+    # POST/DELETE against this DB. That is why the DB is per-module and
+    # throwaway rather than shared.
     db_path = tmp_path_factory.mktemp("auth-sweep") / "auth-sweep.db"
+    previous = get_context()
     reset_context(create_context(OpenBladeConfig(db_url=f"sqlite:///{db_path}")))
+    yield
+    # Restore, or this module's context leaks into every later test module.
+    reset_context(previous)
 
 
 @pytest.fixture()
@@ -270,26 +278,57 @@ def test_auth_is_registered_inside_the_scalar_scope_middleware() -> None:
     )
 
 
-def test_no_prefix_strip_turns_a_gated_path_into_an_exempt_one() -> None:
-    """Pin the invariant that makes X-Forwarded-Prefix stripping safe.
+def test_no_request_header_can_change_the_classification(
+    auth_enabled: None, client: TestClient
+) -> None:
+    """A client-controlled header must never influence the auth decision.
 
-    ``strip_forwarded_prefix`` trusts a client-controlled header. It is safe only
-    because no native route is mounted at a path whose tail looks like ``/aml``,
-    ``/iblade`` or a health path. Assert that against the real route table rather
-    than leaving it as prose in a docstring, so adding ``/fleet/aml/...`` later
-    fails here instead of silently opening the layer.
+    Regression test for a proven bypass. The classifier used to strip
+    ``X-Forwarded-Prefix`` when the ASGI scope carried no ``root_path``, so an
+    attacker could shrink the classified path to any suffix of the real one while
+    the router still matched the original:
+
+        GET /catalog/aml/instances   X-Forwarded-Prefix: /catalog
+        -> classified "/aml/instances" (exempt), routed to /catalog/{file_id}
+
+    53 native operations answered something other than this layer's 401 that way.
+    """
+    attacks = [
+        ("/catalog/aml/instances", "/catalog"),
+        ("/jobs/aml", "/jobs"),
+        ("/nas/pools/aml", "/nas/pools"),
+        ("/aml/proxy/libraries/aml/probe", "/aml/proxy/libraries"),
+        ("/api/libraries/iblade", "/api/libraries"),
+        ("/health/../jobs/", "/health"),
+    ]
+    for path, forged_prefix in attacks:
+        response = client.get(path, headers={"X-Forwarded-Prefix": forged_prefix})
+        assert _is_native_401(response), (
+            f"X-Forwarded-Prefix: {forged_prefix} skipped the gate on {path} "
+            f"({response.status_code})"
+        )
+
+
+def test_path_parameter_values_cannot_forge_an_exempt_classification(
+    auth_enabled: None, client: TestClient
+) -> None:
+    """The template-tail reasoning that hid the bypass, done properly.
+
+    An earlier version of this test walked tails of route *templates*, so
+    ``/catalog/{file_id}`` yielded ``/{file_id}`` and passed while the live hole
+    used the parameter *value*. Substitute the exempt-looking names into every
+    parametrized native route and assert the gate still fires.
     """
     offenders = []
-    for _method, path in NATIVE_OPERATIONS:
-        segments = path.strip("/").split("/")
-        for cut in range(1, len(segments)):
-            tail = "/" + "/".join(segments[cut:])
-            if not api_auth.requires_api_token(tail):
-                offenders.append(f"{path} -> {tail}")
-    assert not offenders, (
-        "a gated native path has an exempt-looking tail; prefix stripping could "
-        f"be abused to skip the gate: {offenders}"
-    )
+    for method, path in NATIVE_OPERATIONS:
+        if "{" not in path:
+            continue
+        for forged in ("aml", "iblade", "health"):
+            concrete = _PATH_PARAM.sub(forged, path)
+            response = client.request(method.upper(), concrete)
+            if not _is_native_401(response):
+                offenders.append(f"{method.upper()} {concrete} -> {response.status_code}")
+    assert not offenders, f"a path parameter value defeated the gate: {offenders[:15]}"
 
 
 # ---------------------------------------------------------------------------
@@ -307,10 +346,61 @@ def test_root_path_deployments_classify_on_the_routed_path(auth_enabled: None) -
         == "/aml/system"
     )
     assert api_auth.classification_path({"path": "/ob/jobs/", "root_path": "/ob"}) == "/jobs/"
-    # No root_path: fall back to the X-Forwarded-Prefix header.
-    assert api_auth.classification_path({"path": "/ob/health"}, "/ob") == "/health"
-    # Neither: the path is already what the router matches.
+    # The server-set root_path is the ONLY prefix source; no header is consulted,
+    # and the function takes no header argument to be tempted by.
+    assert api_auth.classification_path({"path": "/catalog/aml"}) == "/catalog/aml"
+    # No root_path: the path is already what the router matches.
     assert api_auth.classification_path({"path": "/health"}) == "/health"
+
+
+def test_with_the_token_on_an_aml_session_must_use_the_cookie(
+    auth_enabled: None, client: TestClient
+) -> None:
+    """Pin the two-credentials-one-header wrinkle, including its sharp edge.
+
+    Authorization carries the API token, so ``require_auth``'s bearer fallback
+    is *unreachable* on native routes once the token is on: the AML session has
+    only the cookie left. This is the documented behaviour operators trip over.
+    """
+    login = client.post("/aml/users/login", json={"name": "admin", "password": "password"})
+    assert login.status_code == 200
+    session_id = client.cookies.get("sessionID")
+    assert session_id
+
+    # Cookie channel: works.
+    assert (
+        client.get("/api/libraries", headers={"Authorization": f"Bearer {TOKEN}"}).status_code
+        == 200
+    )
+
+    # Bearer channel: the header is spent on the API token, so the session
+    # cannot ride along. Without the cookie the route is unauthenticated.
+    client.cookies.clear()
+    assert (
+        client.get("/api/libraries", headers={"Authorization": f"Bearer {TOKEN}"}).status_code
+        == 401
+    )
+
+
+def test_disabled_mode_still_accepts_an_aml_session_as_a_bearer_token(
+    auth_disabled: None, client: TestClient
+) -> None:
+    """require_auth's bearer fallback must keep working when the token is off.
+
+    tests/i3 moves the AML session to the cookie whenever the API token is set,
+    so in token mode it never exercises this path -- "142 passed in both modes"
+    would not catch a regression here. Cover it directly.
+    """
+    login = client.post("/aml/users/login", json={"name": "admin", "password": "password"})
+    assert login.status_code == 200
+    session_id = client.cookies.get("sessionID")
+    assert session_id
+    client.cookies.clear()
+    response = client.get("/api/libraries", headers={"Authorization": f"Bearer {session_id}"})
+    assert response.status_code == 200, (
+        "require_auth no longer accepts an AML session as a bearer token; the i3 "
+        "suite cannot see this regression in token mode"
+    )
 
 
 def test_native_routes_mounted_under_an_aml_prefix_are_still_gated() -> None:
