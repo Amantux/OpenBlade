@@ -35,6 +35,7 @@ from openblade.api import (
     routes_aml_physical,
     routes_aml_system,
     routes_archive,
+    routes_assist,
     routes_catalog,
     routes_dashboard,
     routes_health,
@@ -213,6 +214,7 @@ app.include_router(routes_ltfs.router, prefix="/ltfs", tags=["ltfs"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_libraries.router)
+app.include_router(routes_assist.router, tags=["assist"])
 app.include_router(routes_safety.router)
 # Compatibility shims for frontend and i3 tests that expect /storage and /restore/plan
 app.include_router(routes_storage_compat.router)

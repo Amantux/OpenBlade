@@ -15,6 +15,7 @@ from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
 from openblade.config import BackendMode, OpenBladeConfig, load_config
 from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.domain.policies import RealHardwareGuard
 from openblade.hardware.discovery import discover_library
 from openblade.hardware.library import RealLibraryBackend
 from openblade.hardware.ltfs import RealLTFSBackend
@@ -374,11 +375,15 @@ class AppContext:
     restore_service: RestoreService
 
 
-def _create_scalar_http_library(config: OpenBladeConfig) -> LibraryBackend:
+def _create_scalar_http_library(
+    config: OpenBladeConfig, runner: SafeRunner, guard: RealHardwareGuard
+) -> LibraryBackend:
     """Build the Web Services robotics backend for a real Scalar i3 AML endpoint."""
     import httpx
 
     from openblade.domain.errors import RealHardwareDisabledError
+    from openblade.hardware.correlation import DriveCorrelation
+    from openblade.hardware.library import build_drive_correlation
     from openblade.hardware.scalar_http import ScalarHttpLibraryBackend, ScalarHttpSession
 
     if not config.scalar_url:
@@ -391,7 +396,19 @@ def _create_scalar_http_library(config: OpenBladeConfig) -> LibraryBackend:
     session = ScalarHttpSession(
         client, username=config.scalar_user, password=config.scalar_password
     )
-    return ScalarHttpLibraryBackend(session)
+
+    def _correlate() -> DriveCorrelation:
+        # Deferred to first use: local SCSI discovery and sg_inq are only needed for
+        # the LTFS data path, so a robotics-only deployment (no tape devices on this
+        # host) keeps starting exactly as it did before drive_device was implemented.
+        return build_drive_correlation(
+            config=config,
+            runner=runner,
+            guard=guard,
+            discovery=discover_library(runner, guard),
+        )
+
+    return ScalarHttpLibraryBackend(session, correlation_factory=_correlate)
 
 
 def _catalog_tape_states(config: OpenBladeConfig) -> dict[str, tuple[int, int]]:
@@ -432,7 +449,7 @@ def _create_real_backends(config: OpenBladeConfig) -> tuple[LibraryBackend, LTFS
     runner = SafeRunner(dry_run=config.hardware_dry_run)
     library: LibraryBackend
     if config.robotics_transport == "webservices":
-        library = _create_scalar_http_library(config)
+        library = _create_scalar_http_library(config, runner, guard)
     else:
         discovery = discover_library(runner, guard)
         library = RealLibraryBackend(config=config, runner=runner, discovery=discovery)

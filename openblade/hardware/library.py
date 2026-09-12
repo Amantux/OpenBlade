@@ -15,6 +15,7 @@ from openblade.domain.models import (
     OperationResult,
     SlotState,
 )
+from openblade.domain.policies import RealHardwareGuard
 from openblade.domain.states import validate_mount_transition
 from openblade.hardware.correlation import DriveCorrelation, correlate_drives
 from openblade.hardware.discovery import LibraryDiscovery, discover_library
@@ -53,17 +54,15 @@ class RealLibraryBackend:
         # Drive correlation runs at construction so a mapping that disagrees with
         # the attached hardware refuses here, before any load/write can target the
         # wrong drive.
-        drive_devices = _configured_drive_devices(config, active_discovery)
         object.__setattr__(
             self,
             "correlation",
-            correlate_drives(
-                devices=drive_devices,
-                serial_map=config.drive_serial_map,
+            build_drive_correlation(
+                config=config,
                 runner=active_runner,
                 guard=guard,
+                discovery=active_discovery,
                 element_count=active_changer.inventory().drive_count or None,
-                probe_devices=_sg_probe_devices(drive_devices, active_discovery),
             ),
         )
         object.__setattr__(self, "_mount_states", {})
@@ -195,6 +194,39 @@ class RealLibraryBackend:
     def drive_device(self, drive_id: int) -> str:
         """Host device for a library drive element, via verified correlation."""
         return self.correlation.device_for(drive_id)
+
+
+def build_drive_correlation(
+    *,
+    config: OpenBladeConfig,
+    runner: SafeRunner,
+    guard: RealHardwareGuard,
+    discovery: LibraryDiscovery,
+    element_count: int | None = None,
+) -> DriveCorrelation:
+    """Correlate library drive elements with host tape devices for ``config``.
+
+    One place where "which devices, probed through which nodes" is decided, shared
+    by every real backend.
+
+    ``element_count`` is what lets ``correlate_drives`` refuse a declared element
+    outside the changer's range, and refuse a changer element with no host device
+    (which would strand a cartridge). The SCSI backend passes the changer's count.
+    The AML Web Services backend passes nothing here — it cannot, because the
+    correlation is built lazily without a session — and instead makes a strictly
+    stronger check of its own once it has one: it requires the declared element
+    ids to equal the library's actual element ADDRESSES, not merely to be the
+    right count. See ``ScalarHttpLibraryBackend._refuse_on_element_address_mismatch``.
+    """
+    drive_devices = _configured_drive_devices(config, discovery)
+    return correlate_drives(
+        devices=drive_devices,
+        serial_map=config.drive_serial_map,
+        runner=runner,
+        guard=guard,
+        element_count=element_count,
+        probe_devices=_sg_probe_devices(drive_devices, discovery),
+    )
 
 
 def _resolve_changer_device(discovery: LibraryDiscovery) -> str:
