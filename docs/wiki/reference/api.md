@@ -6,7 +6,7 @@
 
 Introspected from the OpenAPI schema of `openblade.api.main:app`.
 
-**1171 operations** total: 191 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
+**1172 operations** total: 192 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
 
 The application serves two surfaces from one ASGI app. Setting
 `OPENBLADE_SCALAR_API_ONLY=true` puts it in emulator-only mode, where the
@@ -306,6 +306,12 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `POST` | `/restore/plan` | Restore Plan Compat | - | `object` | `object` |
 | `POST` | `/storage/archive-planning` | Storage Archive Planning | - | `object` | `ArchivePlanningResponse` |
 | `GET` | `/storage/restore-queue` | Storage Restore Queue | - | - | `array` |
+
+### `assist` (1 operation)
+
+| Method | Path | Summary | Parameters | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/assist` | Assist | - | `AssistRequest` | `AssistResponse` |
 
 ## Quantum AML / iBlade emulator surface
 
