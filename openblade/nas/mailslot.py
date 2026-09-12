@@ -23,6 +23,7 @@ from openblade.domain.errors import (
     MailslotUnsupportedError,
 )
 from openblade.domain.models import SlotState
+from openblade.jobs.inventory import InventoryService
 from openblade.nas.tape_orchestrator import TapeOperationOrchestrator
 from openblade.nas.types import TapeOpRequest, TapeOpStatus, TapeOpType
 
@@ -163,7 +164,14 @@ class MailslotService:
     ) -> MailslotMoveResult:
         """Move a cartridge from storage into the first empty I/E element."""
         assessment = self.preview_export(barcode)
-        source_slot = self.library.find_slot_by_barcode(barcode)
+        source_slot = next(
+            (
+                slot.slot_id
+                for slot in InventoryService(self.library).snapshot().slots
+                if slot.barcode is not None and str(slot.barcode) == str(barcode)
+            ),
+            None,
+        )
         if source_slot is None:
             raise CartridgeNotFoundError(
                 f"Cartridge {barcode} is not in a storage slot; "
@@ -247,7 +255,7 @@ class MailslotService:
         )
 
     def _first_empty_storage_slot(self) -> int:
-        for slot in self.library.inventory().slots:
+        for slot in InventoryService(self.library).snapshot().slots:
             if slot.barcode is None:
                 return slot.slot_id
         raise ImportExportSlotError("No empty storage slot is available to import into")
