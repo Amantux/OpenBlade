@@ -112,21 +112,26 @@ def _is_mock(context: AppContext) -> bool:
 
 
 def _save_state(context: AppContext) -> None:
-    if not _is_mock(context):
+    # Narrowed here rather than through `_is_mock(context)` so the simulator-only
+    # attributes below (`_slots`, `_ie_slots`, `_tapes`, ...) are statically known
+    # to exist. Same gate, same outcome; see `_is_mock` for why it exists.
+    library = context.library
+    ltfs = context.ltfs
+    if not isinstance(library, MockLibraryBackend) or not isinstance(ltfs, MockLTFSBackend):
         return
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "library": {
-            "library_id": context.library.library_id,
-            "num_slots": len(context.library.inventory().slots),
-            "num_drives": len(context.library.inventory().drives),
+            "library_id": library.library_id,
+            "num_slots": len(library.inventory().slots),
+            "num_drives": len(library.inventory().drives),
             "slots": {
                 str(slot_id): slot.barcode.value if slot.barcode is not None else None
-                for slot_id, slot in context.library._slots.items()
+                for slot_id, slot in library._slots.items()
             },
             "import_export_slots": {
                 str(slot_id): slot.barcode.value if slot.barcode is not None else None
-                for slot_id, slot in context.library._ie_slots.items()
+                for slot_id, slot in library._ie_slots.items()
             },
             "drives": {
                 str(drive_id): {
@@ -134,14 +139,14 @@ def _save_state(context: AppContext) -> None:
                     "drive_state": drive.drive_state.value,
                     "mount_state": drive.mount_state.value,
                 }
-                for drive_id, drive in context.library._drives.items()
+                for drive_id, drive in library._drives.items()
             },
             "cartridge_states": {
-                barcode: state.value for barcode, state in context.library._cartridge_states.items()
+                barcode: state.value for barcode, state in library._cartridge_states.items()
             },
         },
         "ltfs": {
-            "capacity_bytes": context.ltfs.capacity_bytes,
+            "capacity_bytes": ltfs.capacity_bytes,
             "tapes": {
                 barcode: {
                     "used_bytes": tape.used_bytes,
@@ -157,7 +162,7 @@ def _save_state(context: AppContext) -> None:
                         for tape_path, record in tape.files.items()
                     },
                 }
-                for barcode, tape in context.ltfs._tapes.items()
+                for barcode, tape in ltfs._tapes.items()
             },
         },
     }

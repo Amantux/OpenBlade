@@ -6,7 +6,7 @@ import hashlib
 import threading
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 import structlog
@@ -389,7 +389,7 @@ class TapeOperationOrchestrator:
             )
         from openblade.catalog.export_policy import assess_export
 
-        assessment = assess_export(cast("CatalogRepository", self.repo), request.barcode)
+        assessment = assess_export(self.repo, request.barcode)
         if assessment.carries_data:
             raise ExportRefusedError(assessment.refusal_message())
 

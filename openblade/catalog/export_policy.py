@@ -107,17 +107,24 @@ def assess_export(catalog: CatalogRepository, barcode: str) -> ExportAssessment:
         return assessment
 
     for group in catalog.list_volume_groups():
-        if group.id != cartridge.volume_group_id:
+        if group.id == cartridge.volume_group_id:
+            assessment.volume_group = group.name
+            break
+
+    # Siblings come from a fresh cartridge query rather than `group.cartridges`:
+    # the volume group may already be in SQLAlchemy's identity map with a
+    # collection loaded before the newest cartridge was linked, and a stale
+    # "no siblings" answer here reads as "safe to export".
+    for sibling in catalog.list_cartridges():
+        if sibling.volume_group_id != cartridge.volume_group_id:
             continue
-        assessment.volume_group = group.name
-        for sibling in group.barcodes:
-            if sibling == barcode:
-                continue
-            if any(
-                instance.state in ARCHIVED_INSTANCE_STATES
-                for instance in catalog.list_instances_for_barcode(sibling)
-            ):
-                assessment.volume_group_barcodes_with_data.append(sibling)
-        break
+        if sibling.barcode == barcode:
+            continue
+        if any(
+            instance.state in ARCHIVED_INSTANCE_STATES
+            for instance in catalog.list_instances_for_barcode(sibling.barcode)
+        ):
+            assessment.volume_group_barcodes_with_data.append(sibling.barcode)
+    assessment.volume_group_barcodes_with_data.sort()
 
     return assessment

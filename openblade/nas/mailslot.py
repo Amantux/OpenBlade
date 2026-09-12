@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from openblade.catalog.export_policy import ExportAssessment, assess_export
 from openblade.catalog.repository import CatalogRepository
-from openblade.domain.backends import MailslotBackend
+from openblade.domain.backends import LibraryBackend, LTFSBackend, MailslotBackend
 from openblade.domain.errors import (
     CartridgeNotFoundError,
     ImportExportSlotError,
@@ -49,6 +49,13 @@ class MailslotListing:
     @property
     def occupied(self) -> list[MailslotSlot]:
         return [slot for slot in self.slots if slot.occupied]
+
+    def occupied_barcodes(self) -> list[str]:
+        return [slot.barcode for slot in self.occupied if slot.barcode is not None]
+
+    @property
+    def slot_count(self) -> int:
+        return len(self.slots)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -90,7 +97,9 @@ class MailslotMoveResult:
 class MailslotService:
     """Operator surface over the library's import/export station."""
 
-    def __init__(self, catalog: CatalogRepository, library: object, ltfs: object) -> None:
+    def __init__(
+        self, catalog: CatalogRepository, library: LibraryBackend, ltfs: LTFSBackend
+    ) -> None:
         self.catalog = catalog
         self.library = library
         self.ltfs = ltfs
@@ -143,7 +152,9 @@ class MailslotService:
         )
         self._raise_if_failed(record, "import")
         # The cartridge is back in the library: whatever is catalogued on it is
-        # restorable again.
+        # restorable again. Same add-then-set as export -- an imported cartridge
+        # may be one the catalog has never seen.
+        self.catalog.add_cartridge(barcode)
         self.catalog.set_cartridge_state(barcode, _STATE_IN_SLOT)
         return MailslotMoveResult(
             op_id=record.op_id,
@@ -160,7 +171,7 @@ class MailslotService:
     ) -> MailslotMoveResult:
         """Move a cartridge from storage into the first empty I/E element."""
         assessment = self.preview_export(barcode)
-        source_slot = self.library.find_slot_by_barcode(barcode)  # type: ignore[attr-defined]
+        source_slot = self.library.find_slot_by_barcode(barcode)
         if source_slot is None:
             raise CartridgeNotFoundError(
                 f"Cartridge {barcode} is not in a storage slot; "
@@ -184,6 +195,13 @@ class MailslotService:
         self._raise_if_failed(record, "export")
         # Every restore path reads this flag. Data that is sitting in a mailslot
         # waiting for a human to take it is not online data.
+        #
+        # add_cartridge first because set_cartridge_state no-ops on a barcode the
+        # catalog has never seen -- and file_instances key on the BARCODE, not on
+        # a cartridges row, so a tape can carry archived data with no row at all.
+        # Skipping this would export the media and leave the catalog claiming it
+        # was still restorable.
+        self.catalog.add_cartridge(barcode)
         self.catalog.set_cartridge_state(barcode, _STATE_EXPORTED)
         return MailslotMoveResult(
             op_id=record.op_id,
@@ -237,7 +255,7 @@ class MailslotService:
         )
 
     def _first_empty_storage_slot(self) -> int:
-        for slot in self.library.inventory().slots:  # type: ignore[attr-defined]
+        for slot in self.library.inventory().slots:
             if slot.barcode is None:
                 return slot.slot_id
         raise ImportExportSlotError(

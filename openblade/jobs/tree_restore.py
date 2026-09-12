@@ -24,6 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from openblade.catalog.models import FileRecord
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.errors import safe_job_error
@@ -128,13 +129,13 @@ def _relative_parts(catalog_path: str, prefix: str) -> tuple[str, ...]:
     return tuple(part for part in parts if part not in {"", "/", ".", ".."}) or (path.name,)
 
 
-def _select_records(catalog: CatalogRepository, prefix: str) -> list[object]:
+def _select_records(catalog: CatalogRepository, prefix: str) -> list[FileRecord]:
     """Top-level catalog records strictly under ``prefix``.
 
     ``list_file_records`` matches with SQL ``LIKE 'prefix%'``, so a prefix of
     ``/photo`` also matches ``/photos-old/x``. Re-filter on path components.
     """
-    selected = []
+    selected: list[FileRecord] = []
     for record in catalog.list_file_records(prefix):
         path = str(record.path)
         if prefix == "/" or path == prefix or path.startswith(prefix.rstrip("/") + "/"):
