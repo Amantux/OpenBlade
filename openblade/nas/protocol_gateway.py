@@ -5,6 +5,7 @@ SFTP ingest. Gateway credentials are separate from web UI credentials.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import importlib.util
@@ -324,10 +325,8 @@ class ProtocolGateway:
         now = datetime.utcnow()
         for session in self._sessions:
             if session.disconnected_at is None:
-                try:
+                with contextlib.suppress(Exception):
                     session.disconnected_at = now
-                except Exception:  # noqa: BLE001
-                    pass
         self._status = GatewayStatus.STOPPED
 
     def disable(self) -> None:

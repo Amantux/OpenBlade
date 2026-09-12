@@ -621,7 +621,9 @@ async def create_move(
             s = int(s_raw)
             d = int(d_raw)
         except Exception:
-            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers")
+            # `from None`, not `from exc`: the ValueError/TypeError text can echo
+            # the caller's raw payload, and this detail string is client-facing.
+            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers") from None
         try:
             result = context.library.load(s, d)
             if getattr(result, "success", False):
@@ -636,7 +638,7 @@ async def create_move(
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if isinstance(payload, dict) and "move" in payload and isinstance(payload["move"], dict):
         data = payload["move"]
@@ -661,7 +663,9 @@ async def create_move(
             s = int(source_raw)
             d = int(dest_raw)
         except Exception:
-            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers")
+            # `from None`, not `from exc`: the ValueError/TypeError text can echo
+            # the caller's raw payload, and this detail string is client-facing.
+            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers") from None
         # Call the simulated library backend to perform the load/unload
         try:
             result = context.library.load(s, d)
@@ -679,7 +683,7 @@ async def create_move(
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # If barcode is missing, try to infer it from the source slot in the current inventory
     if not barcode_raw and source_raw:
@@ -719,9 +723,7 @@ async def create_move(
     def _is_missing(val: object) -> bool:
         if val is None:
             return True
-        if isinstance(val, str) and not val.strip():
-            return True
-        return False
+        return bool(isinstance(val, str) and not val.strip())
 
     if _is_missing(source_raw) or _is_missing(dest_raw) or _is_missing(barcode_raw):
         raise HTTPException(status_code=422, detail="Missing move fields")

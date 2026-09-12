@@ -1,6 +1,8 @@
 """jobs.error is served UNAUTHENTICATED (GET /jobs). Raw exception text —
 CommandError carries argv + tool stderr — must never reach that field.
 Typed OpenBlade errors carry curated messages and pass through."""
+import contextlib
+
 from openblade.domain.errors import OpenBladeError, safe_job_error
 from openblade.hardware.runner import CommandError
 
@@ -38,10 +40,8 @@ def test_run_job_records_sanitized_error() -> None:
     def boom():
         raise CommandError(["mtx", "status"], 1, "raw stderr LEAK")
 
-    try:
+    with contextlib.suppress(CommandError):
         queue.run_job(job, boom)
-    except CommandError:
-        pass
     failed = queue.get_job(job.id)
     assert failed.error is not None
     assert "LEAK" not in failed.error

@@ -176,7 +176,6 @@ def test_cli_stdout_is_parseable_json_with_logs_on_stderr(tmp_path) -> None:
     # code. `shutil` retained for no other caller. 
     del shutil
     repo_root = Path(__file__).resolve().parents[2]
-    console_script = None  # replaced by the -m invocation below
 
     env = {
         **os.environ,

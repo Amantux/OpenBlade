@@ -6,13 +6,14 @@ BASE='http://localhost:8000'
 print('Logging in')
 r = requests.post(f"{BASE}/aml/auth/login", json={"name":"admin","password":"password"}, timeout=5)
 if r.status_code!=200:
-    print('login failed', r.status_code); raise SystemExit(1)
+    print('login failed', r.status_code)
+    raise SystemExit(1)
 token=r.json().get('token')
 headers={'Authorization':f'Bearer {token}'}
 libs = requests.get(f"{BASE}/api/libraries", headers=headers, timeout=5).json()
-print('libraries:', [l['name'] for l in libs])
-for l in libs:
-    url = l.get('emulator_url')
+print('libraries:', [lib['name'] for lib in libs])
+for lib in libs:
+    url = lib.get('emulator_url')
     if not url:
         continue
     try:
