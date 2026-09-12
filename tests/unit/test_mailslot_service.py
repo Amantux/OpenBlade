@@ -366,6 +366,36 @@ class TestOrchestratorGuardIsUnbypassable:
             )
         assert library.find_slot_by_barcode("OB0001L8") == 1
 
+    def test_a_full_library_refuses_to_unload_rather_than_eject_to_the_mailslot(
+        self,
+    ) -> None:
+        """The defect-3.9 shape, from the other direction.
+
+        `_find_empty_slot` picks "the first empty slot" for an unload. Now that
+        I/E elements exist and are numbered past the storage slots, a library
+        with no free storage slot must REFUSE, not fall through to the mailslot
+        and eject a loaded cartridge to the front panel.
+        """
+        from openblade.nas.tape_orchestrator import (
+            TapeOperationOrchestrator,
+            _TransientTapeOpRepository,
+        )
+
+        library = MockLibraryBackend(
+            num_slots=2, num_drives=1, num_import_export_slots=2
+        )
+        library.seed_slots(["OB0001L8", "OB0002L8"])
+        library.load(1, 0)                    # slot 1 is now free...
+        library.add_cartridge(1, "OB0003L8")  # ...and immediately refilled
+        orchestrator = TapeOperationOrchestrator(
+            _TransientTapeOpRepository(), library, MockLTFSBackend(library)
+        )
+
+        with pytest.raises(ValueError, match="No empty slot"):
+            orchestrator._find_empty_slot()
+
+        assert all(not slot.occupied for slot in library.import_export_slots())
+
 
 class TestSimulatorState:
     def test_import_export_elements_are_not_storage_slots(self) -> None:
