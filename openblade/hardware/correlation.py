@@ -367,9 +367,13 @@ def verify_against_library_serials(
     missing = sorted(declared - reported)
     if missing and len(missing) == len(declared):
         return (
-            f"none of the declared drive serials appear in {source}'s drive list; the two "
-            "sides may spell serials differently, so the declaration was NOT cross-checked "
-            "against the library",
+            f"NOT cross-checked: none of the declared drive serials appear in {source}'s "
+            f"drive list (declared {sorted(declared)}, reported {sorted(reported)}). Either "
+            "the two sides spell serials differently — harmless — or this controller is "
+            "driving a different library than the drives attached to this host, which would "
+            "load cartridges into elements whose drives are not here. Nothing distinguishes "
+            "the two from here, so the declaration stands unchecked: confirm the serials on "
+            "the library's drive page match `openblade hardware connect-i3`.",
         )
     if missing:
         raise DriveCorrelationError(

@@ -39,7 +39,10 @@ absent. On top of the SCSI backend's live ``sg_inq`` check, it adds one check
 ``mtx`` cannot make: the declared serials are cross-checked against the serials
 this library reports on ``GET /aml/drives`` (see
 ``correlation.verify_against_library_serials``), which catches a map that
-belongs to a *different* library. Lifting the limitation needs the library to
+belongs to a *different* library — but only when the two sides spell serials
+comparably enough to overlap at all. A fully disjoint result is warned about,
+not refused, because nothing here can tell it apart from a formatting
+difference. Lifting the limitation needs the library to
 publish the join — READ ELEMENT STATUS with DVCID, or a documented AML field
 carrying the element address on the drive object.
 """
