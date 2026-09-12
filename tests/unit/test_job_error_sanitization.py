@@ -50,3 +50,16 @@ def test_run_job_records_sanitized_error() -> None:
     assert failed.error is not None
     assert "LEAK" not in failed.error
     assert "CommandError" in failed.error
+
+
+def test_aml_move_error_detail_is_sanitized() -> None:
+    """The AML moveMedium fallback handler serves detail= at a boundary that
+    is unauthenticated by default — raw exception text (argv, stderr, paths)
+    must reduce to a class name there too."""
+    import inspect
+
+    from openblade.api import routes_aml_operations as mod
+
+    src = inspect.getsource(mod)
+    assert "detail=str(exc)" not in src
+    assert src.count("detail=safe_job_error(exc)") >= 2

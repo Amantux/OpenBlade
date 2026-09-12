@@ -82,11 +82,10 @@ jobs:
     needs: changes
     if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.api == 'true' || needs.changes.outputs.simulator == 'true' }}
     runs-on: ubuntu-latest
-    # Advisory: the repo carries a large pre-existing ruff/format backlog (~180
-    # lint findings + ~160 files needing `ruff format`). This job still runs and
-    # reports, but does not fail CI (so trusted-PR auto-merge can proceed). Not a
-    # required check. Tracked for incremental cleanup; new code should still lint.
-    continue-on-error: true
+    # BLOCKING since the toolchain was pinned (ruff==0.15.22 via the dev extra)
+    # and the baseline cleared to zero findings / fully formatted. If this job
+    # goes red, the fix is `ruff check --fix` / `ruff format` with the PINNED
+    # version, never a version bump in the same change.
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -261,7 +260,7 @@ jobs:
   # branch-protection check (plus operability-gate). It understands a valid
   # `skipped` result from path-filtered jobs and fails on any real failure or
   # cancellation, so branch protection no longer has to reason about skips.
-  # backend-lint / backend-typecheck are advisory (reported, never blocking).
+  # backend-typecheck is advisory (reported, never blocking); backend-lint blocks.
   ci-gate:
     name: ci-gate
     needs:

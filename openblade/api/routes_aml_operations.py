@@ -14,6 +14,7 @@ from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_
 from openblade.api.service_auth import require_service_token
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
+from openblade.domain.errors import safe_job_error
 
 router = APIRouter()
 
@@ -646,7 +647,10 @@ async def create_move(
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # safe_job_error: typed OpenBlade errors carry curated messages;
+            # anything else (CommandError argv+stderr, OSError paths) must not
+            # reach this unauthenticated-by-default AML boundary verbatim.
+            raise HTTPException(status_code=400, detail=safe_job_error(exc)) from exc
 
     if isinstance(payload, dict) and "move" in payload and isinstance(payload["move"], dict):
         data = payload["move"]
@@ -695,7 +699,10 @@ async def create_move(
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # safe_job_error: typed OpenBlade errors carry curated messages;
+            # anything else (CommandError argv+stderr, OSError paths) must not
+            # reach this unauthenticated-by-default AML boundary verbatim.
+            raise HTTPException(status_code=400, detail=safe_job_error(exc)) from exc
 
     # If barcode is missing, try to infer it from the source slot in the current inventory
     if not barcode_raw and source_raw:
