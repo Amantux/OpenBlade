@@ -16,7 +16,11 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "sqlalchemy[asyncio]>=2.0",
   "alembic>=1.13",
-  "typer>=0.12",
+  "typer==0.27.0",  # pinned: CI resolved a newer typer whose bare-group
+  # invocation rendered a usage error instead of the callback, failing
+  # test_restore_without_options_or_subcommand while the venv passed —
+  # the same toolchain-skew class the ruff pin closed. Bump deliberately.
+  "click==8.4.2",  # typer's engine; pinned with it
   "rich>=13",
   "pydantic>=2",
   "aiosqlite>=0.20",
