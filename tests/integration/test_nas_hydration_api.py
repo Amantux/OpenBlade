@@ -14,7 +14,9 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def reset_app_context(tmp_path: Path) -> None:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'nas-hydration-api.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'nas-hydration-api.db'}")
+    )
     reset_context(context)
 
 

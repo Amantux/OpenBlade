@@ -30,7 +30,13 @@ class FakeMetadataBackend:
         return self.files.get(path)
 
 
-def _services() -> tuple[FakeMetadataBackend, TapeMetadataWriter, CatalogShardWriter, ManifestValidator, VersionedManifestWriter]:
+def _services() -> tuple[
+    FakeMetadataBackend,
+    TapeMetadataWriter,
+    CatalogShardWriter,
+    ManifestValidator,
+    VersionedManifestWriter,
+]:
     backend = FakeMetadataBackend()
     metadata_writer = TapeMetadataWriter(backend)
     shard_writer = CatalogShardWriter(metadata_writer)
@@ -85,7 +91,9 @@ def _shard_dataset(**overrides: object) -> CatalogShardDatasetEntry:
     return CatalogShardDatasetEntry(**payload)
 
 
-def _write_valid_manifest(metadata_writer: TapeMetadataWriter, barcode: str = "VOL001L8") -> ManifestJson:
+def _write_valid_manifest(
+    metadata_writer: TapeMetadataWriter, barcode: str = "VOL001L8"
+) -> ManifestJson:
     manifest = _manifest(barcode=barcode)
     checksum = metadata_writer.write_manifest(barcode, manifest)
     metadata_writer.write_manifest_checksum(barcode, checksum)
@@ -315,7 +323,9 @@ def test_validate_manifest_reports_inconsistent_raw_file_count() -> None:
     backend, metadata_writer, _, validator, _ = _services()
     payload = _manifest().model_dump(by_alias=True)
     payload["file_count"] = 99
-    backend.files["/.openblade/manifest.json"] = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    backend.files["/.openblade/manifest.json"] = json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
     metadata_writer.write_manifest_checksum(
         "VOL001L8",
         metadata_writer.compute_json_checksum(payload),

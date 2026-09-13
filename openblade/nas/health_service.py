@@ -69,10 +69,14 @@ class HealthService:
                 reasons.append("database unavailable")
             if library.status is not HealthStatus.OK:
                 reasons.append("library unavailable")
-            return ReadyResponse(ready=not reasons, reason="; ".join(reasons), checked_at=checked_at)
+            return ReadyResponse(
+                ready=not reasons, reason="; ".join(reasons), checked_at=checked_at
+            )
         except Exception:
             logger.warning("readiness check failed", exc_info=True)
-            return ReadyResponse(ready=False, reason="dependency check unavailable", checked_at=checked_at)
+            return ReadyResponse(
+                ready=False, reason="dependency check unavailable", checked_at=checked_at
+            )
 
     def get_library_status(self) -> LibraryStatusResponse:
         """Return library connection and slot/drive occupancy derived from the simulator inventory."""
@@ -120,14 +124,18 @@ class HealthService:
         successful_checks = 0
 
         try:
-            total_datasets = int(self.repo.session.execute(select(func.count()).select_from(NasDataset)).scalar_one())
+            total_datasets = int(
+                self.repo.session.execute(select(func.count()).select_from(NasDataset)).scalar_one()
+            )
             successful_checks += 1
         except Exception:
             logger.warning("catalog dataset count failed", exc_info=True)
 
         try:
             total_file_records = int(
-                self.repo.session.execute(select(func.count()).select_from(NasFileRecord)).scalar_one()
+                self.repo.session.execute(
+                    select(func.count()).select_from(NasFileRecord)
+                ).scalar_one()
             )
             successful_checks += 1
         except Exception:
@@ -135,14 +143,18 @@ class HealthService:
 
         try:
             total_path_mappings = int(
-                self.repo.session.execute(select(func.count()).select_from(PathMapping)).scalar_one()
+                self.repo.session.execute(
+                    select(func.count()).select_from(PathMapping)
+                ).scalar_one()
             )
             successful_checks += 1
         except Exception:
             logger.warning("catalog path mapping count failed", exc_info=True)
 
         try:
-            total_cartridges = int(self.repo.session.execute(select(func.count()).select_from(Cartridge)).scalar_one())
+            total_cartridges = int(
+                self.repo.session.execute(select(func.count()).select_from(Cartridge)).scalar_one()
+            )
             successful_checks += 1
         except Exception:
             logger.warning("catalog cartridge count failed", exc_info=True)
@@ -150,8 +162,12 @@ class HealthService:
         try:
             latest_rebuild = self.repo.list_rebuild_runs(limit=1)
             latest_rebuild_run = latest_rebuild[0] if latest_rebuild else None
-            last_rebuild_run_id = str(latest_rebuild_run["id"]) if latest_rebuild_run is not None else None
-            last_rebuild_status = str(latest_rebuild_run["status"]) if latest_rebuild_run is not None else None
+            last_rebuild_run_id = (
+                str(latest_rebuild_run["id"]) if latest_rebuild_run is not None else None
+            )
+            last_rebuild_status = (
+                str(latest_rebuild_run["status"]) if latest_rebuild_run is not None else None
+            )
             successful_checks += 1
         except Exception:
             logger.warning("catalog rebuild lookup failed", exc_info=True)
@@ -210,9 +226,15 @@ class HealthService:
         started_at = time.perf_counter()
         try:
             inventory = self.library.inventory() if hasattr(self.library, "inventory") else None
-            drive_count = len(inventory.drives) if inventory is not None else len(self.library.drives)
+            drive_count = (
+                len(inventory.drives) if inventory is not None else len(self.library.drives)
+            )
             status = HealthStatus.OK if drive_count > 0 else HealthStatus.DEGRADED
-            message = "Library connected." if drive_count > 0 else "Library connected but no drives available."
+            message = (
+                "Library connected."
+                if drive_count > 0
+                else "Library connected but no drives available."
+            )
             return ComponentHealth(
                 name="library",
                 status=status,

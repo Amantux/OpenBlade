@@ -5,6 +5,7 @@ streaming live output via Server-Sent Events.
 
 Safety gate: running against a real i3 requires I3_REAL_HARDWARE_ENABLED=true.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,6 +33,7 @@ _RUNS: dict[str, dict] = {}
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
+
 
 class TestRunRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -70,6 +72,7 @@ class TestRunStatus(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _module_pattern(modules: list[str] | None) -> str:
     """Convert a list of module short names to a pytest -k expression."""
@@ -121,10 +124,14 @@ def _parse_json_report(run_id: str) -> dict:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/run", response_model=TestRunResponse)
 async def start_test_run(req: TestRunRequest) -> TestRunResponse:
     """Start a test run. Returns run_id. Output streams via /stream/{run_id}."""
-    if req.target == "real" and os.environ.get("I3_REAL_HARDWARE_ENABLED", "false").lower() != "true":
+    if (
+        req.target == "real"
+        and os.environ.get("I3_REAL_HARDWARE_ENABLED", "false").lower() != "true"
+    ):
         raise HTTPException(
             status_code=403,
             detail=(
@@ -225,6 +232,7 @@ async def list_runs() -> list[dict]:
 # Background task
 # ---------------------------------------------------------------------------
 
+
 async def _run_tests(run_id: str, req: TestRunRequest) -> None:
     """Run pytest in a subprocess, capturing output line by line."""
     run = _RUNS[run_id]
@@ -285,7 +293,9 @@ async def _run_tests(run_id: str, req: TestRunRequest) -> None:
 
     run["status"] = "completed" if run["exit_code"] == 0 else "failed"
     run["finished_at"] = datetime.now(timezone.utc).isoformat()
-    log.info("test_run_complete", exit_code=run["exit_code"], passed=run["passed"], failed=run["failed"])
+    log.info(
+        "test_run_complete", exit_code=run["exit_code"], passed=run["passed"], failed=run["failed"]
+    )
 
 
 def _update_counts_from_line(run: dict, line: str) -> None:
@@ -319,14 +329,16 @@ async def _sse_generator(run_id: str) -> AsyncGenerator[bytes, None]:
 
         if run["status"] in ("completed", "failed") and sent_idx >= len(run["output_lines"]):
             # Send final status event
-            status_payload = json.dumps({
-                "event": "done",
-                "status": run["status"],
-                "passed": run["passed"],
-                "failed": run["failed"],
-                "total": run["total_tests"],
-                "exit_code": run["exit_code"],
-            })
+            status_payload = json.dumps(
+                {
+                    "event": "done",
+                    "status": run["status"],
+                    "passed": run["passed"],
+                    "failed": run["failed"],
+                    "total": run["total_tests"],
+                    "exit_code": run["exit_code"],
+                }
+            )
             yield f"data: {status_payload}\n\n".encode()
             break
 

@@ -52,7 +52,9 @@ def test_system_endpoints_require_auth(client: TestClient, path: str) -> None:
         ("put", "/aml/system/ha", {"enabled": True}),
     ],
 )
-def test_system_mutations_require_admin(service_client: TestClient, method: str, path: str, payload: dict[str, object]) -> None:
+def test_system_mutations_require_admin(
+    service_client: TestClient, method: str, path: str, payload: dict[str, object]
+) -> None:
     resp = getattr(service_client, method)(path, json=payload)
     assert resp.status_code == 403
 
@@ -137,4 +139,6 @@ def test_reset_clears_system_config(tmp_path: Path) -> None:
     cfg["hostname"] = "mutated-host"
     set_aml_system_config(cfg)
     reset_context(ctx)
-    assert get_aml_system_config()["hostname"] == "openblade-1", "reset_context must clear system config"
+    assert get_aml_system_config()["hostname"] == "openblade-1", (
+        "reset_context must clear system config"
+    )

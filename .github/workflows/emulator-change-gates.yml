@@ -66,18 +66,9 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: python3 tools/emulator_spec/validate_cross_repo_contract.py
       - run: python3 tools/emulator_spec/generate_matrix_endpoint_catalog.py
-      - run: >
-          python -m pytest
-          tests/i3/test_14_emulator_profile.py
-          tests/i3/test_18_config_profiles.py
-          tests/i3/test_15_manual_matrix_contract.py
-          tests/i3/test_16_manual_matrix_generated_suites.py
-          tests/i3/test_17_matrix_endpoint_coverage.py
-          tests/integration/test_aml_emulator_latency*.py
-          tests/integration/test_aml_scope_lockdown.py
-          tests/integration/test_aml_library_spec_parity.py
-          tests/unit/test_emulator_client_config.py
-          -q --tb=short
+      # Boot BEFORE the suites: this ordering was wrong since the workflow was
+      # written, masked for months because the contract-validator step above
+      # failed first — the suites below dial 127.0.0.1:8000.
       - run: |
           rm -f /tmp/openblade-emulator-gates.db
           OPENBLADE_BACKEND=mock OPENBLADE_DB_URL=sqlite:////tmp/openblade-emulator-gates.db \
@@ -96,4 +87,16 @@ jobs:
                   time.sleep(1)
           raise SystemExit("API did not become healthy in time")
           PY
+      - run: >
+          python -m pytest
+          tests/i3/test_14_emulator_profile.py
+          tests/i3/test_18_config_profiles.py
+          tests/i3/test_15_manual_matrix_contract.py
+          tests/i3/test_16_manual_matrix_generated_suites.py
+          tests/i3/test_17_matrix_endpoint_coverage.py
+          tests/integration/test_aml_emulator_latency*.py
+          tests/integration/test_aml_scope_lockdown.py
+          tests/integration/test_aml_library_spec_parity.py
+          tests/unit/test_emulator_client_config.py
+          -q --tb=short
       - run: python -m pytest tests/i3/ -m i3 -q --tb=short

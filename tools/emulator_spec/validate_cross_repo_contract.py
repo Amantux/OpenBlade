@@ -57,9 +57,13 @@ def _validate() -> list[str]:
     policy_line = str(compatibility_policy.get("contract_semver", ""))
     if expected_line:
         if policy_line != expected_line:
-            errors.append(f"compatibility_policy.contract_semver must be {expected_line}, got {policy_line}")
+            errors.append(
+                f"compatibility_policy.contract_semver must be {expected_line}, got {policy_line}"
+            )
         if contract_line != expected_line:
-            errors.append(f"cross_repo_contract.contract_line must be {expected_line}, got {contract_line}")
+            errors.append(
+                f"cross_repo_contract.contract_line must be {expected_line}, got {contract_line}"
+            )
 
     if str(contract.get("contract_schema_version", "")) != "1.0.0":
         errors.append("contract_schema_version must be 1.0.0")
@@ -74,7 +78,9 @@ def _validate() -> list[str]:
     if not compose_matches:
         errors.append("docker-compose.yml must include OPENBLADE_EMULATOR_IMAGE pin")
     elif set(compose_matches) != {expected_pin}:
-        errors.append(f"docker-compose image pins must all equal {expected_pin}, got {sorted(set(compose_matches))}")
+        errors.append(
+            f"docker-compose image pins must all equal {expected_pin}, got {sorted(set(compose_matches))}"
+        )
 
     if str(contract.get("scope_policy", "")) != str(matrix.get("scope", "")):
         errors.append("scope_policy must match matrix scope")
@@ -86,11 +92,17 @@ def _validate() -> list[str]:
             "matrix minimum_cases_per_endpoint must be >= contract minimum_cases_per_endpoint"
         )
     if int(api_guarantees.get("matrix_minimum_case_count", 0)) != contract_minimum:
-        errors.append("api_compatibility_guarantees.matrix_minimum_case_count must match contract minimum")
+        errors.append(
+            "api_compatibility_guarantees.matrix_minimum_case_count must match contract minimum"
+        )
 
     required_endpoints = api_guarantees.get("required_endpoints")
-    if not isinstance(required_endpoints, list) or not {"/health", "/aml/"}.issubset(required_endpoints):
-        errors.append("api_compatibility_guarantees.required_endpoints must include /health and /aml/")
+    if not isinstance(required_endpoints, list) or not {"/health", "/aml/"}.issubset(
+        required_endpoints
+    ):
+        errors.append(
+            "api_compatibility_guarantees.required_endpoints must include /health and /aml/"
+        )
 
     required_paths: list[str] = []
     for key in ("contract_file", "manual_matrix_file", "compose_file"):
@@ -128,7 +140,9 @@ def _validate() -> list[str]:
             continue
         workflow_path = ROOT / workflow_file
         if workflow_file not in workflow_files:
-            errors.append(f"workflow file {workflow_file} must be listed in required_artifacts.workflow_files")
+            errors.append(
+                f"workflow file {workflow_file} must be listed in required_artifacts.workflow_files"
+            )
             continue
         if not workflow_path.exists():
             errors.append(f"workflow file does not exist: {workflow_file}")

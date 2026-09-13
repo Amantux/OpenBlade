@@ -29,13 +29,26 @@ two share code. See openblade/emulator_contract/README.md.
 - Still verify dependency behavior against installed source in `.venv/`, not memory.
 
 ## Commands (verified — there is NO `make check` target)
-- Lint:        make lint            (ruff)
+- Lint:        make lint            (ruff check . && ruff format --check .)
 - Tests:       make test | make test-unit | make test-integration
 - Full gate:   make all             (lint + test + build)
 - One suite:   python3 -m pytest tests/i3 -q
 - Frontend:    cd frontend && npm run test && npm run build   (vitest / tsc+vite)
 - Run stack:   make up | make emulator-up | make fleet-up
 Definition of done = `make all` green + relevant frontend checks + any parity gates.
+
+## Lint toolchain — the version is pinned, and that is load-bearing
+- `ruff==0.15.22` EXACTLY in `[project.optional-dependencies].dev`, and
+  `[tool.ruff.lint].select` is explicit. Both halves are required: CI installs
+  ruff only via `pip install -e '.[dev]'`, so a `>=` floor there meant CI and
+  your venv could enforce different rules on the same tree. Use the venv's ruff;
+  do not `pip install -U ruff`. Bump in its own commit, re-running both commands.
+- `ruff check .` is expected to be **clean (0)**. If you add a `# noqa`, it needs
+  a written reason at the site — bare noqa is not accepted here.
+- `ruff format` changes go in their own format-only commit, never mixed with
+  logic. Known exception still outstanding: `openblade/assistant/tools.py`.
+- Background + the deferred `BLE`/`S` rule families:
+  docs/decisions/2026-09-11-pin-ruff-toolchain.md.
 
 ## Effort tiers (project-specific escalation)
 - T1: <10 lines, no interface/wire/schema change → just do it. One-line report.

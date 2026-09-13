@@ -253,11 +253,23 @@ def test_iblade_post_operation_endpoints_queue_jobs(
             group = client.get("/iblade/volume-groups/1")
             assert group.status_code == 200
             for barcode in group.json()["tapes"]:
-                assert client.put(f"/iblade/lto-media/{barcode}", json={"state": "sequestered"}).status_code == 200
-                assert client.put(f"/iblade/lto-media/{barcode}", json={"state": "formatted"}).status_code == 200
+                assert (
+                    client.put(
+                        f"/iblade/lto-media/{barcode}", json={"state": "sequestered"}
+                    ).status_code
+                    == 200
+                )
+                assert (
+                    client.put(
+                        f"/iblade/lto-media/{barcode}", json={"state": "formatted"}
+                    ).status_code
+                    == 200
+                )
             return {"index": 1}
         if path.endswith("/repair") or path.endswith("/safe-repair"):
-            assert aml_state.update_iblade_volume_group(1, {"state": "DEGRADED", "reason": "REPAIR_REQUIRED"})
+            assert aml_state.update_iblade_volume_group(
+                1, {"state": "DEGRADED", "reason": "REPAIR_REQUIRED"}
+            )
             return {"index": 1}
         if "replicate" in path:
             return {"source": 1, "destination": 2}
@@ -798,7 +810,9 @@ def test_iblade_messages_put_supports_close_all_and_single_close(client: TestCli
     assert open_messages_after_bulk.status_code == 200
     assert open_messages_after_bulk.json() == []
 
-    aml_state.update_iblade_message("MSG-001", {"acknowledged": False, "closed_by": None, "closed_at": None})
+    aml_state.update_iblade_message(
+        "MSG-001", {"acknowledged": False, "closed_by": None, "closed_at": None}
+    )
     single_close = client.put("/iblade/messages/MSG-001", json={"closed_by": "security"})
     assert single_close.status_code == 200
     payload = single_close.json()

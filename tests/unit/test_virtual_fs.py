@@ -114,7 +114,9 @@ def _login() -> None:
     assert response.status_code == 200
 
 
-def test_list_root_returns_pools(catalog_service: NasService, filesystem: VirtualFilesystem) -> None:
+def test_list_root_returns_pools(
+    catalog_service: NasService, filesystem: VirtualFilesystem
+) -> None:
     seed_dataset(catalog_service, pool_name="critical", dataset_id="2026")
     seed_dataset(catalog_service, pool_name="archive", dataset_id="2027")
 
@@ -124,7 +126,9 @@ def test_list_root_returns_pools(catalog_service: NasService, filesystem: Virtua
     assert all(entry.is_directory for entry in listing.entries)
 
 
-def test_list_pools_returns_datasets(catalog_service: NasService, filesystem: VirtualFilesystem) -> None:
+def test_list_pools_returns_datasets(
+    catalog_service: NasService, filesystem: VirtualFilesystem
+) -> None:
     seed_dataset(catalog_service, pool_name="critical", dataset_id="2026")
     seed_dataset(catalog_service, pool_name="critical", dataset_id="2027")
 
@@ -134,7 +138,9 @@ def test_list_pools_returns_datasets(catalog_service: NasService, filesystem: Vi
     assert all(entry.is_directory for entry in listing.entries)
 
 
-def test_list_dataset_returns_files(catalog_service: NasService, filesystem: VirtualFilesystem) -> None:
+def test_list_dataset_returns_files(
+    catalog_service: NasService, filesystem: VirtualFilesystem
+) -> None:
     seed_dataset(catalog_service)
     seed_file(catalog_service, dataset_id="2026", relative_path="alpha.mov")
     seed_file(catalog_service, dataset_id="2026", relative_path="beta.mov")
@@ -153,7 +159,9 @@ def test_list_unknown_path_returns_empty(filesystem: VirtualFilesystem) -> None:
     assert listing.total_entries == 0
 
 
-def test_stat_file_returns_entry(context: AppContext, catalog_service: NasService, filesystem: VirtualFilesystem) -> None:
+def test_stat_file_returns_entry(
+    context: AppContext, catalog_service: NasService, filesystem: VirtualFilesystem
+) -> None:
     seed_dataset(catalog_service)
     record = seed_file(catalog_service, dataset_id="2026", relative_path="alpha.mov")
     seed_mapping(
@@ -229,7 +237,10 @@ def test_request_hydration_returns_queued_job(
     assert job.job_id
     assert job.status == "queued"
     assert job.total_files == 1
-    assert filesystem.stat_file("/pools/critical/2026/offline.mov").status is VirtualFileStatus.HYDRATING
+    assert (
+        filesystem.stat_file("/pools/critical/2026/offline.mov").status
+        is VirtualFileStatus.HYDRATING
+    )
 
 
 def test_request_hydration_assigns_required_tapes(
@@ -373,7 +384,9 @@ def test_list_hydration_jobs_returns_all(
     }
 
 
-def test_mock_sftp_listdir_returns_names(catalog_service: NasService, filesystem: VirtualFilesystem) -> None:
+def test_mock_sftp_listdir_returns_names(
+    catalog_service: NasService, filesystem: VirtualFilesystem
+) -> None:
     seed_dataset(catalog_service)
     seed_file(catalog_service, dataset_id="2026", relative_path="alpha.mov")
     seed_file(catalog_service, dataset_id="2026", relative_path="beta.mov")
@@ -384,7 +397,9 @@ def test_mock_sftp_listdir_returns_names(catalog_service: NasService, filesystem
     assert names == ["alpha.mov", "beta.mov"]
 
 
-def test_mock_sftp_stat_returns_attrs(context: AppContext, catalog_service: NasService, filesystem: VirtualFilesystem) -> None:
+def test_mock_sftp_stat_returns_attrs(
+    context: AppContext, catalog_service: NasService, filesystem: VirtualFilesystem
+) -> None:
     seed_dataset(catalog_service)
     record = seed_file(catalog_service, dataset_id="2026", relative_path="alpha.mov")
     seed_mapping(
@@ -426,7 +441,9 @@ def test_mock_sftp_open_offline_raises_with_hydration(
     )
     session = MockSftpSession(filesystem)
 
-    with pytest.raises(OfflineFileError, match=r"File is offline on tape TAPE404\. Hydration queued as job"):
+    with pytest.raises(
+        OfflineFileError, match=r"File is offline on tape TAPE404\. Hydration queued as job"
+    ):
         session.open("/pools/critical/2026/offline.mov")
 
     assert len(filesystem.list_hydration_jobs()) == 1
@@ -440,7 +457,9 @@ def test_virtual_ls_route_requires_auth() -> None:
     assert response.status_code in (401, 403)
 
 
-def test_virtual_hydrate_route_returns_job(context: AppContext, catalog_service: NasService) -> None:
+def test_virtual_hydrate_route_returns_job(
+    context: AppContext, catalog_service: NasService
+) -> None:
     seed_dataset(catalog_service)
     record = seed_file(
         catalog_service,

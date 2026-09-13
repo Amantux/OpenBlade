@@ -69,7 +69,10 @@ class RestorePlanner:
             else:
                 estimated_bytes += record.size_bytes
 
-            if state in {NasFileState.OFFLINE_ON_TAPE, NasFileState.ONLINE_CACHED} and record.tape_barcode:
+            if (
+                state in {NasFileState.OFFLINE_ON_TAPE, NasFileState.ONLINE_CACHED}
+                and record.tape_barcode
+            ):
                 required_counts[record.tape_barcode] += 1
                 batches_by_tape[record.tape_barcode].append(logical_path)
             elif state is NasFileState.MISSING_TAPE:
@@ -101,9 +104,13 @@ class RestorePlanner:
                 f"{len(missing_list)} tape(s) required but not available: {', '.join(missing_list)}"
             )
         if exported_list:
-            warnings.append(f"{len(exported_list)} tape(s) have been exported: {', '.join(exported_list)}")
+            warnings.append(
+                f"{len(exported_list)} tape(s) have been exported: {', '.join(exported_list)}"
+            )
         if unavailable_list:
-            warnings.append(f"{len(unavailable_list)} file(s) cannot be restored due to unavailable tapes")
+            warnings.append(
+                f"{len(unavailable_list)} file(s) cannot be restored due to unavailable tapes"
+            )
         if estimated_tape_swaps > 3:
             warnings.append(
                 f"This restore requires {estimated_tape_swaps} tape swaps. Consider restoring in batches."
@@ -154,12 +161,20 @@ class RestorePlanner:
         if pool is not None and pool.default_policy_id:
             policy = self.service.get_policy(pool.default_policy_id)
             if policy is not None and policy.policy_type is PolicyType.CRITICAL_SEQUENTIAL:
-                dataset_ids = {record.dataset_id for record in records if record.tape_barcode in required_counts}
+                dataset_ids = {
+                    record.dataset_id
+                    for record in records
+                    if record.tape_barcode in required_counts
+                }
                 if len(dataset_ids) == 1:
                     dataset = self.service.get_dataset(next(iter(dataset_ids)))
                     if dataset is not None and dataset.tape_set:
-                        ordered = [barcode for barcode in dataset.tape_set if barcode in required_counts]
-                        remaining = sorted(barcode for barcode in required_counts if barcode not in ordered)
+                        ordered = [
+                            barcode for barcode in dataset.tape_set if barcode in required_counts
+                        ]
+                        remaining = sorted(
+                            barcode for barcode in required_counts if barcode not in ordered
+                        )
                         return [*ordered, *remaining]
                 return sorted(required_counts)
 

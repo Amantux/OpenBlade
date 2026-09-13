@@ -125,7 +125,9 @@ def test_write_failure_commits_nothing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ltfs, "write_file", _raise(RuntimeError("boom")))
 
     job = catalog.create_job("archive", {})
-    result = run_sharded_archive(_request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id)
+    result = run_sharded_archive(
+        _request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id
+    )
 
     assert result.errors  # failure surfaced, not swallowed
     assert result.files_archived == 0
@@ -140,7 +142,9 @@ def test_unmount_failure_blocks_commit(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ltfs, "unmount", _raise(RuntimeError("stuck")))
 
     job = catalog.create_job("archive", {})
-    result = run_sharded_archive(_request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id)
+    result = run_sharded_archive(
+        _request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id
+    )
 
     assert result.errors  # dirty unmount surfaced as a failure
     assert result.files_archived == 0
@@ -157,7 +161,9 @@ def test_unload_failure_blocks_commit(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(library, "unload", _raise(RuntimeError("drive stuck")))
 
     job = catalog.create_job("archive", {})
-    result = run_sharded_archive(_request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id)
+    result = run_sharded_archive(
+        _request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id
+    )
 
     assert result.errors  # stuck unload surfaced, not swallowed
     assert result.files_archived == 0

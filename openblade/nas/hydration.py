@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -14,6 +15,8 @@ from openblade.nas.service import NasService
 from openblade.nas.tape_paths import dataset_tape_path
 from openblade.nas.types import NasFileRecord, NasFileState, NasRestoreJob, RestoreJobStatus
 from openblade.simulator.ltfs_volume import MockLTFSBackend
+
+logger = logging.getLogger(__name__)
 
 _SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
@@ -77,7 +80,9 @@ class HydrationExecutor:
             error_message=job.error_message,
         )
         cancelled = self._require_job(job_id)
-        cancelled = self._persist_job(cancelled.model_copy(update={"partial_success": job.partial_success}))
+        cancelled = self._persist_job(
+            cancelled.model_copy(update={"partial_success": job.partial_success})
+        )
         return cancelled
 
     def pause(self, job_id: str) -> NasRestoreJob:
@@ -97,7 +102,9 @@ class HydrationExecutor:
     def resume(self, job_id: str) -> NasRestoreJob:
         job = self._require_job(job_id)
         self._require_status(job, {RestoreJobStatus.PAUSED}, "resume")
-        self._persist_job(job.model_copy(update={"status": RestoreJobStatus.RUNNING, "error_message": None}))
+        self._persist_job(
+            job.model_copy(update={"status": RestoreJobStatus.RUNNING, "error_message": None})
+        )
         return self._execute(job_id)
 
     def retry(self, job_id: str) -> NasRestoreJob:
@@ -169,7 +176,9 @@ class HydrationExecutor:
             # cache_path is the logical restore destination the client requested; the
             # downloadable bytes live at restore_dir/{id} (written by _materialize_content
             # and resolved by the download endpoint independently of cache_path).
-            destination = str(PurePosixPath(hydration_job.restore_job.destination) / record.relative_path)
+            destination = str(
+                PurePosixPath(hydration_job.restore_job.destination) / record.relative_path
+            )
             restored = self._persist_file_record(
                 record.model_copy(
                     update={
@@ -243,7 +252,9 @@ class HydrationExecutor:
         )
 
     def _plan_from_job(self, job: NasRestoreJob) -> RestorePlan:
-        ordered_groups = [job.parallel_restore_groups[key] for key in sorted(job.parallel_restore_groups)]
+        ordered_groups = [
+            job.parallel_restore_groups[key] for key in sorted(job.parallel_restore_groups)
+        ]
         requested_paths = [self._normalize_path(path) for path in job.paths]
         batches_by_tape: dict[str, list[str]] = {barcode: [] for barcode in job.required_tapes}
         for record in self._records_for_job(job):
@@ -271,7 +282,9 @@ class HydrationExecutor:
             estimated_bytes=job.estimated_bytes,
             unavailable_files=list(job.unavailable_files),
             warnings=list(job.warnings),
-            is_safe_to_enqueue=not job.unavailable_files and not job.missing_tapes and not job.exported_tapes,
+            is_safe_to_enqueue=not job.unavailable_files
+            and not job.missing_tapes
+            and not job.exported_tapes,
         )
 
     def _records_for_job(self, job: NasRestoreJob) -> list[NasFileRecord]:
@@ -313,7 +326,22 @@ class HydrationExecutor:
         tape_path = str(dataset_tape_path(dataset.name, record.relative_path))
         try:
             return self.ltfs.read_bytes(record.tape_barcode, tape_path)
-        except Exception:  # noqa: BLE001 - a tape read failure falls back to placeholder
+        except Exception as exc:  # noqa: BLE001 - a tape read failure falls back to placeholder
+            # The fallback is deliberate -- the checksum guard below turns it into
+            # a clean failure rather than corrupt data. Swallowing the *cause* is
+            # not. Against real hardware the usual cause here is "Barcode ... is
+            # not loaded in a drive", because HydrationExecutor never loads the
+            # cartridge; the operator was shown "tape read failed or data corrupt"
+            # instead, which points at the media rather than at the missing load.
+            logger.warning(
+                "hydration tape read failed; falling back to placeholder bytes",
+                exc_info=True,
+                extra={
+                    "barcode": record.tape_barcode,
+                    "tape_path": tape_path,
+                    "cause_type": type(exc).__name__,
+                },
+            )
             return None
 
     def _materialize_content(self, record: NasFileRecord) -> bytes:
@@ -391,7 +419,9 @@ class HydrationExecutor:
     def _require_status(job: NasRestoreJob, allowed: set[RestoreJobStatus], action: str) -> None:
         if job.status not in allowed:
             allowed_names = ", ".join(sorted(status.value for status in allowed))
-            raise ValueError(f"Cannot {action} restore job from {job.status.value}; allowed: {allowed_names}")
+            raise ValueError(
+                f"Cannot {action} restore job from {job.status.value}; allowed: {allowed_names}"
+            )
 
     @staticmethod
     def _normalize_path(path: str) -> str:

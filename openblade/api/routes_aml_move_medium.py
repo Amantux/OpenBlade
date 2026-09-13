@@ -98,9 +98,7 @@ async def move_medium(
     try:
         if move_class.is_unload or (source_type == "drive" and destination is None):
             if source_type != "drive":
-                raise HTTPException(
-                    status_code=422, detail="Unload move requires a drive source"
-                )
+                raise HTTPException(status_code=422, detail="Unload move requires a drive source")
             # Real moveClass=8 unload takes the drive source only; if a destination
             # slot is supplied (client hint), honor it, else the library picks an
             # empty/home slot (Web Services manual). Guard the destination type:

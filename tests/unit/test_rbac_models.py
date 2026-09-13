@@ -15,7 +15,9 @@ def make_catalog() -> CatalogRepository:
     return CatalogRepository(get_session())
 
 
-def create_role(catalog: CatalogRepository, *, role_id: str = "role-1", name: str = "operator") -> dict[str, object]:
+def create_role(
+    catalog: CatalogRepository, *, role_id: str = "role-1", name: str = "operator"
+) -> dict[str, object]:
     return catalog.create_role(
         {
             "id": role_id,
@@ -28,7 +30,13 @@ def create_role(catalog: CatalogRepository, *, role_id: str = "role-1", name: st
     )
 
 
-def create_user(catalog: CatalogRepository, *, user_id: str = "user-1", username: str = "alice", is_active: bool = True) -> dict[str, object]:
+def create_user(
+    catalog: CatalogRepository,
+    *,
+    user_id: str = "user-1",
+    username: str = "alice",
+    is_active: bool = True,
+) -> dict[str, object]:
     return catalog.create_user(
         {
             "id": user_id,
@@ -47,7 +55,13 @@ def create_user(catalog: CatalogRepository, *, user_id: str = "user-1", username
     )
 
 
-def create_api_token(catalog: CatalogRepository, *, token_id: str = "token-1", user_id: str = "user-1", raw_token: str = "secret-token") -> tuple[str, dict[str, object]]:
+def create_api_token(
+    catalog: CatalogRepository,
+    *,
+    token_id: str = "token-1",
+    user_id: str = "user-1",
+    raw_token: str = "secret-token",
+) -> tuple[str, dict[str, object]]:
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
     token = catalog.create_api_token(
         {
@@ -65,7 +79,14 @@ def create_api_token(catalog: CatalogRepository, *, token_id: str = "token-1", u
     return raw_token, token
 
 
-def create_audit_event(catalog: CatalogRepository, *, event_id: str, user_id: str | None, event_type: str, created_at: str) -> dict[str, object]:
+def create_audit_event(
+    catalog: CatalogRepository,
+    *,
+    event_id: str,
+    user_id: str | None,
+    event_type: str,
+    created_at: str,
+) -> dict[str, object]:
     return catalog.create_audit_event(
         {
             "id": event_id,
@@ -112,7 +133,11 @@ def test_update_role_permissions() -> None:
     updated = catalog.update_role(
         "role-1",
         {
-            "permissions": [RbacPermission.TAPE_READ, RbacPermission.TAPE_WRITE, RbacPermission.CATALOG_READ],
+            "permissions": [
+                RbacPermission.TAPE_READ,
+                RbacPermission.TAPE_WRITE,
+                RbacPermission.CATALOG_READ,
+            ],
             "updated_at": LATER,
         },
     )
@@ -219,7 +244,9 @@ def test_update_token_last_used() -> None:
 
 def test_create_audit_event() -> None:
     catalog = make_catalog()
-    created = create_audit_event(catalog, event_id="audit-1", user_id="user-1", event_type="login_success", created_at=NOW)
+    created = create_audit_event(
+        catalog, event_id="audit-1", user_id="user-1", event_type="login_success", created_at=NOW
+    )
     assert created["details"] == {"source": "test"}
     fetched = catalog.list_audit_events(limit=1)
     assert fetched == [created]
@@ -227,16 +254,24 @@ def test_create_audit_event() -> None:
 
 def test_list_audit_events_by_user() -> None:
     catalog = make_catalog()
-    create_audit_event(catalog, event_id="audit-1", user_id="user-1", event_type="login_success", created_at=NOW)
-    create_audit_event(catalog, event_id="audit-2", user_id="user-2", event_type="login_failure", created_at=LATER)
+    create_audit_event(
+        catalog, event_id="audit-1", user_id="user-1", event_type="login_success", created_at=NOW
+    )
+    create_audit_event(
+        catalog, event_id="audit-2", user_id="user-2", event_type="login_failure", created_at=LATER
+    )
     events = catalog.list_audit_events(user_id="user-1")
     assert [event["id"] for event in events] == ["audit-1"]
 
 
 def test_list_audit_events_by_type() -> None:
     catalog = make_catalog()
-    create_audit_event(catalog, event_id="audit-1", user_id="user-1", event_type="login_success", created_at=NOW)
-    create_audit_event(catalog, event_id="audit-2", user_id="user-1", event_type="token_revoked", created_at=LATER)
+    create_audit_event(
+        catalog, event_id="audit-1", user_id="user-1", event_type="login_success", created_at=NOW
+    )
+    create_audit_event(
+        catalog, event_id="audit-2", user_id="user-1", event_type="token_revoked", created_at=LATER
+    )
     events = catalog.list_audit_events(event_type="token_revoked")
     assert [event["id"] for event in events] == ["audit-2"]
 

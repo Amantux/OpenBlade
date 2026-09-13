@@ -2,6 +2,7 @@
 
 Covers login, session token handling, bad credentials, and logout.
 """
+
 from __future__ import annotations
 
 import httpx
@@ -20,7 +21,9 @@ def _login_attempts(i3_client: httpx.Client, username: str, password: str) -> li
     return attempts
 
 
-def _first_successful_login(i3_client: httpx.Client, username: str, password: str) -> httpx.Response | None:
+def _first_successful_login(
+    i3_client: httpx.Client, username: str, password: str
+) -> httpx.Response | None:
     for response in _login_attempts(i3_client, username, password):
         if response.status_code == 200:
             return response
@@ -28,7 +31,9 @@ def _first_successful_login(i3_client: httpx.Client, username: str, password: st
 
 
 class TestLogin:
-    def test_login_with_valid_credentials(self, i3_client: httpx.Client, i3_credentials: tuple[str, str]) -> None:
+    def test_login_with_valid_credentials(
+        self, i3_client: httpx.Client, i3_credentials: tuple[str, str]
+    ) -> None:
         user, password = i3_credentials
         wait_for_op("auth")
         resp = _first_successful_login(i3_client, user, password)
@@ -37,7 +42,9 @@ class TestLogin:
         token = data.get("token") or data.get("access_token") or data.get("sessionToken")
         assert token, "Login response should contain a token"
 
-    def test_login_with_wrong_password_is_rejected(self, i3_client: httpx.Client, i3_credentials: tuple[str, str]) -> None:
+    def test_login_with_wrong_password_is_rejected(
+        self, i3_client: httpx.Client, i3_credentials: tuple[str, str]
+    ) -> None:
         user, _ = i3_credentials
         attempts = _login_attempts(i3_client, user, "wrong-password-xyz")
         assert any(resp.status_code in (401, 403) for resp in attempts), (
@@ -50,7 +57,9 @@ class TestLogin:
             f"Expected 401/403 for unknown user, got {[resp.status_code for resp in attempts]}"
         )
 
-    def test_login_response_has_required_fields(self, i3_client: httpx.Client, i3_credentials: tuple[str, str]) -> None:
+    def test_login_response_has_required_fields(
+        self, i3_client: httpx.Client, i3_credentials: tuple[str, str]
+    ) -> None:
         user, password = i3_credentials
         resp = _first_successful_login(i3_client, user, password)
         assert resp is not None, "No supported login endpoint returned a successful response"
@@ -61,7 +70,9 @@ class TestLogin:
 
 
 class TestAuthenticatedAccess:
-    def test_authenticated_request_succeeds(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_authenticated_request_succeeds(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/aml/library", headers=auth_headers)
         assert resp.status_code in (200, 207), f"Authenticated request failed: {resp.status_code}"
 
@@ -75,7 +86,9 @@ class TestAuthenticatedAccess:
 
 
 class TestLogout:
-    def test_logout_returns_success(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_logout_returns_success(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         responses = [
             i3_client.post("/aml/auth/logout", headers=auth_headers),
             i3_client.post("/aml/users/logout", headers=auth_headers),

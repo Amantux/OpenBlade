@@ -68,7 +68,11 @@ class DrReport:
         return all(c.ok for c in self.checks)
 
     def to_dict(self) -> dict[str, object]:
-        return {"backup_path": self.backup_path, "ok": self.ok, "checks": [asdict(c) for c in self.checks]}
+        return {
+            "backup_path": self.backup_path,
+            "ok": self.ok,
+            "checks": [asdict(c) for c in self.checks],
+        }
 
 
 def restore_and_verify(backup_path: Path) -> DrReport:
@@ -92,23 +96,44 @@ def restore_and_verify(backup_path: Path) -> DrReport:
             with sqlite3.connect(str(restored)) as conn:
                 result = conn.execute("PRAGMA integrity_check").fetchone()
                 integ_ok = bool(result) and result[0] == "ok"
-                report.checks.append(DrCheck("integrity_check", integ_ok, str(result[0] if result else "no result")))
+                report.checks.append(
+                    DrCheck("integrity_check", integ_ok, str(result[0] if result else "no result"))
+                )
 
-                tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                tables = {
+                    row[0]
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                }
                 missing = EXPECTED_TABLES - tables
-                report.checks.append(DrCheck("schema_present", not missing,
-                    f"{len(tables)} tables; missing={sorted(missing)}" if missing else f"{len(tables)} tables"))
+                report.checks.append(
+                    DrCheck(
+                        "schema_present",
+                        not missing,
+                        f"{len(tables)} tables; missing={sorted(missing)}"
+                        if missing
+                        else f"{len(tables)} tables",
+                    )
+                )
 
                 # Representative read against the restored data as-is — proves the
                 # core table is queryable without recreating anything.
                 if "file_records" in tables:
                     count = conn.execute("SELECT count(*) FROM file_records").fetchone()[0]
-                    report.checks.append(DrCheck("data_layer_query", True, f"{count} file records readable"))
+                    report.checks.append(
+                        DrCheck("data_layer_query", True, f"{count} file records readable")
+                    )
                 else:
-                    report.checks.append(DrCheck("data_layer_query", False,
-                        "file_records table absent — backup cannot be read by the app"))
+                    report.checks.append(
+                        DrCheck(
+                            "data_layer_query",
+                            False,
+                            "file_records table absent — backup cannot be read by the app",
+                        )
+                    )
         except sqlite3.DatabaseError as exc:
-            report.checks.append(DrCheck("integrity_check", False, f"backup is not a valid database: {exc}"))
+            report.checks.append(
+                DrCheck("integrity_check", False, f"backup is not a valid database: {exc}")
+            )
             return report
 
         return report

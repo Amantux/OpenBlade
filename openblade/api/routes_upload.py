@@ -17,7 +17,7 @@ _UUID4_RE = re.compile(
 )
 
 # Maximum upload size: 10 GiB by default, overridable via env
-_MAX_UPLOAD_BYTES = int(os.environ.get("OPENBLADE_MAX_UPLOAD_BYTES", str(10 * 1024 ** 3)))
+_MAX_UPLOAD_BYTES = int(os.environ.get("OPENBLADE_MAX_UPLOAD_BYTES", str(10 * 1024**3)))
 
 
 def _validate_file_id(file_id: str) -> str:
@@ -33,6 +33,7 @@ def _safe_resolve(base: Path, file_id: str) -> Path:
     if not str(resolved).startswith(str(base.resolve())):
         raise HTTPException(status_code=400, detail="Invalid file_id format")
     return resolved
+
 
 from fastapi import (
     APIRouter,
@@ -162,20 +163,28 @@ def _normalize_target_prefix(prefix: str) -> str:
         return ""
     path = Path(value)
     if any(part in {"..", ""} for part in path.parts):
-        raise HTTPException(status_code=400, detail="target_prefix contains invalid path components")
+        raise HTTPException(
+            status_code=400, detail="target_prefix contains invalid path components"
+        )
     return "/".join(path.parts)
 
 
-def _resolve_share_for_pool(service: NasService, *, pool_id: str, share_path: str) -> NasShareDefinition:
+def _resolve_share_for_pool(
+    service: NasService, *, pool_id: str, share_path: str
+) -> NasShareDefinition:
     share = service.get_share(share_path)
     if share is None:
         raise HTTPException(status_code=404, detail=f"Share {share_path} not found")
     if pool_id not in share.pool_ids:
-        raise HTTPException(status_code=400, detail=f"Share {share_path} is not mapped to pool {pool_id}")
+        raise HTTPException(
+            status_code=400, detail=f"Share {share_path} is not mapped to pool {pool_id}"
+        )
     return share
 
 
-def _resolve_pool_for_share(service: NasService, *, pool_id: str, share: NasShareDefinition) -> NasPool:
+def _resolve_pool_for_share(
+    service: NasService, *, pool_id: str, share: NasShareDefinition
+) -> NasPool:
     pool = service.get_pool(pool_id)
     if pool is None:
         raise HTTPException(status_code=400, detail=f"Pool {pool_id} not found")
@@ -289,9 +298,13 @@ def _present_status(record: dict[str, object]) -> str:
 def _serialize_record(record: dict[str, object]) -> PoolFileEntry:
     return PoolFileEntry(
         file_id=str(record["id"]),
-        filename=_sanitize_filename(record.get("relative_path") if isinstance(record.get("relative_path"), str) else None),
+        filename=_sanitize_filename(
+            record.get("relative_path") if isinstance(record.get("relative_path"), str) else None
+        ),
         size_bytes=int(record.get("size_bytes") or 0),
-        checksum_sha256=record.get("checksum_sha256") if isinstance(record.get("checksum_sha256"), str) else None,
+        checksum_sha256=record.get("checksum_sha256")
+        if isinstance(record.get("checksum_sha256"), str)
+        else None,
         pool_id=record.get("pool_id") if isinstance(record.get("pool_id"), str) else None,
         status=_present_status(record),
         created_at=record.get("created_at") if isinstance(record.get("created_at"), str) else None,
@@ -315,7 +328,9 @@ def _resolve_file_path(file_id: str, record: dict[str, object] | None = None) ->
     return None
 
 
-@router.post("/pools/{pool_id}/upload", response_model=UploadResponse, dependencies=[Depends(require_auth)])
+@router.post(
+    "/pools/{pool_id}/upload", response_model=UploadResponse, dependencies=[Depends(require_auth)]
+)
 async def upload_file_to_pool(
     pool_id: str,
     file: UploadFile = File(...),
@@ -338,7 +353,7 @@ async def upload_file_to_pool(
                     destination.unlink(missing_ok=True)
                     raise HTTPException(
                         status_code=413,
-                        detail=f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024 ** 2)} MiB",
+                        detail=f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024**2)} MiB",
                     )
                 handle.write(chunk)
                 sha256.update(chunk)
@@ -406,7 +421,11 @@ async def download_file(
     return FileResponse(path=path, filename=filename)
 
 
-@router.get("/files/{file_id}/checksum", response_model=FileChecksumResponse, dependencies=[Depends(require_auth)])
+@router.get(
+    "/files/{file_id}/checksum",
+    response_model=FileChecksumResponse,
+    dependencies=[Depends(require_auth)],
+)
 async def get_file_checksum(
     file_id: str,
     repo: CatalogRepository = Depends(get_catalog),
@@ -426,7 +445,11 @@ async def get_file_checksum(
     return FileChecksumResponse(file_id=file_id, checksum_sha256=sha256.hexdigest())
 
 
-@router.get("/pools/{pool_id}/files", response_model=PoolFileListResponse, dependencies=[Depends(require_auth)])
+@router.get(
+    "/pools/{pool_id}/files",
+    response_model=PoolFileListResponse,
+    dependencies=[Depends(require_auth)],
+)
 async def list_pool_files(
     pool_id: str,
     repo: CatalogRepository = Depends(get_catalog),
@@ -436,7 +459,10 @@ async def list_pool_files(
     if dataset is not None:
         records = repo.list_nas_file_records(str(dataset["id"]))
     else:
-        records = [record.model_dump(mode="json") for record in NasService(repo).list_pool_file_records(pool_id)]
+        records = [
+            record.model_dump(mode="json")
+            for record in NasService(repo).list_pool_file_records(pool_id)
+        ]
 
     files = sorted(
         (_serialize_record(record) for record in records),
@@ -446,7 +472,9 @@ async def list_pool_files(
     return PoolFileListResponse(pool_id=pool_id, files=files)
 
 
-@router.delete("/files/{file_id}", response_model=DeleteFileResponse, dependencies=[Depends(require_auth)])
+@router.delete(
+    "/files/{file_id}", response_model=DeleteFileResponse, dependencies=[Depends(require_auth)]
+)
 async def delete_file(
     file_id: str,
     repo: CatalogRepository = Depends(get_catalog),
@@ -520,20 +548,32 @@ async def push_staged_files_to_share(
             _validate_file_id(file_id)
             record = records_by_id.get(file_id)
             if record is None:
-                raise HTTPException(status_code=404, detail=f"File {file_id} not found in pool {pool_id}")
+                raise HTTPException(
+                    status_code=404, detail=f"File {file_id} not found in pool {pool_id}"
+                )
             if str(record.get("pool_id") or "") != pool_id:
-                raise HTTPException(status_code=400, detail=f"File {file_id} does not belong to pool {pool_id}")
+                raise HTTPException(
+                    status_code=400, detail=f"File {file_id} does not belong to pool {pool_id}"
+                )
             if str(record.get("status") or "") != NasFileState.ONLINE_CACHED.value:
-                raise HTTPException(status_code=400, detail=f"File {file_id} is not pending archive")
+                raise HTTPException(
+                    status_code=400, detail=f"File {file_id} is not pending archive"
+                )
             source_path = _resolve_file_path(file_id, record)
             if source_path is None:
-                raise HTTPException(status_code=404, detail=f"Staged content for {file_id} was not found")
+                raise HTTPException(
+                    status_code=404, detail=f"Staged content for {file_id} was not found"
+                )
 
-            base_name = _sanitize_filename(record.get("relative_path") if isinstance(record, dict) else None)
+            base_name = _sanitize_filename(
+                record.get("relative_path") if isinstance(record, dict) else None
+            )
             candidate = f"{target_prefix}/{base_name}" if target_prefix else base_name
             if candidate in used_paths:
                 candidate = (
-                    f"{target_prefix}/{file_id}-{base_name}" if target_prefix else f"{file_id}-{base_name}"
+                    f"{target_prefix}/{file_id}-{base_name}"
+                    if target_prefix
+                    else f"{file_id}-{base_name}"
                 )
             used_paths.add(candidate)
             destination_path = _safe_workspace_path(workspace, candidate)

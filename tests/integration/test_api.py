@@ -19,7 +19,10 @@ def _admin_auth_headers() -> dict[str, str]:
 
 
 def _controller_headers() -> dict[str, str]:
-    return {**_admin_auth_headers(), "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"}
+    return {
+        **_admin_auth_headers(),
+        "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose",
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +35,11 @@ def _first_data_barcode() -> str:
     from openblade.bootstrap import get_context
 
     context = get_context()
-    return next(cartridge.barcode for cartridge in context.catalog.list_cartridges() if not cartridge.barcode.startswith("CLN"))
+    return next(
+        cartridge.barcode
+        for cartridge in context.catalog.list_cartridges()
+        if not cartridge.barcode.startswith("CLN")
+    )
 
 
 def _format_first_tape() -> tuple[str, str]:
@@ -76,7 +83,11 @@ def test_archive_returns_job_id(tmp_path: Path) -> None:
     barcode, token = _format_first_tape()
     client.post("/volume-groups/", json={"name": "photos"})
     client.post("/volume-groups/photos/assign", json={"barcode": barcode})
-    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_controller_headers())
+    client.post(
+        "/cartridges/format/confirm",
+        json={"barcode": barcode, "token": token},
+        headers=_controller_headers(),
+    )
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.txt").write_text("api archive")
@@ -92,7 +103,11 @@ def test_restore_returns_job_id(tmp_path: Path) -> None:
     barcode, token = _format_first_tape()
     client.post("/volume-groups/", json={"name": "photos"})
     client.post("/volume-groups/photos/assign", json={"barcode": barcode})
-    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_controller_headers())
+    client.post(
+        "/cartridges/format/confirm",
+        json={"barcode": barcode, "token": token},
+        headers=_controller_headers(),
+    )
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.txt").write_text("api restore")
@@ -115,7 +130,11 @@ def test_get_job_status(tmp_path: Path) -> None:
     barcode, token = _format_first_tape()
     client.post("/volume-groups/", json={"name": "photos"})
     client.post("/volume-groups/photos/assign", json={"barcode": barcode})
-    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_controller_headers())
+    client.post(
+        "/cartridges/format/confirm",
+        json={"barcode": barcode, "token": token},
+        headers=_controller_headers(),
+    )
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.txt").write_text("job status")
@@ -159,7 +178,11 @@ def test_sharded_archive_returns_job_id(tmp_path: Path) -> None:
     barcode, token = _format_first_tape()
     client.post("/volume-groups/", json={"name": "photos"})
     client.post("/volume-groups/photos/assign", json={"barcode": barcode})
-    client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_controller_headers())
+    client.post(
+        "/cartridges/format/confirm",
+        json={"barcode": barcode, "token": token},
+        headers=_controller_headers(),
+    )
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.txt").write_text("api sharded archive")

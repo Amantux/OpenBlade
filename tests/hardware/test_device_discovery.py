@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from openblade.hardware.discovery import find_tape_drives, parse_lsscsi
+from openblade.hardware.discovery import find_tape_drives, parse_lsscsi, resolve_sg_device
 from openblade.hardware.sg import parse_sg_inq
 
 pytestmark = pytest.mark.real_hardware
@@ -19,21 +19,35 @@ def _lsscsi_devices(runner):
 
 
 def _normalize_drive_path(device: str) -> str:
+    """Map a no-rewind node onto the rewinding node lsscsi reports in its output.
+
+    This exists ONLY so a configured /dev/nstN can be matched against lsscsi's
+    block-device column, which always shows /dev/stN. It must never be the path
+    a SCSI command is issued against - see _resolve_scsi_path.
+    """
     if device.startswith("/dev/nst"):
         return f"/dev/st{device.removeprefix('/dev/nst')}"
     return device
 
 
 def _resolve_scsi_path(requested_device: str, devices) -> str:
+    """Resolve a configured drive device to the node SCSI commands should use.
+
+    Always prefer the SCSI generic node. Issuing sg_inq against the REWINDING
+    /dev/stN node exits 50 ("close error: No medium found") whenever the drive
+    is empty, because closing a rewinding node attempts a rewind - the inquiry
+    itself succeeds and the command still reports failure. Drives are empty
+    most of the time on a real library, so returning /dev/stN here made this a
+    guaranteed false failure rather than an occasional one.
+    """
     requested = _normalize_drive_path(requested_device)
     requested_name = Path(requested).name
     for device in devices:
         candidates = {value for value in (device.block_device, device.sg_device) if value}
-        if requested in candidates:
-            return requested
-        if requested_name in {Path(candidate).name for candidate in candidates}:
+        names = {Path(candidate).name for candidate in candidates}
+        if requested in candidates or requested_name in names:
             return device.sg_device or device.block_device or requested_device
-    return requested_device
+    return resolve_sg_device(requested_device)
 
 
 def _user_in_tape_group() -> bool:
@@ -79,7 +93,7 @@ def test_drive_sg_devices_readable(real_hardware_guard, drive_devices, runner):
         assert os.access(sg_or_drive, os.R_OK), f"Drive device is not readable: {sg_or_drive}"
 
 
-@pytest.mark.parametrize("drive_index", [0])
+@pytest.mark.parametrize("drive_index", [0, 1, 2])
 def test_sg_inquiry_drives(real_hardware_guard, drive_devices, runner, drive_index):
     """Requires: OPENBLADE_DRIVE_DEVICES to point at attached tape drives."""
     if drive_index >= len(drive_devices):
@@ -91,6 +105,24 @@ def test_sg_inquiry_drives(real_hardware_guard, drive_devices, runner, drive_ind
     inquiry = parse_sg_inq(result.stdout)
     assert inquiry.vendor
     assert inquiry.product
+
+
+def test_drive_serials_are_unique(real_hardware_guard, drive_devices, runner):
+    """Requires: >=2 drives. Serial-based drive correlation needs distinct serials."""
+    if len(drive_devices) < 2:
+        pytest.skip("Drive correlation only matters with two or more drives")
+    _, devices = _lsscsi_devices(runner)
+    serials = {}
+    for drive_device in drive_devices:
+        result = runner.run(["sg_inq", _resolve_scsi_path(drive_device, devices)], timeout=30)
+        assert result.returncode == 0, result.stderr
+        serials[drive_device] = parse_sg_inq(result.stdout).serial
+    missing = [device for device, serial in serials.items() if not serial]
+    if missing:
+        pytest.skip(f"Drives report no unit serial number: {missing}")
+    assert len(set(serials.values())) == len(serials), (
+        f"Drives must report distinct serials for OPENBLADE_DRIVE_SERIAL_MAP: {serials}"
+    )
 
 
 def test_sg_inquiry_changer(real_hardware_guard, changer_device, runner):

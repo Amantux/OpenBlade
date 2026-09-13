@@ -1,4 +1,5 @@
 """Protocol gateway isolation and auth tests."""
+
 from __future__ import annotations
 
 import inspect
@@ -16,7 +17,9 @@ from openblade.nas.protocol_gateway import GatewayStatus, ProtocolGateway
 
 @pytest.fixture(autouse=True)
 def reset_app_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'protocol-gateway.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'protocol-gateway.db'}")
+    )
     reset_context(context)
     monkeypatch.setattr(protocol_gateway_module, "_gateway", ProtocolGateway())
 
@@ -226,7 +229,9 @@ def test_inbox_paths_api(client: TestClient, admin_auth_headers: dict[str, str])
     assert "/openblade/inbox-critical" in paths
 
 
-def test_sessions_api_includes_upload_audit(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_sessions_api_includes_upload_audit(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     gateway = protocol_gateway_module.get_gateway()
     gateway.add_credential("audit_user", "pass")
     session = gateway.open_session("audit_user", "10.0.0.1")

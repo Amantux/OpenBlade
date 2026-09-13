@@ -16,7 +16,11 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "sqlalchemy[asyncio]>=2.0",
   "alembic>=1.13",
-  "typer>=0.12",
+  "typer==0.27.0",  # pinned: CI resolved a newer typer whose bare-group
+  # invocation rendered a usage error instead of the callback, failing
+  # test_restore_without_options_or_subcommand while the venv passed —
+  # the same toolchain-skew class the ruff pin closed. Bump deliberately.
+  "click==8.4.2",  # typer's engine; pinned with it
   "rich>=13",
   "pydantic>=2",
   "aiosqlite>=0.20",
@@ -27,12 +31,27 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# `openblade fuse mount`. fusepy over pyfuse3 deliberately: it is pure Python
+# (ctypes over libfuse2, no compiler or Cython at install time) and needs no
+# async runtime, so the mount reuses the existing synchronous catalog and
+# restore code unchanged. Requires libfuse2 and /dev/fuse on the host; the CLI
+# degrades with a curated message when this extra is not installed.
+fuse = [
+  "fusepy>=3.0.1",
+]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.23",
   "pytest-cov>=5.0",
   "hypothesis>=6.112",
-  "ruff>=0.6",
+  # EXACT pin, not a floor. `ruff>=0.6` let CI resolve whatever was newest on
+  # PyPI that morning while developer venvs sat on an older build, so `make lint`
+  # and the backend-lint job enforced two different rule sets. Pinned to the
+  # version the project venv already carries (verified: 0.15.22 and 0.16.7
+  # produce byte-identical `ruff check` and `ruff format` results on this tree,
+  # so the pin costs zero churn). Bump deliberately, in its own commit, after
+  # re-running `ruff check . && ruff format --check .`.
+  "ruff==0.15.22",
   "mypy>=1.11",
   "asyncssh>=2.21",
   "pyfakefs>=5.6",
@@ -49,6 +68,14 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
+# EXPLICIT rule set — never rely on ruff's defaults, which widen between minor
+# releases (this is why the version above is pinned exactly as well). Anything
+# not listed here is OFF, including rules referenced by `# noqa` comments in the
+# tree: 23 `# noqa: BLE001` and 4 `# noqa: S3xx/S4xx` markers are currently inert
+# documentation, because BLE and S are deliberately not selected yet. Enabling
+# them is a scoped follow-up (BLE = 44 findings, S = 3,748, mostly S101 in
+# tests) — see docs/decisions/2026-09-11-pin-ruff-toolchain.md. Do not delete those
+# noqa markers to "clean up"; they record intent for that follow-up.
 select = ["E", "F", "I", "B", "UP", "A", "SIM"]
 # A002 (argument shadows a builtin) is ignored: FastAPI path/query params like
 # `id`, `type`, `filter` ARE the wire contract — renaming them would break the

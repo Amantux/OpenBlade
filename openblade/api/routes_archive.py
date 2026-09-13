@@ -56,7 +56,9 @@ def _bridge_to_aml(
             "status": status,
             "priority": "normal",
             "startTime": _timestamp(job.created_at),
-            "completedTime": _timestamp(job.updated_at) if status in _TERMINAL_JOB_STATUSES else None,
+            "completedTime": _timestamp(job.updated_at)
+            if status in _TERMINAL_JOB_STATUSES
+            else None,
             "progress": 100 if status == "completed" else 0,
             "result": result,
         },
@@ -109,9 +111,7 @@ def _iter_archive_source_files(source_path: Path) -> list[Path]:
 def _cleanup_failed_archive(context: AppContext, source_path: Path, volume_group: str) -> None:
     for file_path in _iter_archive_source_files(source_path):
         relative = (
-            file_path.name
-            if source_path.is_file()
-            else str(file_path.relative_to(source_path))
+            file_path.name if source_path.is_file() else str(file_path.relative_to(source_path))
         )
         catalog_path = str(PurePosixPath("/") / volume_group / relative)
         context.catalog.delete_file_record_if_unarchived(catalog_path)

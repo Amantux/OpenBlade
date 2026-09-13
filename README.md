@@ -2,6 +2,8 @@
 
 OpenBlade is a simulator-first DIY tape archive controller inspired by iBlade-style workflows for Quantum Scalar i3 and LTFS media handling. It provides a safe default mock backend, a FastAPI control plane, a Typer CLI, a SQLite-backed catalog, and regression tests for safety-critical operations.
 
+📖 **Operator documentation: [docs/wiki/](docs/wiki/README.md)** — guides for every user-facing function, plus a generated [CLI](docs/wiki/reference/cli.md) and [API](docs/wiki/reference/api.md) reference.
+
 ## Features
 - Simulator-first backend with deterministic library, drive, changer, and LTFS behavior
 - Explicit safety gates for real hardware enablement and tape formatting
@@ -62,6 +64,6 @@ gunicorn openblade.api.wsgi:application
 - Mock backend is the default
 - Real hardware requires `OPENBLADE_BACKEND=real` and `OPENBLADE_REAL_HARDWARE_ENABLED=true`
 - Use `openblade hardware connect-i3` to validate guarded Quantum i3 discovery before attempting live operations
-- Use `openblade hardware validate-ltfs --device /dev/st0 --barcode ABC123L9` to validate LTFS capabilities explicitly
+- Use `openblade hardware validate-ltfs --device /dev/nst0 --barcode ABC123L9` to validate LTFS capabilities explicitly (always the **no-rewind** `nst` node — see `docs/hardware-setup.md`)
 - Formatting requires barcode confirmation plus a one-time safety token
 - Drive unload is blocked if LTFS is mounted or dirty

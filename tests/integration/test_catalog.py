@@ -37,21 +37,32 @@ def _admin_auth_headers(client: TestClient) -> dict[str, str]:
 
 
 def _service_headers(client: TestClient) -> dict[str, str]:
-    return {**_admin_auth_headers(client), "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"}
+    return {
+        **_admin_auth_headers(client),
+        "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose",
+    }
 
 
 def _format_tape(client: TestClient, barcode: str) -> str:
-    response = client.post(f"/cartridges/{barcode}/format/dry-run", headers=_admin_auth_headers(client))
+    response = client.post(
+        f"/cartridges/{barcode}/format/dry-run", headers=_admin_auth_headers(client)
+    )
     assert response.status_code == 200
     token = response.json()["token"]
-    confirm = client.post("/cartridges/format/confirm", json={"barcode": barcode, "token": token}, headers=_service_headers(client))
+    confirm = client.post(
+        "/cartridges/format/confirm",
+        json={"barcode": barcode, "token": token},
+        headers=_service_headers(client),
+    )
     assert confirm.status_code == 200
     return token
 
 
 def _format_first_tape(client: TestClient) -> tuple[str, str]:
     barcode = _first_data_barcode()
-    response = client.post(f"/cartridges/{barcode}/format/dry-run", headers=_admin_auth_headers(client))
+    response = client.post(
+        f"/cartridges/{barcode}/format/dry-run", headers=_admin_auth_headers(client)
+    )
     assert response.status_code == 200
     return barcode, response.json()["token"]
 
@@ -178,7 +189,10 @@ def test_catalog_shards_endpoint_returns_shard_metadata(client: TestClient, tmp_
     assert len(barcodes) == 2
     assert client.post("/volume-groups/", json={"name": "photos"}).status_code == 201
     for barcode in barcodes:
-        assert client.post("/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
+        assert (
+            client.post("/volume-groups/photos/assign", json={"barcode": barcode}).status_code
+            == 200
+        )
         _format_tape(client, barcode)
 
     source = tmp_path / "source"

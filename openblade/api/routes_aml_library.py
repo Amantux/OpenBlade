@@ -302,7 +302,9 @@ def _mode_status() -> str:
 
 
 def _ie_slot_count() -> int:
-    return sum(len(station.get("slots", [])) for station in aml_state.get_aml_ie_stations().values())
+    return sum(
+        len(station.get("slots", [])) for station in aml_state.get_aml_ie_stations().values()
+    )
 
 
 def _library_counts(context: AppContext) -> tuple[int, int, int, int, int]:
@@ -321,7 +323,9 @@ def _library_counts(context: AppContext) -> tuple[int, int, int, int, int]:
 
 def _build_library_resource(context: AppContext) -> LibraryResource:
     inventory = context.library.inventory()
-    slots_total, slots_occupied, drives_online, drives_offline, cleaning_slots = _library_counts(context)
+    slots_total, slots_occupied, drives_online, drives_offline, cleaning_slots = _library_counts(
+        context
+    )
     return LibraryResource(
         name=aml_state.get_library_name(),
         type=_LIBRARY_TYPE,
@@ -416,7 +420,11 @@ def _slot_coordinate(slot_id: int) -> dict[str, int]:
         slots = int(tower.get("slots", 0))
         if remaining <= slots:
             return ScalarCoordinate(
-                frame=1, rack=1, section=bay, column=1, row=remaining,
+                frame=1,
+                rack=1,
+                section=bay,
+                column=1,
+                row=remaining,
                 element_type=_STORAGE_ELEMENT_TYPE,
             ).to_dict()
         remaining -= slots
@@ -471,7 +479,9 @@ def _create_library_task(
 
 
 def _list_library_tasks(context: AppContext, *, task_type: str | None = None) -> list[Task]:
-    tasks = aml_state.list_aml_library_operation_tasks(component_id=_serial_number(context), task_type=task_type)
+    tasks = aml_state.list_aml_library_operation_tasks(
+        component_id=_serial_number(context), task_type=task_type
+    )
     return [_serialize_task(task) for task in tasks]
 
 
@@ -479,12 +489,17 @@ def _get_library_task_or_404(context: AppContext, task_type: str, task_id: str) 
     task = aml_state.get_aml_library_operation_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    if str(task.get("componentId")) != _serial_number(context) or str(task.get("type")) != task_type:
+    if (
+        str(task.get("componentId")) != _serial_number(context)
+        or str(task.get("type")) != task_type
+    ):
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
 
-def _delete_library_task_or_404(context: AppContext, task_type: str, task_id: str) -> dict[str, Any]:
+def _delete_library_task_or_404(
+    context: AppContext, task_type: str, task_id: str
+) -> dict[str, Any]:
     task = _get_library_task_or_404(context, task_type, task_id)
     deleted = aml_state.delete_aml_library_operation_task(str(task.get("id")))
     if deleted is None:
@@ -503,7 +518,9 @@ def _segment_coordinate_key(coordinate: SegmentCoordinate) -> tuple[int, int, in
     )
 
 
-def _segment_from_patch_or_404(segments: list[dict[str, Any]], patch: SegmentPatch) -> tuple[int, dict[str, Any]]:
+def _segment_from_patch_or_404(
+    segments: list[dict[str, Any]], patch: SegmentPatch
+) -> tuple[int, dict[str, Any]]:
     if patch.id:
         for idx, segment in enumerate(segments):
             if str(segment.get("id")) == patch.id:
@@ -532,14 +549,26 @@ def _filtered_segments(
         segments = [item for item in segments if str(item.get("owner", "")) == partition]
     if status:
         normalized_status = status.strip().lower()
-        segments = [item for item in segments if str(item.get("status", "")).strip().lower() == normalized_status]
+        segments = [
+            item
+            for item in segments
+            if str(item.get("status", "")).strip().lower() == normalized_status
+        ]
     if type_filter:
         normalized_type = type_filter.strip().lower()
-        segments = [item for item in segments if str(item.get("type", "")).strip().lower() == normalized_type]
+        segments = [
+            item
+            for item in segments
+            if str(item.get("type", "")).strip().lower() == normalized_type
+        ]
     if frame is not None:
-        segments = [item for item in segments if int(item.get("coordinate", {}).get("frame", -1)) == frame]
+        segments = [
+            item for item in segments if int(item.get("coordinate", {}).get("frame", -1)) == frame
+        ]
     if rack is not None:
-        segments = [item for item in segments if int(item.get("coordinate", {}).get("rack", -1)) == rack]
+        segments = [
+            item for item in segments if int(item.get("coordinate", {}).get("rack", -1)) == rack
+        ]
     start_index = max(start, 0)
     if length < 0:
         return segments[start_index:]
@@ -670,7 +699,9 @@ async def get_library_modules(
             slots=int(tower.get("slots", 0)),
             drives=len(tower.get("drives", [])),
         )
-        for index, tower in enumerate(sorted(towers.values(), key=lambda item: str(item.get("id", ""))), start=1)
+        for index, tower in enumerate(
+            sorted(towers.values(), key=lambda item: str(item.get("id", ""))), start=1
+        )
     ]
     return ModuleListResponse(moduleList=ModuleListResource(module=modules))
 
@@ -699,7 +730,11 @@ async def put_library_mode(
     context: AppContext = Depends(get_context),
 ) -> ModeResponse:
     _ensure_state(context)
-    return ModeResponse(mode=ModeResource(value=aml_state.set_library_mode(_validate_library_mode(payload.mode.value))))
+    return ModeResponse(
+        mode=ModeResource(
+            value=aml_state.set_library_mode(_validate_library_mode(payload.mode.value))
+        )
+    )
 
 
 @router.get("/physicalLibrary/operations", response_model=TaskListResponse)
@@ -708,7 +743,11 @@ async def list_physical_library_operations(
     context: AppContext = Depends(get_context),
 ) -> TaskListResponse:
     _ensure_state(context)
-    tasks = [task for task in _list_library_tasks(context) if task.type in {"inventory", "shutdown", "reboot", "reset", "teach"}]
+    tasks = [
+        task
+        for task in _list_library_tasks(context)
+        if task.type in {"inventory", "shutdown", "reboot", "reset", "teach"}
+    ]
     return TaskListResponse(taskList=TaskListResource(task=tasks))
 
 
@@ -718,7 +757,9 @@ async def list_physical_library_inventory_tasks(
     context: AppContext = Depends(get_context),
 ) -> TaskListResponse:
     _ensure_state(context)
-    return TaskListResponse(taskList=TaskListResource(task=_list_library_tasks(context, task_type="inventory")))
+    return TaskListResponse(
+        taskList=TaskListResource(task=_list_library_tasks(context, task_type="inventory"))
+    )
 
 
 @router.post("/physicalLibrary/operations/inventory", response_model=WSResultCode)
@@ -740,7 +781,9 @@ async def start_physical_library_inventory(
             "elementsTotal": elements_total,
         }
     )
-    _create_library_task(context=context, task_type="inventory", description="Physical library inventory completed")
+    _create_library_task(
+        context=context, task_type="inventory", description="Physical library inventory completed"
+    )
     return _ws_result("Inventory completed")
 
 
@@ -752,7 +795,9 @@ async def get_physical_library_inventory_task(
 ) -> TaskResponse:
     _ensure_state(context)
     task_id = _validate_identifier(id, field_name="id")
-    return TaskResponse(task=_serialize_task(_get_library_task_or_404(context, "inventory", task_id)))
+    return TaskResponse(
+        task=_serialize_task(_get_library_task_or_404(context, "inventory", task_id))
+    )
 
 
 @router.delete("/physicalLibrary/operations/inventory/{id}", response_model=WSResultCode)
@@ -774,7 +819,9 @@ async def list_physical_library_shutdown_tasks(
     context: AppContext = Depends(get_context),
 ) -> TaskListResponse:
     _ensure_state(context)
-    return TaskListResponse(taskList=TaskListResource(task=_list_library_tasks(context, task_type="shutdown")))
+    return TaskListResponse(
+        taskList=TaskListResource(task=_list_library_tasks(context, task_type="shutdown"))
+    )
 
 
 @router.post("/physicalLibrary/operations/shutdown", response_model=WSResultCode)
@@ -784,7 +831,9 @@ async def start_physical_library_shutdown(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    _create_library_task(context=context, task_type="shutdown", description="Physical library shutdown requested")
+    _create_library_task(
+        context=context, task_type="shutdown", description="Physical library shutdown requested"
+    )
     return _ws_result("Shutdown requested")
 
 
@@ -796,7 +845,9 @@ async def get_physical_library_shutdown_task(
 ) -> TaskResponse:
     _ensure_state(context)
     task_id = _validate_identifier(id, field_name="id")
-    return TaskResponse(task=_serialize_task(_get_library_task_or_404(context, "shutdown", task_id)))
+    return TaskResponse(
+        task=_serialize_task(_get_library_task_or_404(context, "shutdown", task_id))
+    )
 
 
 @router.delete("/physicalLibrary/operations/shutdown/{id}", response_model=WSResultCode)
@@ -818,7 +869,9 @@ async def list_physical_library_reboot_tasks(
     context: AppContext = Depends(get_context),
 ) -> TaskListResponse:
     _ensure_state(context)
-    return TaskListResponse(taskList=TaskListResource(task=_list_library_tasks(context, task_type="reboot")))
+    return TaskListResponse(
+        taskList=TaskListResource(task=_list_library_tasks(context, task_type="reboot"))
+    )
 
 
 @router.post("/physicalLibrary/operations/reboot", response_model=WSResultCode)
@@ -828,7 +881,9 @@ async def start_physical_library_reboot(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    _create_library_task(context=context, task_type="reboot", description="Physical library reboot requested")
+    _create_library_task(
+        context=context, task_type="reboot", description="Physical library reboot requested"
+    )
     return _ws_result("Reboot requested")
 
 
@@ -862,7 +917,9 @@ async def list_physical_library_reset_tasks(
     context: AppContext = Depends(get_context),
 ) -> TaskListResponse:
     _ensure_state(context)
-    return TaskListResponse(taskList=TaskListResource(task=_list_library_tasks(context, task_type="reset")))
+    return TaskListResponse(
+        taskList=TaskListResource(task=_list_library_tasks(context, task_type="reset"))
+    )
 
 
 @router.post("/physicalLibrary/operations/reset", response_model=WSResultCode)
@@ -872,7 +929,9 @@ async def start_physical_library_reset(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    _create_library_task(context=context, task_type="reset", description="Physical library reset requested")
+    _create_library_task(
+        context=context, task_type="reset", description="Physical library reset requested"
+    )
     return _ws_result("Reset requested")
 
 
@@ -906,7 +965,9 @@ async def list_physical_library_teach_tasks(
     context: AppContext = Depends(get_context),
 ) -> TaskListResponse:
     _ensure_state(context)
-    return TaskListResponse(taskList=TaskListResource(task=_list_library_tasks(context, task_type="teach")))
+    return TaskListResponse(
+        taskList=TaskListResource(task=_list_library_tasks(context, task_type="teach"))
+    )
 
 
 @router.post("/physicalLibrary/operations/teach", response_model=WSResultCode)
@@ -916,7 +977,9 @@ async def start_physical_library_teach(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    _create_library_task(context=context, task_type="teach", description="Physical library teach requested")
+    _create_library_task(
+        context=context, task_type="teach", description="Physical library teach requested"
+    )
     return _ws_result("Teach requested")
 
 
@@ -944,7 +1007,9 @@ async def delete_physical_library_teach_task(
     return _ws_result(f"Deleted teach task {task_id}")
 
 
-@router.get("/physicalLibrary/subset/configuration", response_model=PhysicalLibraryConfigurationResponse)
+@router.get(
+    "/physicalLibrary/subset/configuration", response_model=PhysicalLibraryConfigurationResponse
+)
 async def get_physical_library_subset_configuration(
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
@@ -964,7 +1029,9 @@ async def get_physical_library_subset_configuration(
     )
 
 
-@router.get("/physicalLibrary/subset/remoteAccess", response_model=PhysicalLibraryRemoteAccessResponse)
+@router.get(
+    "/physicalLibrary/subset/remoteAccess", response_model=PhysicalLibraryRemoteAccessResponse
+)
 async def get_physical_library_subset_remote_access(
     _: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
@@ -1039,7 +1106,9 @@ async def get_physical_library_segments(
         frame=frame,
         rack=rack,
     )
-    return SegmentListResponse(segmentList=SegmentListResource(segment=[_serialize_segment(item) for item in segments]))
+    return SegmentListResponse(
+        segmentList=SegmentListResource(segment=[_serialize_segment(item) for item in segments])
+    )
 
 
 @router.get("/physicalLibrary/segments/amp", response_model=SegmentListResponse)
@@ -1048,8 +1117,14 @@ async def get_physical_library_amp_segments(
     context: AppContext = Depends(get_context),
 ) -> SegmentListResponse:
     _ensure_state(context)
-    segments = [item for item in aml_state.list_aml_physical_segments() if int(item.get("configuredType", 0)) == 1]
-    return SegmentListResponse(segmentList=SegmentListResource(segment=[_serialize_segment(item) for item in segments]))
+    segments = [
+        item
+        for item in aml_state.list_aml_physical_segments()
+        if int(item.get("configuredType", 0)) == 1
+    ]
+    return SegmentListResponse(
+        segmentList=SegmentListResource(segment=[_serialize_segment(item) for item in segments])
+    )
 
 
 @router.put("/physicalLibrary/segments/amp", response_model=WSResultCode)
@@ -1079,8 +1154,14 @@ async def get_physical_library_cleaning_segments(
     context: AppContext = Depends(get_context),
 ) -> SegmentListResponse:
     _ensure_state(context)
-    segments = [item for item in aml_state.list_aml_physical_segments() if int(item.get("configuredType", 0)) == 2]
-    return SegmentListResponse(segmentList=SegmentListResource(segment=[_serialize_segment(item) for item in segments]))
+    segments = [
+        item
+        for item in aml_state.list_aml_physical_segments()
+        if int(item.get("configuredType", 0)) == 2
+    ]
+    return SegmentListResponse(
+        segmentList=SegmentListResource(segment=[_serialize_segment(item) for item in segments])
+    )
 
 
 @router.post("/physicalLibrary/segments/cleaning", response_model=WSResultCode)
@@ -1146,7 +1227,10 @@ async def get_library_status(
 ) -> LibraryStatusResponse:
     _ensure_state(context)
     inventory = context.library.inventory()
-    cartridge_states = [context.library.get_cartridge_state(barcode) for barcode in context.library.get_all_barcodes()]
+    cartridge_states = [
+        context.library.get_cartridge_state(barcode)
+        for barcode in context.library.get_all_barcodes()
+    ]
     robotics = _status_level(
         failed=inventory.changer_state == ChangerState.ERROR,
         warning=inventory.changer_state == ChangerState.MOVING,
@@ -1157,10 +1241,14 @@ async def get_library_status(
         warning=0 < failed_drives < len(inventory.drives),
     )
     media = _status_level(
-        failed=all(state in {CartridgeState.MISSING, CartridgeState.EXPORTED} for state in cartridge_states)
+        failed=all(
+            state in {CartridgeState.MISSING, CartridgeState.EXPORTED} for state in cartridge_states
+        )
         if cartridge_states
         else False,
-        warning=any(state in {CartridgeState.MISSING, CartridgeState.CLEANING} for state in cartridge_states),
+        warning=any(
+            state in {CartridgeState.MISSING, CartridgeState.CLEANING} for state in cartridge_states
+        ),
     )
     connectivity = _status_level(warning=aml_state.get_library_mode() == "offline")
     power = _status_level()
@@ -1183,6 +1271,7 @@ async def get_library_status(
 # ---------------------------------------------------------------------------
 # Backwards-compatible aliases for tests/UI that expect /aml/library paths
 # ---------------------------------------------------------------------------
+
 
 @router.get("/library", response_model=LibraryResponse)
 async def get_library_alias(

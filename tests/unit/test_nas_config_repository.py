@@ -19,7 +19,9 @@ from openblade.nas.types import (
 
 
 def make_nas_service(tmp_path: Path) -> NasService:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite+aiosqlite:///{tmp_path / 'openblade.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite+aiosqlite:///{tmp_path / 'openblade.db'}")
+    )
     return NasService(context.catalog)
 
 
@@ -169,7 +171,6 @@ def test_share_rejects_nonexistent_pool(tmp_path: Path) -> None:
         )
 
 
-
 def test_delete_policy_blocked_when_referenced(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     policy = service.upsert_policy(
@@ -249,7 +250,6 @@ def test_cache_drive_validates_retention_days() -> None:
             min_free_bytes=0,
             retention_days=-1,
         )
-
 
 
 def test_share_path_must_start_with_slash() -> None:

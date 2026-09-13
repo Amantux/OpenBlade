@@ -9,7 +9,9 @@ from openblade.config import OpenBladeConfig
 
 
 def _make_client(tmp_path: Path, *, raise_server_exceptions: bool = True) -> TestClient:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'archive-aml-bridge.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'archive-aml-bridge.db'}")
+    )
     reset_context(context)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
@@ -43,19 +45,27 @@ def _prepare_volume_group(client: TestClient, volume_group: str = "photos") -> s
     assert dry_run.status_code == 200
     token = dry_run.json()["token"]
     assert client.post("/volume-groups/", json={"name": volume_group}).status_code == 201
-    assert client.post(f"/volume-groups/{volume_group}/assign", json={"barcode": barcode}).status_code == 200
+    assert (
+        client.post(f"/volume-groups/{volume_group}/assign", json={"barcode": barcode}).status_code
+        == 200
+    )
     assert (
         client.post(
             "/cartridges/format/confirm",
             json={"barcode": barcode, "token": token},
-            headers={**auth_headers, "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"},
+            headers={
+                **auth_headers,
+                "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose",
+            },
         ).status_code
         == 200
     )
     return barcode
 
 
-def test_archive_bridges_into_aml_jobs_events_and_catalog(client: TestClient, tmp_path: Path) -> None:
+def test_archive_bridges_into_aml_jobs_events_and_catalog(
+    client: TestClient, tmp_path: Path
+) -> None:
     _login_admin(client)
     _prepare_volume_group(client)
 
@@ -98,7 +108,9 @@ def test_archive_bridges_into_aml_jobs_events_and_catalog(client: TestClient, tm
     assert archived_file.stat().st_size > 0
 
 
-def test_sharded_archive_bridges_into_aml_jobs_and_events(client: TestClient, tmp_path: Path) -> None:
+def test_sharded_archive_bridges_into_aml_jobs_and_events(
+    client: TestClient, tmp_path: Path
+) -> None:
     _login_admin(client)
     barcode = _prepare_volume_group(client)
 
@@ -169,11 +181,17 @@ def test_archive_failure_bridges_into_aml_jobs_events_and_resets_drive_state(
     assert failure_event["severity"] == "error"
     assert failure_event["details"]["error"] == "archive bridge boom"
 
-    drive = client.get("/aml/drive/DRV-001").json().get("drive") or client.get("/aml/drive/DRV-001").json()
+    drive = (
+        client.get("/aml/drive/DRV-001").json().get("drive")
+        or client.get("/aml/drive/DRV-001").json()
+    )
     assert drive["state"] == "idle"
     assert drive["loadedMedia"] is None
 
-    media = client.get(f"/aml/media/{barcode}").json().get("media") or client.get(f"/aml/media/{barcode}").json()
+    media = (
+        client.get(f"/aml/media/{barcode}").json().get("media")
+        or client.get(f"/aml/media/{barcode}").json()
+    )
     assert media["state"] == "home"
     assert media["slotAddress"] == "1,1,1"
 
@@ -189,7 +207,9 @@ def test_restore_failure_bridges_into_aml_jobs_and_events(
     source.mkdir()
     archived_file = source / "restore.txt"
     archived_file.write_text("restore aml bridge")
-    archive_response = client.post("/archive/", json={"source_path": str(source), "volume_group": "photos"})
+    archive_response = client.post(
+        "/archive/", json={"source_path": str(source), "volume_group": "photos"}
+    )
     assert archive_response.status_code == 202
 
     def _boom(*args, **kwargs):
@@ -230,7 +250,9 @@ def test_restore_bridges_into_aml_jobs_and_events(client: TestClient, tmp_path: 
     archived_file = source / "restore.txt"
     archived_file.write_text("restore aml bridge")
 
-    archive_response = client.post("/archive/", json={"source_path": str(source), "volume_group": "photos"})
+    archive_response = client.post(
+        "/archive/", json={"source_path": str(source), "volume_group": "photos"}
+    )
     assert archive_response.status_code == 202
 
     restore_dir = tmp_path / "restore"

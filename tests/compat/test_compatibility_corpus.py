@@ -53,7 +53,9 @@ def _run(client: TestClient, case: dict):
     if case.get("auth") == "admin":
         _authenticate(client)
     req = case["request"]
-    return client.request(req["method"], req["path"], json=req.get("json"), headers=req.get("headers"))
+    return client.request(
+        req["method"], req["path"], json=req.get("json"), headers=req.get("headers")
+    )
 
 
 def _subset_matches(expected: dict, actual: dict) -> list[str]:
@@ -85,7 +87,9 @@ def test_inferred_case_behaviour_is_stable(case: dict, client: TestClient) -> No
         assert not problems, f"{case['id']}: {problems}"
 
 
-@pytest.mark.parametrize("case", CAPTURED or [None], ids=[c["id"] for c in CAPTURED] or ["<none-yet>"])
+@pytest.mark.parametrize(
+    "case", CAPTURED or [None], ids=[c["id"] for c in CAPTURED] or ["<none-yet>"]
+)
 def test_captured_case_matches_appliance(case, client: TestClient) -> None:
     # Enforced fidelity: the emulator MUST match a real capture exactly.
     if case is None:
@@ -108,7 +112,9 @@ def test_fidelity_coverage_is_reported(capsys) -> None:
     with capsys.disabled():
         print(f"\n[compatibility corpus] captured={len(CAPTURED)} inferred={len(INFERRED)}")
         if not CAPTURED:
-            print("[compatibility corpus] WARNING: i3 wire fidelity is UNVERIFIED (no appliance captures).")
+            print(
+                "[compatibility corpus] WARNING: i3 wire fidelity is UNVERIFIED (no appliance captures)."
+            )
     # This assertion documents the current state; flip the expectation when the
     # first real capture lands so a regression to zero captures is caught.
     assert len(CAPTURED) == 0, (

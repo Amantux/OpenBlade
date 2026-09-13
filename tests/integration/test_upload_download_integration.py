@@ -27,7 +27,9 @@ from openblade.nas.types import (
 def reset_app_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENBLADE_STAGING_DIR", str(tmp_path / "staging"))
     monkeypatch.setenv("OPENBLADE_RESTORE_DIR", str(tmp_path / "restore"))
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'upload-download-integration.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'upload-download-integration.db'}")
+    )
     reset_context(context)
 
 
@@ -47,7 +49,9 @@ def admin_auth_headers(client: TestClient) -> dict[str, str]:
 
 
 class TestUploadRoundTrip:
-    def test_small_file_round_trip(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_small_file_round_trip(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Upload a small file, download it, verify bytes are identical."""
         content = b"Hello tape world! " * 100
         expected_sha = hashlib.sha256(content).hexdigest()
@@ -66,7 +70,9 @@ class TestUploadRoundTrip:
         assert download.status_code == 200
         assert download.content == content
 
-    def test_large_file_round_trip(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_large_file_round_trip(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Upload a ~512KB file and verify checksum."""
         content = b"X" * (512 * 1024)
         expected_sha = hashlib.sha256(content).hexdigest()
@@ -80,7 +86,9 @@ class TestUploadRoundTrip:
         assert upload.json()["checksum_sha256"] == expected_sha
         assert upload.json()["size_bytes"] == len(content)
 
-    def test_checksum_endpoint_matches_upload(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_checksum_endpoint_matches_upload(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Checksum endpoint should return same hash as reported at upload time."""
         content = b"checksum endpoint test " * 50
         expected_sha = hashlib.sha256(content).hexdigest()
@@ -97,7 +105,9 @@ class TestUploadRoundTrip:
         assert chk.status_code == 200
         assert chk.json()["checksum_sha256"] == expected_sha
 
-    def test_file_appears_in_pool_listing(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_file_appears_in_pool_listing(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Uploaded file should appear in pool file listing."""
         content = b"pool listing test"
         upload = client.post(
@@ -154,7 +164,9 @@ class TestUploadRoundTrip:
         assert "design-spec-v3.pdf" in filenames
         assert any(item["status"] == "archived" for item in payload["files"])
 
-    def test_delete_removes_from_listing(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_delete_removes_from_listing(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Deleted file should not appear in listing."""
         content = b"delete me"
         upload = client.post(
@@ -176,7 +188,9 @@ class TestUploadRoundTrip:
         assert listing_after.status_code == 200
         assert file_id not in [f["file_id"] for f in listing_after.json()["files"]]
 
-    def test_download_after_delete_returns_404(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_download_after_delete_returns_404(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Downloading a deleted file should return 404."""
         content = b"ephemeral"
         upload = client.post(
@@ -192,7 +206,9 @@ class TestUploadRoundTrip:
         dl = client.get(f"/api/files/{file_id}/download", headers=admin_auth_headers)
         assert dl.status_code == 404
 
-    def test_checksum_mismatch_rejects_upload(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_checksum_mismatch_rejects_upload(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Upload with wrong expected_checksum should be rejected and file cleaned up."""
         content = b"real content"
         resp = client.post(
@@ -204,7 +220,9 @@ class TestUploadRoundTrip:
         assert resp.status_code == 400
         assert "mismatch" in resp.json()["detail"].lower()
 
-    def test_binary_content_preserved(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_binary_content_preserved(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         """Binary content with null bytes and high bytes should be preserved exactly."""
         content = bytes(range(256)) * 100
 
@@ -222,7 +240,9 @@ class TestUploadRoundTrip:
 
 
 class TestSecurityBoundaries:
-    def test_path_traversal_rejected(self, client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+    def test_path_traversal_rejected(
+        self, client: TestClient, admin_auth_headers: dict[str, str]
+    ) -> None:
         for evil in ["../../etc/passwd", "../staging", "/etc/shadow", "not-a-uuid"]:
             r = client.get(f"/api/files/{evil}/download", headers=admin_auth_headers)
             assert r.status_code in (400, 404), f"Expected rejection for {evil!r}"
@@ -232,9 +252,14 @@ class TestSecurityBoundaries:
             "/api/pools/1/upload",
             files={"file": ("x.txt", io.BytesIO(b"x"), "text/plain")},
         ).status_code in (401, 403)
-        assert client.get("/api/files/00000000-0000-4000-8000-000000000001/download").status_code in (401, 403)
+        assert client.get(
+            "/api/files/00000000-0000-4000-8000-000000000001/download"
+        ).status_code in (401, 403)
         assert client.get("/api/pools/1/files").status_code in (401, 403)
-        assert client.delete("/api/files/00000000-0000-4000-8000-000000000001").status_code in (401, 403)
+        assert client.delete("/api/files/00000000-0000-4000-8000-000000000001").status_code in (
+            401,
+            403,
+        )
 
 
 def test_download_offline_file_returns_409_with_hydrate_guidance(
@@ -255,7 +280,9 @@ def test_download_offline_file_returns_409_with_hydrate_guidance(
     )
     assert upload.status_code == 200
     file_id = upload.json()["file_id"]
-    assert client.get(f"/api/files/{file_id}/download", headers=admin_auth_headers).status_code == 200
+    assert (
+        client.get(f"/api/files/{file_id}/download", headers=admin_auth_headers).status_code == 200
+    )
 
     # Simulate the file going offline: drop every local copy, keep the catalog record.
     record = get_context().catalog.get_nas_file_record(file_id)
@@ -264,7 +291,9 @@ def test_download_offline_file_returns_409_with_hydrate_guidance(
         ru._safe_resolve(ru._restore_dir(), file_id),
     ]
     candidates += [
-        Path(str(record[key])) for key in ("cache_path", "source_path") if record and record.get(key)
+        Path(str(record[key]))
+        for key in ("cache_path", "source_path")
+        if record and record.get(key)
     ]
     for candidate in candidates:
         if candidate.exists():

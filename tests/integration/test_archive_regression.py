@@ -13,7 +13,9 @@ from openblade.config import OpenBladeConfig
 
 @pytest.fixture()
 def client(tmp_path: Path) -> TestClient:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'archive-regression.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'archive-regression.db'}")
+    )
     reset_context(context)
     return TestClient(app, raise_server_exceptions=False)
 
@@ -38,7 +40,9 @@ def _data_barcodes(limit: int) -> list[str]:
 def _prepare_volume_group(client: TestClient, name: str, barcode: str) -> None:
     auth_headers = _login_admin(client)
     assert client.post("/volume-groups/", json={"name": name}).status_code == 201
-    assert client.post(f"/volume-groups/{name}/assign", json={"barcode": barcode}).status_code == 200
+    assert (
+        client.post(f"/volume-groups/{name}/assign", json={"barcode": barcode}).status_code == 200
+    )
     dry_run = client.post(f"/cartridges/{barcode}/format/dry-run", headers=auth_headers)
     assert dry_run.status_code == 200
     token = dry_run.json()["token"]
@@ -46,7 +50,10 @@ def _prepare_volume_group(client: TestClient, name: str, barcode: str) -> None:
         client.post(
             "/cartridges/format/confirm",
             json={"barcode": barcode, "token": token},
-            headers={**auth_headers, "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"},
+            headers={
+                **auth_headers,
+                "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose",
+            },
         ).status_code
         == 200
     )
@@ -110,7 +117,9 @@ def test_sharded_archive_rejects_unsupported_profile(client: TestClient, tmp_pat
     assert response.status_code == 422
 
 
-def test_concurrent_archive_jobs_preserve_catalog_and_job_state(client: TestClient, tmp_path: Path) -> None:
+def test_concurrent_archive_jobs_preserve_catalog_and_job_state(
+    client: TestClient, tmp_path: Path
+) -> None:
     _login_admin(client)
     barcodes = _data_barcodes(limit=2)
     assert len(barcodes) == 2
@@ -158,7 +167,9 @@ def test_concurrent_archive_jobs_preserve_catalog_and_job_state(client: TestClie
     assert jobs[second_response.json()["job_id"]]["status"] == "completed"
 
 
-def test_archive_completion_is_visible_in_aml_jobs_and_events(client: TestClient, tmp_path: Path) -> None:
+def test_archive_completion_is_visible_in_aml_jobs_and_events(
+    client: TestClient, tmp_path: Path
+) -> None:
     _login_admin(client)
     barcode = _data_barcodes(limit=1)[0]
     _prepare_volume_group(client, "photos", barcode)

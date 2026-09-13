@@ -292,7 +292,6 @@ def _ws_result(summary: str = "Operation completed") -> WSResultCode:
     return WSResultCode(summary=summary)
 
 
-
 def _job_response(job_type: str, message: str) -> dict[str, str]:
     job_id = str(uuid4())
     aml_state.set_aml_job(job_id, {"type": job_type, "status": "queued", "result": message})
@@ -448,9 +447,21 @@ def _build_tower_drives(tower: dict[str, Any], context: AppContext) -> list[Driv
     drives: list[Drive] = []
     for index, drive_id in enumerate(drive_ids):
         inventory_drive = inventory.drives[index] if index < len(inventory.drives) else None
-        state = inventory_drive.drive_state.value if inventory_drive is not None else DriveState.EMPTY.value
-        status = "failed" if inventory_drive is not None and inventory_drive.drive_state == DriveState.FAILED else "online"
-        barcode = str(inventory_drive.barcode) if inventory_drive is not None and inventory_drive.barcode is not None else None
+        state = (
+            inventory_drive.drive_state.value
+            if inventory_drive is not None
+            else DriveState.EMPTY.value
+        )
+        status = (
+            "failed"
+            if inventory_drive is not None and inventory_drive.drive_state == DriveState.FAILED
+            else "online"
+        )
+        barcode = (
+            str(inventory_drive.barcode)
+            if inventory_drive is not None and inventory_drive.barcode is not None
+            else None
+        )
         drives.append(Drive(id=drive_id, status=status, state=state, barcode=barcode))
     return drives
 
@@ -465,7 +476,10 @@ def _tower_with_counts(tower: dict[str, Any], context: AppContext) -> dict[str, 
 
 def _ie_station_with_counts(station: dict[str, Any]) -> dict[str, Any]:
     updated = dict(station)
-    updated["slots"] = [slot.model_dump() if isinstance(slot, Slot) else dict(slot) for slot in updated.get("slots", [])]
+    updated["slots"] = [
+        slot.model_dump() if isinstance(slot, Slot) else dict(slot)
+        for slot in updated.get("slots", [])
+    ]
     updated["slotCount"] = len(updated["slots"])
     return updated
 
@@ -474,10 +488,14 @@ def _magazine_with_counts(magazine: dict[str, Any]) -> dict[str, Any]:
     updated = dict(magazine)
     slot_addresses = _magazine_slot_addresses(updated)
     barcode_by_address = _barcode_by_slot_address()
-    mapped_tapes = [barcode_by_address[address] for address in slot_addresses if address in barcode_by_address]
+    mapped_tapes = [
+        barcode_by_address[address] for address in slot_addresses if address in barcode_by_address
+    ]
     updated["slotAddresses"] = slot_addresses
     updated["tapes"] = mapped_tapes
-    updated["slotCount"] = len(slot_addresses) if slot_addresses else int(updated.get("slotCount", 0))
+    updated["slotCount"] = (
+        len(slot_addresses) if slot_addresses else int(updated.get("slotCount", 0))
+    )
     updated["occupiedSlots"] = len(mapped_tapes)
     return updated
 
@@ -558,7 +576,9 @@ async def get_robot(
     context: AppContext = Depends(get_context),
 ) -> RobotResponse:
     _ensure_state(context)
-    return RobotResponse(robot=_serialize_robot(_get_robot_or_404(_validate_identifier(id, field_name="Robot id"))))
+    return RobotResponse(
+        robot=_serialize_robot(_get_robot_or_404(_validate_identifier(id, field_name="Robot id")))
+    )
 
 
 @router.put("/robot/{id}", response_model=RobotResponse)
@@ -611,7 +631,9 @@ async def get_robot_status(
     context: AppContext = Depends(get_context),
 ) -> RobotStatusResponse:
     _ensure_state(context)
-    return _robot_status_response(_get_robot_or_404(_validate_identifier(id, field_name="Robot id")))
+    return _robot_status_response(
+        _get_robot_or_404(_validate_identifier(id, field_name="Robot id"))
+    )
 
 
 @router.get("/devices/robot/{name}", response_model=RobotResponse)
@@ -621,7 +643,11 @@ async def get_robot_device(
     context: AppContext = Depends(get_context),
 ) -> RobotResponse:
     _ensure_state(context)
-    return RobotResponse(robot=_serialize_robot(_get_robot_or_404(_validate_identifier(name, field_name="Robot name"))))
+    return RobotResponse(
+        robot=_serialize_robot(
+            _get_robot_or_404(_validate_identifier(name, field_name="Robot name"))
+        )
+    )
 
 
 @router.post("/devices/robot/{name}", response_model=RobotResponse)
@@ -646,7 +672,9 @@ async def get_robot_device_state(
     context: AppContext = Depends(get_context),
 ) -> RobotStatusResponse:
     _ensure_state(context)
-    return _robot_status_response(_get_robot_or_404(_validate_identifier(name, field_name="Robot name")))
+    return _robot_status_response(
+        _get_robot_or_404(_validate_identifier(name, field_name="Robot name"))
+    )
 
 
 @router.put("/devices/robot/{name}/state", response_model=RobotStatusResponse)
@@ -660,8 +688,14 @@ async def put_robot_device_state(
     _require_admin(current_user)
     robot_id = _validate_identifier(name, field_name="Robot name")
     robot = _get_robot_or_404(robot_id)
-    updates = {key: value for key, value in payload.items() if key in {"state", "status", "location"} and value is not None}
-    updated = aml_state.update_aml_robot(robot_id, {**robot, **updates}) or _get_robot_or_404(robot_id)
+    updates = {
+        key: value
+        for key, value in payload.items()
+        if key in {"state", "status", "location"} and value is not None
+    }
+    updated = aml_state.update_aml_robot(robot_id, {**robot, **updates}) or _get_robot_or_404(
+        robot_id
+    )
     return _robot_status_response(updated)
 
 
@@ -675,7 +709,9 @@ async def park_robot_device(
     _require_admin(current_user)
     robot_id = _validate_identifier(name, field_name="Robot name")
     robot = _get_robot_or_404(robot_id)
-    aml_state.update_aml_robot(robot_id, {"state": "parked", "location": robot.get("homeSlot", "park")})
+    aml_state.update_aml_robot(
+        robot_id, {"state": "parked", "location": robot.get("homeSlot", "park")}
+    )
     return _job_response("robot-park", f"Robot {robot_id} park queued")
 
 
@@ -685,7 +721,10 @@ async def list_towers(
     context: AppContext = Depends(get_context),
 ) -> TowerListResponse:
     _ensure_state(context)
-    towers = [_serialize_tower(_tower_with_counts(item, context)) for item in aml_state.get_aml_towers().values()]
+    towers = [
+        _serialize_tower(_tower_with_counts(item, context))
+        for item in aml_state.get_aml_towers().values()
+    ]
     return TowerListResponse(towerList=TowerListResource(tower=towers))
 
 
@@ -697,7 +736,9 @@ async def get_tower(
 ) -> TowerResponse:
     _ensure_state(context)
     tower_id = _validate_identifier(id, field_name="Tower id")
-    return TowerResponse(tower=_serialize_tower(_tower_with_counts(_get_tower_or_404(tower_id), context)))
+    return TowerResponse(
+        tower=_serialize_tower(_tower_with_counts(_get_tower_or_404(tower_id), context))
+    )
 
 
 @router.put("/tower/{id}", response_model=TowerResponse)
@@ -712,7 +753,9 @@ async def put_tower(
     tower_id = _validate_identifier(id, field_name="Tower id")
     _get_tower_or_404(tower_id)
     tower = aml_state.update_aml_tower(tower_id, _validate_patch(payload.tower))
-    return TowerResponse(tower=_serialize_tower(_tower_with_counts(tower or _get_tower_or_404(tower_id), context)))
+    return TowerResponse(
+        tower=_serialize_tower(_tower_with_counts(tower or _get_tower_or_404(tower_id), context))
+    )
 
 
 @router.get("/tower/{id}/status", response_model=TowerStatusResponse)
@@ -722,7 +765,9 @@ async def get_tower_status(
     context: AppContext = Depends(get_context),
 ) -> TowerStatusResponse:
     _ensure_state(context)
-    return _tower_status_response(_get_tower_or_404(_validate_identifier(id, field_name="Tower id")), context)
+    return _tower_status_response(
+        _get_tower_or_404(_validate_identifier(id, field_name="Tower id")), context
+    )
 
 
 @router.get("/tower/{id}/slots", response_model=SlotListResponse)
@@ -753,7 +798,10 @@ async def list_ie_stations(
     context: AppContext = Depends(get_context),
 ) -> IEStationListResponse:
     _ensure_state(context)
-    stations = [_serialize_ie_station(_ie_station_with_counts(item)) for item in aml_state.get_aml_ie_stations().values()]
+    stations = [
+        _serialize_ie_station(_ie_station_with_counts(item))
+        for item in aml_state.get_aml_ie_stations().values()
+    ]
     return IEStationListResponse(ieStationList=IEStationListResource(ieStation=stations))
 
 
@@ -765,7 +813,9 @@ async def get_ie_station(
 ) -> IEStationResponse:
     _ensure_state(context)
     station_id = _validate_identifier(id, field_name="IE station id")
-    return IEStationResponse(ieStation=_serialize_ie_station(_ie_station_with_counts(_get_ie_station_or_404(station_id))))
+    return IEStationResponse(
+        ieStation=_serialize_ie_station(_ie_station_with_counts(_get_ie_station_or_404(station_id)))
+    )
 
 
 @router.put("/ieStation/{id}", response_model=IEStationResponse)
@@ -780,7 +830,11 @@ async def put_ie_station(
     station_id = _validate_identifier(id, field_name="IE station id")
     _get_ie_station_or_404(station_id)
     station = aml_state.update_aml_ie_station(station_id, _validate_patch(payload.ieStation))
-    return IEStationResponse(ieStation=_serialize_ie_station(_ie_station_with_counts(station or _get_ie_station_or_404(station_id))))
+    return IEStationResponse(
+        ieStation=_serialize_ie_station(
+            _ie_station_with_counts(station or _get_ie_station_or_404(station_id))
+        )
+    )
 
 
 @router.post("/ieStation/{id}/open", response_model=WSResultCode)
@@ -818,7 +872,9 @@ async def get_ie_station_status(
     context: AppContext = Depends(get_context),
 ) -> IEStationStatusResponse:
     _ensure_state(context)
-    return _ie_station_status_response(_get_ie_station_or_404(_validate_identifier(id, field_name="IE station id")))
+    return _ie_station_status_response(
+        _get_ie_station_or_404(_validate_identifier(id, field_name="IE station id"))
+    )
 
 
 @router.get("/ieStation/{id}/slots", response_model=SlotListResponse)
@@ -828,8 +884,12 @@ async def list_ie_station_slots(
     context: AppContext = Depends(get_context),
 ) -> SlotListResponse:
     _ensure_state(context)
-    station = _ie_station_with_counts(_get_ie_station_or_404(_validate_identifier(id, field_name="IE station id")))
-    return SlotListResponse(slotList=SlotListResource(slot=[_serialize_slot(slot) for slot in station.get("slots", [])]))
+    station = _ie_station_with_counts(
+        _get_ie_station_or_404(_validate_identifier(id, field_name="IE station id"))
+    )
+    return SlotListResponse(
+        slotList=SlotListResource(slot=[_serialize_slot(slot) for slot in station.get("slots", [])])
+    )
 
 
 @router.get("/magazines", response_model=MagazineListResponse)
@@ -838,7 +898,10 @@ async def list_magazines(
     context: AppContext = Depends(get_context),
 ) -> MagazineListResponse:
     _ensure_state(context)
-    magazines = [_serialize_magazine(_magazine_with_counts(item)) for item in aml_state.get_aml_magazines().values()]
+    magazines = [
+        _serialize_magazine(_magazine_with_counts(item))
+        for item in aml_state.get_aml_magazines().values()
+    ]
     return MagazineListResponse(magazineList=MagazineListResource(magazine=magazines))
 
 
@@ -850,7 +913,9 @@ async def get_magazine(
 ) -> MagazineResponse:
     _ensure_state(context)
     magazine_id = _validate_identifier(id, field_name="Magazine id")
-    return MagazineResponse(magazine=_serialize_magazine(_magazine_with_counts(_get_magazine_or_404(magazine_id))))
+    return MagazineResponse(
+        magazine=_serialize_magazine(_magazine_with_counts(_get_magazine_or_404(magazine_id)))
+    )
 
 
 @router.put("/magazine/{id}", response_model=MagazineResponse)
@@ -865,7 +930,11 @@ async def put_magazine(
     magazine_id = _validate_identifier(id, field_name="Magazine id")
     _get_magazine_or_404(magazine_id)
     magazine = aml_state.update_aml_magazine(magazine_id, _validate_patch(payload.magazine))
-    return MagazineResponse(magazine=_serialize_magazine(_magazine_with_counts(magazine or _get_magazine_or_404(magazine_id))))
+    return MagazineResponse(
+        magazine=_serialize_magazine(
+            _magazine_with_counts(magazine or _get_magazine_or_404(magazine_id))
+        )
+    )
 
 
 @router.post("/magazine/{id}/eject", response_model=WSResultCode)
@@ -921,8 +990,12 @@ async def get_physical_summary(
         physicalSummary=PhysicalSummary(
             robots=PhysicalCategorySummary(count=len(robots), status=_collection_health(robots)),
             towers=PhysicalCategorySummary(count=len(towers), status=_collection_health(towers)),
-            ieStations=PhysicalCategorySummary(count=len(ie_stations), status=_collection_health(ie_stations)),
-            magazines=PhysicalCategorySummary(count=len(magazines), status=_collection_health(magazines)),
+            ieStations=PhysicalCategorySummary(
+                count=len(ie_stations), status=_collection_health(ie_stations)
+            ),
+            magazines=PhysicalCategorySummary(
+                count=len(magazines), status=_collection_health(magazines)
+            ),
         )
     )
 
@@ -974,7 +1047,12 @@ async def get_physical_elements(
 ) -> ElementListResponse:
     _ensure_state(context)
     elements = [
-        Element(type="robot", id=item["id"], location=item.get("location", "unknown"), status=item["status"])
+        Element(
+            type="robot",
+            id=item["id"],
+            location=item.get("location", "unknown"),
+            status=item["status"],
+        )
         for item in aml_state.get_aml_robots().values()
     ]
     elements.extend(
@@ -986,7 +1064,12 @@ async def get_physical_elements(
         for item in aml_state.get_aml_ie_stations().values()
     )
     elements.extend(
-        Element(type="magazine", id=item["id"], location=item.get("location", "unknown"), status=item["status"])
+        Element(
+            type="magazine",
+            id=item["id"],
+            location=item.get("location", "unknown"),
+            status=item["status"],
+        )
         for item in aml_state.get_aml_magazines().values()
     )
     return ElementListResponse(elementList=ElementListResource(element=elements))

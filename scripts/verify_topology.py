@@ -28,6 +28,7 @@ def main(argv: list[str]) -> int:
     context = get_context()
 
     with TestClient(app) as client:
+
         def probe(method: str, path: str) -> int:
             return client.request(method, path).status_code
 

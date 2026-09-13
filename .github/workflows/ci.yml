@@ -23,6 +23,7 @@ jobs:
       simulator: ${{ steps.filter.outputs.simulator }}
       frontend: ${{ steps.filter.outputs.frontend }}
       cicd: ${{ steps.filter.outputs.cicd }}
+      wiki: ${{ steps.filter.outputs.wiki }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
@@ -66,17 +67,25 @@ jobs:
               - 'frontend/**'
             cicd:
               - '.github/workflows/**'
+            # docs/wiki/reference/{cli,api}.md are GENERATED from the Typer CLI
+            # tree and the FastAPI route table. Anything that can move either
+            # surface — or the generator itself — has to re-run the staleness
+            # check, or the wiki silently starts describing a past release.
+            wiki:
+              - 'openblade/cli/**'
+              - 'openblade/api/**'
+              - 'tools/gen_wiki_reference.py'
+              - 'docs/wiki/reference/**'
 
   backend-lint:
     name: backend-lint
     needs: changes
     if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.api == 'true' || needs.changes.outputs.simulator == 'true' }}
     runs-on: ubuntu-latest
-    # Advisory: the repo carries a large pre-existing ruff/format backlog (~180
-    # lint findings + ~160 files needing `ruff format`). This job still runs and
-    # reports, but does not fail CI (so trusted-PR auto-merge can proceed). Not a
-    # required check. Tracked for incremental cleanup; new code should still lint.
-    continue-on-error: true
+    # BLOCKING since the toolchain was pinned (ruff==0.15.22 via the dev extra)
+    # and the baseline cleared to zero findings / fully formatted. If this job
+    # goes red, the fix is `ruff check --fix` / `ruff format` with the PINNED
+    # version, never a version bump in the same change.
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -204,6 +213,24 @@ jobs:
       - run: npm run build
       - run: npm run test -- --run
 
+  wiki-reference:
+    name: wiki-reference
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.wiki == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      # The generator imports the app and introspects it, so it needs the real
+      # dependency set — not just a markdown diff. `--check` writes nothing and
+      # exits 1 naming each stale page.
+      - name: Generated wiki reference matches the code
+        run: python3 tools/gen_wiki_reference.py --check
+
   cicd-workflow-validate:
     name: cicd-workflow-validate
     needs: changes
@@ -233,7 +260,7 @@ jobs:
   # branch-protection check (plus operability-gate). It understands a valid
   # `skipped` result from path-filtered jobs and fails on any real failure or
   # cancellation, so branch protection no longer has to reason about skips.
-  # backend-lint / backend-typecheck are advisory (reported, never blocking).
+  # backend-typecheck is advisory (reported, never blocking); backend-lint blocks.
   ci-gate:
     name: ci-gate
     needs:
@@ -244,6 +271,7 @@ jobs:
       - i3-smoke
       - frontend-build-test
       - cicd-workflow-validate
+      - wiki-reference
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -261,6 +289,10 @@ jobs:
           check i3-smoke             "${{ needs.i3-smoke.result }}"
           check frontend-build-test  "${{ needs.frontend-build-test.result }}"
           check cicd-workflow-validate "${{ needs.cicd-workflow-validate.result }}"
+          # Blocking on purpose: the fix is one command
+          # (`python3 tools/gen_wiki_reference.py`) and a stale generated page
+          # is indistinguishable from a correct one to a reader.
+          check wiki-reference       "${{ needs.wiki-reference.result }}"
           echo "advisory (non-blocking): backend-lint=${{ needs.backend-lint.result }} backend-typecheck=${{ needs.backend-typecheck.result }}"
           if [ "$fail" -ne 0 ]; then
             echo "::error::ci-gate: a required job failed or was cancelled"

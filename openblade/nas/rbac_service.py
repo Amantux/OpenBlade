@@ -106,7 +106,11 @@ class RbacService:
             resource="rbac:user",
             action="create",
             outcome="success",
-            details={"role_id": summary.role_id, "email": summary.email, "full_name": summary.full_name},
+            details={
+                "role_id": summary.role_id,
+                "email": summary.email,
+                "full_name": summary.full_name,
+            },
         )
         return summary
 
@@ -145,7 +149,9 @@ class RbacService:
                 "expires_at": token_record.expires_at,
             },
         )
-        return CreateTokenResult(token_id=token_record.id, raw_token=raw_token, token_record=token_record)
+        return CreateTokenResult(
+            token_id=token_record.id, raw_token=raw_token, token_record=token_record
+        )
 
     def revoke_token(self, token_id: str, revoked_by_user_id: str) -> bool:
         """Mark token revoked, emit audit event."""
@@ -176,7 +182,10 @@ class RbacService:
 
     def list_users(self, active_only: bool = False) -> list[UserSummary]:
         """Return UserSummary list — no hashed_password."""
-        return [UserSummary.model_validate(user) for user in self.repo.list_users(active_only=active_only)]
+        return [
+            UserSummary.model_validate(user)
+            for user in self.repo.list_users(active_only=active_only)
+        ]
 
     def get_user_summary(self, user_id: str) -> UserSummary | None:
         """Return UserSummary or None."""

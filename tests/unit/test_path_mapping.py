@@ -27,7 +27,9 @@ def make_service(tmp_path: Path) -> PathMappingService:
 
 @pytest.fixture(autouse=True)
 def reset_app_context(tmp_path: Path) -> None:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'path-mapping-api.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'path-mapping-api.db'}")
+    )
     reset_context(context)
 
 
@@ -40,14 +42,12 @@ def test_path_mapping_record_defaults() -> None:
     assert record.all_barcodes == []
 
 
-
 def test_path_lookup_result_can_represent_missing_path() -> None:
     result = PathLookupResult(logical_path="/missing.txt", found=False)
 
     assert result.found is False
     assert result.primary_barcode == ""
     assert result.file_state is NasFileState.OFFLINE_ON_TAPE
-
 
 
 def test_record_file_upserts_and_returns_record(tmp_path: Path) -> None:
@@ -66,7 +66,6 @@ def test_record_file_upserts_and_returns_record(tmp_path: Path) -> None:
     assert saved.logical_path == record.logical_path
     assert saved.primary_barcode == "TAPE001"
     assert service.lookup(record.logical_path, record.pool_id).found is True
-
 
 
 def test_record_file_updates_existing_mapping(tmp_path: Path) -> None:
@@ -97,7 +96,6 @@ def test_record_file_updates_existing_mapping(tmp_path: Path) -> None:
     assert service.get_stats(pool_id="pool-a")["total_files"] == 1
 
 
-
 def test_lookup_returns_found_true_after_record_file(tmp_path: Path) -> None:
     service = make_service(tmp_path)
     service.record_file(
@@ -117,7 +115,6 @@ def test_lookup_returns_found_true_after_record_file(tmp_path: Path) -> None:
     assert result.checksum == "abc"
 
 
-
 def test_lookup_returns_found_false_for_unknown_path(tmp_path: Path) -> None:
     service = make_service(tmp_path)
 
@@ -125,7 +122,6 @@ def test_lookup_returns_found_false_for_unknown_path(tmp_path: Path) -> None:
 
     assert result.found is False
     assert result.logical_path == "/archive/missing.mov"
-
 
 
 def test_lookup_warns_for_missing_tape_state(tmp_path: Path) -> None:
@@ -146,7 +142,6 @@ def test_lookup_warns_for_missing_tape_state(tmp_path: Path) -> None:
     assert "missing_tape" in result.warnings
 
 
-
 def test_lookup_warns_for_multiple_barcodes_without_strategy(tmp_path: Path) -> None:
     service = make_service(tmp_path)
     service.record_file(
@@ -164,7 +159,6 @@ def test_lookup_warns_for_multiple_barcodes_without_strategy(tmp_path: Path) -> 
     assert "multiple_barcodes_without_restore_strategy" in result.warnings
 
 
-
 def test_update_file_state_changes_state_and_returns_true(tmp_path: Path) -> None:
     service = make_service(tmp_path)
     service.record_file(PathMappingRecord(logical_path="/archive/file.bin", pool_id="pool-a"))
@@ -175,12 +169,10 @@ def test_update_file_state_changes_state_and_returns_true(tmp_path: Path) -> Non
     assert service.lookup("/archive/file.bin", "pool-a").file_state is NasFileState.HYDRATING
 
 
-
 def test_update_file_state_returns_false_for_unknown_path(tmp_path: Path) -> None:
     service = make_service(tmp_path)
 
     assert service.update_file_state("/missing.bin", "pool-a", NasFileState.HYDRATING) is False
-
 
 
 def test_remove_deletes_mapping_and_lookup_is_missing(tmp_path: Path) -> None:
@@ -189,7 +181,6 @@ def test_remove_deletes_mapping_and_lookup_is_missing(tmp_path: Path) -> None:
 
     assert service.remove("/archive/remove.me", "pool-a") is True
     assert service.lookup("/archive/remove.me", "pool-a").found is False
-
 
 
 def test_search_prefix_filter_returns_subset(tmp_path: Path) -> None:
@@ -207,7 +198,6 @@ def test_search_prefix_filter_returns_subset(tmp_path: Path) -> None:
     results = service.search(PathMappingSearchRequest(prefix="/archive/a"))
 
     assert [record.logical_path for record in results] == ["/archive/a/file1", "/archive/a/file2"]
-
 
 
 def test_search_barcode_filter_matches_json_round_trip(tmp_path: Path) -> None:
@@ -257,7 +247,6 @@ def test_search_contains_filter_returns_matches(tmp_path: Path) -> None:
     ]
 
 
-
 def test_bulk_record_files_returns_correct_count(tmp_path: Path) -> None:
     service = make_service(tmp_path)
 
@@ -273,7 +262,6 @@ def test_bulk_record_files_returns_correct_count(tmp_path: Path) -> None:
 
     assert count == 3
     assert service.get_stats(pool_id="pool-a")["total_files"] == 3
-
 
 
 def test_bulk_record_files_can_skip_existing_entries(tmp_path: Path) -> None:
@@ -292,7 +280,6 @@ def test_bulk_record_files_can_skip_existing_entries(tmp_path: Path) -> None:
 
     assert count == 1
     assert service.get_stats(pool_id="pool-a")["total_files"] == 2
-
 
 
 def test_list_tapes_for_pool_returns_distinct_barcodes(tmp_path: Path) -> None:
@@ -317,7 +304,6 @@ def test_list_tapes_for_pool_returns_distinct_barcodes(tmp_path: Path) -> None:
     )
 
     assert service.list_tapes_for_pool("pool-a") == ["TAPE001", "TAPE002", "TAPE003"]
-
 
 
 def test_get_stats_returns_expected_totals(tmp_path: Path) -> None:
@@ -353,7 +339,6 @@ def test_get_stats_returns_expected_totals(tmp_path: Path) -> None:
     assert stats["total_bytes"] == 30
     assert stats["by_state"] == {"offline_on_tape": 1, "hydrating": 1}
     assert stats["tape_count"] == 3
-
 
 
 def _login(c: TestClient) -> None:

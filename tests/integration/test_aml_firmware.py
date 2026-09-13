@@ -33,6 +33,7 @@ def _fw_upload(name: str, content: bytes = b"FAKEFIRMWARE") -> dict:
 # Blade firmware
 # ---------------------------------------------------------------------------
 
+
 def test_list_blade_firmware_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/devices/blades/firmware")
     assert resp.status_code == 401
@@ -57,6 +58,7 @@ def test_upload_blade_firmware(authed: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Drive firmware images
 # ---------------------------------------------------------------------------
+
 
 def test_list_drive_firmware_images_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/drives/firmware/images")
@@ -120,12 +122,10 @@ def test_version_preserved_on_upload(authed: TestClient) -> None:
     list_resp = authed.get("/aml/drives/firmware/images")
     assert list_resp.status_code == 200
     data = list_resp.json()
-    images = (
-        data.get("images")
-        or data.get("firmwareFileList", {}).get("firmwareFile")
-        or []
-    )
-    matching = [img for img in images if isinstance(img, dict) and "lto9_d9_1_0" in str(img.get("name", ""))]
+    images = data.get("images") or data.get("firmwareFileList", {}).get("firmwareFile") or []
+    matching = [
+        img for img in images if isinstance(img, dict) and "lto9_d9_1_0" in str(img.get("name", ""))
+    ]
     if matching:
         version = matching[0].get("version", "")
         assert version != "D9", f"Version collapsed to {version!r} instead of D9.1.0"
@@ -139,6 +139,7 @@ def test_activate_drive_firmware_requires_admin(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Per-drive firmware
 # ---------------------------------------------------------------------------
+
 
 def test_get_drive_firmware_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/drive/DRV-001/firmware")
@@ -163,6 +164,7 @@ def test_update_drive_firmware_requires_admin(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # System firmware
 # ---------------------------------------------------------------------------
+
 
 def test_get_system_firmware_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/system/firmware")

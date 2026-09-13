@@ -66,6 +66,7 @@ def _clear_rate_limit(remote_ip: str) -> None:
     """Clear the attempt counter for an IP after a successful login."""
     _login_attempts.pop(remote_ip, None)
 
+
 F = TypeVar("F", bound=Callable[..., Any])
 
 
@@ -221,7 +222,9 @@ def _ws_result(summary: str) -> WSResultCode:
 def _ws_error(status_code: int, summary: str, *, description: str = "Error") -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
-        content=WSResultCode(code=status_code, description=description, summary=summary).model_dump(),
+        content=WSResultCode(
+            code=status_code, description=description, summary=summary
+        ).model_dump(),
     )
 
 
@@ -251,7 +254,9 @@ def _validate_password(password: str, user_name: str | None = None) -> str:
     if any(char not in _PASSWORD_ALLOWED for char in password):
         raise HTTPException(status_code=400, detail="Invalid password characters")
     policy = aml_state.get_password_policy()
-    if len(password) < int(policy.get("minLength", 8)) or len(password) > int(policy.get("maxLength", 64)):
+    if len(password) < int(policy.get("minLength", 8)) or len(password) > int(
+        policy.get("maxLength", 64)
+    ):
         raise HTTPException(status_code=400, detail="Password does not satisfy policy")
     if sum(char.islower() for char in password) < int(policy.get("minLowercase", 0)):
         raise HTTPException(status_code=400, detail="Password does not satisfy policy")
@@ -325,9 +330,7 @@ def _verify_totp(secret: str, code: str) -> bool:
     return pyotp.TOTP(secret).verify(code, valid_window=1)
 
 
-async def require_auth(
-    request: Request, context: AppContext = Depends(get_context)
-) -> AmlUser:
+async def require_auth(request: Request, context: AppContext = Depends(get_context)) -> AmlUser:
     _ensure_state(context)
     # Prefer session cookie, fall back to Bearer token for API clients/tests
     session_id = request.cookies.get("sessionID")
@@ -380,7 +383,9 @@ async def get_current_user(
 ) -> UserResponse:
     _ensure_state(context)
     user = await require_auth(request, context)
-    return UserResponse(name=user.name, role=user.role, requirePasswordChange=user.require_password_change)
+    return UserResponse(
+        name=user.name, role=user.role, requirePasswordChange=user.require_password_change
+    )
 
 
 @router.post(
@@ -658,7 +663,9 @@ async def get_mfa_configs(
     context: AppContext = Depends(get_context),
 ) -> MFAList:
     _ensure_state(context)
-    return MFAList(mfa=[MFAConfig.model_validate(item) for item in aml_state.list_user_mfa(current_user.name)])
+    return MFAList(
+        mfa=[MFAConfig.model_validate(item) for item in aml_state.list_user_mfa(current_user.name)]
+    )
 
 
 @router.put("/users/mfa", response_model=MFAConfig)
@@ -687,7 +694,9 @@ async def get_login_report(
     _ensure_state(context)
     _require_admin(current_user)
     return LoginActivityList(
-        loginActivity=[LoginActivity.model_validate(item) for item in aml_state.get_login_activity()]
+        loginActivity=[
+            LoginActivity.model_validate(item) for item in aml_state.get_login_activity()
+        ]
     )
 
 

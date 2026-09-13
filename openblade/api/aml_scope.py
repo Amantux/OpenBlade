@@ -8,7 +8,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-_MATRIX_PATH = Path(__file__).resolve().parents[1] / "emulator_contract" / "quantum_i3_rev_h_matrix.json"
+_MATRIX_PATH = (
+    Path(__file__).resolve().parents[1] / "emulator_contract" / "quantum_i3_rev_h_matrix.json"
+)
 
 
 def normalize_aml_path(path: str) -> str:
@@ -75,7 +77,9 @@ def matrix_endpoint_patterns() -> dict[str, tuple[tuple[re.Pattern[str], str], .
     for entry in _load_matrix_endpoint_entries():
         method = str(entry["method"])
         path_template = str(entry["path"])
-        by_method.setdefault(method, []).append((_compile_template_path(path_template), path_template))
+        by_method.setdefault(method, []).append(
+            (_compile_template_path(path_template), path_template)
+        )
     return {method: tuple(items) for method, items in by_method.items()}
 
 

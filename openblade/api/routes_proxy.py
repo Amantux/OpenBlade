@@ -39,7 +39,8 @@ def _count_online_drives(drives: list[dict[str, Any]]) -> int:
     return sum(
         1
         for drive in drives
-        if str(drive.get("state") or drive.get("status") or "").upper() not in {"FAILED", "FAULTED", "OFFLINE"}
+        if str(drive.get("state") or drive.get("status") or "").upper()
+        not in {"FAILED", "FAULTED", "OFFLINE"}
     )
 
 
@@ -48,7 +49,11 @@ def _count_active_jobs(jobs: list[dict[str, Any]]) -> int:
 
 
 def _count_used_slots(slots: list[dict[str, Any]]) -> int:
-    return sum(1 for slot in slots if slot.get("barcode") or str(slot.get("state") or "").lower() != "empty")
+    return sum(
+        1
+        for slot in slots
+        if slot.get("barcode") or str(slot.get("state") or "").lower() != "empty"
+    )
 
 
 def _build_remote_base_url(host: str, port: int) -> str:
@@ -75,7 +80,9 @@ def _pick_hostname(host: str, system_payload: dict[str, Any], info_payload: dict
     )
 
 
-def _pick_version(system_payload: dict[str, Any], version_payload: dict[str, Any], info_payload: dict[str, Any]) -> str:
+def _pick_version(
+    system_payload: dict[str, Any], version_payload: dict[str, Any], info_payload: dict[str, Any]
+) -> str:
     return str(
         _extract_nested(version_payload, "versionInfo", "software")
         or _extract_nested(version_payload, "versionInfo", "firmware")
@@ -107,7 +114,11 @@ async def probe_remote_library(
             )
             if login_response.status_code != 200:
                 payload = _response_json(login_response)
-                detail = payload.get("detail") or payload.get("summary") or f"Login failed: {login_response.status_code}"
+                detail = (
+                    payload.get("detail")
+                    or payload.get("summary")
+                    or f"Login failed: {login_response.status_code}"
+                )
                 return {"status": "error", "error": str(detail)}
 
             cookies = login_response.cookies
@@ -121,7 +132,14 @@ async def probe_remote_library(
             ]
             results = await asyncio.gather(*requests, return_exceptions=True)
 
-            system_result, info_result, version_result, drives_result, jobs_result, partitions_result = results
+            (
+                system_result,
+                info_result,
+                version_result,
+                drives_result,
+                jobs_result,
+                partitions_result,
+            ) = results
 
             if isinstance(system_result, Exception) and isinstance(info_result, Exception):
                 raise system_result
@@ -129,27 +147,54 @@ async def probe_remote_library(
             system_ok = isinstance(system_result, httpx.Response) and system_result.is_success
             info_ok = isinstance(info_result, httpx.Response) and info_result.is_success
             if not system_ok and not info_ok:
-                return {"status": "error", "error": "Unable to read remote library system information."}
+                return {
+                    "status": "error",
+                    "error": "Unable to read remote library system information.",
+                }
 
-            system_payload = _response_json(system_result) if isinstance(system_result, httpx.Response) else {}
-            info_payload = _response_json(info_result) if isinstance(info_result, httpx.Response) else {}
-            version_payload = _response_json(version_result) if isinstance(version_result, httpx.Response) else {}
-            drives_payload = _response_json(drives_result) if isinstance(drives_result, httpx.Response) else {}
-            jobs_payload = _response_json(jobs_result) if isinstance(jobs_result, httpx.Response) else {}
-            partitions_payload = _response_json(partitions_result) if isinstance(partitions_result, httpx.Response) else {}
+            system_payload = (
+                _response_json(system_result) if isinstance(system_result, httpx.Response) else {}
+            )
+            info_payload = (
+                _response_json(info_result) if isinstance(info_result, httpx.Response) else {}
+            )
+            version_payload = (
+                _response_json(version_result) if isinstance(version_result, httpx.Response) else {}
+            )
+            drives_payload = (
+                _response_json(drives_result) if isinstance(drives_result, httpx.Response) else {}
+            )
+            jobs_payload = (
+                _response_json(jobs_result) if isinstance(jobs_result, httpx.Response) else {}
+            )
+            partitions_payload = (
+                _response_json(partitions_result)
+                if isinstance(partitions_result, httpx.Response)
+                else {}
+            )
 
             partitions = _extract_list(partitions_payload, "partitionList", "partition")
             slot_requests = [
-                client.get(f"{base_url}/aml/partition/{quote(str(partition.get('name', '')), safe='')}/slots", cookies=cookies)
+                client.get(
+                    f"{base_url}/aml/partition/{quote(str(partition.get('name', '')), safe='')}/slots",
+                    cookies=cookies,
+                )
                 for partition in partitions
                 if partition.get("name")
             ] + [
-                client.get(f"{base_url}/aml/partition/{quote(str(partition.get('name', '')), safe='')}/ieSlots", cookies=cookies)
+                client.get(
+                    f"{base_url}/aml/partition/{quote(str(partition.get('name', '')), safe='')}/ieSlots",
+                    cookies=cookies,
+                )
                 for partition in partitions
                 if partition.get("name")
             ]
 
-            slot_responses = await asyncio.gather(*slot_requests, return_exceptions=True) if slot_requests else []
+            slot_responses = (
+                await asyncio.gather(*slot_requests, return_exceptions=True)
+                if slot_requests
+                else []
+            )
             slot_groups = [
                 _extract_list(_response_json(response), "slotList", "slot")
                 for response in slot_responses

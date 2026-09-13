@@ -12,7 +12,9 @@ from openblade.config import OpenBladeConfig
 
 @pytest.fixture(autouse=True)
 def reset_app_context(tmp_path) -> None:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'library-instances.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'library-instances.db'}")
+    )
     reset_context(context)
 
 

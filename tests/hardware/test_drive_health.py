@@ -123,3 +123,57 @@ def test_drive_not_reporting_fault(real_hardware_guard, drive_devices, runner):
     sg_device = _drive_sg_device(drive_devices[0], _lsscsi_devices(runner))
     flags = _parse_tapealert(_sg_logs(runner, sg_device, "0x2e"))
     assert _flag_value(flags, "hardware a") == 0
+
+
+# ---------------------------------------------------------------------------
+# openblade.hardware.tapealert against the rig
+#
+# mhvtl's emulated LTO drives DO answer LOG SENSE page 0x2E -- `sg_logs -p 0x2e`
+# decodes all 64 flags -- but every flag is always 0 and mhvtl has no way to set
+# one. So the rig can prove the read path and the "no alerts" path, and nothing
+# else: every set-flag assertion lives in tests/unit/test_tapealert.py against
+# captured sg3_utils output. Do not "fix" that by asserting a set flag here; it
+# would never fire.
+# ---------------------------------------------------------------------------
+
+
+def test_read_tape_alerts_degrades_gracefully(real_hardware_guard, drive_devices, runner):
+    """Requires: a tape drive. Passes whether or not TapeAlert is implemented."""
+    from openblade.config import load_config
+    from openblade.hardware.safety import require_real_hardware
+    from openblade.hardware.tapealert import read_tape_alerts
+
+    guard = require_real_hardware(load_config())
+    report = read_tape_alerts(drive_devices[0], runner, guard)
+    if not report.supported:
+        print(f"TapeAlert not supported on {report.device}: {report.reason}")
+        assert report.active == ()
+        return
+    print(f"TapeAlert on {report.device}: {len(report.flags)} flags, {len(report.active)} set")
+    assert len(report.flags) == 64
+    for flag in report.active:
+        print(f"  set: {flag.number} {flag.name} ({flag.severity})")
+
+
+def test_read_tape_alerts_on_the_changer_is_unsupported(
+    real_hardware_guard, changer_device, runner
+):
+    """Requires: a media changer. It answers 0x2e with a non-TapeAlert payload."""
+    from openblade.config import load_config
+    from openblade.hardware.safety import require_real_hardware
+    from openblade.hardware.tapealert import read_tape_alerts
+
+    guard = require_real_hardware(load_config())
+    report = read_tape_alerts(changer_device, runner, guard)
+    assert report.active == ()
+
+
+def test_drive_health_command_exits_zero(real_hardware_guard, drive_devices):
+    """Requires: a tape drive. The CLI must not fail on a drive with no alerts."""
+    from typer.testing import CliRunner
+
+    from openblade.cli.main import app
+
+    result = CliRunner().invoke(app, ["hardware", "drive-health", "--device", drive_devices[0]])
+    assert result.exit_code == 0, result.output
+    print(result.output)

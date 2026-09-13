@@ -90,7 +90,9 @@ def build_generated_spec_cases(matrix: dict[str, object] | None = None) -> list[
     return generated_cases
 
 
-def group_generated_cases_by_endpoint(cases: list[GeneratedSpecCase]) -> dict[str, list[GeneratedSpecCase]]:
+def group_generated_cases_by_endpoint(
+    cases: list[GeneratedSpecCase],
+) -> dict[str, list[GeneratedSpecCase]]:
     grouped: dict[str, list[GeneratedSpecCase]] = defaultdict(list)
     for case in cases:
         grouped[case.endpoint_id].append(case)

@@ -517,12 +517,16 @@ def _parse_int_field(data: dict[str, Any], *, field_name: str, default: int) -> 
 
 
 def _model_bad_request(model_name: str, error: ValidationError) -> HTTPException:
-    details = "; ".join(err.get("msg", "Invalid value") for err in error.errors()) or "Invalid value"
+    details = (
+        "; ".join(err.get("msg", "Invalid value") for err in error.errors()) or "Invalid value"
+    )
     details = details.replace("Input should be a valid integer", "must be an integer")
     return HTTPException(status_code=400, detail=f"{model_name}: {details}")
 
 
-def _parse_model_payload(model: type[Any], payload: dict[str, Any] | None, *, model_name: str) -> Any:
+def _parse_model_payload(
+    model: type[Any], payload: dict[str, Any] | None, *, model_name: str
+) -> Any:
     try:
         return model.model_validate(payload or {})
     except ValidationError as error:
@@ -538,7 +542,9 @@ def _normalize_media_state(value: object) -> str:
     return normalized
 
 
-def _validate_media_state_transition(barcode: str, current_state: object, target_state: object) -> None:
+def _validate_media_state_transition(
+    barcode: str, current_state: object, target_state: object
+) -> None:
     normalized_current = _normalize_media_state(current_state)
     normalized_target = _normalize_media_state(target_state)
     allowed = _MEDIA_STATE_TRANSITIONS.get(normalized_current, frozenset())
@@ -557,7 +563,9 @@ def _validate_media_update_item(
 ) -> dict[str, Any]:
     normalized_updates = {key: value for key, value in updates.items() if key != "barcode"}
     if "state" in normalized_updates and normalized_updates["state"] is not None:
-        _validate_media_state_transition(barcode, existing.get("state", "home"), normalized_updates["state"])
+        _validate_media_state_transition(
+            barcode, existing.get("state", "home"), normalized_updates["state"]
+        )
         normalized_updates["state"] = _normalize_media_state(normalized_updates["state"])
     return normalized_updates
 
@@ -612,7 +620,9 @@ def _normalized_message_close_payload(payload: dict[str, Any]) -> dict[str, Any]
     if "ids" in payload:
         normalized["ids"] = payload.get("ids")
     elif "messages" in payload and isinstance(payload["messages"], list):
-        normalized["ids"] = [item.get("id") for item in payload["messages"] if isinstance(item, dict)]
+        normalized["ids"] = [
+            item.get("id") for item in payload["messages"] if isinstance(item, dict)
+        ]
     return normalized
 
 
@@ -655,7 +665,9 @@ def _validate_ipv4(value: object, *, field_name: str) -> str:
     try:
         IPv4Address(normalized)
     except AddressValueError as error:
-        raise HTTPException(status_code=400, detail=f"{field_name} must be a valid IPv4 address") from error
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} must be a valid IPv4 address"
+        ) from error
     return normalized
 
 
@@ -686,7 +698,9 @@ def _validate_network_path_fields(port: str, version: str) -> tuple[str, int]:
     return normalized_port, normalized_version
 
 
-def _apply_network_update(payload: dict[str, Any] | None, *, port: str | None = None, version: int | None = None) -> IBladeNetworkConfig:
+def _apply_network_update(
+    payload: dict[str, Any] | None, *, port: str | None = None, version: int | None = None
+) -> IBladeNetworkConfig:
     updates = _validated_network_updates(payload)
     if port is not None and version is not None:
         updates["configurationPort"] = port
@@ -713,6 +727,7 @@ def _formatted_volume_group_tapes(group: dict[str, Any]) -> list[str]:
     if not formatted:
         raise HTTPException(status_code=409, detail="Volume group has no media to export")
     return formatted
+
 
 def _queue_job(
     job_type: str, message: str, metadata: dict[str, Any] | None = None
@@ -1234,7 +1249,9 @@ async def put_messages(
         _message_or_404(normalized)
         seen.add(normalized)
         normalized_ids.append(normalized)
-    return [_close_message(message_id, closed_by=request.closed_by) for message_id in normalized_ids]
+    return [
+        _close_message(message_id, closed_by=request.closed_by) for message_id in normalized_ids
+    ]
 
 
 @router.get("/messages/{message_id}", response_model=IBladeMessage)
@@ -1953,7 +1970,9 @@ async def merge_operation(
     context: AppContext = Depends(get_context),
 ) -> IBladeJobResponse:
     _ensure_state(context)
-    request = _parse_model_payload(IBladeMergeOperationRequest, payload or {}, model_name="merge payload")
+    request = _parse_model_payload(
+        IBladeMergeOperationRequest, payload or {}, model_name="merge payload"
+    )
     source_index = int(request.source)
     destination_index = int(request.destination)
     if source_index == destination_index:
@@ -1964,7 +1983,9 @@ async def merge_operation(
     if not source_tapes:
         raise HTTPException(status_code=409, detail=f"Volume group {source_index} has no media")
     merged = list(dict.fromkeys([*destination.get("tapes", []), *source_tapes]))
-    groups = [item.model_dump() for item in _serialize_volume_groups() if item.index != source_index]
+    groups = [
+        item.model_dump() for item in _serialize_volume_groups() if item.index != source_index
+    ]
     for item in groups:
         if int(item["index"]) == destination_index:
             item["tapes"] = merged
@@ -2054,10 +2075,15 @@ async def repair_volume_group_operation(
     context: AppContext = Depends(get_context),
 ) -> IBladeJobResponse:
     _ensure_state(context)
-    request = _parse_model_payload(IBladeRepairOperationRequest, payload or {}, model_name="repair payload")
+    request = _parse_model_payload(
+        IBladeRepairOperationRequest, payload or {}, model_name="repair payload"
+    )
     index = int(request.index)
     group = _volume_group_or_404(index)
-    if str(group.get("state", "")).upper() == "READY" and str(group.get("reason", "")).upper() == "NONE":
+    if (
+        str(group.get("state", "")).upper() == "READY"
+        and str(group.get("reason", "")).upper() == "NONE"
+    ):
         raise HTTPException(status_code=409, detail=f"Volume group {index} is already healthy")
     aml_state.update_iblade_volume_group(index, {"state": "READY", "reason": "NONE"})
     return _queue_job(
@@ -2128,7 +2154,10 @@ async def safe_repair_operation(
             detail=f"Volume group {index} is not eligible for safe-repair",
         )
     group = _volume_group_or_404(index)
-    if str(group.get("state", "")).upper() == "READY" and str(group.get("reason", "")).upper() == "NONE":
+    if (
+        str(group.get("state", "")).upper() == "READY"
+        and str(group.get("reason", "")).upper() == "NONE"
+    ):
         raise HTTPException(status_code=409, detail=f"Volume group {index} is already healthy")
     aml_state.update_iblade_volume_group(index, {"state": "READY", "reason": "NONE"})
     return _queue_job(

@@ -9,6 +9,7 @@ Three profiles:
 Usage:
     from tests.i3.timing import get_profile, wait_for_op, assert_within_tolerance
 """
+
 from __future__ import annotations
 
 import os
@@ -67,15 +68,15 @@ TIMING_PROFILES: dict[ProfileName, dict[OpType, float]] = {
 
 # Tolerance multipliers for hardware mode (real i3 timing can vary)
 HARDWARE_TOLERANCE: dict[OpType, float] = {
-    "tape_load": 0.4,    # ±40% — mechanical variation
+    "tape_load": 0.4,  # ±40% — mechanical variation
     "tape_unload": 0.4,
     "move": 0.5,
-    "rewind": 0.6,       # tape length dependent
+    "rewind": 0.6,  # tape length dependent
     "format": 0.3,
     "mount": 0.3,
     "unmount": 0.3,
     "inventory": 0.5,
-    "auth": 2.0,         # network latency varies widely
+    "auth": 2.0,  # network latency varies widely
 }
 
 
@@ -123,6 +124,5 @@ def assert_within_tolerance(
     lo = expected * (1.0 - tolerance)
     hi = expected * (1.0 + tolerance)
     assert lo <= elapsed <= hi, (
-        f"Timing out of range for {op_type}: "
-        f"expected {lo:.1f}–{hi:.1f}s, got {elapsed:.2f}s"
+        f"Timing out of range for {op_type}: expected {lo:.1f}–{hi:.1f}s, got {elapsed:.2f}s"
     )

@@ -101,7 +101,9 @@ class ReportGenerator:
             f"| Duration (s) | {report.duration_s:.3f} |",
             "",
         ]
-        failed_results = [result for result in report.results if result.outcome in {"failed", "error"}]
+        failed_results = [
+            result for result in report.results if result.outcome in {"failed", "error"}
+        ]
         if failed_results:
             lines.extend(["## Failed Tests", ""])
             for result in failed_results:

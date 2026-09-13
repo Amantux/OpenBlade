@@ -59,7 +59,9 @@ def _postcheck_in_process() -> StageResult:
         )
     ok = is_healthy_topology(findings)
     blocking = [f.code for f in findings if f.severity == "blocking"]
-    return StageResult(Stage.POSTCHECK, ok, "topology OK" if ok else f"blocking: {blocking}", findings=blocking)
+    return StageResult(
+        Stage.POSTCHECK, ok, "topology OK" if ok else f"blocking: {blocking}", findings=blocking
+    )
 
 
 def _postcheck_live(base_url: str) -> StageResult:
@@ -80,7 +82,12 @@ def _postcheck_live(base_url: str) -> StageResult:
     findings = verify_topology(probe=probe, context=_AllWired(), emulator_urls=[])
     ok = is_healthy_topology(findings)
     blocking = [f.code for f in findings if f.severity == "blocking"]
-    return StageResult(Stage.POSTCHECK, ok, "live topology OK" if ok else f"blocking: {blocking}", findings=blocking)
+    return StageResult(
+        Stage.POSTCHECK,
+        ok,
+        "live topology OK" if ok else f"blocking: {blocking}",
+        findings=blocking,
+    )
 
 
 class _AllWired:
@@ -107,7 +114,9 @@ def main(argv: list[str]) -> int:
         )
     postcheck = (lambda: _postcheck_live(args.base_url)) if args.base_url else _postcheck_in_process
 
-    report = run_deploy_pipeline(precheck=_precheck, deploy=lambda: _deploy(cmd), postcheck=postcheck)
+    report = run_deploy_pipeline(
+        precheck=_precheck, deploy=lambda: _deploy(cmd), postcheck=postcheck
+    )
 
     if args.json:
         print(json.dumps(report.to_dict(), indent=2))

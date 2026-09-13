@@ -68,7 +68,9 @@ class MockSftpSession:
 
     def listdir_attr(self, path: str) -> list[SFTPAttributes]:
         """Return SFTP-style attributes for all entries in a virtual directory."""
-        return [self._to_attributes(entry) for entry in self.filesystem.list_directory(path).entries]
+        return [
+            self._to_attributes(entry) for entry in self.filesystem.list_directory(path).entries
+        ]
 
     def stat(self, path: str) -> SFTPAttributes:
         """Return SFTP-style metadata for a virtual file or directory."""
@@ -81,7 +83,9 @@ class MockSftpSession:
         if entry.is_directory:
             raise IsADirectoryError(path)
         if entry.status is VirtualFileStatus.OFFLINE_ON_TAPE:
-            job = self.filesystem.request_hydration(HydrationRequest(paths=[entry.path], pool=entry.pool))
+            job = self.filesystem.request_hydration(
+                HydrationRequest(paths=[entry.path], pool=entry.pool)
+            )
             logger.info(
                 "mock_sftp.offline_open",
                 path=entry.path,

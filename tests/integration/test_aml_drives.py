@@ -32,6 +32,7 @@ def _controller_headers() -> dict[str, str]:
 # List / Get drives
 # ---------------------------------------------------------------------------
 
+
 def test_list_drives_requires_auth(client: TestClient) -> None:
     resp = client.get("/aml/drives")
     assert resp.status_code == 401
@@ -62,6 +63,7 @@ def test_get_drive_not_found(authed: TestClient) -> None:
 # Drive status
 # ---------------------------------------------------------------------------
 
+
 def test_drives_status_returns_list(authed: TestClient) -> None:
     resp = authed.get("/aml/drives/status")
     assert resp.status_code == 200
@@ -75,6 +77,7 @@ def test_drive_status_returns_single(authed: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Drive media endpoint — regression for loadedMedia mount hotfix
 # ---------------------------------------------------------------------------
+
 
 def test_drive_media_returns_empty_when_nothing_loaded(authed: TestClient) -> None:
     resp = authed.get("/aml/drive/DRV-001/media")
@@ -98,6 +101,7 @@ def test_drive_media_after_mount_does_not_crash(authed: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Unload — cartridge state consistency fix
 # ---------------------------------------------------------------------------
+
 
 def test_unload_clears_drive_and_updates_media(authed: TestClient) -> None:
     """After unload, drive must be empty and cartridge must not remain in loaded state."""
@@ -130,6 +134,7 @@ def test_unload_clears_drive_and_updates_media(authed: TestClient) -> None:
 # Drive statistics
 # ---------------------------------------------------------------------------
 
+
 def test_drive_statistics(authed: TestClient) -> None:
     resp = authed.get("/aml/drive/DRV-001/statistics")
     assert resp.status_code == 200
@@ -138,6 +143,7 @@ def test_drive_statistics(authed: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Drive config
 # ---------------------------------------------------------------------------
+
 
 def test_get_drive_config(authed: TestClient) -> None:
     resp = authed.get("/aml/drive/DRV-001/config")

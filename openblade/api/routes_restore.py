@@ -52,7 +52,9 @@ def _bridge_to_aml(
             "status": status,
             "priority": "normal",
             "startTime": _timestamp(job.created_at),
-            "completedTime": _timestamp(job.updated_at) if status in _TERMINAL_JOB_STATUSES else None,
+            "completedTime": _timestamp(job.updated_at)
+            if status in _TERMINAL_JOB_STATUSES
+            else None,
             "progress": 100 if status == "completed" else 0,
             "result": result,
         },
@@ -96,7 +98,10 @@ async def enqueue_restore(
 ) -> EnqueuedJobResponse:
     catalog_path = request.catalog_path or request.source_path
     if catalog_path is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="catalog_path or source_path is required")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="catalog_path or source_path is required",
+        )
     job = context.catalog.create_job(
         "restore",
         {"catalog_path": catalog_path, "dest_path": request.dest_path},
@@ -104,7 +109,9 @@ async def enqueue_restore(
     record = context.catalog.get_file_record(catalog_path)
     use_sharded_restore = False
     if record is not None:
-        use_sharded_restore = bool(context.catalog.list_shard_records(record.id)) or (record.shard_count or 1) > 1
+        use_sharded_restore = (
+            bool(context.catalog.list_shard_records(record.id)) or (record.shard_count or 1) > 1
+        )
     try:
         if use_sharded_restore:
             scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))

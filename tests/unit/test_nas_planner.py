@@ -47,7 +47,9 @@ def test_critical_sequential_spillover() -> None:
         ArchivePlanRequest(
             policy_type=PolicyType.CRITICAL_SEQUENTIAL,
             files=["dataset/a.bin", "dataset/b.bin", "dataset/c.bin"],
-            file_sizes={path: 5 * TB for path in ["dataset/a.bin", "dataset/b.bin", "dataset/c.bin"]},
+            file_sizes={
+                path: 5 * TB for path in ["dataset/a.bin", "dataset/b.bin", "dataset/c.bin"]
+            },
             available_tapes=["TAPE001", "TAPE002"],
             tape_capacities={"TAPE001": 12 * TB, "TAPE002": 12 * TB},
         )
@@ -124,7 +126,10 @@ def test_noncritical_directory_batch() -> None:
         )
     )
 
-    assignment_dirs = [{Path(file_path).parent.as_posix() for file_path in assignment.files} for assignment in plan.tape_assignments]
+    assignment_dirs = [
+        {Path(file_path).parent.as_posix() for file_path in assignment.files}
+        for assignment in plan.tape_assignments
+    ]
 
     assert len(plan.tape_assignments) == 2
     assert assignment_dirs == [{"photos/a"}, {"photos/b"}]
@@ -224,7 +229,10 @@ def test_source_stream_critical_adds_safety_warning() -> None:
         )
     )
 
-    assert any("Source-stream mode requires source files to remain stable and online" in warning.message for warning in plan.safety_warnings)
+    assert any(
+        "Source-stream mode requires source files to remain stable and online" in warning.message
+        for warning in plan.safety_warnings
+    )
 
 
 def test_source_stream_critical_always_warns() -> None:
@@ -240,7 +248,10 @@ def test_source_stream_critical_always_warns() -> None:
         )
     )
 
-    assert any("Source-stream mode requires source files to remain stable and online" in warning.message for warning in plan.safety_warnings)
+    assert any(
+        "Source-stream mode requires source files to remain stable and online" in warning.message
+        for warning in plan.safety_warnings
+    )
 
 
 def test_relative_paths_in_assignments() -> None:
@@ -331,4 +342,7 @@ def test_noncritical_sharded_flags_oversized_shards() -> None:
     assert plan.is_safe_to_enqueue is True
     assert plan.shard_size_bytes == GB
     assert len(plan.tape_assignments) == 2
-    assert any("exceed configured shard_size_bytes" in warning.message for warning in plan.capacity_warnings)
+    assert any(
+        "exceed configured shard_size_bytes" in warning.message
+        for warning in plan.capacity_warnings
+    )

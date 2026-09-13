@@ -124,7 +124,9 @@ class FaultInjector:
     def active_faults(self) -> list[FaultSpec]:
         """Return the currently active, non-exhausted fault specs."""
         with self._lock:
-            return [self._copy_spec(tracked.spec) for tracked in self._faults if not tracked.exhausted()]
+            return [
+                self._copy_spec(tracked.spec) for tracked in self._faults if not tracked.exhausted()
+            ]
 
     def __enter__(self) -> FaultInjector:
         """Activate faults for a context-managed block."""
@@ -135,7 +137,9 @@ class FaultInjector:
         self.clear()
 
     def _matching_spec(self, fault_type: FaultType, target: str) -> FaultSpec | None:
-        if self._last_triggered is not None and self._matches(self._last_triggered, fault_type, target):
+        if self._last_triggered is not None and self._matches(
+            self._last_triggered, fault_type, target
+        ):
             return self._last_triggered
         for tracked in self._faults:
             if self._matches(tracked.spec, fault_type, target):

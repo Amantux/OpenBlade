@@ -20,7 +20,9 @@ def _rbac_user_for_aml_user(service: RbacService, current_user: AmlUser) -> Rbac
 
 
 def _is_admin_user(current_user: AmlUser) -> bool:
-    return bool(getattr(current_user, "is_admin", False) or getattr(current_user, "role", None) == 0)
+    return bool(
+        getattr(current_user, "is_admin", False) or getattr(current_user, "role", None) == 0
+    )
 
 
 def ensure_permission_for_user(
@@ -47,7 +49,9 @@ def ensure_permission_for_user(
         action=permission.value,
         outcome="denied",
         details={"permission": permission.value},
-        ip_address=request.client.host if request is not None and request.client is not None else None,
+        ip_address=request.client.host
+        if request is not None and request.client is not None
+        else None,
     )
     raise HTTPException(status_code=403, detail="Permission denied")
 

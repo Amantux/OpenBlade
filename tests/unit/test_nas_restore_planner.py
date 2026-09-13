@@ -8,7 +8,9 @@ from openblade.nas.types import NasDataset, NasFileRecord, NasFileState, NasPool
 
 
 def make_nas_service(tmp_path: Path) -> NasService:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'nas-restore-planner.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'nas-restore-planner.db'}")
+    )
     reset_context(context)
     return NasService(context.catalog)
 
@@ -17,8 +19,12 @@ def seed_pool(service: NasService, *, pool_id: str = "pool-1") -> NasPool:
     return service.upsert_pool(NasPool(id=pool_id, name="Pool One"))
 
 
-def seed_dataset(service: NasService, *, pool_id: str = "pool-1", dataset_id: str = "dataset-1") -> NasDataset:
-    return service.upsert_dataset(NasDataset(id=dataset_id, pool_id=pool_id, name=f"dataset-{dataset_id}"))
+def seed_dataset(
+    service: NasService, *, pool_id: str = "pool-1", dataset_id: str = "dataset-1"
+) -> NasDataset:
+    return service.upsert_dataset(
+        NasDataset(id=dataset_id, pool_id=pool_id, name=f"dataset-{dataset_id}")
+    )
 
 
 def seed_file(
@@ -64,7 +70,13 @@ def test_plan_with_single_file_on_one_tape(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="photos/a.jpg", tape_barcode="VOL001L9")
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="photos/a.jpg",
+        tape_barcode="VOL001L9",
+    )
 
     plan = make_planner(service).plan(RestorePlanRequest(pool_id=pool.id))
 
@@ -76,9 +88,27 @@ def test_plan_with_multiple_tapes_sorts_by_file_count_desc(tmp_path: Path) -> No
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="a.txt", tape_barcode="VOL002L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="b.txt", tape_barcode="VOL001L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="c.txt", tape_barcode="VOL001L9")
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="a.txt",
+        tape_barcode="VOL002L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="b.txt",
+        tape_barcode="VOL001L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="c.txt",
+        tape_barcode="VOL001L9",
+    )
 
     plan = make_planner(service).plan(RestorePlanRequest(pool_id=pool.id))
 
@@ -128,8 +158,20 @@ def test_plan_with_specific_paths_only_includes_requested_subset(tmp_path: Path)
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="photos/a.jpg", tape_barcode="VOL001L9")
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="photos/b.jpg", tape_barcode="VOL002L9")
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="photos/a.jpg",
+        tape_barcode="VOL001L9",
+    )
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="photos/b.jpg",
+        tape_barcode="VOL002L9",
+    )
 
     plan = make_planner(service).plan(RestorePlanRequest(pool_id=pool.id, paths=["photos/b.jpg"]))
 
@@ -151,7 +193,9 @@ def test_parallel_groups_chunk_tapes_when_parallel_enabled(tmp_path: Path) -> No
             tape_barcode=f"VOL00{index}L9",
         )
 
-    plan = make_planner(service).plan(RestorePlanRequest(pool_id=pool.id, max_drives=2, allow_parallel=True))
+    plan = make_planner(service).plan(
+        RestorePlanRequest(pool_id=pool.id, max_drives=2, allow_parallel=True)
+    )
 
     assert plan.parallel_restore_groups == [["VOL000L9", "VOL001L9"], ["VOL002L9", "VOL003L9"]]
 
@@ -169,7 +213,9 @@ def test_parallel_groups_are_singletons_when_parallel_disabled(tmp_path: Path) -
             tape_barcode=f"VOL00{index}L9",
         )
 
-    plan = make_planner(service).plan(RestorePlanRequest(pool_id=pool.id, max_drives=2, allow_parallel=False))
+    plan = make_planner(service).plan(
+        RestorePlanRequest(pool_id=pool.id, max_drives=2, allow_parallel=False)
+    )
 
     assert plan.parallel_restore_groups == [["VOL000L9"], ["VOL001L9"], ["VOL002L9"]]
 
@@ -216,7 +262,13 @@ def test_missing_tape_warning_is_present(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="missing.bin", tape_barcode=None)
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="missing.bin",
+        tape_barcode=None,
+    )
 
     plan = make_planner(service).plan(RestorePlanRequest(pool_id=pool.id))
 
@@ -264,7 +316,13 @@ def test_is_safe_to_enqueue_true_when_all_tapes_available(tmp_path: Path) -> Non
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="safe.bin", tape_barcode="VOL001L9")
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="safe.bin",
+        tape_barcode="VOL001L9",
+    )
 
     plan = make_planner(service).plan(RestorePlanRequest(pool_id=pool.id))
 

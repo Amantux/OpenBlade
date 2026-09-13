@@ -32,12 +32,17 @@ def main(argv: list[str]) -> int:
 
     deployable = is_deployable(findings) and load_error is None
     if as_json:
-        print(json.dumps({
-            "environment": os.environ.get("OPENBLADE_ENV", "development"),
-            "deployable": deployable,
-            "load_error": load_error,
-            "findings": [asdict(f) for f in findings],
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "environment": os.environ.get("OPENBLADE_ENV", "development"),
+                    "deployable": deployable,
+                    "load_error": load_error,
+                    "findings": [asdict(f) for f in findings],
+                },
+                indent=2,
+            )
+        )
     else:
         env = os.environ.get("OPENBLADE_ENV", "development")
         print(f"config validation ({env}): {'DEPLOYABLE' if deployable else 'BLOCKED'}")

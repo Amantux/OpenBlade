@@ -5,13 +5,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from openblade.api.main import app
-from openblade.bootstrap import create_context, reset_context
+from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
 
 
 @pytest.fixture()
 def client(tmp_path: Path) -> TestClient:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'controller-isolation.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'controller-isolation.db'}")
+    )
     reset_context(context)
     return TestClient(app)
 
@@ -30,6 +32,19 @@ def _merge_headers(*header_sets: dict[str, str]) -> dict[str, str]:
     for header_set in header_sets:
         merged.update(header_set)
     return merged
+
+
+def _free_slot_address() -> str:
+    """Return the AML address of an empty storage slot in the seeded simulator.
+
+    The destination must not be hardcoded: the default i3 media seed grew from
+    slots 1-10 to slots 1-28, so a literal "1,1,11" now names an occupied slot
+    and the move is (correctly) rejected with 409 SlotOccupiedError.
+    """
+    inventory = get_context().library.inventory()
+    empty = sorted(slot.slot_id for slot in inventory.slots if not slot.occupied)
+    assert empty, "simulator seed has no empty storage slot to move into"
+    return f"1,1,{empty[0]}"
 
 
 def _find_direct_simulator_imports(paths: list[Path], repo_root: Path) -> list[str]:
@@ -56,7 +71,9 @@ def test_moveMedium_requires_service_token(client: TestClient) -> None:
     assert response.json()["code"] == "FORBIDDEN_CONTROLLER_ONLY"
 
 
-def test_moveMedium_rejected_with_user_token(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_moveMedium_rejected_with_user_token(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """moveMedium must be rejected even with valid admin user token"""
     response = client.post(
         "/aml/media/move",
@@ -76,7 +93,7 @@ def test_moveMedium_accepted_with_service_token(
     """moveMedium accepted only with service token"""
     response = client.post(
         "/aml/media/move",
-        json={"move": {"barcode": "VOL001L9", "destination": "1,1,11"}},
+        json={"move": {"barcode": "VOL001L9", "destination": _free_slot_address()}},
         headers=_merge_headers(admin_auth_headers, service_token_headers),
     )
 
@@ -84,7 +101,9 @@ def test_moveMedium_accepted_with_service_token(
     assert response.status_code != 403
 
 
-def test_wrong_service_token_rejected(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_wrong_service_token_rejected(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """Wrong service token value must be rejected even with correct header name"""
     response = client.post(
         "/aml/media/move",
@@ -95,7 +114,9 @@ def test_wrong_service_token_rejected(client: TestClient, admin_auth_headers: di
     assert response.status_code == 403
 
 
-def test_format_confirm_requires_service_token(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_format_confirm_requires_service_token(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """format-confirm must require service token even for admin users"""
     response = client.post(
         "/cartridges/format/confirm",
@@ -106,7 +127,9 @@ def test_format_confirm_requires_service_token(client: TestClient, admin_auth_he
     assert response.status_code == 403
 
 
-def test_mount_requires_service_token(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_mount_requires_service_token(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """mount/load operations must require service token"""
     response = client.post(
         "/aml/mount",

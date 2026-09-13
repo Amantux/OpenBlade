@@ -10,7 +10,8 @@ from pathlib import Path, PurePosixPath
 from openblade.api import aml_state
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
-from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError
+from openblade.domain.capacity import has_room_for
+from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError, safe_job_error
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.verify import sha256sum
@@ -53,6 +54,19 @@ def _is_cleaning_barcode(barcode: str) -> bool:
     return barcode.upper().startswith("CLN")
 
 
+def _has_room_for(ltfs: LTFSBackend, barcode: str, size_bytes: int) -> bool:
+    """Can ``barcode`` still take a file of ``size_bytes``?
+
+    Thin adapter over :mod:`openblade.domain.capacity`. The free-space policy --
+    in particular the LTFS-index reserve that makes "nearly full" mean full --
+    lives there and nowhere else, so the classic and sharded selection paths
+    cannot drift apart. See that module for why "zero bytes free" was the wrong
+    threshold, and for what the rig could and could not be made to demonstrate.
+    """
+    tape = ltfs.ensure_tape(barcode)
+    return has_room_for(int(tape.capacity_bytes), int(tape.used_bytes), size_bytes)
+
+
 def _choose_tape(
     catalog: CatalogRepository,
     library: LibraryBackend,
@@ -68,7 +82,7 @@ def _choose_tape(
     for cartridge in assigned:
         if _is_cleaning_barcode(cartridge.barcode):
             continue
-        if ltfs.remaining_capacity(cartridge.barcode) >= size_bytes:
+        if _has_room_for(ltfs, cartridge.barcode, size_bytes):
             return cartridge.barcode
     for barcode in _inventory_barcodes(library):
         if _is_cleaning_barcode(barcode):
@@ -79,7 +93,7 @@ def _choose_tape(
             or cartridge.state == "exported"
         ):
             continue
-        if ltfs.remaining_capacity(barcode) < size_bytes:
+        if not _has_room_for(ltfs, barcode, size_bytes):
             continue
         cartridge.volume_group_id = volume_group_id
         catalog.session.commit()
@@ -134,7 +148,9 @@ def _mark_aml_drive_idle(barcode: str, drive_id: int, slot_id: int | None) -> No
         aml_state.update_aml_drive(drive_name, {"state": "idle", "loadedMedia": None})
     media = aml_state.get_aml_media(barcode)
     if media is not None and slot_id is not None:
-        aml_state.update_aml_media(barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"})
+        aml_state.update_aml_media(
+            barcode, {"slotAddress": _aml_slot_address(slot_id), "state": "home"}
+        )
 
 
 def _load_if_needed(
@@ -321,7 +337,7 @@ def run_archive_job(
                 _mark_aml_drive_idle(current_barcode, current_drive_id, current_slot_id)
             except Exception:
                 logger.exception("failed to reset archive AML drive state for job %s", job_id)
-        catalog.update_job_state(job_id, "failed", str(exc))
+        catalog.update_job_state(job_id, "failed", safe_job_error(exc))
         raise
 
     result = ArchiveResult(

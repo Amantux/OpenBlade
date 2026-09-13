@@ -29,7 +29,9 @@ def login(client: TestClient) -> None:
     assert response.status_code == 200
 
 
-def make_health_service(tmp_path, db_name: str = "health.db") -> tuple[HealthService, CatalogRepository]:
+def make_health_service(
+    tmp_path, db_name: str = "health.db"
+) -> tuple[HealthService, CatalogRepository]:
     context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / db_name}"))
     reset_context(context)
     return HealthService(context.catalog, context.library, context.ltfs), context.catalog
@@ -125,10 +127,14 @@ def test_get_library_status_returns_drive_count(tmp_path) -> None:
 def test_get_catalog_status_returns_counts(tmp_path) -> None:
     service, repo = make_health_service(tmp_path, "catalog-status.db")
     repo.upsert_nas_dataset(
-        NasDataset(id="dataset-1", name="Dataset 1", status=DatasetStatus.ARCHIVED).model_dump(mode="json")
+        NasDataset(id="dataset-1", name="Dataset 1", status=DatasetStatus.ARCHIVED).model_dump(
+            mode="json"
+        )
     )
     repo.upsert_nas_file_record(
-        NasFileRecord(id="file-1", dataset_id="dataset-1", relative_path="file.txt").model_dump(mode="json")
+        NasFileRecord(id="file-1", dataset_id="dataset-1", relative_path="file.txt").model_dump(
+            mode="json"
+        )
     )
     repo.upsert_path_mapping(
         PathMappingRecord(id="mapping-1", logical_path="/pool/file.txt", dataset_id="dataset-1")

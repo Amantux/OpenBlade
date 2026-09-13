@@ -65,9 +65,13 @@ def _ensure_any_permission(
     *permissions: RbacPermission,
 ) -> None:
     rbac_user = _current_rbac_user(service, current_user)
-    if rbac_user is not None and any(service.check_permission(rbac_user.id, permission) for permission in permissions):
+    if rbac_user is not None and any(
+        service.check_permission(rbac_user.id, permission) for permission in permissions
+    ):
         return
-    if rbac_user is None and bool(getattr(current_user, "is_admin", False) or current_user.role == 0):
+    if rbac_user is None and bool(
+        getattr(current_user, "is_admin", False) or current_user.role == 0
+    ):
         return
     service.emit_audit_event(
         event_type="permission_denied",
@@ -89,7 +93,9 @@ async def list_users(
     current_user: AmlUser = Depends(require_auth),
     service: RbacService = Depends(get_rbac_service),
 ) -> list[UserSummary]:
-    _ensure_any_permission(service, current_user, request, RbacPermission.SYSTEM_ADMIN, RbacPermission.USER_ADMIN)
+    _ensure_any_permission(
+        service, current_user, request, RbacPermission.SYSTEM_ADMIN, RbacPermission.USER_ADMIN
+    )
     return service.list_users(active_only=active_only)
 
 
@@ -100,7 +106,9 @@ async def create_user(
     current_user: AmlUser = Depends(require_auth),
     service: RbacService = Depends(get_rbac_service),
 ) -> UserSummary:
-    _ensure_any_permission(service, current_user, request, RbacPermission.SYSTEM_ADMIN, RbacPermission.USER_ADMIN)
+    _ensure_any_permission(
+        service, current_user, request, RbacPermission.SYSTEM_ADMIN, RbacPermission.USER_ADMIN
+    )
     return service.create_user(payload)
 
 
@@ -247,5 +255,7 @@ async def list_audit_events(
 ) -> list[RbacAuditEventRecord]:
     return [
         RbacAuditEventRecord.model_validate(event)
-        for event in service.repo.list_audit_events(limit=limit, user_id=user_id, event_type=event_type)
+        for event in service.repo.list_audit_events(
+            limit=limit, user_id=user_id, event_type=event_type
+        )
     ]

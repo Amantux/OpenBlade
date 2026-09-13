@@ -378,7 +378,15 @@ class CatalogRepository:
         library = self.get_library_instance(library_id)
         if library is None:
             return None
-        for field in {"name", "emulator_url", "serial_number", "model", "enabled", "role", "sort_order"}:
+        for field in {
+            "name",
+            "emulator_url",
+            "serial_number",
+            "model",
+            "enabled",
+            "role",
+            "sort_order",
+        }:
             if field in kwargs:
                 setattr(library, field, kwargs[field])
         self.session.commit()
@@ -433,6 +441,23 @@ class CatalogRepository:
     def get_cartridge(self, barcode: str) -> Cartridge | None:
         stmt = select(Cartridge).where(Cartridge.barcode == barcode)
         return self.session.execute(stmt).scalar_one_or_none()
+
+    def set_cartridge_state(self, barcode: str, state: str) -> Cartridge | None:
+        """Record a cartridge's catalog state (``in_slot`` / ``exported`` / ...).
+
+        ``exported`` is the flag every restore path already reads to refuse a
+        cartridge that is no longer in the library (jobs/restore.py,
+        jobs/sharded_restore.py, jobs/archive.py). Until now nothing outside a
+        test fixture ever set it, so moving media out left the catalog claiming
+        the data was still online. The mailslot flows are what write it.
+        """
+        cartridge = self.get_cartridge(barcode)
+        if cartridge is None:
+            return None
+        cartridge.state = state
+        self.session.commit()
+        self.session.refresh(cartridge)
+        return cartridge
 
     def list_cartridges(self) -> list[Cartridge]:
         stmt = select(Cartridge).order_by(Cartridge.barcode)
@@ -501,13 +526,21 @@ class CatalogRepository:
     def list_catalog_files(
         self, limit: int = 50, offset: int = 0, search: str | None = None
     ) -> tuple[list[FileRecord], int]:
-        stmt = select(FileRecord).options(selectinload(FileRecord.instances)).where(FileRecord.parent_id.is_(None))
-        count_stmt = select(func.count()).select_from(FileRecord).where(FileRecord.parent_id.is_(None))
+        stmt = (
+            select(FileRecord)
+            .options(selectinload(FileRecord.instances))
+            .where(FileRecord.parent_id.is_(None))
+        )
+        count_stmt = (
+            select(func.count()).select_from(FileRecord).where(FileRecord.parent_id.is_(None))
+        )
         if search:
             pattern = f"%{search.strip()}%"
             stmt = stmt.where(FileRecord.path.ilike(pattern))
             count_stmt = count_stmt.where(FileRecord.path.ilike(pattern))
-        stmt = stmt.order_by(FileRecord.created_at.desc(), FileRecord.path).offset(offset).limit(limit)
+        stmt = (
+            stmt.order_by(FileRecord.created_at.desc(), FileRecord.path).offset(offset).limit(limit)
+        )
         records = list(self.session.execute(stmt).scalars().all())
         total = int(self.session.execute(count_stmt).scalar_one())
         return records, total
@@ -869,7 +902,9 @@ class CatalogRepository:
         stmt = select(NasDataset).order_by(NasDataset.created_at, NasDataset.name)
         if pool_id is not None:
             stmt = stmt.where(NasDataset.pool_id == pool_id)
-        return [self._nas_dataset_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+        return [
+            self._nas_dataset_to_dict(row) for row in self.session.execute(stmt).scalars().all()
+        ]
 
     def get_nas_dataset(self, dataset_id: str) -> dict[str, object] | None:
         row = self.session.get(NasDataset, dataset_id)
@@ -917,7 +952,9 @@ class CatalogRepository:
             .where(NasFileRecord.dataset_id == dataset_id)
             .order_by(NasFileRecord.relative_path)
         )
-        return [self._nas_file_record_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+        return [
+            self._nas_file_record_to_dict(row) for row in self.session.execute(stmt).scalars().all()
+        ]
 
     def get_nas_file_record(self, file_id: str) -> dict[str, object] | None:
         row = self.session.get(NasFileRecord, file_id)
@@ -961,7 +998,9 @@ class CatalogRepository:
         row = self.session.get(NasFileRecord, file_id)
         if row is None:
             return False
-        parsed = NasFileRecordModel.model_validate({**self._nas_file_record_to_dict(row), "status": status})
+        parsed = NasFileRecordModel.model_validate(
+            {**self._nas_file_record_to_dict(row), "status": status}
+        )
         row.status = parsed.status.value
         row.updated_at = _utcnow_iso()
         self.session.commit()
@@ -971,7 +1010,9 @@ class CatalogRepository:
         stmt = select(NasRestoreJob).order_by(NasRestoreJob.created_at.desc())
         if status is not None:
             stmt = stmt.where(NasRestoreJob.status == status)
-        return [self._nas_restore_job_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+        return [
+            self._nas_restore_job_to_dict(row) for row in self.session.execute(stmt).scalars().all()
+        ]
 
     def get_nas_restore_job(self, job_id: str) -> dict[str, object] | None:
         row = self.session.get(NasRestoreJob, job_id)
@@ -1092,7 +1133,9 @@ class CatalogRepository:
             return None
         return self._catalog_rebuild_run_to_dict(row)
 
-    def update_rebuild_run(self, run_id: str, updates: dict[str, object]) -> dict[str, object] | None:
+    def update_rebuild_run(
+        self, run_id: str, updates: dict[str, object]
+    ) -> dict[str, object] | None:
         existing = self.get_rebuild_run(run_id)
         if existing is None:
             return None
@@ -1150,15 +1193,12 @@ class CatalogRepository:
     def upsert_path_mapping(self, record: PathMappingRecord) -> PathMappingRecord:
         """Insert or update a PathMapping row. Validates through Pydantic before persisting."""
         parsed = PathMappingRecord.model_validate(record.model_dump(mode="json"))
-        row = (
-            self.session.execute(
-                select(PathMapping).where(
-                    PathMapping.logical_path == parsed.logical_path,
-                    PathMapping.pool_id == parsed.pool_id,
-                )
+        row = self.session.execute(
+            select(PathMapping).where(
+                PathMapping.logical_path == parsed.logical_path,
+                PathMapping.pool_id == parsed.pool_id,
             )
-            .scalar_one_or_none()
-        )
+        ).scalar_one_or_none()
         if row is None:
             row = PathMapping(
                 id=parsed.id,
@@ -1187,15 +1227,12 @@ class CatalogRepository:
 
     def get_path_mapping(self, logical_path: str, pool_id: str = "") -> PathMappingRecord | None:
         """Lookup a single path mapping by (logical_path, pool_id). Returns None if not found."""
-        row = (
-            self.session.execute(
-                select(PathMapping).where(
-                    PathMapping.logical_path == logical_path,
-                    PathMapping.pool_id == pool_id,
-                )
+        row = self.session.execute(
+            select(PathMapping).where(
+                PathMapping.logical_path == logical_path,
+                PathMapping.pool_id == pool_id,
             )
-            .scalar_one_or_none()
-        )
+        ).scalar_one_or_none()
         if row is None:
             return None
         return PathMappingRecord.model_validate(self._path_mapping_to_dict(row))
@@ -1224,15 +1261,12 @@ class CatalogRepository:
 
     def delete_path_mapping(self, logical_path: str, pool_id: str = "") -> bool:
         """Delete a path mapping. Returns True if a row was deleted."""
-        row = (
-            self.session.execute(
-                select(PathMapping).where(
-                    PathMapping.logical_path == logical_path,
-                    PathMapping.pool_id == pool_id,
-                )
+        row = self.session.execute(
+            select(PathMapping).where(
+                PathMapping.logical_path == logical_path,
+                PathMapping.pool_id == pool_id,
             )
-            .scalar_one_or_none()
-        )
+        ).scalar_one_or_none()
         if row is None:
             return False
         self.session.delete(row)
@@ -1487,7 +1521,9 @@ class CatalogRepository:
             .where(RbacApiToken.user_id == user_id)
             .order_by(RbacApiToken.created_at.desc(), RbacApiToken.name)
         )
-        return [self._rbac_api_token_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+        return [
+            self._rbac_api_token_to_dict(row) for row in self.session.execute(stmt).scalars().all()
+        ]
 
     def revoke_api_token(self, token_id: str) -> bool:
         """Mark an API token as revoked."""
@@ -1553,7 +1589,10 @@ class CatalogRepository:
         if event_type is not None:
             stmt = stmt.where(RbacAuditEvent.event_type == event_type)
         stmt = stmt.order_by(RbacAuditEvent.created_at.desc()).limit(limit)
-        return [self._rbac_audit_event_to_dict(row) for row in self.session.execute(stmt).scalars().all()]
+        return [
+            self._rbac_audit_event_to_dict(row)
+            for row in self.session.execute(stmt).scalars().all()
+        ]
 
     def create_tape_op(self, op: dict[str, object]) -> dict[str, object]:
         """Create a tape operation audit log entry."""

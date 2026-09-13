@@ -17,7 +17,6 @@ class EffectivePolicySource(str, Enum):
     SIDECAR = "sidecar"
 
 
-
 def _strip_required_string(value: object, *, field_name: str, max_length: int | None = None) -> str:
     if value is None:
         raise ValueError(f"{field_name} must be non-empty")
@@ -101,6 +100,12 @@ class TapeOpType(str, Enum):
     MOVE = "move"
     VERIFY = "verify"
     EJECT = "eject"
+    # Import/export (mailslot) moves. Separate op types rather than MOVE with an
+    # I/E destination, because MOVE deliberately refuses import/export elements
+    # (see TapeOperationOrchestrator._dest_slot) and must keep doing so: these
+    # two carry their own guards.
+    IMPORT = "import"
+    EXPORT = "export"
 
 
 class TapeOpStatus(str, Enum):
@@ -143,8 +148,8 @@ class VersionResponse(BaseModel):
     version: str
     git_commit: str = "unknown"
     build_date: str = "unknown"
-    python_version: str = ""       # omitted from unauthenticated /version endpoint
-    environment: str = ""          # omitted from unauthenticated /version endpoint
+    python_version: str = ""  # omitted from unauthenticated /version endpoint
+    environment: str = ""  # omitted from unauthenticated /version endpoint
 
 
 class ErrorCodeEntry(BaseModel):

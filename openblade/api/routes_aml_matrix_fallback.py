@@ -43,7 +43,9 @@ def _task_from_request(path: str, *, task_type: str) -> dict[str, Any]:
     ).model_dump()
 
 
-def _get_shim_payload(*, path_template: str, request_path: str, operation_class: str) -> dict[str, Any]:
+def _get_shim_payload(
+    *, path_template: str, request_path: str, operation_class: str
+) -> dict[str, Any]:
     lowered = path_template.lower()
     if "/operations/" in lowered and path_template.endswith("}"):
         task_type = path_template.split("/operations/")[1].split("/")[0]
@@ -128,4 +130,3 @@ def register_missing_matrix_routes(app: FastAPI) -> int:
         existing.add(key)
         registered += 1
     return registered
-

@@ -35,8 +35,13 @@ def test_moveclass_is_a_composable_bit_field() -> None:
 
 def test_moveclass_real_documented_bit_values() -> None:
     # Values from the Web Services manual (Rev D): unload=8, no-eject=16, closest=32.
-    assert (MoveClass.IMPORT, MoveClass.EXPORT, MoveClass.UNLOAD, MoveClass.NO_EJECT,
-            MoveClass.CLOSEST_SLOT) == (2, 4, 8, 16, 32)
+    assert (
+        MoveClass.IMPORT,
+        MoveClass.EXPORT,
+        MoveClass.UNLOAD,
+        MoveClass.NO_EJECT,
+        MoveClass.CLOSEST_SLOT,
+    ) == (2, 4, 8, 16, 32)
     assert MoveClass.from_wire(8).is_unload
     assert MoveClass.from_wire(8).to_wire() == 8  # sends 8, not the deprecated 3
     assert MoveClass.from_wire(24) == (MoveClass.UNLOAD | MoveClass.NO_EJECT)  # 8+16

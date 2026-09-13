@@ -132,7 +132,9 @@ def test_authenticate_by_token_revoked_returns_none() -> None:
     service = make_service()
     create_role(service.repo, "operator", RbacPermission.TOKEN_MANAGE)
     create_user(service.repo, user_id="user-1", username="alice", role_id="operator")
-    create_token(service.repo, token_id="token-1", user_id="user-1", raw_token="secret-token", revoked=True)
+    create_token(
+        service.repo, token_id="token-1", user_id="user-1", raw_token="secret-token", revoked=True
+    )
 
     assert service.authenticate_by_token("secret-token") is None
 
@@ -142,7 +144,13 @@ def test_authenticate_by_token_expired_returns_none() -> None:
     create_role(service.repo, "operator", RbacPermission.TOKEN_MANAGE)
     create_user(service.repo, user_id="user-1", username="alice", role_id="operator")
     expires_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    create_token(service.repo, token_id="token-1", user_id="user-1", raw_token="secret-token", expires_at=expires_at)
+    create_token(
+        service.repo,
+        token_id="token-1",
+        user_id="user-1",
+        raw_token="secret-token",
+        expires_at=expires_at,
+    )
 
     assert service.authenticate_by_token("secret-token") is None
 
@@ -176,7 +184,9 @@ def test_create_user_hashes_password() -> None:
 def test_create_user_returns_summary_without_password() -> None:
     service = make_service()
 
-    summary = service.create_user(CreateUserRequest(username="alice", password="secret-password", role_id="admin"))
+    summary = service.create_user(
+        CreateUserRequest(username="alice", password="secret-password", role_id="admin")
+    )
 
     assert "hashed_password" not in summary.model_dump()
     assert summary.username == "alice"
@@ -184,12 +194,16 @@ def test_create_user_returns_summary_without_password() -> None:
 
 def test_create_token_stores_hash_not_raw(monkeypatch: pytest.MonkeyPatch) -> None:
     service = make_service()
-    service.create_user(CreateUserRequest(username="alice", password="secret-password", role_id="admin"))
+    service.create_user(
+        CreateUserRequest(username="alice", password="secret-password", role_id="admin")
+    )
     monkeypatch.setattr(rbac_service_module.secrets, "token_hex", lambda _: "a" * 64)
     user = service.repo.get_user_by_username("alice")
     assert user is not None
 
-    result = service.create_token(user["id"], CreateTokenRequest(name="cli", permissions=[RbacPermission.TOKEN_MANAGE]))
+    result = service.create_token(
+        user["id"], CreateTokenRequest(name="cli", permissions=[RbacPermission.TOKEN_MANAGE])
+    )
 
     stored = service.repo.get_api_token(result.token_id)
     assert stored is not None
@@ -199,23 +213,33 @@ def test_create_token_stores_hash_not_raw(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_create_token_raw_token_different_from_hash(monkeypatch: pytest.MonkeyPatch) -> None:
     service = make_service()
-    service.create_user(CreateUserRequest(username="alice", password="secret-password", role_id="admin"))
+    service.create_user(
+        CreateUserRequest(username="alice", password="secret-password", role_id="admin")
+    )
     monkeypatch.setattr(rbac_service_module.secrets, "token_hex", lambda _: "b" * 64)
     user = service.repo.get_user_by_username("alice")
     assert user is not None
 
-    result = service.create_token(user["id"], CreateTokenRequest(name="cli", permissions=[RbacPermission.TOKEN_MANAGE]))
+    result = service.create_token(
+        user["id"], CreateTokenRequest(name="cli", permissions=[RbacPermission.TOKEN_MANAGE])
+    )
 
     assert result.raw_token != result.token_record.token_hash
 
 
 def test_revoke_token_marks_revoked(monkeypatch: pytest.MonkeyPatch) -> None:
     service = make_service()
-    service.create_user(CreateUserRequest(username="alice", password="secret-password", role_id="admin", is_admin=True))
+    service.create_user(
+        CreateUserRequest(
+            username="alice", password="secret-password", role_id="admin", is_admin=True
+        )
+    )
     monkeypatch.setattr(rbac_service_module.secrets, "token_hex", lambda _: "c" * 64)
     user = service.repo.get_user_by_username("alice")
     assert user is not None
-    token = service.create_token(user["id"], CreateTokenRequest(name="cli", permissions=[RbacPermission.TOKEN_MANAGE]))
+    token = service.create_token(
+        user["id"], CreateTokenRequest(name="cli", permissions=[RbacPermission.TOKEN_MANAGE])
+    )
 
     assert service.revoke_token(token.token_id, user["id"]) is True
     assert service.repo.get_api_token(token.token_id)["revoked"] is True
@@ -223,8 +247,12 @@ def test_revoke_token_marks_revoked(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_list_users_returns_summaries() -> None:
     service = make_service()
-    service.create_user(CreateUserRequest(username="alice", password="secret-password", role_id="admin"))
-    service.create_user(CreateUserRequest(username="bob", password="another-password", role_id="operator"))
+    service.create_user(
+        CreateUserRequest(username="alice", password="secret-password", role_id="admin")
+    )
+    service.create_user(
+        CreateUserRequest(username="bob", password="another-password", role_id="operator")
+    )
 
     users = service.list_users()
 
@@ -234,8 +262,14 @@ def test_list_users_returns_summaries() -> None:
 
 def test_deactivate_user_emits_audit_event() -> None:
     service = make_service()
-    service.create_user(CreateUserRequest(username="alice", password="secret-password", role_id="admin", is_admin=True))
-    service.create_user(CreateUserRequest(username="bob", password="another-password", role_id="operator"))
+    service.create_user(
+        CreateUserRequest(
+            username="alice", password="secret-password", role_id="admin", is_admin=True
+        )
+    )
+    service.create_user(
+        CreateUserRequest(username="bob", password="another-password", role_id="operator")
+    )
     actor = service.repo.get_user_by_username("alice")
     target = service.repo.get_user_by_username("bob")
     assert actor is not None and target is not None
@@ -288,11 +322,15 @@ def test_require_permission_emits_audit_event_on_denial() -> None:
     app = FastAPI()
 
     @app.get("/protected")
-    async def protected(_: AmlUser = Depends(require_permission(RbacPermission.TOKEN_MANAGE))) -> dict[str, bool]:
+    async def protected(
+        _: AmlUser = Depends(require_permission(RbacPermission.TOKEN_MANAGE)),
+    ) -> dict[str, bool]:
         return {"ok": True}
 
     app.dependency_overrides[get_catalog_repository] = lambda: repo
-    app.dependency_overrides[require_auth] = lambda: AmlUser(name="guest", password="x", role=1, require_password_change=False)
+    app.dependency_overrides[require_auth] = lambda: AmlUser(
+        name="guest", password="x", role=1, require_password_change=False
+    )
 
     client = TestClient(app)
     response = client.get("/protected")

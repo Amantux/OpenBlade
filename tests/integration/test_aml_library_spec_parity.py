@@ -29,12 +29,18 @@ def authed(client: TestClient) -> TestClient:
 
 
 def _library_matrix_endpoints() -> set[tuple[str, str]]:
-    matrix_path = Path(__file__).resolve().parents[2] / "openblade" / "emulator_contract" / "quantum_i3_rev_h_matrix.json"
+    matrix_path = (
+        Path(__file__).resolve().parents[2]
+        / "openblade"
+        / "emulator_contract"
+        / "quantum_i3_rev_h_matrix.json"
+    )
     matrix = json.loads(matrix_path.read_text())
     return {
         (str(item["method"]).upper(), str(item["path"]))
         for item in matrix["endpoints"]
-        if "/library" in str(item["path"]).lower() or "/physicallibrary" in str(item["path"]).lower()
+        if "/library" in str(item["path"]).lower()
+        or "/physicallibrary" in str(item["path"]).lower()
     }
 
 
@@ -96,23 +102,33 @@ def test_segments_cleaning_and_amp_round_trip(authed: TestClient) -> None:
     assert segments
     target_id = str(segments[0]["id"])
 
-    amp_set = authed.put("/aml/physicalLibrary/segments/amp", json={"segmentList": {"segment": [{"id": target_id}]}})
+    amp_set = authed.put(
+        "/aml/physicalLibrary/segments/amp", json={"segmentList": {"segment": [{"id": target_id}]}}
+    )
     assert amp_set.status_code == 200
     assert amp_set.json()["code"] == 0
 
     amp_segments = authed.get("/aml/physicalLibrary/segments/amp")
     assert amp_segments.status_code == 200
-    assert any(str(item["id"]) == target_id for item in amp_segments.json()["segmentList"]["segment"])
+    assert any(
+        str(item["id"]) == target_id for item in amp_segments.json()["segmentList"]["segment"]
+    )
 
-    cleaning_set = authed.post("/aml/physicalLibrary/segments/cleaning", json={"segment": {"id": target_id}})
+    cleaning_set = authed.post(
+        "/aml/physicalLibrary/segments/cleaning", json={"segment": {"id": target_id}}
+    )
     assert cleaning_set.status_code == 200
     assert cleaning_set.json()["code"] == 0
 
     cleaning_segments = authed.get("/aml/physicalLibrary/segments/cleaning")
     assert cleaning_segments.status_code == 200
-    assert any(str(item["id"]) == target_id for item in cleaning_segments.json()["segmentList"]["segment"])
+    assert any(
+        str(item["id"]) == target_id for item in cleaning_segments.json()["segmentList"]["segment"]
+    )
 
-    cleaning_delete = authed.request("DELETE", "/aml/physicalLibrary/segments/cleaning", json={"segment": {"id": target_id}})
+    cleaning_delete = authed.request(
+        "DELETE", "/aml/physicalLibrary/segments/cleaning", json={"segment": {"id": target_id}}
+    )
     assert cleaning_delete.status_code == 200
     assert cleaning_delete.json()["code"] == 0
 
@@ -154,9 +170,18 @@ def test_library_blade_serial_endpoint(authed: TestClient) -> None:
 def test_new_library_endpoints_require_auth(client: TestClient) -> None:
     assert client.get("/aml/physicalLibrary/operations").status_code == 401
     assert client.post("/aml/physicalLibrary/operations/inventory").status_code == 401
-    assert client.put("/aml/physicalLibrary/segments/amp", json={"segmentList": {"segment": [{"id": "SEG-ST-001"}]}}).status_code == 401
-    assert client.request(
-        "DELETE",
-        "/aml/physicalLibrary/segments/cleaning",
-        json={"segment": {"id": "SEG-CLN-001"}},
-    ).status_code == 401
+    assert (
+        client.put(
+            "/aml/physicalLibrary/segments/amp",
+            json={"segmentList": {"segment": [{"id": "SEG-ST-001"}]}},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.request(
+            "DELETE",
+            "/aml/physicalLibrary/segments/cleaning",
+            json={"segment": {"id": "SEG-CLN-001"}},
+        ).status_code
+        == 401
+    )

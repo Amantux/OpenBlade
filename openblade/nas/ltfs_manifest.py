@@ -115,7 +115,9 @@ class TapeMetadataWriter:
     def write_tape_json(self, barcode: str, tape_json: TapeJson) -> None:
         """Serialize and write /.openblade/tape.json to the simulated tape."""
         self.ensure_openblade_dirs(barcode)
-        self._write_json(barcode, self._metadata_path("tape.json"), tape_json.model_dump(by_alias=True))
+        self._write_json(
+            barcode, self._metadata_path("tape.json"), tape_json.model_dump(by_alias=True)
+        )
 
     def write_manifest(self, barcode: str, manifest: ManifestJson) -> str:
         """Write /.openblade/manifest.json and return its sha256 checksum."""
@@ -142,7 +144,9 @@ class TapeMetadataWriter:
     def write_dataset_manifest(self, barcode: str, dataset_id: str, data: dict[str, Any]) -> None:
         """Write /.openblade/datasets/<dataset_id>.json to the simulated tape."""
         self.ensure_openblade_dirs(barcode)
-        self._write_json(barcode, self._metadata_path("datasets", f"{self._safe_name(dataset_id)}.json"), data)
+        self._write_json(
+            barcode, self._metadata_path("datasets", f"{self._safe_name(dataset_id)}.json"), data
+        )
 
     def write_tape_set_manifest(self, barcode: str, tape_set: TapeSetManifest) -> None:
         """Write /.openblade/tape-sets/<tape_set_id>.json to the simulated tape."""

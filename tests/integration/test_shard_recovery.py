@@ -43,18 +43,26 @@ def _format_tape(client: TestClient, barcode: str) -> None:
         client.post(
             "/cartridges/format/confirm",
             json={"barcode": barcode, "token": token},
-            headers={**auth_headers, "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose"},
+            headers={
+                **auth_headers,
+                "X-Openblade-Service-Token": "openblade-controller-dev-token-do-not-expose",
+            },
         ).status_code
         == 200
     )
 
 
-def _prepare_sharded_archive(client: TestClient, tmp_path: Path) -> tuple[dict[str, object], list[dict[str, object]]]:
+def _prepare_sharded_archive(
+    client: TestClient, tmp_path: Path
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     barcodes = _data_barcodes(limit=2)
     assert len(barcodes) == 2
     assert client.post("/volume-groups/", json={"name": "photos"}).status_code == 201
     for barcode in barcodes:
-        assert client.post("/volume-groups/photos/assign", json={"barcode": barcode}).status_code == 200
+        assert (
+            client.post("/volume-groups/photos/assign", json={"barcode": barcode}).status_code
+            == 200
+        )
         _format_tape(client, barcode)
 
     source = tmp_path / "source"
@@ -83,7 +91,9 @@ def _prepare_sharded_archive(client: TestClient, tmp_path: Path) -> tuple[dict[s
     return parent, shards_response.json()
 
 
-def test_block_stripe_archive_creates_shard_catalog_entries(client: TestClient, tmp_path: Path) -> None:
+def test_block_stripe_archive_creates_shard_catalog_entries(
+    client: TestClient, tmp_path: Path
+) -> None:
     parent, shards = _prepare_sharded_archive(client, tmp_path)
 
     assert parent["shard_count"] == 2
@@ -109,7 +119,9 @@ def test_block_stripe_archive_creates_shard_catalog_entries(client: TestClient, 
     assert all(record.parent_id == parent["id"] for record in shard_records)
 
 
-def test_restore_fails_gracefully_when_shard_entries_are_missing(client: TestClient, tmp_path: Path) -> None:
+def test_restore_fails_gracefully_when_shard_entries_are_missing(
+    client: TestClient, tmp_path: Path
+) -> None:
     parent, shards = _prepare_sharded_archive(client, tmp_path)
     assert len(shards) == 2
 

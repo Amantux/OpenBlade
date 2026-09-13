@@ -369,7 +369,10 @@ class _BaseIngest:
         if not self.job.plan.verify_after_archive:
             return
         stat = self.ltfs.stat(handle, tape_path)
-        if stat.checksum_sha256 != prepared.checksum_sha256 or stat.size_bytes != prepared.size_bytes:
+        if (
+            stat.checksum_sha256 != prepared.checksum_sha256
+            or stat.size_bytes != prepared.size_bytes
+        ):
             raise RuntimeError(f"verification failed for {prepared.relative_path}")
 
     def _upsert_file_record(
@@ -422,7 +425,10 @@ class _BaseIngest:
                 self.job.errors.append(message)
             self._mark_dataset_archived()
             return
-        if self._dataset_archive_result is None or not self._dataset_archive_result.dataset_marked_archived:
+        if (
+            self._dataset_archive_result is None
+            or not self._dataset_archive_result.dataset_marked_archived
+        ):
             self._mark_dataset_failed("Dataset archive lifecycle did not complete")
             return
         dataset = self.service.get_dataset(self.dataset.id)
@@ -437,7 +443,9 @@ class _BaseIngest:
             update={
                 "status": DatasetStatus.ARCHIVED,
                 "copies_completed": dataset.copies_completed + 1,
-                "tape_set": _ordered_unique([assignment.barcode for assignment in self.job.plan.tape_assignments]),
+                "tape_set": _ordered_unique(
+                    [assignment.barcode for assignment in self.job.plan.tape_assignments]
+                ),
                 "shard_map": {
                     assignment.barcode: list(assignment.files)
                     for assignment in self.job.plan.tape_assignments
@@ -517,7 +525,9 @@ class CacheDriveIngest(_BaseIngest):
             seen_paths.add(prepared.source_path)
             source_path = Path(prepared.source_path).resolve()
             if not source_path.exists():
-                raise RuntimeError(f"Cache-drive source file {prepared.source_path} is not available")
+                raise RuntimeError(
+                    f"Cache-drive source file {prepared.source_path} is not available"
+                )
             try:
                 source_path.relative_to(cache_root.resolve())
             except ValueError as exc:
@@ -527,7 +537,9 @@ class CacheDriveIngest(_BaseIngest):
             total_bytes += prepared.size_bytes
 
         available_bytes = max(self.cache_drive.max_bytes - self.cache_drive.min_free_bytes, 0)
-        reserved_bytes = _reserved_cache_drive_bytes(self.cache_drive.id, exclude_job_id=self.job.job_id)
+        reserved_bytes = _reserved_cache_drive_bytes(
+            self.cache_drive.id, exclude_job_id=self.job.job_id
+        )
         if total_bytes + reserved_bytes > available_bytes:
             raise RuntimeError(
                 f"Cache drive {self.cache_drive.id} cannot reserve {total_bytes} bytes; "
@@ -611,10 +623,18 @@ class SourceStreamIngest(_BaseIngest):
         return super()._checksum_for_file(relative_path, barcode)
 
     def _before_write_file(self, prepared: _PreparedFile) -> None:
-        if not self.config.fail_on_source_change or prepared.relative_path not in self._source_snapshots:
+        if (
+            not self.config.fail_on_source_change
+            or prepared.relative_path not in self._source_snapshots
+        ):
             return
-        if self._capture_snapshot(prepared.relative_path) != self._source_snapshots[prepared.relative_path]:
-            raise RuntimeError(f"Source changed during source-stream ingest: {prepared.relative_path}")
+        if (
+            self._capture_snapshot(prepared.relative_path)
+            != self._source_snapshots[prepared.relative_path]
+        ):
+            raise RuntimeError(
+                f"Source changed during source-stream ingest: {prepared.relative_path}"
+            )
 
     def _abort_on_file_error(self, prepared: _PreparedFile, error: Exception) -> bool:
         del prepared, error
@@ -798,6 +818,7 @@ def _ordered_unique(values: list[str]) -> list[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
+
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()

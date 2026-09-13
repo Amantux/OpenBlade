@@ -24,6 +24,7 @@ from openblade.dr import backup_sqlite, restore_and_verify
 
 def _seed_source() -> str:
     from openblade.catalog.db import init_db
+
     path = Path(tempfile.mktemp(suffix=".db"))
     url = f"sqlite:///{path}"
     init_db(url)  # creates the full schema (create_all)

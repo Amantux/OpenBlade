@@ -19,6 +19,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # Published i3 emulator image (cross-repo contract pin — validated by
+  # tools/emulator_spec/validate_cross_repo_contract.py). Off by default:
+  # `docker compose --profile emulator up` runs it; the default stack is
+  # unchanged. The standalone fleet launcher (deploy/emulator/) remains the
+  # local-build path.
+  emulator:
+    image: ${OPENBLADE_EMULATOR_IMAGE:-ghcr.io/amantux/openblade-i3-emulator:0.1.0}
+    profiles: ["emulator"]
+    ports:
+      - "8010:8010"
+
   web:
     build:
       context: ./frontend

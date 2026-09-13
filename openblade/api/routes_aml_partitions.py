@@ -378,7 +378,6 @@ def _unique_strings(values: list[str]) -> list[str]:
     return result
 
 
-
 def _policy_defaults(name: str) -> dict[str, Any]:
     defaults = {
         "activeVault": {"enabled": False, "retentionDays": 0, "mode": "manual"},
@@ -389,7 +388,6 @@ def _policy_defaults(name: str) -> dict[str, Any]:
         "ekm": {"enabled": False, "server": None, "keyGroup": None},
     }
     return dict(defaults[name])
-
 
 
 def _global_policy(name: str) -> dict[str, Any]:
@@ -412,7 +410,11 @@ def _partition_slots(partition: dict[str, Any], context: AppContext) -> list[Slo
     for address in range(1, slot_count + 1):
         address_str = str(address)
         barcode = occupied.get(address_str)
-        slot_type = "cleaning" if address >= cleaning_start and int(partition.get("cleaningSlots", 0)) > 0 else "storage"
+        slot_type = (
+            "cleaning"
+            if address >= cleaning_start and int(partition.get("cleaningSlots", 0)) > 0
+            else "storage"
+        )
         slots.append(
             SlotResource(
                 id=f"{partition['name']}-slot-{address_str}",
@@ -441,7 +443,9 @@ def _partition_ie_slots(partition: dict[str, Any]) -> list[SlotResource]:
 
 def _partition_media(partition: dict[str, Any], context: AppContext) -> list[MediaResource]:
     return [
-        MediaResource(barcode=slot.barcode or "", slotAddress=slot.address, state=slot.state, type=slot.type)
+        MediaResource(
+            barcode=slot.barcode or "", slotAddress=slot.address, state=slot.state, type=slot.type
+        )
         for slot in _partition_slots(partition, context)
         if slot.barcode is not None
     ]
@@ -455,7 +459,9 @@ def _partition_quota_dict(partition: dict[str, Any], context: AppContext) -> dic
         "usedDrives": len(partition.get("drives", [])),
     }
     quota = dict(default_quota)
-    quota.update({key: int(value) for key, value in partition.get("quota", {}).items() if value is not None})
+    quota.update(
+        {key: int(value) for key, value in partition.get("quota", {}).items() if value is not None}
+    )
     return quota
 
 
@@ -463,7 +469,10 @@ def _partition_statistics(partition: dict[str, Any], context: AppContext) -> Sta
     stats = partition.get("statistics") or {}
     media_usage = stats.get("mediaUsage")
     if media_usage is None:
-        media_usage = [{"barcode": media.barcode, "mounts": 0} for media in _partition_media(partition, context)]
+        media_usage = [
+            {"barcode": media.barcode, "mounts": 0}
+            for media in _partition_media(partition, context)
+        ]
     return StatisticsResource(
         mountCount=int(stats.get("mountCount", 0)),
         unmountCount=int(stats.get("unmountCount", 0)),
@@ -520,17 +529,23 @@ def _serialize_partition(partition: dict[str, Any], context: AppContext) -> Part
 def _partition_report(partition: dict[str, Any], context: AppContext) -> dict[str, Any]:
     return {
         "partition": _serialize_partition(partition, context).model_dump(),
-        "drives": [{"serialNumber": serial_number} for serial_number in partition.get("drives", [])],
+        "drives": [
+            {"serialNumber": serial_number} for serial_number in partition.get("drives", [])
+        ],
         "media": [item.model_dump() for item in _partition_media(partition, context)],
         "slots": [item.model_dump() for item in _partition_slots(partition, context)],
         "ieSlots": [item.model_dump() for item in _partition_ie_slots(partition)],
         "policy": PolicyResource.model_validate(partition.get("policy", {})).model_dump(),
         "access": AccessConfigResource.model_validate(partition.get("access", {})).model_dump(),
-        "cleaning": CleaningConfigResource.model_validate(partition.get("cleaning", {})).model_dump(),
+        "cleaning": CleaningConfigResource.model_validate(
+            partition.get("cleaning", {})
+        ).model_dump(),
         "statistics": _partition_statistics(partition, context).model_dump(),
         "status": _partition_status(partition, context).model_dump(),
         "worm": WormResource.model_validate(partition.get("worm", {})).model_dump(),
-        "encryption": EncryptionResource.model_validate(partition.get("encryption", {})).model_dump(),
+        "encryption": EncryptionResource.model_validate(
+            partition.get("encryption", {})
+        ).model_dump(),
         "qos": QoSResource.model_validate(partition.get("qos", {})).model_dump(),
         "lme": LMEResource.model_validate(partition.get("lme", {})).model_dump(),
         "quota": _partition_quota_dict(partition, context),
@@ -557,7 +572,9 @@ async def put_active_vault_policy(
 ) -> dict[str, Any]:
     _ensure_state(context)
     _require_admin(current_user)
-    aml_state.set_aml_partitions_global({"activeVault": {**_global_policy("activeVault"), **payload}})
+    aml_state.set_aml_partitions_global(
+        {"activeVault": {**_global_policy("activeVault"), **payload}}
+    )
     return _global_policy("activeVault")
 
 
@@ -620,7 +637,9 @@ async def put_drive_cleaning_policy(
 ) -> dict[str, Any]:
     _ensure_state(context)
     _require_admin(current_user)
-    aml_state.set_aml_partitions_global({"driveCleaning": {**_global_policy("driveCleaning"), **payload}})
+    aml_state.set_aml_partitions_global(
+        {"driveCleaning": {**_global_policy("driveCleaning"), **payload}}
+    )
     return _global_policy("driveCleaning")
 
 
@@ -672,7 +691,9 @@ async def get_global_partition_config(
     context: AppContext = Depends(get_context),
 ) -> GlobalConfigResponse:
     _ensure_state(context)
-    return GlobalConfigResponse(globalConfig=GlobalConfigResource.model_validate(aml_state.get_aml_partitions_global()))
+    return GlobalConfigResponse(
+        globalConfig=GlobalConfigResource.model_validate(aml_state.get_aml_partitions_global())
+    )
 
 
 @router.put("/partitions/global", response_model=GlobalConfigResponse)
@@ -712,7 +733,9 @@ async def get_partition_utilization_report(
                 "name": str(partition.get("name")),
                 "usedSlots": int(quota.get("usedSlots", 0)),
                 "totalSlots": int(quota.get("totalSlots", 0)),
-                "utilizationPercent": round((int(quota.get("usedSlots", 0)) / total_slots) * 100, 2),
+                "utilizationPercent": round(
+                    (int(quota.get("usedSlots", 0)) / total_slots) * 100, 2
+                ),
                 "usedDrives": int(quota.get("usedDrives", 0)),
                 "totalDrives": int(quota.get("totalDrives", 0)),
             }
@@ -727,7 +750,11 @@ async def list_partitions(
 ) -> PartitionListResponse:
     _ensure_state(context)
     return PartitionListResponse(
-        partitionList=PartitionListResource(partition=[_serialize_partition(item, context) for item in aml_state.list_aml_partitions()])
+        partitionList=PartitionListResource(
+            partition=[
+                _serialize_partition(item, context) for item in aml_state.list_aml_partitions()
+            ]
+        )
     )
 
 
@@ -739,10 +766,14 @@ async def get_partition(
 ) -> PartitionEnvelope:
     _ensure_state(context)
     partition_name = _validate_name(name)
-    return PartitionEnvelope(partition=_serialize_partition(_get_partition_or_404(partition_name), context))
+    return PartitionEnvelope(
+        partition=_serialize_partition(_get_partition_or_404(partition_name), context)
+    )
 
 
-@router.post("/partition/{name}", response_model=PartitionEnvelope, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/partition/{name}", response_model=PartitionEnvelope, status_code=status.HTTP_201_CREATED
+)
 async def create_partition(
     name: str,
     payload: PartitionCreateRequest,
@@ -752,7 +783,9 @@ async def create_partition(
     _ensure_state(context)
     _require_admin(current_user)
     partition_name = _validate_name(name)
-    created = aml_state.create_aml_partition(partition_name, _validate_partition_config(payload.partition))
+    created = aml_state.create_aml_partition(
+        partition_name, _validate_partition_config(payload.partition)
+    )
     if created is None:
         raise HTTPException(status_code=409, detail="Partition already exists")
     return PartitionEnvelope(partition=_serialize_partition(created, context))
@@ -768,7 +801,9 @@ async def update_partition(
     _ensure_state(context)
     _require_admin(current_user)
     partition_name = _validate_name(name)
-    updated = aml_state.update_aml_partition(partition_name, _validate_partition_config(payload.partition))
+    updated = aml_state.update_aml_partition(
+        partition_name, _validate_partition_config(payload.partition)
+    )
     if updated is None:
         raise HTTPException(status_code=404, detail="Partition not found")
     return PartitionEnvelope(partition=_serialize_partition(updated, context))
@@ -796,7 +831,11 @@ async def list_partition_drives(
 ) -> DriveListResponse:
     _ensure_state(context)
     partition = _get_partition_or_404(_validate_name(name))
-    return DriveListResponse(driveList=DriveListResource(drive=[DriveResource(serialNumber=item) for item in partition.get("drives", [])]))
+    return DriveListResponse(
+        driveList=DriveListResource(
+            drive=[DriveResource(serialNumber=item) for item in partition.get("drives", [])]
+        )
+    )
 
 
 @router.post("/partition/{name}/drive", response_model=WSResultCode)
@@ -840,7 +879,9 @@ async def list_partition_media(
 ) -> MediaListResponse:
     _ensure_state(context)
     partition = _get_partition_or_404(_validate_name(name))
-    return MediaListResponse(mediaList=MediaListResource(media=_partition_media(partition, context)))
+    return MediaListResponse(
+        mediaList=MediaListResource(media=_partition_media(partition, context))
+    )
 
 
 @router.get("/partition/{name}/slots", response_model=SlotListResponse)
@@ -901,7 +942,9 @@ async def put_partition_policy(
 ) -> PolicyResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updated = aml_state.set_aml_partition_section(_validate_name(name), "policy", payload.policy.model_dump())
+    updated = aml_state.set_aml_partition_section(
+        _validate_name(name), "policy", payload.policy.model_dump()
+    )
     if updated is None:
         raise HTTPException(status_code=404, detail="Partition not found")
     return PolicyResponse(policy=PolicyResource.model_validate(updated))
@@ -915,7 +958,9 @@ async def get_partition_access(
 ) -> AccessConfigResponse:
     _ensure_state(context)
     partition = _get_partition_or_404(_validate_name(name))
-    return AccessConfigResponse(accessConfig=AccessConfigResource.model_validate(partition.get("access", {})))
+    return AccessConfigResponse(
+        accessConfig=AccessConfigResource.model_validate(partition.get("access", {}))
+    )
 
 
 @router.put("/partition/{name}/access", response_model=AccessConfigResponse)
@@ -1065,7 +1110,9 @@ async def get_partition_cleaning(
 ) -> CleaningConfigResponse:
     _ensure_state(context)
     partition = _get_partition_or_404(_validate_name(name))
-    return CleaningConfigResponse(cleaningConfig=CleaningConfigResource.model_validate(partition.get("cleaning", {})))
+    return CleaningConfigResponse(
+        cleaningConfig=CleaningConfigResource.model_validate(partition.get("cleaning", {}))
+    )
 
 
 @router.put("/partition/{name}/cleaning", response_model=CleaningConfigResponse)
@@ -1077,7 +1124,9 @@ async def put_partition_cleaning(
 ) -> CleaningConfigResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updated = aml_state.set_aml_partition_section(_validate_name(name), "cleaning", payload.cleaningConfig.model_dump())
+    updated = aml_state.set_aml_partition_section(
+        _validate_name(name), "cleaning", payload.cleaningConfig.model_dump()
+    )
     if updated is None:
         raise HTTPException(status_code=404, detail="Partition not found")
     return CleaningConfigResponse(cleaningConfig=CleaningConfigResource.model_validate(updated))
@@ -1141,7 +1190,9 @@ async def put_partition_worm(
 ) -> WormResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updated = aml_state.set_aml_partition_section(_validate_name(name), "worm", payload.worm.model_dump())
+    updated = aml_state.set_aml_partition_section(
+        _validate_name(name), "worm", payload.worm.model_dump()
+    )
     if updated is None:
         raise HTTPException(status_code=404, detail="Partition not found")
     return WormResponse(worm=WormResource.model_validate(updated))
@@ -1155,7 +1206,9 @@ async def get_partition_encryption(
 ) -> EncryptionResponse:
     _ensure_state(context)
     partition = _get_partition_or_404(_validate_name(name))
-    return EncryptionResponse(encryption=EncryptionResource.model_validate(partition.get("encryption", {})))
+    return EncryptionResponse(
+        encryption=EncryptionResource.model_validate(partition.get("encryption", {}))
+    )
 
 
 @router.put("/partition/{name}/encryption", response_model=EncryptionResponse)
@@ -1167,7 +1220,9 @@ async def put_partition_encryption(
 ) -> EncryptionResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updated = aml_state.set_aml_partition_section(_validate_name(name), "encryption", payload.encryption.model_dump())
+    updated = aml_state.set_aml_partition_section(
+        _validate_name(name), "encryption", payload.encryption.model_dump()
+    )
     if updated is None:
         raise HTTPException(status_code=404, detail="Partition not found")
     return EncryptionResponse(encryption=EncryptionResource.model_validate(updated))
@@ -1193,7 +1248,9 @@ async def put_partition_qos(
 ) -> QoSResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updated = aml_state.set_aml_partition_section(_validate_name(name), "qos", payload.qos.model_dump())
+    updated = aml_state.set_aml_partition_section(
+        _validate_name(name), "qos", payload.qos.model_dump()
+    )
     if updated is None:
         raise HTTPException(status_code=404, detail="Partition not found")
     return QoSResponse(qos=QoSResource.model_validate(updated))
@@ -1219,7 +1276,9 @@ async def put_partition_lme(
 ) -> LMEResponse:
     _ensure_state(context)
     _require_admin(current_user)
-    updated = aml_state.set_aml_partition_section(_validate_name(name), "lme", payload.lme.model_dump())
+    updated = aml_state.set_aml_partition_section(
+        _validate_name(name), "lme", payload.lme.model_dump()
+    )
     if updated is None:
         raise HTTPException(status_code=404, detail="Partition not found")
     return LMEResponse(lme=LMEResource.model_validate(updated))
@@ -1245,7 +1304,11 @@ async def get_partition_move_queue(
     _ensure_state(context)
     partition = _get_partition_or_404(_validate_name(name))
     return MoveQueueListResponse(
-        moveQueueList=MoveQueueListResource(moveJob=[MoveJobResource.model_validate(item) for item in partition.get("moveQueue", [])])
+        moveQueueList=MoveQueueListResource(
+            moveJob=[
+                MoveJobResource.model_validate(item) for item in partition.get("moveQueue", [])
+            ]
+        )
     )
 
 
@@ -1271,7 +1334,11 @@ async def get_partition_alerts(
 ) -> AlertListResponse:
     _ensure_state(context)
     partition = _get_partition_or_404(_validate_name(name))
-    return AlertListResponse(alertList=AlertListResource(alert=[AlertResource.model_validate(item) for item in partition.get("alerts", [])]))
+    return AlertListResponse(
+        alertList=AlertListResource(
+            alert=[AlertResource.model_validate(item) for item in partition.get("alerts", [])]
+        )
+    )
 
 
 @router.get("/partition/{name}/quota", response_model=QuotaResponse)
@@ -1282,7 +1349,9 @@ async def get_partition_quota(
 ) -> QuotaResponse:
     _ensure_state(context)
     partition = _get_partition_or_404(_validate_name(name))
-    return QuotaResponse(quota=QuotaResource.model_validate(_partition_quota_dict(partition, context)))
+    return QuotaResponse(
+        quota=QuotaResource.model_validate(_partition_quota_dict(partition, context))
+    )
 
 
 @router.put("/partition/{name}/quota", response_model=QuotaResponse)

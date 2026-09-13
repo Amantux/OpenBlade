@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
 from openblade.config import BackendMode, OpenBladeConfig, load_config
 from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.domain.policies import RealHardwareGuard
 from openblade.hardware.discovery import discover_library
 from openblade.hardware.library import RealLibraryBackend
 from openblade.hardware.ltfs import RealLTFSBackend
@@ -30,7 +32,13 @@ from openblade.nas.types import NasDataset, NasFileRecord, NasFileState, NasPool
 from openblade.simulator.i3_config import scalar_i3_active_config
 from openblade.simulator.scenarios import scalar_i3_default
 
-structlog.configure()
+# structlog's default PrintLoggerFactory writes to sys.stdout (verified against
+# the installed structlog._output.PrintLogger.__init__: `file or stdout`). That
+# put log lines into the CLI's own machine-readable output -- e.g.
+#     openblade format confirm --barcode X --token Y | jq
+# died with "Extra data" because two `tape operation ...` lines preceded the
+# JSON. Diagnostics belong on stderr; stdout is the data channel.
+structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=sys.stderr))
 
 _library: LibraryBackend | None = None
 _ltfs: LTFSBackend | None = None
@@ -367,24 +375,71 @@ class AppContext:
     restore_service: RestoreService
 
 
-def _create_scalar_http_library(config: OpenBladeConfig) -> LibraryBackend:
+def _create_scalar_http_library(
+    config: OpenBladeConfig, runner: SafeRunner, guard: RealHardwareGuard
+) -> LibraryBackend:
     """Build the Web Services robotics backend for a real Scalar i3 AML endpoint."""
     import httpx
 
     from openblade.domain.errors import RealHardwareDisabledError
+    from openblade.hardware.correlation import DriveCorrelation
+    from openblade.hardware.library import build_drive_correlation
     from openblade.hardware.scalar_http import ScalarHttpLibraryBackend, ScalarHttpSession
 
     if not config.scalar_url:
         raise RealHardwareDisabledError(
             "OPENBLADE_ROBOTICS_TRANSPORT=webservices requires OPENBLADE_SCALAR_URL"
         )
-    client = httpx.Client(
-        base_url=config.scalar_url, verify=config.scalar_verify_tls, timeout=30.0
-    )
+    client = httpx.Client(base_url=config.scalar_url, verify=config.scalar_verify_tls, timeout=30.0)
     session = ScalarHttpSession(
         client, username=config.scalar_user, password=config.scalar_password
     )
-    return ScalarHttpLibraryBackend(session)
+
+    def _correlate() -> DriveCorrelation:
+        # Deferred to first use: local SCSI discovery and sg_inq are only needed for
+        # the LTFS data path, so a robotics-only deployment (no tape devices on this
+        # host) keeps starting exactly as it did before drive_device was implemented.
+        return build_drive_correlation(
+            config=config,
+            runner=runner,
+            guard=guard,
+            discovery=discover_library(runner, guard),
+        )
+
+    return ScalarHttpLibraryBackend(session, correlation_factory=_correlate)
+
+
+def _catalog_tape_states(config: OpenBladeConfig) -> dict[str, tuple[int, int]]:
+    """Measured capacity/usage per barcode, straight from the ``cartridges`` table.
+
+    This is what hydrates ``RealLTFSBackend._tapes`` so the first spill decision
+    after a restart uses the real geometry of the medium instead of the
+    12 GB default. The catalog is the authority because ``jobs/archive.py`` is
+    what writes these columns, from the ``statvfs`` numbers measured while the
+    tape was mounted.
+
+    Never fatal: a database that is missing, unreadable or empty just means "no
+    measurements yet", which is exactly the pre-existing behaviour.
+    """
+    logger = structlog.get_logger(__name__)
+    try:
+        init_db(config.db_url)
+        session = get_session()
+    except Exception as exc:  # noqa: BLE001 - startup must survive a bad/absent DB
+        logger.debug("ltfs_capacity_hydration_skipped", error=type(exc).__name__)
+        return {}
+    try:
+        states = {
+            str(cartridge.barcode): (int(cartridge.capacity_bytes), int(cartridge.used_bytes))
+            for cartridge in CatalogRepository(session).list_cartridges()
+        }
+    except Exception as exc:  # noqa: BLE001 - see above
+        logger.debug("ltfs_capacity_hydration_failed", error=type(exc).__name__)
+        return {}
+    finally:
+        session.close()
+    logger.debug("ltfs_capacity_hydrated", tapes=len(states))
+    return states
 
 
 def _create_real_backends(config: OpenBladeConfig) -> tuple[LibraryBackend, LTFSBackend]:
@@ -392,7 +447,7 @@ def _create_real_backends(config: OpenBladeConfig) -> tuple[LibraryBackend, LTFS
     runner = SafeRunner(dry_run=config.hardware_dry_run)
     library: LibraryBackend
     if config.robotics_transport == "webservices":
-        library = _create_scalar_http_library(config)
+        library = _create_scalar_http_library(config, runner, guard)
     else:
         discovery = discover_library(runner, guard)
         library = RealLibraryBackend(config=config, runner=runner, discovery=discovery)
@@ -403,6 +458,7 @@ def _create_real_backends(config: OpenBladeConfig) -> tuple[LibraryBackend, LTFS
         guard=guard,
         runner=runner,
         mount_root=Path(config.ltfs_mount_root),
+        known_tapes=_catalog_tape_states(config),
     )
     return library, ltfs
 

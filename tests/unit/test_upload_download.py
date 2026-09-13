@@ -94,7 +94,9 @@ def test_download_uploaded_file(client: TestClient, admin_auth_headers: dict[str
 
 def test_download_nonexistent_file(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
     # Use a valid UUID4 format that does not correspond to any uploaded file
-    response = client.get("/api/files/00000000-0000-4000-8000-000000000000/download", headers=admin_auth_headers)
+    response = client.get(
+        "/api/files/00000000-0000-4000-8000-000000000000/download", headers=admin_auth_headers
+    )
     assert response.status_code == 404
 
 
@@ -195,20 +197,28 @@ def test_upload_requires_auth(client: TestClient) -> None:
     assert response.status_code in (401, 403)
 
 
-def test_path_traversal_download_rejected(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_path_traversal_download_rejected(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """file_id with path traversal must be rejected with 400."""
     for evil_id in ["../../etc/passwd", "../staging/somefile", "/etc/passwd", "not-a-uuid"]:
         resp = client.get(f"/api/files/{evil_id}/download", headers=admin_auth_headers)
-        assert resp.status_code in (400, 404), f"Expected 400/404 for {evil_id!r}, got {resp.status_code}"
+        assert resp.status_code in (400, 404), (
+            f"Expected 400/404 for {evil_id!r}, got {resp.status_code}"
+        )
 
 
-def test_path_traversal_checksum_rejected(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_path_traversal_checksum_rejected(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """file_id with path traversal must be rejected with 400 on checksum endpoint."""
     resp = client.get("/api/files/../../etc/shadow/checksum", headers=admin_auth_headers)
     assert resp.status_code in (400, 404)
 
 
-def test_path_traversal_delete_rejected(client: TestClient, admin_auth_headers: dict[str, str]) -> None:
+def test_path_traversal_delete_rejected(
+    client: TestClient, admin_auth_headers: dict[str, str]
+) -> None:
     """file_id with path traversal must be rejected with 400 on delete endpoint."""
     resp = client.delete("/api/files/../../etc/shadow", headers=admin_auth_headers)
     assert resp.status_code in (400, 404)

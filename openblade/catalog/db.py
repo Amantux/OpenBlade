@@ -57,7 +57,9 @@ def _migrate_schema(engine: Engine) -> None:
     }
     restore_job_columns: set[str] = set()
     if "nas_restore_jobs" in inspector.get_table_names():
-        restore_job_columns = {column["name"] for column in inspector.get_columns("nas_restore_jobs")}
+        restore_job_columns = {
+            column["name"] for column in inspector.get_columns("nas_restore_jobs")
+        }
     missing_restore_job_columns = (
         {"partial_success": "BOOLEAN NOT NULL DEFAULT 0"}
         if restore_job_columns and "partial_success" not in restore_job_columns
@@ -74,14 +76,20 @@ def _migrate_schema(engine: Engine) -> None:
     with engine.begin() as connection:
         if missing_columns:
             for name, column_type in missing_columns.items():
-                connection.execute(text(f"ALTER TABLE file_records ADD COLUMN {name} {column_type}"))
+                connection.execute(
+                    text(f"ALTER TABLE file_records ADD COLUMN {name} {column_type}")
+                )
         if existing_columns:
             connection.execute(
-                text("CREATE INDEX IF NOT EXISTS ix_file_records_parent_id ON file_records (parent_id)")
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_file_records_parent_id ON file_records (parent_id)"
+                )
             )
         if missing_restore_job_columns:
             for name, column_type in missing_restore_job_columns.items():
-                connection.execute(text(f"ALTER TABLE nas_restore_jobs ADD COLUMN {name} {column_type}"))
+                connection.execute(
+                    text(f"ALTER TABLE nas_restore_jobs ADD COLUMN {name} {column_type}")
+                )
         connection.execute(
             text(
                 """
@@ -102,18 +110,28 @@ def _migrate_schema(engine: Engine) -> None:
         )
         library_columns: set[str] = set()
         if "library_instances" in inspector.get_table_names():
-            library_columns = {column["name"] for column in inspector.get_columns("library_instances")}
+            library_columns = {
+                column["name"] for column in inspector.get_columns("library_instances")
+            }
         if library_columns and "role" not in library_columns:
             with suppress(Exception):
-                connection.execute(text("ALTER TABLE library_instances ADD COLUMN role TEXT DEFAULT 'primary'"))
+                connection.execute(
+                    text("ALTER TABLE library_instances ADD COLUMN role TEXT DEFAULT 'primary'")
+                )
         if library_columns and "sort_order" not in library_columns:
             with suppress(Exception):
-                connection.execute(text("ALTER TABLE library_instances ADD COLUMN sort_order INTEGER DEFAULT 0"))
+                connection.execute(
+                    text("ALTER TABLE library_instances ADD COLUMN sort_order INTEGER DEFAULT 0")
+                )
         if missing_cartridge_columns:
             for name, column_type in missing_cartridge_columns.items():
                 connection.execute(text(f"ALTER TABLE cartridges ADD COLUMN {name} {column_type}"))
         if cartridge_columns:
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_cartridges_library_id ON cartridges (library_id)"))
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_cartridges_library_id ON cartridges (library_id)"
+                )
+            )
         connection.execute(
             text(
                 """

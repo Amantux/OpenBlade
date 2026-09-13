@@ -43,11 +43,8 @@ def test_real_library_supports_smoke_command_matrix(
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     failed = [item for item in report["results"] if not bool(item["matched"])]
-    assert not failed, (
-        "Smoke command compatibility failed:\n"
-        + "\n".join(
-            f"- {item['method']} {item['path']} -> {item['status_code']} "
-            f"(expected one of {item['expected_statuses']})"
-            for item in failed
-        )
+    assert not failed, "Smoke command compatibility failed:\n" + "\n".join(
+        f"- {item['method']} {item['path']} -> {item['status_code']} "
+        f"(expected one of {item['expected_statuses']})"
+        for item in failed
     )

@@ -14,7 +14,12 @@ from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 # Methods newly promoted into the shared protocol this change — verified present on
 # the simulator AND the real backends (mtx/SCSI + Scalar HTTP + real LTFS).
-_ADDED_LIBRARY = ("find_slot_by_barcode", "find_drive_by_barcode", "get_all_barcodes", "get_cartridge_state")
+_ADDED_LIBRARY = (
+    "find_slot_by_barcode",
+    "find_drive_by_barcode",
+    "get_all_barcodes",
+    "get_cartridge_state",
+)
 _ADDED_LTFS = ("ensure_tape", "remaining_capacity", "read_bytes")
 
 

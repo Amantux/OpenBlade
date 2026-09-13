@@ -4,8 +4,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from openblade.config import OpenBladeConfig
+from openblade.domain.errors import DriveCorrelationError
 from openblade.domain.policies import DryRunPlan
-from openblade.hardware.discovery import LibraryDiscovery, discover_library
+from openblade.hardware.discovery import LibraryDiscovery, discover_library, resolve_sg_device
 from openblade.hardware.library import RealLibraryBackend
 from openblade.hardware.ltfs import LTFSCommandBackend, LTFSDevice
 from openblade.hardware.runner import SafeRunner
@@ -25,6 +26,16 @@ class QuantumI3ConnectionReport:
     loaded_drive_count: int
     drive_devices: list[str]
     sg_inquiry: list[dict[str, str]]
+    # Drive-element -> device binding and how it was established. Copy the serials
+    # into OPENBLADE_DRIVE_SERIAL_MAP to turn an unverified positional order into a
+    # verified one (see openblade/hardware/correlation.py).
+    drive_correlation: list[dict[str, str | int]]
+    drive_correlation_source: str
+    # True only when every device was probed and its serial matched the declared
+    # map. It does NOT mean the element assignment itself was machine-verified —
+    # see openblade/hardware/correlation.py.
+    drive_correlation_serials_verified: bool
+    drive_correlation_warnings: list[str]
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -62,8 +73,16 @@ def connect_quantum_i3(
         drive_count=len(inventory.drives),
         occupied_slot_count=sum(1 for slot in inventory.slots if slot.occupied),
         loaded_drive_count=sum(1 for drive in inventory.drives if drive.barcode is not None),
-        drive_devices=[library.drive_device(drive.drive_id) for drive in inventory.drives],
+        # An element the host has no device for is reported as "" rather than
+        # raising: connect-i3 is the diagnostic you run *because* a drive is missing.
+        drive_devices=[
+            _drive_device_or_blank(library, drive.drive_id) for drive in inventory.drives
+        ],
         sg_inquiry=_inquiry_payloads(discovery, active_runner, guard),
+        drive_correlation=library.correlation.to_payload(),
+        drive_correlation_source=library.correlation.source,
+        drive_correlation_serials_verified=library.correlation.serials_verified,
+        drive_correlation_warnings=list(library.correlation.warnings),
     )
 
 
@@ -86,22 +105,38 @@ def validate_ltfs_capabilities(
         if mount_point is None:
             raise ValueError("mount_point is required when exercise_mounts is enabled")
         mount_point.mkdir(parents=True, exist_ok=True)
-        readonly_mount = LTFSCommandBackend.mount_readonly(device, str(mount_point), guard, active_runner)
+        readonly_mount = LTFSCommandBackend.mount_readonly(
+            device, str(mount_point), guard, active_runner
+        )
         readonly_mount_ok = readonly_mount.success
         if readonly_mount.success:
             LTFSCommandBackend.unmount(str(mount_point), guard, active_runner)
-        readwrite_mount = LTFSCommandBackend.mount_readwrite(device, str(mount_point), guard, active_runner)
+        readwrite_mount = LTFSCommandBackend.mount_readwrite(
+            device, str(mount_point), guard, active_runner
+        )
         readwrite_mount_ok = readwrite_mount.success
         if readwrite_mount.success:
             LTFSCommandBackend.unmount(str(mount_point), guard, active_runner)
     return LTFSValidationReport(
         requested_device=device,
         discovered_devices=[_ltfs_device_payload(current) for current in devices],
-        device_list_ok=any(current.device == device for current in devices),
+        # Compare on the SCSI generic node. LTFS only ever lists /dev/sgN, but
+        # callers pass a tape node - the CLI help for this command literally
+        # suggests "/dev/st0", and Phase 4.1 of the bring-up plan passes
+        # /dev/nst0 - so a raw equality check reported device_list_ok=false on
+        # a perfectly healthy setup, at the first gate of the bring-up.
+        device_list_ok=_device_in_list(device, devices),
         format_plan=_plan_payload(format_plan),
         readonly_mount_ok=readonly_mount_ok,
         readwrite_mount_ok=readwrite_mount_ok,
     )
+
+
+def _drive_device_or_blank(library: RealLibraryBackend, drive_id: int) -> str:
+    try:
+        return library.drive_device(drive_id)
+    except DriveCorrelationError:
+        return ""
 
 
 def _changer_devices(discovery: LibraryDiscovery) -> list[str]:
@@ -124,7 +159,9 @@ def _drive_devices(discovery: LibraryDiscovery) -> list[str]:
     return devices
 
 
-def _inquiry_payloads(discovery: LibraryDiscovery, runner: SafeRunner, guard) -> list[dict[str, str]]:
+def _inquiry_payloads(
+    discovery: LibraryDiscovery, runner: SafeRunner, guard
+) -> list[dict[str, str]]:
     payloads: list[dict[str, str]] = []
     for device in _inquiry_devices(discovery):
         inquiry = sg_inq(device, runner, guard)
@@ -145,6 +182,21 @@ def _inquiry_devices(discovery: LibraryDiscovery) -> list[str]:
         if element.sg_device:
             devices.append(element.sg_device)
     return devices
+
+
+def _device_in_list(device: str, devices: list[LTFSDevice]) -> bool:
+    """Is ``device`` one of the drives LTFS enumerated?
+
+    LTFS lists SCSI generic nodes (/dev/sgN); callers name a tape node
+    (/dev/stN or /dev/nstN). Resolve both sides before comparing, and keep the
+    literal comparison too so an already-sg argument still matches on a host
+    where the sysfs mapping is unreadable.
+    """
+    resolved = resolve_sg_device(device)
+    return any(
+        current.device == device or resolve_sg_device(current.device) == resolved
+        for current in devices
+    )
 
 
 def _ltfs_device_payload(device: LTFSDevice) -> dict[str, object]:

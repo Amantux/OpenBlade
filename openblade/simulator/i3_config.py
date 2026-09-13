@@ -82,9 +82,7 @@ class ScalarI3Profile:
                 f"({self.drive_count + 1}) to fit one cleaning slot per drive plus data"
             )
         if not 0 <= self.occupancy_percent <= 100:
-            raise ValueError(
-                f"occupancy_percent must be in 0..100; got {self.occupancy_percent}"
-            )
+            raise ValueError(f"occupancy_percent must be in 0..100; got {self.occupancy_percent}")
         if self.ie_slot_count < 0:
             raise ValueError(f"ie_slot_count must be >= 0; got {self.ie_slot_count}")
         if self.drive_overrides is not None and len(self.drive_overrides) != self.drive_count:
@@ -313,7 +311,9 @@ def _build_drives(profile: ScalarI3Profile) -> list[dict[str, Any]]:
     return drives
 
 
-def _build_partition(profile: ScalarI3Profile, data_media: list[dict[str, Any]], cleaning_count: int) -> dict[str, Any]:
+def _build_partition(
+    profile: ScalarI3Profile, data_media: list[dict[str, Any]], cleaning_count: int
+) -> dict[str, Any]:
     return {
         "name": "partition1",
         "id": "PART-001",
@@ -347,7 +347,9 @@ def _build_ie_stations(profile: ScalarI3Profile) -> list[dict[str, Any]]:
     ]
 
 
-def _build_ltfs_sections(profile: ScalarI3Profile, data_media: list[dict[str, Any]], drives: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_ltfs_sections(
+    profile: ScalarI3Profile, data_media: list[dict[str, Any]], drives: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     roles = ("primary", "secondary", "auxiliary")
     drive_refs = [
         {

@@ -2,6 +2,7 @@
 
 Format delay is significant (8s realistic, 300s hardware) — test uses timing profile.
 """
+
 from __future__ import annotations
 
 import time
@@ -31,18 +32,24 @@ def _get_scratch_barcode(i3_client: httpx.Client, headers: dict[str, str]) -> st
 
 
 class TestLTFSFormat:
-    def test_format_endpoint_exists(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_format_endpoint_exists(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         """Verify the LTFS format endpoint is present and requires confirmation."""
         resp = i3_client.post("/ltfs/format", headers=auth_headers, json={})
         assert resp.status_code != 404, "LTFS format endpoint is missing"
 
-    def test_format_requires_barcode(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_format_requires_barcode(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.post("/ltfs/format", headers=auth_headers, json={})
         assert resp.status_code in (400, 422), (
             f"Format without barcode should be rejected: {resp.status_code}"
         )
 
-    def test_format_with_timing(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_format_with_timing(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         barcode = _get_scratch_barcode(i3_client, auth_headers)
         if not barcode:
             pytest.skip("No scratch barcode available for format test")
@@ -60,17 +67,23 @@ class TestLTFSFormat:
 
 
 class TestLTFSMount:
-    def test_mount_endpoint_exists(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_mount_endpoint_exists(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.post("/ltfs/mount", headers=auth_headers, json={})
         assert resp.status_code != 404, "LTFS mount endpoint is missing"
 
-    def test_mount_requires_barcode(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_mount_requires_barcode(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.post("/ltfs/mount", headers=auth_headers, json={})
         assert resp.status_code in (400, 422), (
             f"Mount without barcode should be rejected: {resp.status_code}"
         )
 
-    def test_mount_and_unmount_cycle(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_mount_and_unmount_cycle(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         barcode = _get_scratch_barcode(i3_client, auth_headers)
         if not barcode:
             pytest.skip("No scratch barcode for mount test")
@@ -94,11 +107,15 @@ class TestLTFSMount:
 
 
 class TestLTFSStatus:
-    def test_ltfs_status_endpoint(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_ltfs_status_endpoint(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/ltfs/status", headers=auth_headers)
         assert resp.status_code == 200
 
-    def test_ltfs_status_fields(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_ltfs_status_fields(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         resp = i3_client.get("/ltfs/status", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()

@@ -113,7 +113,9 @@ def _render_markdown(catalog: dict[str, Any]) -> str:
 
 def main() -> int:
     catalog = _build_catalog()
-    CATALOG_JSON_PATH.write_text(json.dumps(catalog, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    CATALOG_JSON_PATH.write_text(
+        json.dumps(catalog, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     CATALOG_MD_PATH.write_text(_render_markdown(catalog), encoding="utf-8")
     print(
         "Generated endpoint catalog: "

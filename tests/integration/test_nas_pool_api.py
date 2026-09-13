@@ -18,10 +18,8 @@ def reset_app_context(tmp_path: Path) -> None:
     reset_context(context)
 
 
-
 def nas_service() -> NasService:
     return NasService(get_context().catalog)
-
 
 
 def seed_pool_file(pool_id: str, relative_path: str, *, dataset_id: str = "dataset-1") -> None:
@@ -40,13 +38,11 @@ def seed_pool_file(pool_id: str, relative_path: str, *, dataset_id: str = "datas
     )
 
 
-
 def test_post_pools_returns_201() -> None:
     response = client.post("/nas/pools", json={"id": "pool-1", "name": "Pool One"})
 
     assert response.status_code == 201
     assert response.json()["id"] == "pool-1"
-
 
 
 def test_get_pools_returns_created_pool() -> None:
@@ -58,7 +54,6 @@ def test_get_pools_returns_created_pool() -> None:
     assert any(pool["id"] == "pool-1" for pool in response.json())
 
 
-
 def test_get_pool_by_id_returns_200() -> None:
     assert client.post("/nas/pools", json={"id": "pool-1", "name": "Pool One"}).status_code == 201
 
@@ -68,7 +63,6 @@ def test_get_pool_by_id_returns_200() -> None:
     assert response.json()["name"] == "Pool One"
 
 
-
 def test_browse_empty_pool_returns_200() -> None:
     assert client.post("/nas/pools", json={"id": "pool-1", "name": "Pool One"}).status_code == 201
 
@@ -76,7 +70,6 @@ def test_browse_empty_pool_returns_200() -> None:
 
     assert response.status_code == 200
     assert response.json()["entries"] == []
-
 
 
 def test_browse_pool_with_path_returns_200() -> None:
@@ -90,7 +83,6 @@ def test_browse_pool_with_path_returns_200() -> None:
     assert [entry["name"] for entry in response.json()["entries"]] == ["a.jpg", "b.jpg"]
 
 
-
 def test_get_pool_file_missing_returns_404() -> None:
     assert client.post("/nas/pools", json={"id": "pool-1", "name": "Pool One"}).status_code == 201
 
@@ -98,7 +90,6 @@ def test_get_pool_file_missing_returns_404() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "File not found"
-
 
 
 def test_request_restore_returns_201_with_job_id() -> None:
@@ -115,7 +106,6 @@ def test_request_restore_returns_201_with_job_id() -> None:
     assert response.json()["id"]
 
 
-
 def test_list_restore_jobs_returns_200() -> None:
     assert client.post("/nas/pools", json={"id": "pool-1", "name": "Pool One"}).status_code == 201
     create_response = client.post(
@@ -128,7 +118,6 @@ def test_list_restore_jobs_returns_200() -> None:
 
     assert response.status_code == 200
     assert any(job["id"] == job_id for job in response.json())
-
 
 
 def test_get_restore_job_returns_200() -> None:

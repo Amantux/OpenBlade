@@ -189,7 +189,9 @@ async def list_access_groups(
 ) -> AccessGroupList:
     _ensure_state(context)
     _require_admin_access(current_user)
-    return AccessGroupList(accessGroup=[_serialize_access_group(item) for item in aml_state.list_access_groups()])
+    return AccessGroupList(
+        accessGroup=[_serialize_access_group(item) for item in aml_state.list_access_groups()]
+    )
 
 
 @router.get("/access/group/{name}", response_model=AccessGroupEnvelope)
@@ -204,7 +206,9 @@ async def get_access_group(
     return AccessGroupEnvelope(accessGroup=_serialize_access_group(_get_group_or_404(group_name)))
 
 
-@router.post("/access/group/{name}", response_model=AccessGroupEnvelope, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/access/group/{name}", response_model=AccessGroupEnvelope, status_code=status.HTTP_201_CREATED
+)
 async def create_access_group(
     name: str,
     current_user: AmlUser = Depends(require_auth),
@@ -292,7 +296,9 @@ async def list_group_devices(
     _require_admin_access(current_user)
     group_name = _require_group(name)
     group = _get_group_or_404(group_name)
-    return DeviceList(device=[Device(serialNumber=serial_number) for serial_number in group.get("devices", [])])
+    return DeviceList(
+        device=[Device(serialNumber=serial_number) for serial_number in group.get("devices", [])]
+    )
 
 
 @router.post("/access/group/{name}/devices", response_model=WSResultCode)

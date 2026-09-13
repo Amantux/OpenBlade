@@ -1366,9 +1366,7 @@ def _prometheus_label_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
-def _prometheus_line(
-    name: str, value: int | float, labels: dict[str, str] | None = None
-) -> str:
+def _prometheus_line(name: str, value: int | float, labels: dict[str, str] | None = None) -> str:
     if labels:
         rendered_labels = ",".join(
             f'{key}="{_prometheus_label_value(label)}"' for key, label in sorted(labels.items())
@@ -1410,7 +1408,14 @@ def _job_bytes(job: dict[str, Any]) -> int:
     metadata = job.get("metadata")
     if not isinstance(metadata, dict):
         return 0
-    for key in ("bytes", "bytesWritten", "bytesRead", "bytesArchived", "bytesRestored", "sizeBytes"):
+    for key in (
+        "bytes",
+        "bytesWritten",
+        "bytesRead",
+        "bytesArchived",
+        "bytesRestored",
+        "sizeBytes",
+    ):
         value = metadata.get(key)
         if isinstance(value, (int, float)):
             return int(value)
@@ -1607,7 +1612,9 @@ def _build_prometheus_metrics_payload() -> str:
     total_capacity_bytes = sum(int(media.get("capacityBytes", 0)) for media in data_media)
     total_used_bytes = sum(int(media.get("usedBytes", 0)) for media in data_media)
     utilization_percent = (
-        round((total_used_bytes / total_capacity_bytes) * 100, 3) if total_capacity_bytes > 0 else 0.0
+        round((total_used_bytes / total_capacity_bytes) * 100, 3)
+        if total_capacity_bytes > 0
+        else 0.0
     )
     lines.append(_prometheus_line("openblade_media_utilization_percent", utilization_percent))
     lines.append(
@@ -1616,7 +1623,9 @@ def _build_prometheus_metrics_payload() -> str:
         )
     )
     lines.append(
-        _prometheus_line("openblade_media_capacity_bytes", total_used_bytes, {"metric": "total_used"})
+        _prometheus_line(
+            "openblade_media_capacity_bytes", total_used_bytes, {"metric": "total_used"}
+        )
     )
 
     drive_state_counts: dict[str, int] = {}
@@ -3293,7 +3302,9 @@ async def get_emulator_latency_metrics(
     )
 
 
-@router.get("/system/emulator/latency/metrics/export", response_model=EmulatorLatencyMetricsResponse)
+@router.get(
+    "/system/emulator/latency/metrics/export", response_model=EmulatorLatencyMetricsResponse
+)
 async def export_emulator_latency_metrics(
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
@@ -3320,7 +3331,9 @@ async def export_emulator_latency_metrics_prometheus(
     )
 
 
-@router.post("/system/emulator/latency/metrics/reset", response_model=EmulatorLatencyMetricsResponse)
+@router.post(
+    "/system/emulator/latency/metrics/reset", response_model=EmulatorLatencyMetricsResponse
+)
 async def reset_emulator_latency_metrics(
     current_user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),

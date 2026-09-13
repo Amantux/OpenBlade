@@ -14,6 +14,7 @@ from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_
 from openblade.api.service_auth import require_service_token
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
+from openblade.domain.errors import safe_job_error
 
 router = APIRouter()
 
@@ -335,7 +336,6 @@ class GenericStatusResponse(BaseModel):
     status: OperationState
 
 
-
 def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -353,7 +353,6 @@ def _record_drive_cleaning_report(serial_number: str, cleaned_at: str) -> None:
     )
 
 
-
 def _parse_timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -363,10 +362,8 @@ def _parse_timestamp(value: str | None) -> datetime | None:
         return None
 
 
-
 def _ws_result(summary: str = "Operation completed") -> WSResultCode:
     return WSResultCode(summary=summary)
-
 
 
 def _validate_identifier(value: str, *, field_name: str) -> str:
@@ -376,7 +373,6 @@ def _validate_identifier(value: str, *, field_name: str) -> str:
     return normalized
 
 
-
 def _validate_barcodes(barcodes: list[str]) -> list[str]:
     values = [_validate_identifier(barcode, field_name="barcode") for barcode in barcodes]
     if not values:
@@ -384,25 +380,22 @@ def _validate_barcodes(barcodes: list[str]) -> list[str]:
     return values
 
 
-
 def _serialize_move(item: dict[str, Any]) -> MoveOperation:
     return MoveOperation.model_validate(item)
-
 
 
 def _serialize_mount(item: dict[str, Any]) -> MountOperation:
     return MountOperation.model_validate(item)
 
 
-
 def _serialize_job(item: dict[str, Any]) -> Job:
     return Job.model_validate(item)
 
 
-
 def _sorted_jobs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(items, key=lambda item: (item.get("startTime") or "", item.get("id") or ""), reverse=True)
-
+    return sorted(
+        items, key=lambda item: (item.get("startTime") or "", item.get("id") or ""), reverse=True
+    )
 
 
 def _get_media_or_404(barcode: str) -> dict[str, Any]:
@@ -412,13 +405,11 @@ def _get_media_or_404(barcode: str) -> dict[str, Any]:
     return media
 
 
-
 def _get_drive_or_404(drive: str) -> dict[str, Any]:
     drive_data = aml_state.get_aml_drive(drive)
     if drive_data is None:
         raise HTTPException(status_code=404, detail="Drive not found")
     return drive_data
-
 
 
 def _get_partition_or_404(name: str) -> dict[str, Any]:
@@ -428,13 +419,11 @@ def _get_partition_or_404(name: str) -> dict[str, Any]:
     return partition
 
 
-
 def _get_ie_station_or_404(name: str) -> dict[str, Any]:
     station = aml_state.get_aml_ie_station(name)
     if station is None:
         raise HTTPException(status_code=404, detail="IE station not found")
     return station
-
 
 
 def _get_move_or_404(move_id: str) -> dict[str, Any]:
@@ -444,13 +433,11 @@ def _get_move_or_404(move_id: str) -> dict[str, Any]:
     return move
 
 
-
 def _get_mount_or_404(mount_id: str) -> dict[str, Any]:
     mount = aml_state.get_aml_mount(mount_id)
     if mount is None:
         raise HTTPException(status_code=404, detail="Mount not found")
     return mount
-
 
 
 def _get_job_or_404(job_id: str) -> dict[str, Any]:
@@ -463,8 +450,9 @@ def _get_job_or_404(job_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Job not found")
 
 
-
-def _create_job(operation_type: str, *, priority: str = "normal", result: str | None = None) -> dict[str, Any]:
+def _create_job(
+    operation_type: str, *, priority: str = "normal", result: str | None = None
+) -> dict[str, Any]:
     job_id = str(uuid4())
     job = {
         "id": job_id,
@@ -479,7 +467,6 @@ def _create_job(operation_type: str, *, priority: str = "normal", result: str | 
     return aml_state.set_aml_job(job_id, job)
 
 
-
 def _archive_job(job_id: str, *, status: str, result: str) -> dict[str, Any] | None:
     job = aml_state.pop_aml_job(job_id)
     if job is None:
@@ -491,8 +478,9 @@ def _archive_job(job_id: str, *, status: str, result: str) -> dict[str, Any] | N
     return aml_state.append_aml_job_history(job)
 
 
-
-def _find_mount(*, barcode: str | None = None, drive: str | None = None) -> tuple[str, dict[str, Any]] | None:
+def _find_mount(
+    *, barcode: str | None = None, drive: str | None = None
+) -> tuple[str, dict[str, Any]] | None:
     for mount in aml_state.list_aml_mounts():
         if barcode is not None and mount.get("barcode") != barcode:
             continue
@@ -500,7 +488,6 @@ def _find_mount(*, barcode: str | None = None, drive: str | None = None) -> tupl
             continue
         return str(mount["id"]), mount
     return None
-
 
 
 def _queue_counts() -> QueueStatus:
@@ -515,7 +502,6 @@ def _queue_counts() -> QueueStatus:
     )
 
 
-
 def _throughput_window(since: datetime) -> ThroughputWindow:
     counts = {"mount": 0, "unmount": 0, "move": 0}
     for job in aml_state.list_aml_job_history():
@@ -525,8 +511,9 @@ def _throughput_window(since: datetime) -> ThroughputWindow:
         job_type = str(job.get("type", "")).lower()
         if job_type in counts:
             counts[job_type] += 1
-    return ThroughputWindow(mounts=counts["mount"], unmounts=counts["unmount"], moves=counts["move"])
-
+    return ThroughputWindow(
+        mounts=counts["mount"], unmounts=counts["unmount"], moves=counts["move"]
+    )
 
 
 def _operations_status() -> OperationsStatus:
@@ -538,7 +525,10 @@ def _operations_status() -> OperationsStatus:
     if combined:
         last_operation = max(
             combined,
-            key=lambda item: (item.get("completedTime") or item.get("startTime") or "", item.get("id") or ""),
+            key=lambda item: (
+                item.get("completedTime") or item.get("startTime") or "",
+                item.get("id") or "",
+            ),
         )
     if active_count:
         state = "active"
@@ -554,7 +544,6 @@ def _operations_status() -> OperationsStatus:
         pendingJobs=pending_count,
         lastOperation=None if last_operation is None else str(last_operation.get("type")),
     )
-
 
 
 def _capacity() -> Capacity:
@@ -574,7 +563,6 @@ def _capacity() -> Capacity:
     )
 
 
-
 def _throughput() -> Throughput:
     now = datetime.now(timezone.utc)
     last_hour = _throughput_window(now - timedelta(hours=1))
@@ -590,14 +578,23 @@ def _throughput() -> Throughput:
     )
 
 
-
 def _robotics_status() -> RoboticsStatus:
     robots = aml_state.get_aml_robots()
     robot_items = list(robots.values())
     return RoboticsStatus(
-        state="busy" if any(str(robot.get("state", "")).lower() not in {"idle", "homed"} for robot in robot_items) else "ready",
-        robotsOnline=sum(1 for robot in robot_items if str(robot.get("status", "")).lower() == "online"),
-        robotsBusy=sum(1 for robot in robot_items if str(robot.get("state", "")).lower() not in {"idle", "homed"}),
+        state="busy"
+        if any(
+            str(robot.get("state", "")).lower() not in {"idle", "homed"} for robot in robot_items
+        )
+        else "ready",
+        robotsOnline=sum(
+            1 for robot in robot_items if str(robot.get("status", "")).lower() == "online"
+        ),
+        robotsBusy=sum(
+            1
+            for robot in robot_items
+            if str(robot.get("state", "")).lower() not in {"idle", "homed"}
+        ),
         lastTestTime=aml_state.get_aml_robotics_last_test_time(),
     )
 
@@ -614,29 +611,46 @@ async def create_move(
     # Support both new shape {"move": {"source":..., "destination":..., "barcode":...}}
     # and legacy UI shape {"sourceSlot": X, "targetDrive": Y, "barcode": Z}
     # Early fast-path: if the root payload contains slot/drive numeric identifiers, call the library backend directly.
-    if isinstance(payload, dict) and ("sourceSlot" in payload or "source" in payload) and ("targetDrive" in payload or "destination" in payload):
+    if (
+        isinstance(payload, dict)
+        and ("sourceSlot" in payload or "source" in payload)
+        and ("targetDrive" in payload or "destination" in payload)
+    ):
         try:
             s_raw = payload.get("sourceSlot") if "sourceSlot" in payload else payload.get("source")
-            d_raw = payload.get("targetDrive") if "targetDrive" in payload else payload.get("destination")
+            d_raw = (
+                payload.get("targetDrive")
+                if "targetDrive" in payload
+                else payload.get("destination")
+            )
             s = int(s_raw)
             d = int(d_raw)
         except Exception:
-            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers")
+            # `from None`, not `from exc`: the ValueError/TypeError text can echo
+            # the caller's raw payload, and this detail string is client-facing.
+            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers") from None
         try:
             result = context.library.load(s, d)
             if getattr(result, "success", False):
                 barcode_val = None
                 try:
-                    barcode_val = result.data.get("barcode") if getattr(result, "data", None) else None
+                    barcode_val = (
+                        result.data.get("barcode") if getattr(result, "data", None) else None
+                    )
                 except Exception:
                     barcode_val = None
                 return _ws_result(f"Queued move for {barcode_val or str(s)}")
             else:
-                raise HTTPException(status_code=400, detail=getattr(result, "message", "Move failed"))
+                raise HTTPException(
+                    status_code=400, detail=getattr(result, "message", "Move failed")
+                )
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            # safe_job_error: typed OpenBlade errors carry curated messages;
+            # anything else (CommandError argv+stderr, OSError paths) must not
+            # reach this unauthenticated-by-default AML boundary verbatim.
+            raise HTTPException(status_code=400, detail=safe_job_error(exc)) from exc
 
     if isinstance(payload, dict) and "move" in payload and isinstance(payload["move"], dict):
         data = payload["move"]
@@ -661,7 +675,9 @@ async def create_move(
             s = int(source_raw)
             d = int(dest_raw)
         except Exception:
-            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers")
+            # `from None`, not `from exc`: the ValueError/TypeError text can echo
+            # the caller's raw payload, and this detail string is client-facing.
+            raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers") from None
         # Call the simulated library backend to perform the load/unload
         try:
             result = context.library.load(s, d)
@@ -669,24 +685,35 @@ async def create_move(
                 # If result includes barcode in data, return a helpful message
                 barcode_val = None
                 try:
-                    barcode_val = result.data.get("barcode") if getattr(result, "data", None) else None
+                    barcode_val = (
+                        result.data.get("barcode") if getattr(result, "data", None) else None
+                    )
                 except Exception:
                     barcode_val = None
                 return _ws_result(f"Queued move for {barcode_val or str(s)}")
             else:
                 # Map failure to AML error
-                raise HTTPException(status_code=400, detail=getattr(result, "message", "Move failed"))
+                raise HTTPException(
+                    status_code=400, detail=getattr(result, "message", "Move failed")
+                )
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            # safe_job_error: typed OpenBlade errors carry curated messages;
+            # anything else (CommandError argv+stderr, OSError paths) must not
+            # reach this unauthenticated-by-default AML boundary verbatim.
+            raise HTTPException(status_code=400, detail=safe_job_error(exc)) from exc
 
     # If barcode is missing, try to infer it from the source slot in the current inventory
     if not barcode_raw and source_raw:
         try:
             inventory = context.library.inventory()
             # source_raw is often an integer slot id
-            target_slot_id = int(source_raw) if isinstance(source_raw, (int, str)) and str(source_raw).isdigit() else None
+            target_slot_id = (
+                int(source_raw)
+                if isinstance(source_raw, (int, str)) and str(source_raw).isdigit()
+                else None
+            )
             found = None
             if target_slot_id is not None:
                 for slot in inventory.slots:
@@ -706,7 +733,10 @@ async def create_move(
                 try:
                     for media in aml_state.list_aml_media().values():
                         slot_addr = str(media.get("slotAddress", ""))
-                        if slot_addr and (slot_addr == str(source_raw) or slot_addr.endswith("," + str(source_raw))):
+                        if slot_addr and (
+                            slot_addr == str(source_raw)
+                            or slot_addr.endswith("," + str(source_raw))
+                        ):
                             barcode_raw = str(media.get("barcode"))
                             break
                 except Exception:
@@ -719,20 +749,24 @@ async def create_move(
     def _is_missing(val: object) -> bool:
         if val is None:
             return True
-        if isinstance(val, str) and not val.strip():
-            return True
-        return False
+        return bool(isinstance(val, str) and not val.strip())
 
     if _is_missing(source_raw) or _is_missing(dest_raw) or _is_missing(barcode_raw):
         raise HTTPException(status_code=422, detail="Missing move fields")
 
-    source = _normalize_move_address(_validate_identifier(str(source_raw or ""), field_name="source"))
-    destination = _normalize_move_address(_validate_identifier(str(dest_raw or ""), field_name="destination"))
+    source = _normalize_move_address(
+        _validate_identifier(str(source_raw or ""), field_name="source")
+    )
+    destination = _normalize_move_address(
+        _validate_identifier(str(dest_raw or ""), field_name="destination")
+    )
     barcode = _validate_identifier(str(barcode_raw or ""), field_name="barcode")
 
     media = _get_media_or_404(barcode)
     media_source = _normalize_move_address(str(media.get("slotAddress") or ""))
-    if media_source not in {source, _slot_suffix(source)} and _slot_suffix(media_source) != _slot_suffix(source):
+    if media_source not in {source, _slot_suffix(source)} and _slot_suffix(
+        media_source
+    ) != _slot_suffix(source):
         raise HTTPException(status_code=409, detail="Media is not at the requested source")
     job = _create_job("move")
     aml_state.set_aml_move(
@@ -798,7 +832,11 @@ async def create_mount(
     _require_admin(current_user)
     barcode = _validate_identifier(payload.mount.barcode, field_name="barcode")
     drive_name = _validate_identifier(payload.mount.drive, field_name="drive")
-    partition = None if payload.mount.partition is None else _validate_identifier(payload.mount.partition, field_name="partition")
+    partition = (
+        None
+        if payload.mount.partition is None
+        else _validate_identifier(payload.mount.partition, field_name="partition")
+    )
     media = _get_media_or_404(barcode)
     drive = _get_drive_or_404(drive_name)
     if partition is not None:
@@ -809,7 +847,17 @@ async def create_mount(
         raise HTTPException(status_code=409, detail="Media is already mounted")
     job = _create_job("mount")
     mount_time = job["startTime"]
-    aml_state.update_aml_drive(drive_name, {"loadedMedia": {"barcode": barcode, "type": media.get("type", "LTO-9"), "state": "loaded"}, "state": "mounted"})
+    aml_state.update_aml_drive(
+        drive_name,
+        {
+            "loadedMedia": {
+                "barcode": barcode,
+                "type": media.get("type", "LTO-9"),
+                "state": "loaded",
+            },
+            "state": "mounted",
+        },
+    )
     aml_state.update_aml_media(
         barcode,
         {
@@ -846,7 +894,10 @@ async def create_mount(
             "sessionId": None,
         },
     )
-    aml_state.update_aml_job(job["id"], {"status": "active", "progress": 50, "result": f"Mounted {barcode} on {drive_name}"})
+    aml_state.update_aml_job(
+        job["id"],
+        {"status": "active", "progress": 50, "result": f"Mounted {barcode} on {drive_name}"},
+    )
     _archive_job(job["id"], status="completed", result=f"Mounted {barcode} on {drive_name}")
     return _ws_result(f"Mounted {barcode} on {drive_name}")
 
@@ -927,7 +978,9 @@ async def trigger_inventory(
             "completedTime": None,
             "progress": 0,
             "elementsScanned": 0,
-            "elementsTotal": max(len(aml_state.list_aml_media()) + len(aml_state.list_aml_drives()), 1),
+            "elementsTotal": max(
+                len(aml_state.list_aml_media()) + len(aml_state.list_aml_drives()), 1
+            ),
         }
     )
     return _ws_result("Inventory started")
@@ -940,7 +993,9 @@ async def get_inventory_status(
     context: AppContext = Depends(get_context),
 ) -> InventoryStatusResponse:
     _ensure_state(context)
-    return InventoryStatusResponse(inventoryStatus=InventoryStatus.model_validate(aml_state.get_aml_inventory_status()))
+    return InventoryStatusResponse(
+        inventoryStatus=InventoryStatus.model_validate(aml_state.get_aml_inventory_status())
+    )
 
 
 @router.post("/inventory/partition/{name}", response_model=WSResultCode)
@@ -954,7 +1009,9 @@ async def trigger_partition_inventory(
     partition_name = _validate_identifier(name, field_name="partition")
     _get_partition_or_404(partition_name)
     job = _create_job("inventory-partition")
-    partition_media = [item for item in aml_state.list_aml_media() if item.get("partition") == partition_name]
+    partition_media = [
+        item for item in aml_state.list_aml_media() if item.get("partition") == partition_name
+    ]
     aml_state.set_aml_inventory_status(
         {
             "state": "running",
@@ -1020,7 +1077,9 @@ async def get_import_status(
     context: AppContext = Depends(get_context),
 ) -> ImportStatusResponse:
     _ensure_state(context)
-    return ImportStatusResponse(importStatus=OperationState.model_validate(aml_state.get_aml_import_status()))
+    return ImportStatusResponse(
+        importStatus=OperationState.model_validate(aml_state.get_aml_import_status())
+    )
 
 
 @router.post("/export", response_model=WSResultCode)
@@ -1056,7 +1115,9 @@ async def get_export_status(
     context: AppContext = Depends(get_context),
 ) -> ExportStatusResponse:
     _ensure_state(context)
-    return ExportStatusResponse(exportStatus=OperationState.model_validate(aml_state.get_aml_export_status()))
+    return ExportStatusResponse(
+        exportStatus=OperationState.model_validate(aml_state.get_aml_export_status())
+    )
 
 
 @router.post("/shutdown", response_model=WSResultCode)
@@ -1110,8 +1171,14 @@ async def list_job_history(
     context: AppContext = Depends(get_context),
 ) -> JobListResponse:
     _ensure_state(context)
-    jobs = [item for item in aml_state.list_aml_job_history() if item.get("status") in {"completed", "cancelled", "failed"}]
-    return JobListResponse(jobList=JobListResource(job=[_serialize_job(item) for item in _sorted_jobs(jobs)]))
+    jobs = [
+        item
+        for item in aml_state.list_aml_job_history()
+        if item.get("status") in {"completed", "cancelled", "failed"}
+    ]
+    return JobListResponse(
+        jobList=JobListResource(job=[_serialize_job(item) for item in _sorted_jobs(jobs)])
+    )
 
 
 @router.delete("/jobs/history", response_model=WSResultCode)
@@ -1231,8 +1298,12 @@ async def clean_drives(
             },
         )
     job = _create_job("clean")
-    aml_state.set_aml_cleaning_status({"state": "running", "startTime": job["startTime"], "completedTime": None, "drives": drives})
-    aml_state.update_aml_job(job["id"], {"status": "active", "progress": 25, "result": f"Cleaning {len(drives)} drives"})
+    aml_state.set_aml_cleaning_status(
+        {"state": "running", "startTime": job["startTime"], "completedTime": None, "drives": drives}
+    )
+    aml_state.update_aml_job(
+        job["id"], {"status": "active", "progress": 25, "result": f"Cleaning {len(drives)} drives"}
+    )
     return _ws_result("Cleaning started")
 
 
@@ -1277,8 +1348,18 @@ async def clean_drives_compat(
             },
         )
     job = _create_job("clean")
-    aml_state.set_aml_cleaning_status({"state": "running", "startTime": job["startTime"], "completedTime": None, "drives": validated_drives})
-    aml_state.update_aml_job(job["id"], {"status": "active", "progress": 25, "result": f"Cleaning {len(validated_drives)} drives"})
+    aml_state.set_aml_cleaning_status(
+        {
+            "state": "running",
+            "startTime": job["startTime"],
+            "completedTime": None,
+            "drives": validated_drives,
+        }
+    )
+    aml_state.update_aml_job(
+        job["id"],
+        {"status": "active", "progress": 25, "result": f"Cleaning {len(validated_drives)} drives"},
+    )
     return _ws_result("Cleaning started")
 
 
@@ -1288,7 +1369,9 @@ async def get_cleaning_status(
     context: AppContext = Depends(get_context),
 ) -> CleaningStatusResponse:
     _ensure_state(context)
-    return CleaningStatusResponse(cleaningStatus=CleaningStatus.model_validate(aml_state.get_aml_cleaning_status()))
+    return CleaningStatusResponse(
+        cleaningStatus=CleaningStatus.model_validate(aml_state.get_aml_cleaning_status())
+    )
 
 
 @router.post("/operations/robotics/home", response_model=WSResultCode)

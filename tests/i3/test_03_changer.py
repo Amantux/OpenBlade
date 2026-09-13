@@ -3,6 +3,7 @@
 Tests mechanical operations: load, unload, slot-to-slot move.
 Applies timing delays that simulate real i3 robot movement.
 """
+
 from __future__ import annotations
 
 import time
@@ -52,9 +53,7 @@ def _get_first_drive_id(i3_client: httpx.Client, headers: dict[str, str]) -> int
     return (drives[0].get("driveId") or drives[0].get("id")) if drives else None
 
 
-def _get_first_empty_drive_id(
-    i3_client: httpx.Client, headers: dict[str, str]
-) -> int | None:
+def _get_first_empty_drive_id(i3_client: httpx.Client, headers: dict[str, str]) -> int | None:
     resp = i3_client.get("/aml/library/inventory", headers=headers)
     if resp.status_code != 200:
         return None
@@ -69,7 +68,9 @@ def _get_first_empty_drive_id(
 
 
 class TestChangerLoad:
-    def test_load_cartridge_to_drive(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_load_cartridge_to_drive(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         filled = _get_first_filled_slot(i3_client, auth_headers)
         if filled is None:
             pytest.skip("No filled slots available for load test")
@@ -88,7 +89,9 @@ class TestChangerLoad:
         assert resp.status_code in (200, 202), f"Load failed: {resp.status_code} — {resp.text}"
         assert_within_tolerance(elapsed, "tape_load")
 
-    def test_load_from_empty_slot_fails(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_load_from_empty_slot_fails(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         empty = _get_first_empty_slot(i3_client, auth_headers)
         if empty is None:
             pytest.skip("No empty slots found")
@@ -107,7 +110,9 @@ class TestChangerLoad:
 
 
 class TestChangerUnload:
-    def test_unload_from_drive_to_slot(self, i3_client: httpx.Client, auth_headers: dict[str, str]) -> None:
+    def test_unload_from_drive_to_slot(
+        self, i3_client: httpx.Client, auth_headers: dict[str, str]
+    ) -> None:
         """Unload a drive back to a storage slot (requires drive to be loaded first)."""
         # First load, then unload
         filled = _get_first_filled_slot(i3_client, auth_headers)
@@ -133,7 +138,9 @@ class TestChangerUnload:
             json={"sourceDrive": drive_id, "targetSlot": filled},
         )
         if resp.status_code == 422:
-            pytest.skip("Unload via sourceDrive/targetSlot not supported by this emulator route shape")
+            pytest.skip(
+                "Unload via sourceDrive/targetSlot not supported by this emulator route shape"
+            )
         assert resp.status_code in (200, 202), f"Unload failed: {resp.status_code}"
 
 

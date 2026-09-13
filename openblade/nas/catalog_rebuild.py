@@ -236,7 +236,8 @@ class CatalogRebuildPlanner:
                 source_path=existing.get("source_path"),
                 source_host=existing.get("source_host"),
                 policy_id=entry.policy or existing.get("policy_id"),
-                ingest_mode=self._parse_ingest_mode(entry.ingest_mode) or existing.get("ingest_mode"),
+                ingest_mode=self._parse_ingest_mode(entry.ingest_mode)
+                or existing.get("ingest_mode"),
                 volume_group_id=entry.volume_group or existing.get("volume_group_id"),
                 tape_set=merged,
                 shard_map=dict(existing.get("shard_map") or {}),

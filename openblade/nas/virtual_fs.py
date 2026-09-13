@@ -47,19 +47,25 @@ class VirtualFilesystem:
 
         if normalized in {"/", "/pools"}:
             entries = [self._build_pool_entry(pool_name) for pool_name in self._list_pool_names()]
-            return VirtualDirectoryListing(path=normalized, entries=entries, total_entries=len(entries))
+            return VirtualDirectoryListing(
+                path=normalized, entries=entries, total_entries=len(entries)
+            )
 
         if not parts or parts[0] != "pools":
             raise ValueError("invalid virtual path")
 
         if len(parts) == 1:
             entries = [self._build_pool_entry(pool_name) for pool_name in self._list_pool_names()]
-            return VirtualDirectoryListing(path=normalized, entries=entries, total_entries=len(entries))
+            return VirtualDirectoryListing(
+                path=normalized, entries=entries, total_entries=len(entries)
+            )
 
         pool_name = parts[1]
         if len(parts) == 2:
             entries = self._list_dataset_entries(pool_name)
-            return VirtualDirectoryListing(path=normalized, entries=entries, total_entries=len(entries))
+            return VirtualDirectoryListing(
+                path=normalized, entries=entries, total_entries=len(entries)
+            )
 
         dataset_id = parts[2]
         relative_prefix = "/".join(parts[3:])
@@ -100,7 +106,10 @@ class VirtualFilesystem:
         record = self._find_file_record(dataset_id, relative_path)
         if record is not None and self._find_dataset(pool_name, dataset_id) is not None:
             return self._build_file_entry(pool_name, dataset_id, record)
-        if self._has_directory(dataset_id, relative_path) and self._find_dataset(pool_name, dataset_id) is not None:
+        if (
+            self._has_directory(dataset_id, relative_path)
+            and self._find_dataset(pool_name, dataset_id) is not None
+        ):
             return self._build_directory_entry(
                 path=normalized,
                 name=parts[-1],
@@ -176,7 +185,9 @@ class VirtualFilesystem:
                 raise KeyError(job_id)
             if job.status in _TERMINAL_HYDRATION_STATES:
                 raise ValueError("hydration job already completed")
-            updated = job.model_copy(update={"status": "cancelled", "updated_at": self._utcnow_iso()})
+            updated = job.model_copy(
+                update={"status": "cancelled", "updated_at": self._utcnow_iso()}
+            )
             self._jobs[job_id] = updated
         logger.info("virtual_fs.hydration_cancelled", job_id=job_id)
         return updated.model_copy(deep=True)
@@ -249,7 +260,9 @@ class VirtualFilesystem:
         return [NasDataset.model_validate(row) for row in self.repo.list_nas_datasets()]
 
     def _list_file_records(self, dataset_id: str) -> list[NasFileRecord]:
-        return [NasFileRecord.model_validate(row) for row in self.repo.list_nas_file_records(dataset_id)]
+        return [
+            NasFileRecord.model_validate(row) for row in self.repo.list_nas_file_records(dataset_id)
+        ]
 
     def _find_dataset(self, pool_name: str, dataset_id: str) -> NasDataset | None:
         for dataset in self._list_datasets():
@@ -274,7 +287,9 @@ class VirtualFilesystem:
         )
 
     def _build_pool_entry(self, pool_name: str) -> VirtualFileEntry:
-        return self._build_directory_entry(path=f"/pools/{pool_name}", name=pool_name, pool=pool_name)
+        return self._build_directory_entry(
+            path=f"/pools/{pool_name}", name=pool_name, pool=pool_name
+        )
 
     def _build_directory_entry(
         self,
@@ -296,7 +311,9 @@ class VirtualFilesystem:
             dataset_id=dataset_id,
         )
 
-    def _build_file_entry(self, pool_name: str, dataset_id: str, record: NasFileRecord) -> VirtualFileEntry:
+    def _build_file_entry(
+        self, pool_name: str, dataset_id: str, record: NasFileRecord
+    ) -> VirtualFileEntry:
         relative_path = record.relative_path.strip("/")
         full_path = f"/pools/{pool_name}/{dataset_id}/{relative_path}"
         mapping = self._get_path_mapping(full_path, pool_name)
@@ -305,8 +322,16 @@ class VirtualFilesystem:
             name=relative_path.rsplit("/", 1)[-1],
             size_bytes=record.size_bytes,
             mtime=record.mtime or record.updated_at or record.created_at or self._utcnow_iso(),
-            checksum_sha256=(mapping.checksum if mapping is not None and mapping.checksum else record.checksum_sha256 or ""),
-            tape_barcode=(mapping.primary_barcode if mapping is not None and mapping.primary_barcode else record.tape_barcode or ""),
+            checksum_sha256=(
+                mapping.checksum
+                if mapping is not None and mapping.checksum
+                else record.checksum_sha256 or ""
+            ),
+            tape_barcode=(
+                mapping.primary_barcode
+                if mapping is not None and mapping.primary_barcode
+                else record.tape_barcode or ""
+            ),
             status=self._entry_status(record, mapping),
             is_directory=False,
             pool=pool_name,
@@ -339,7 +364,9 @@ class VirtualFilesystem:
         entry: VirtualFileEntry,
         mapping: PathMappingRecord | None,
     ) -> list[str]:
-        barcodes = [] if mapping is None else [barcode for barcode in mapping.all_barcodes if barcode]
+        barcodes = (
+            [] if mapping is None else [barcode for barcode in mapping.all_barcodes if barcode]
+        )
         if mapping is not None and mapping.primary_barcode:
             barcodes.append(mapping.primary_barcode)
         if entry.tape_barcode:
@@ -352,7 +379,9 @@ class VirtualFilesystem:
             self.repo.upsert_path_mapping(
                 mapping.model_copy(update={"file_state": NasFileState.HYDRATING})
             )
-        record = self._find_file_record(entry.dataset_id, self._relative_from_virtual_path(entry.path))
+        record = self._find_file_record(
+            entry.dataset_id, self._relative_from_virtual_path(entry.path)
+        )
         if record is not None:
             self.repo.update_nas_file_status(record.id, NasFileState.HYDRATING.value)
 

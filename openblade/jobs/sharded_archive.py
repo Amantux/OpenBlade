@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import os
 import shutil
 import uuid
 from contextlib import suppress
@@ -12,6 +13,8 @@ from pathlib import Path, PurePosixPath
 
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.domain.capacity import has_room_for
+from openblade.domain.errors import TapeFullError, safe_job_error
 from openblade.domain.models import MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
@@ -52,8 +55,92 @@ def _shard_record_path(source_file: Path, shard_index: int) -> str:
     return f"{source_file}#shard{shard_index:04d}"
 
 
+def _stripe_tape_path(source_file: Path, source_root: Path) -> str:
+    """On-tape location for a STRIPE-mode file, preserving the source tree.
+
+    This used to be ``/stripe/{source_file.name}`` -- a single flat namespace
+    keyed on the basename. Any two files with the same name in different source
+    directories that landed on the same lane therefore wrote to the same place,
+    and the second silently overwrote the first. Both were marked ``archived``.
+    Demonstrated on the rig: ``alpha/same.txt`` and ``beta/same.txt`` both
+    catalogued at ``OB0001L8:/stripe/same.txt``; restoring alpha returned beta's
+    bytes and only the checksum verify caught it -- at restore time, long after
+    the source was presumed safe. See docs/runbooks/real-data-campaign.md.
+
+    Existing media are unaffected: restore reads ``file_instances.tape_path`` as
+    stored, it does not recompute this.
+
+    The result is always strictly under ``/stripe``. ``source_root`` arrives from
+    the API body (``POST /archive/sharded {"source_path": ...}``) and pathlib does
+    not normalise, so ``/data/../etc/passwd`` relative to ``/data`` yields
+    ``../etc/passwd`` -- which ``write_file`` would join onto the mount point and
+    escape it. Normalise lexically (never ``resolve()``: that touches the
+    filesystem and follows symlinks) and then drop any component that could still
+    climb.
+    """
+    file_path = PurePosixPath(os.path.normpath(str(source_file)))
+    root = PurePosixPath(os.path.normpath(str(source_root)))
+    if file_path == root:
+        # source_path was the file itself: relative_to() returns Path(".") here
+        # rather than raising, which would collapse the tape path to "/stripe".
+        relative: PurePosixPath = PurePosixPath(file_path.name)
+    else:
+        try:
+            relative = file_path.relative_to(root)
+        except ValueError:
+            relative = PurePosixPath(file_path.name)
+    parts = [part for part in relative.parts if part not in {"", ".", "..", "/"}]
+    if not parts:
+        parts = [file_path.name]
+    return str(PurePosixPath("/stripe", *parts))
+
+
 def _archive_profile(mode: ShardMode) -> str:
     return mode.value
+
+
+def _require_lane_room(ltfs: LTFSBackend, barcode: str, size_bytes: int) -> None:
+    """Refuse to write to a lane that cannot hold ``size_bytes``.
+
+    The sharded path has no tape selection at all -- lanes come straight from the
+    request -- so unlike ``jobs/archive.py`` there is nothing to spill onto here
+    (that gap is recorded in docs/runbooks/real-data-campaign.md and is not fixed
+    by this change). What this does buy is that a full lane is a *capacity
+    decision* with the tape named, routed through the one shared policy in
+    ``openblade.domain.capacity``, instead of a raw ``OSError: [Errno 28]``
+    surfacing from LTFS half way through a batch.
+    """
+    tape = ltfs.ensure_tape(barcode)
+    if not has_room_for(int(tape.capacity_bytes), int(tape.used_bytes), size_bytes):
+        raise TapeFullError(
+            f"Tape {barcode} has no room for {size_bytes} more bytes "
+            "(including the LTFS index reserve)"
+        )
+
+
+_JOB_ERROR_MAX_CHARS = 2000
+
+
+def _summarize_errors(errors: list[str]) -> str | None:
+    """Condense per-batch failures into one bounded string for ``jobs.error``.
+
+    A sharded archive can fail hundreds of batches with the same cause, so the
+    distinct messages are what carry information -- and the column has to stay a
+    sane size. Returns None when there is nothing to report, so a clean run still
+    clears the field.
+    """
+    if not errors:
+        return None
+    distinct: list[str] = []
+    for message in errors:
+        if message not in distinct:
+            distinct.append(message)
+    summary = f"{len(errors)} shard batch failure(s); {len(distinct)} distinct: " + " | ".join(
+        distinct
+    )
+    if len(summary) > _JOB_ERROR_MAX_CHARS:
+        summary = summary[: _JOB_ERROR_MAX_CHARS - 3] + "..."
+    return summary
 
 
 def run_sharded_archive(
@@ -127,7 +214,7 @@ def run_sharded_archive(
                     files_archived += 1
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Shard archive failed for %s", source_file)
-                    errors.append(str(exc))
+                    errors.append(safe_job_error(exc))
         else:
             files_archived, bytes_archived = _archive_stripe(
                 files,
@@ -145,7 +232,13 @@ def run_sharded_archive(
         shutil.rmtree(scratch_dir, ignore_errors=True)
 
     state = "completed" if not errors else "failed_recoverable"
-    catalog.update_job_state(job_id, state)
+    # `errors` used to be returned in ShardedArchiveResult and nowhere else. The
+    # API route discards the result (it answers {job_id, status:"pending"}), so a
+    # sharded archive that failed every batch surfaced as `failed_recoverable`
+    # with `error: null` and no log line -- the first real-data run wrote 3 of
+    # 1,073 files over ten minutes and said nothing about why. Persist a bounded
+    # summary on the job, which is the one place an operator looks.
+    catalog.update_job_state(job_id, state, _summarize_errors(errors))
     return ShardedArchiveResult(
         job_id=job_id,
         files_archived=files_archived,
@@ -266,7 +359,8 @@ def _archive_stripe(
                 barcode: str,
                 mount: object,
             ) -> tuple[Path, str, str, str, int]:
-                tape_path = f"/stripe/{source_file.name}"
+                tape_path = _stripe_tape_path(source_file, request.source_path)
+                _require_lane_room(ltfs, barcode, source_file.stat().st_size)
                 checksum = compute_checksum(source_file)
                 ltfs.write_file(mount, source_file, PurePosixPath(tape_path))
                 stat = ltfs.stat(mount, PurePosixPath(tape_path))
@@ -329,7 +423,16 @@ def _archive_stripe(
                 bytes_archived += size_bytes
         except Exception as exc:  # noqa: BLE001
             # Staged instances remain PENDING -> not exposed as archived; resumable.
-            errors.append(str(exc))
+            # This branch had no logging at all, so a batch that failed left no
+            # trace anywhere except a list the caller throws away.
+            logger.warning(
+                "stripe batch failed on %s: %s: %s",
+                ",".join(batch_barcodes),
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            errors.append(safe_job_error(exc))
         finally:
             for mount in mounts.values():
                 with suppress(Exception):
@@ -405,6 +508,7 @@ def _archive_block_stripe(
                 shard_tmp_files[shard_index] = future.result()
 
         def _write_shard(spec: ShardSpec, shard_tmp: Path) -> tuple[int, str, int]:
+            _require_lane_room(ltfs, spec.barcode, shard_tmp.stat().st_size)
             checksum = compute_checksum(shard_tmp)
             mount = mounts[spec.barcode]
             ltfs.write_file(mount, shard_tmp, PurePosixPath(spec.tape_path))

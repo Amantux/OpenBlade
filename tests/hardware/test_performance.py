@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from openblade.hardware.discovery import resolve_sg_device
+from openblade.hardware.ltfs import wait_for_ltfs_release
 from openblade.hardware.mtx import parse_mtx_status
 
 pytestmark = pytest.mark.real_hardware
@@ -56,24 +58,36 @@ def _unload_barcode(changer_device: str, runner, slot_id: int):
 
 
 def _format_tape(runner, drive_device: str, barcode: str):
+    # See tests/hardware/test_ltfs_operations.py::_format_tape - identical
+    # reasoning. --tape-serial accepts exactly 6 alphanumeric characters, so an
+    # 8-character LTO barcode always fails; the barcode belongs in
+    # --volume-name. LTFS also addresses drives by their sg node, not /dev/nstN.
     result = runner.run(
-        ["mkltfs", f"--device={drive_device}", f"--tape-serial={barcode}", "--force"],
+        [
+            "mkltfs",
+            f"--device={resolve_sg_device(drive_device)}",
+            f"--volume-name={barcode}",
+            "--force",
+        ],
         timeout=900,
     )
     assert result.returncode == 0, result.stderr
 
 
 def _mount_ltfs(runner, drive_device: str, mount_dir: Path):
-    result = runner.run(["ltfs", str(mount_dir), "-o", f"devname={drive_device}"], timeout=900)
+    device = resolve_sg_device(drive_device)
+    result = runner.run(["ltfs", str(mount_dir), "-o", f"devname={device}"], timeout=900)
     assert result.returncode == 0, result.stderr
 
 
 def _unmount_ltfs(runner, mount_dir: Path):
     result = runner.run(["umount", str(mount_dir)], timeout=120)
-    if result.returncode == 0:
-        return
-    fallback = runner.run(["fusermount", "-u", str(mount_dir)], timeout=120)
-    assert fallback.returncode == 0, f"{result.stderr}\n{fallback.stderr}"
+    if result.returncode != 0:
+        fallback = runner.run(["fusermount", "-u", str(mount_dir)], timeout=120)
+        assert fallback.returncode == 0, f"{result.stderr}\n{fallback.stderr}"
+    # umount returns before LTFS has closed the drive; remounting it straight
+    # away fails with EBUSY. See test_ltfs_operations.py::_unmount_ltfs.
+    assert wait_for_ltfs_release(str(mount_dir)), f"LTFS still holds {mount_dir} after unmount"
 
 
 def _write_fixed_size_file(path: Path, size_bytes: int):

@@ -18,8 +18,12 @@ def seed_pool(service: NasService, *, pool_id: str = "pool-1") -> NasPool:
     return service.upsert_pool(NasPool(id=pool_id, name="Pool One"))
 
 
-def seed_dataset(service: NasService, *, pool_id: str = "pool-1", dataset_id: str = "dataset-1") -> NasDataset:
-    return service.upsert_dataset(NasDataset(id=dataset_id, pool_id=pool_id, name=f"dataset-{dataset_id}"))
+def seed_dataset(
+    service: NasService, *, pool_id: str = "pool-1", dataset_id: str = "dataset-1"
+) -> NasDataset:
+    return service.upsert_dataset(
+        NasDataset(id=dataset_id, pool_id=pool_id, name=f"dataset-{dataset_id}")
+    )
 
 
 def seed_file(
@@ -59,13 +63,16 @@ def test_browse_pool_with_no_files_returns_empty_entries(tmp_path: Path) -> None
     assert result["total_bytes"] == 0
 
 
-
 def test_browse_pool_with_root_files_lists_them(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="alpha.txt", size_bytes=11)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="beta.txt", size_bytes=22)
+    seed_file(
+        service, dataset_id=dataset.id, pool_id=pool.id, relative_path="alpha.txt", size_bytes=11
+    )
+    seed_file(
+        service, dataset_id=dataset.id, pool_id=pool.id, relative_path="beta.txt", size_bytes=22
+    )
 
     result = service.browse_pool(pool.id)
 
@@ -73,7 +80,6 @@ def test_browse_pool_with_root_files_lists_them(tmp_path: Path) -> None:
     assert all(entry["type"] == "file" for entry in result["entries"])
     assert result["total_files"] == 2
     assert result["total_bytes"] == 33
-
 
 
 def test_browse_pool_with_subdirectory_shows_directory_entry(tmp_path: Path) -> None:
@@ -98,20 +104,22 @@ def test_browse_pool_with_subdirectory_shows_directory_entry(tmp_path: Path) -> 
     ]
 
 
-
 def test_browse_pool_subdirectory_lists_nested_files(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
     dataset = seed_dataset(service, pool_id=pool.id)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="photos/a.jpg", size_bytes=5)
-    seed_file(service, dataset_id=dataset.id, pool_id=pool.id, relative_path="photos/b.jpg", size_bytes=7)
+    seed_file(
+        service, dataset_id=dataset.id, pool_id=pool.id, relative_path="photos/a.jpg", size_bytes=5
+    )
+    seed_file(
+        service, dataset_id=dataset.id, pool_id=pool.id, relative_path="photos/b.jpg", size_bytes=7
+    )
 
     result = service.browse_pool(pool.id, "photos")
 
     assert [entry["name"] for entry in result["entries"]] == ["a.jpg", "b.jpg"]
     assert result["total_files"] == 2
     assert result["total_bytes"] == 12
-
 
 
 def test_browse_pool_multiple_levels_only_shows_immediate_children(tmp_path: Path) -> None:
@@ -126,7 +134,6 @@ def test_browse_pool_multiple_levels_only_shows_immediate_children(tmp_path: Pat
 
     assert [entry["logical_path"] for entry in result["entries"]] == ["docs", "photos"]
     assert all(entry["type"] == "directory" for entry in result["entries"])
-
 
 
 def test_get_pool_file_detail_returns_full_record(tmp_path: Path) -> None:
@@ -150,7 +157,6 @@ def test_get_pool_file_detail_returns_full_record(tmp_path: Path) -> None:
     assert result.size_bytes == 42
 
 
-
 def test_get_pool_file_detail_missing_file_raises_key_error(tmp_path: Path) -> None:
     service = make_nas_service(tmp_path)
     pool = seed_pool(service)
@@ -158,7 +164,6 @@ def test_get_pool_file_detail_missing_file_raises_key_error(tmp_path: Path) -> N
 
     with pytest.raises(KeyError, match="file not found"):
         service.get_pool_file_detail(pool.id, "missing.txt")
-
 
 
 def test_get_pool_file_detail_missing_pool_raises_key_error(tmp_path: Path) -> None:
@@ -186,10 +191,11 @@ def test_derive_file_state_respects_record_state(
     expected: NasFileState,
 ) -> None:
     service = make_nas_service(tmp_path)
-    record = NasFileRecord(dataset_id="dataset-1", relative_path="a.txt", status=status, tape_barcode=tape_barcode)
+    record = NasFileRecord(
+        dataset_id="dataset-1", relative_path="a.txt", status=status, tape_barcode=tape_barcode
+    )
 
     assert service.derive_file_state(record) is expected
-
 
 
 def test_derive_file_state_marks_loaded_tape_as_online_cached(tmp_path: Path) -> None:
@@ -201,8 +207,9 @@ def test_derive_file_state_marks_loaded_tape_as_online_cached(tmp_path: Path) ->
         tape_barcode="VOL001L9",
     )
 
-    assert service.derive_file_state(record, loaded_tapes=["VOL001L9"]) is NasFileState.ONLINE_CACHED
-
+    assert (
+        service.derive_file_state(record, loaded_tapes=["VOL001L9"]) is NasFileState.ONLINE_CACHED
+    )
 
 
 def test_derive_file_state_marks_unloaded_tape_as_offline(tmp_path: Path) -> None:
@@ -214,8 +221,9 @@ def test_derive_file_state_marks_unloaded_tape_as_offline(tmp_path: Path) -> Non
         tape_barcode="VOL001L9",
     )
 
-    assert service.derive_file_state(record, loaded_tapes=["VOL002L9"]) is NasFileState.OFFLINE_ON_TAPE
-
+    assert (
+        service.derive_file_state(record, loaded_tapes=["VOL002L9"]) is NasFileState.OFFLINE_ON_TAPE
+    )
 
 
 def test_browse_pool_counts_online_offline_and_hydrating_files(tmp_path: Path) -> None:
@@ -254,7 +262,6 @@ def test_browse_pool_counts_online_offline_and_hydrating_files(tmp_path: Path) -
     assert result["hydrating_count"] == 1
     assert result["total_files"] == 3
     assert result["total_bytes"] == 60
-
 
 
 def test_browse_pool_missing_pool_raises_key_error(tmp_path: Path) -> None:

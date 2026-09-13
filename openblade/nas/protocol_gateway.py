@@ -3,8 +3,10 @@
 Provides isolated credential management and session auditing for
 SFTP ingest. Gateway credentials are separate from web UI credentials.
 """
+
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import importlib.util
@@ -73,7 +75,9 @@ def _normalize_gateway_path(path: str) -> str:
 
 def _match_inbox_prefix(path: str, candidates: list[str]) -> str | None:
     normalized = _normalize_gateway_path(path)
-    for candidate in sorted((_normalize_gateway_path(item) for item in candidates), key=len, reverse=True):
+    for candidate in sorted(
+        (_normalize_gateway_path(item) for item in candidates), key=len, reverse=True
+    ):
         if normalized == candidate or normalized.startswith(f"{candidate}/"):
             return candidate
     return None
@@ -149,7 +153,11 @@ class ProtocolGateway:
         self._bind_port = int(os.environ.get("OPENBLADE_SFTP_PORT", "2222"))
         self._max_sessions = int(os.environ.get("OPENBLADE_SFTP_MAX_SESSIONS", "10"))
         self._inbox_root = os.environ.get("OPENBLADE_INBOX_ROOT", "/var/lib/openblade")
-        self._status = GatewayStatus.STOPPED if _parse_enabled(os.environ.get("OPENBLADE_SFTP_ENABLED")) else GatewayStatus.DISABLED
+        self._status = (
+            GatewayStatus.STOPPED
+            if _parse_enabled(os.environ.get("OPENBLADE_SFTP_ENABLED"))
+            else GatewayStatus.DISABLED
+        )
 
     @property
     def status(self) -> GatewayStatus:
@@ -248,7 +256,9 @@ class ProtocolGateway:
         self._sessions.append(session)
         return session
 
-    def record_upload(self, session_id: str, requested_path: str, bytes_uploaded: int) -> GatewayUpload:
+    def record_upload(
+        self, session_id: str, requested_path: str, bytes_uploaded: int
+    ) -> GatewayUpload:
         session = self._get_session(session_id)
         if session is None:
             raise KeyError(f"Session {session_id!r} not found")
@@ -303,7 +313,9 @@ class ProtocolGateway:
             return
         try:
             if importlib.util.find_spec("asyncssh") is None:
-                raise RuntimeError("SFTP gateway backend is unavailable because asyncssh is not installed")
+                raise RuntimeError(
+                    "SFTP gateway backend is unavailable because asyncssh is not installed"
+                )
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind((self._bind_host, self._bind_port))
@@ -324,10 +336,8 @@ class ProtocolGateway:
         now = datetime.utcnow()
         for session in self._sessions:
             if session.disconnected_at is None:
-                try:
+                with contextlib.suppress(Exception):
                     session.disconnected_at = now
-                except Exception:  # noqa: BLE001
-                    pass
         self._status = GatewayStatus.STOPPED
 
     def disable(self) -> None:

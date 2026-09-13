@@ -199,9 +199,7 @@ class RbacRole(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     permissions: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
-    updated_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat()
-    )
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
 
 
 class RbacUser(Base):
@@ -217,9 +215,7 @@ class RbacUser(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     api_token_ids: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
-    updated_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat()
-    )
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
     last_login_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -248,7 +244,9 @@ class RbacAuditEvent(Base):
     action: Mapped[str] = mapped_column(String, default="")
     outcome: Mapped[str] = mapped_column(String, default="")
     details: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat(), index=True)
+    created_at: Mapped[str] = mapped_column(
+        Text, default=lambda: datetime.utcnow().isoformat(), index=True
+    )
     ip_address: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
@@ -390,8 +388,12 @@ class CatalogRebuildRun(Base):
     datasets_recovered: Mapped[int] = mapped_column(Integer, default=0)
     path_mappings_recovered: Mapped[int] = mapped_column(Integer, default=0)
     error_summary: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat() + "Z")
-    updated_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat() + "Z")
+    created_at: Mapped[str] = mapped_column(
+        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
+    )
     completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -405,7 +407,9 @@ class ManifestVersion(Base):
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     file_count: Mapped[int] = mapped_column(Integer, default=0)
     is_current: Mapped[bool] = mapped_column(Boolean, default=False)
-    recorded_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat() + "Z")
+    recorded_at: Mapped[str] = mapped_column(
+        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
+    )
 
 
 class NasRestoreJob(Base):

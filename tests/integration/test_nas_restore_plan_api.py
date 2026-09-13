@@ -14,7 +14,9 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def reset_app_context(tmp_path: Path) -> None:
-    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'nas-restore-plan-api.db'}"))
+    context = create_context(
+        OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'nas-restore-plan-api.db'}")
+    )
     reset_context(context)
 
 
@@ -59,7 +61,9 @@ def test_post_restore_plan_returns_restore_plan_fields() -> None:
     assert client.post("/nas/pools", json={"id": "pool-1", "name": "Pool One"}).status_code == 201
     seed_pool_file("pool-1", "photos/a.jpg", tape_barcode="VOL001L9")
 
-    response = client.post("/nas/restore-plan", json={"pool_id": "pool-1", "paths": ["photos/a.jpg"]})
+    response = client.post(
+        "/nas/restore-plan", json={"pool_id": "pool-1", "paths": ["photos/a.jpg"]}
+    )
 
     body = response.json()
 
@@ -74,7 +78,9 @@ def test_post_restore_plan_filters_requested_files() -> None:
     seed_pool_file("pool-1", "photos/a.jpg", tape_barcode="VOL001L9")
     seed_pool_file("pool-1", "photos/b.jpg", tape_barcode="VOL002L9", dataset_id="dataset-2")
 
-    response = client.post("/nas/restore-plan", json={"pool_id": "pool-1", "paths": ["photos/b.jpg"]})
+    response = client.post(
+        "/nas/restore-plan", json={"pool_id": "pool-1", "paths": ["photos/b.jpg"]}
+    )
 
     assert response.status_code == 200
     assert response.json()["required_tapes"] == ["VOL002L9"]
@@ -82,7 +88,9 @@ def test_post_restore_plan_filters_requested_files() -> None:
 
 
 def test_post_restore_plan_missing_pool_returns_404() -> None:
-    response = client.post("/nas/restore-plan", json={"pool_id": "missing-pool", "paths": ["photos/a.jpg"]})
+    response = client.post(
+        "/nas/restore-plan", json={"pool_id": "missing-pool", "paths": ["photos/a.jpg"]}
+    )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Pool missing-pool not found"
@@ -109,7 +117,10 @@ def test_list_restore_jobs_includes_created_job() -> None:
     response = client.get("/nas/restore-jobs")
 
     assert response.status_code == 200
-    assert any(item["id"] == job["id"] and item["required_tapes"] == ["VOL001L9"] for item in response.json())
+    assert any(
+        item["id"] == job["id"] and item["required_tapes"] == ["VOL001L9"]
+        for item in response.json()
+    )
 
 
 def test_get_restore_job_returns_full_job_with_required_tapes() -> None:

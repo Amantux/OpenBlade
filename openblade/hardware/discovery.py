@@ -2,8 +2,10 @@ from __future__ import annotations
 
 """Hardware discovery parsers for lsscsi and sg_map."""
 
+import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from openblade.domain.policies import RealHardwareGuard
 from openblade.hardware.runner import SafeRunner
@@ -99,6 +101,60 @@ def parse_sg_map(output: str) -> dict[str, str]:
         if len(parts) >= 2:
             mapping[parts[0]] = parts[1]
     return mapping
+
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_sg_device(device: str, *, sysfs_root: Path | None = None) -> str:
+    """Map a tape or changer device node onto its SCSI generic (``/dev/sg*``) node.
+
+    SCSI pass-through tools want the ``sg`` node, not the tape node:
+
+    * The LTFS ``sg`` backend addresses drives as ``/dev/sgN``. Handing it
+      ``/dev/st0`` does not error cleanly - it reads the wrong device and
+      reports "No index found in the medium", which looks like blank or
+      corrupt media rather than a wrong device path.
+    * ``sg_inq`` on the REWINDING ``/dev/stN`` node exits non-zero ("close
+      error: No medium found") whenever the drive is empty, because closing a
+      rewinding node attempts a rewind. The ``sg`` node has no such side
+      effect.
+
+    The kernel already publishes the mapping, so we read it rather than
+    guessing from device numbering - ``stN`` and ``sgN`` are independently
+    allocated and do NOT correlate (this rig routinely produces ``st0 -> sg1``).
+
+    Returns ``device`` unchanged when it is already an ``sg`` node or when no
+    mapping exists, so callers can use this unconditionally.
+    """
+    if not device.startswith("/dev/"):
+        return device
+    name = Path(device).name
+    if name.startswith("sg"):
+        return device
+
+    root = sysfs_root or Path("/sys")
+    for class_name in ("scsi_tape", "scsi_changer"):
+        generic_dir = root / "class" / class_name / name / "device" / "scsi_generic"
+        try:
+            entries = sorted(entry.name for entry in generic_dir.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.startswith("sg"):
+                return f"/dev/{entry}"
+
+    # Falling back to the tape node is the behaviour that produces LTFS's
+    # "No index found in the medium" - i.e. it looks like bad media rather than
+    # a bad device path. Say so, loudly, so the next person does not have to
+    # rediscover it.
+    logger.warning(
+        "no SCSI generic node found for %s under %s; using it as-is. "
+        "SCSI pass-through tools (LTFS, sg_inq) may misbehave on a tape node.",
+        device,
+        root,
+    )
+    return device
 
 
 def find_tape_changers(devices: list[ScsiDevice]) -> list[ScsiDevice]:
