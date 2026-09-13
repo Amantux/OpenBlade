@@ -71,11 +71,26 @@ app.command("assist")(assist_command)
 # module; this is the only line they need here.
 register_fuse_and_health(app, hardware_app)
 
-console = Console()
+# highlight=False: rich's auto-highlighter wraps numbers/paths in style
+# spans, splitting tokens like `[1/3]` under color-forcing terminals —
+# nondeterministic output for an operator CLI. Explicit [red]/[green]
+# markup still works.
+console = Console(highlight=False)
+
+
+def emit_json(data: object) -> None:
+    """stdout is the CLI's DATA channel (`openblade … | jq`). Rich's
+    print_json colorizes it whenever the environment forces a terminal
+    (FORCE_COLOR, some CI runners), which makes the output unparseable —
+    ANSI escapes are not JSON. Machine output therefore bypasses rich
+    entirely; human-facing rendering stays on `console` (stderr-adjacent)."""
+    typer.echo(json.dumps(data, indent=2, default=str))
+
+
 # Progress, warnings, and anything else that is NOT the command's result go
 # here. stdout carries the JSON result and nothing else, so
 # `openblade ... | jq` works while the operator still sees what is happening.
-err_console = Console(stderr=True)
+err_console = Console(stderr=True, highlight=False)
 _STATE_DIR = Path.home() / ".openblade"
 _STATE_PATH = _STATE_DIR / "mock_state.json"
 _DB_PATH = _STATE_DIR / "openblade.db"
@@ -433,7 +448,7 @@ def volume_group_create(name: str) -> None:
     """Create a volume group."""
     context = _get_context()
     group = context.catalog.create_volume_group(name)
-    console.print_json(data={"id": group.id, "name": group.name, "barcodes": group.barcodes})
+    emit_json({"id": group.id, "name": group.name, "barcodes": group.barcodes})
 
 
 @format_app.command("dry-run")
@@ -442,8 +457,8 @@ def format_dry_run(barcode: str = typer.Option(...)) -> None:
     context = _get_context()
     plan, token = context.format_service.dry_run(barcode)
     _save_state(context)
-    console.print_json(
-        data={
+    emit_json(
+        {
             "operation": plan.operation,
             "target": plan.target,
             "affected_barcodes": plan.affected_barcodes,
@@ -463,9 +478,7 @@ def format_confirm(
     context = _get_context()
     result = context.format_service.confirm(barcode, token)
     _save_state(context)
-    console.print_json(
-        data={"success": result.success, "message": result.message, "details": result.details}
-    )
+    emit_json({"success": result.success, "message": result.message, "details": result.details})
 
 
 @archive_app.callback(invoke_without_command=True)
@@ -478,14 +491,18 @@ def archive(
     if ctx.invoked_subcommand is not None:
         return
     if volume_group is None or path is None:
-        raise typer.BadParameter(
+        # Plain echo, not BadParameter — same rationale as the restore
+        # callback: rich panels wrap nondeterministically at terminal width.
+        typer.echo(
             "openblade archive needs --volume-group and --path "
-            "(or a subcommand such as `openblade archive sharded`)"
+            "(or a subcommand such as `openblade archive sharded`).",
+            err=True,
         )
+        raise typer.Exit(2)
     context = _get_context()
     job = context.archive_service.enqueue(volume_group, Path(path))
     _save_state(context)
-    console.print_json(data={"job_id": job.id, "status": job.state, "job_type": job.job_type})
+    emit_json({"job_id": job.id, "status": job.state, "job_type": job.job_type})
 
 
 @restore_app.callback(invoke_without_command=True)
@@ -498,14 +515,20 @@ def restore(
     if ctx.invoked_subcommand is not None:
         return
     if path is None or to is None:
-        raise typer.BadParameter(
+        # Plain echo, not BadParameter: rich renders BadParameter as a
+        # width-wrapped panel whose border/wrap points split phrases like
+        # `--path` in narrow terminals (CI is 80 cols), making the guidance
+        # unsearchable and the output nondeterministic across environments.
+        typer.echo(
             "openblade restore needs --path and --to "
-            "(or a subcommand such as `openblade restore tree`)"
+            "(or a subcommand such as `openblade restore tree`).",
+            err=True,
         )
+        raise typer.Exit(2)
     context = _get_context()
     job = context.restore_service.enqueue(path, Path(to))
     _save_state(context)
-    console.print_json(data={"job_id": job.id, "status": job.state, "job_type": job.job_type})
+    emit_json({"job_id": job.id, "status": job.state, "job_type": job.job_type})
 
 
 @restore_app.command("file")
@@ -596,7 +619,7 @@ def restore_file(
         err_console.print(f"[red]Restore failed:[/red] {message}")
         raise typer.Exit(code=1) from None
     _save_state(context)
-    console.print_json(data=payload)
+    emit_json(payload)
     if failed:
         raise typer.Exit(code=1)
 
@@ -644,7 +667,7 @@ def restore_tree(
         err_console.print(f"[red]Tree restore failed:[/red] {message}")
         raise typer.Exit(code=1) from None
     _save_state(context)
-    console.print_json(data=result.to_dict())
+    emit_json(result.to_dict())
     if result.skipped:
         # Loud on stderr as well as in the JSON: a tree that comes back short is
         # exactly the outcome an operator must not discover later.
@@ -782,8 +805,8 @@ def archive_sharded(
         raise typer.Exit(code=1) from None
     _save_state(context)
     refreshed = context.catalog.get_job(job.id)
-    console.print_json(
-        data={
+    emit_json(
+        {
             "jobId": result.job_id,
             "status": refreshed.state if refreshed is not None else "unknown",
             "sourcePath": str(source),
@@ -822,7 +845,7 @@ def mailslot_list() -> None:
     except (MailslotUnsupportedError, ImportExportSlotError) as exc:
         raise _mailslot_exit(exc) from None
     _save_state(context)
-    console.print_json(data=listing.to_dict())
+    emit_json(listing.to_dict())
 
 
 @mailslot_app.command("import")
@@ -848,7 +871,7 @@ def mailslot_import(
         f"Imported {result.barcode} from I/E slot {result.source_slot} into storage slot "
         f"{result.destination_slot}" + (" (chosen automatically)" if result.slot_was_chosen else "")
     )
-    console.print_json(data=result.to_dict())
+    emit_json(result.to_dict())
 
 
 @mailslot_app.command("export")
@@ -886,7 +909,7 @@ def mailslot_export(
         f"Exported {result.barcode} from storage slot {result.source_slot} to I/E slot "
         f"{result.destination_slot}" + (" (chosen automatically)" if result.slot_was_chosen else "")
     )
-    console.print_json(data=result.to_dict())
+    emit_json(result.to_dict())
 
 
 @app.command()
@@ -897,8 +920,8 @@ def jobs(job_id: str | None = typer.Argument(None)) -> None:
         job = context.catalog.get_job(job_id)
         if job is None:
             raise typer.BadParameter(f"Unknown job {job_id}")
-        console.print_json(
-            data={
+        emit_json(
+            {
                 "id": job.id,
                 "state": job.state,
                 "job_type": job.job_type,
@@ -945,7 +968,7 @@ def hardware_connect_i3() -> None:
         # traceback. The message names the variable to fix.
         console.print(f"[red]Drive correlation failed:[/red] {exc}")
         raise typer.Exit(code=1) from None
-    console.print_json(data=report.to_dict())
+    emit_json(report.to_dict())
 
 
 @hardware_app.command("validate-ltfs")
@@ -968,7 +991,7 @@ def hardware_validate_ltfs(
         mount_point=None if mount_point is None else Path(mount_point),
         exercise_mounts=exercise_mounts,
     )
-    console.print_json(data=report.to_dict())
+    emit_json(report.to_dict())
 
 
 if __name__ == "__main__":  # pragma: no cover — the console script calls app() via the entry point

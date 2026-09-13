@@ -24,7 +24,7 @@ from openblade.hardware.safety import require_real_hardware
 from openblade.hardware.sg import sg_inq
 from openblade.hardware.tapealert import TapeAlertSeverity, read_tape_alerts
 
-console = Console()
+console = Console(highlight=False)
 
 fuse_app = typer.Typer(help="Read-only FUSE mount over the catalog namespace")
 

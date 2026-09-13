@@ -43,7 +43,7 @@ from openblade.assistant import (
 )
 from openblade.assistant.config import DISABLED_MESSAGE, load_assistant_config
 
-console = Console()
+console = Console(highlight=False)
 
 _BANNER = (
     "OpenBlade assistant. It can set up volume groups, and load, unload, move,\n"
