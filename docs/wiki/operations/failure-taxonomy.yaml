@@ -1,0 +1,200 @@
+# OpenBlade failure taxonomy (machine-readable).
+# Source of truth: implementation + observed runtime. Each failure lists ONLY
+# detection signals the system actually emits (verified). Where telemetry is
+# missing, detection.status = "limited" and the gap is named — the agent MUST NOT
+# claim high-confidence detection without the listed corroborating evidence.
+#
+# Validated by scripts/wiki_validate.py (unique IDs; metrics must exist in the
+# emitted-metrics allowlist; runbook refs must resolve).
+schema_version: 1
+last_verified: 2026-07-19
+
+failures:
+  - id: API-001
+    title: API service not starting / unreachable on :8000
+    component: api
+    severity: critical
+    user_impact: total outage; UI and CLI operations fail
+    detection:
+      status: verified
+      evidence_required:            # need >=2, not a single signal
+        - "GET /healthz connection refused or times out"
+        - "process for uvicorn openblade.api.main:app absent"
+      signals:
+        - health: /healthz
+        - log_pattern: "Traceback (most recent call last)"   # startup crash (structlog/uvicorn stdout)
+    likely_causes: [import/config error at startup, port 8000 in use, DB path not writable]
+    alternative_causes: [dependency install incomplete, corrupted SQLite file]
+    runbooks: [RB-API-001]
+    automation_level: approval_required   # restart is env-scoped; see remediation catalog
+
+  - id: HEALTH-001
+    title: Readiness failing (/readyz ready=false)
+    component: api
+    severity: high
+    user_impact: load balancer removes instance; requests may 5xx upstream
+    detection:
+      status: verified
+      evidence_required:
+        - "GET /readyz returns ready=false"
+        - "reason field names 'database unavailable' OR 'library unavailable'"
+      signals:
+        - health: /readyz
+        - metric: openblade_component_status   # <1 for the failing component
+    notes: >
+      Verified quirk: a connected library with 0 drives is DEGRADED (!= ok) and
+      makes readiness fail (openblade/nas/health_service.py). Corroborate with
+      /healthz component detail before concluding a hard DB outage.
+    likely_causes: [database probes failing, library backend reports 0 drives or error]
+    runbooks: [RB-HEALTH-001, RB-DB-001]
+    automation_level: diagnostic_only
+
+  - id: DB-001
+    title: Catalog database unavailable / probes failing
+    component: catalog
+    severity: high
+    user_impact: archive/restore/catalog operations fail
+    detection:
+      status: verified
+      evidence_required:
+        - "GET /healthz database component status = unhealthy (all probes fail) or degraded"
+        - "log_pattern 'database health probe failed'"
+      signals:
+        - health: /healthz
+        - log_pattern: "database health probe failed"   # openblade/nas/health_service.py:187
+    likely_causes: [SQLite file missing/locked/corrupt, disk full, wrong OPENBLADE_DB_URL]
+    alternative_causes: [permissions on /data, concurrent writer lock]
+    runbooks: [RB-DB-001]
+    automation_level: approval_required
+
+  - id: EMU-001
+    title: Emulator fleet instance unreachable
+    component: emulator
+    severity: medium
+    user_impact: controller cannot reach that library; fleet view shows it offline
+    detection:
+      status: verified
+      evidence_required:
+        - "GET {emulator_url}/health fails for one instance (others OK)"
+        - "controller fleet probe marks it offline (routes_libraries)"
+      signals:
+        - health: /health
+    likely_causes: [emulator container stopped/crashed, port conflict, host.docker.internal unresolved]
+    runbooks: [RB-EMU-001]
+    automation_level: approval_required
+
+  - id: JOB-001
+    title: Job queue stalled (jobs active, no active mounts)
+    component: jobs
+    severity: high
+    user_impact: archive/restore appears hung
+    detection:
+      status: verified
+      evidence_required:
+        - "OpenBladeQueueStalled alert firing (>=10m)"
+        - "openblade_jobs_state_total{queue=active,state=~pending|active|queued} > 0"
+        - "openblade_transfer_activity_total{metric=active_mounts} == 0"
+      signals:
+        - metric: openblade_jobs_state_total
+        - metric: openblade_transfer_activity_total
+    likely_causes: [worker not processing, mount blocked, backend backend stuck]
+    runbooks: [RB-JOB-001]
+    automation_level: approval_required
+
+  - id: API-002
+    title: Elevated request latency
+    component: api
+    severity: medium
+    user_impact: slow operations
+    detection:
+      status: verified
+      evidence_required:
+        - "OpenBladeHighLatency alert firing (>=10m)"
+        - "max(openblade_iblade_request_duration_ms{stat=avg}) > 1500"
+      signals:
+        - metric: openblade_iblade_request_duration_ms
+    notes: >
+      Latency metrics cover ONLY /aml and /iblade paths (verified gap). High
+      latency on /archive|/restore|/jobs is NOT observable via metrics; corroborate
+      with logs/timing before diagnosing those paths.
+    likely_causes: [emulator latency profile set high, backend slow, resource pressure]
+    runbooks: [RB-API-002]
+    automation_level: diagnostic_only
+
+  - id: HW-001
+    title: Real-hardware operation blocked by safety gate
+    component: real-backend
+    severity: low
+    user_impact: expected/by-design refusal, not an outage
+    detection:
+      status: verified
+      evidence_required:
+        - "RealHardwareDisabledError raised"
+        - "OPENBLADE_BACKEND != real OR OPENBLADE_REAL_HARDWARE_ENABLED != true"
+      signals:
+        - log_pattern: "Real hardware operations require"
+    notes: This is a safety control working as intended. NEVER auto-bypass. Escalate to a human to enable hardware deliberately.
+    runbooks: [RB-HW-001]
+    automation_level: none
+
+  - id: ASST-001
+    title: AI assistant endpoint failing
+    component: assistant
+    severity: low
+    user_impact: assistant chat returns errors; no operational impact on archive path
+    detection:
+      status: verified
+      evidence_required:
+        - "POST /assistant/chat returns 502 (endpoint error) or GET /assistant/status enabled=false"
+      signals:
+        - health: /assistant/status
+    likely_causes: [configured OpenAI-compatible endpoint down, bad API key, model unavailable]
+    runbooks: [RB-ASST-001]
+    automation_level: diagnostic_only
+
+  - id: AUTH-001
+    title: Authentication failures
+    component: api
+    severity: medium
+    user_impact: operators cannot log in
+    detection:
+      status: limited
+      gap: "login activity is in-memory only (aml_state, capped 500), not a durable metric; no auth failure counter is exported"
+      evidence_required:
+        - "GET /aml/users/sessions or login_activity shows repeated failures across users"
+        - "synthetic login attempt fails"
+      signals:
+        - log_pattern: "Invalid credentials"
+    likely_causes: [default/expired credentials, LDAP mode misconfig, session store reset on restart]
+    runbooks: [RB-AUTH-001]
+    automation_level: none
+
+  - id: DISK-001
+    title: Disk pressure on the data volume
+    component: catalog
+    severity: high
+    user_impact: DB writes fail; archive metadata loss risk
+    detection:
+      status: limited
+      gap: "no disk metric is exported by the app; requires host/node telemetry outside OpenBlade"
+      evidence_required:
+        - "host filesystem for /data (or OPENBLADE_DB_URL path) near full"
+        - "DB write errors in logs"
+      signals:
+        - log_pattern: "disk I/O error"
+    runbooks: [RB-DISK-001]
+    automation_level: none
+
+  - id: MEM-001
+    title: Memory pressure
+    component: api
+    severity: medium
+    user_impact: OOM kills, restarts
+    detection:
+      status: limited
+      gap: "no memory metric exported by the app; note aml_state and latency metrics grow in-memory (unbounded per-endpoint keys) — a real leak vector"
+      evidence_required:
+        - "host/container RSS climbing"
+        - "process restarts correlate with memory ceiling"
+    runbooks: []
+    automation_level: none
