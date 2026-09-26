@@ -207,24 +207,70 @@ def test_a_tool_failure_answers_502_without_the_argv_or_stderr(
 def test_the_tapealert_reason_never_carries_the_tools_stderr(
     client: TestClient, hardware_enabled: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Curation happens AT THE SOURCE now: read_tape_alerts puts tool text in
+    # reason_detail (log/CLI only) and keeps reason curated. The route must
+    # serialize reason verbatim and reason_detail never.
     monkeypatch.setattr(
         "openblade.api.routes_drive_health.read_tape_alerts",
         lambda device, runner, guard: tapealert.TapeAlertReport(
             device=device,
             supported=False,
             flags=(),
-            reason=(
-                "no TapeAlert page in sg_logs output "
-                "(sg_logs exited 5: log_sense: field in cdb illegal, /dev/sg1 dsn=secret)"
-            ),
+            reason="no TapeAlert page in sg_logs output (sg_logs exited 5; see server logs)",
+            reason_detail="log_sense: field in cdb illegal, /dev/sg1 dsn=secret",
         ),
     )
 
     response = client.get("/hardware/drive-health", params={"device": "/dev/sg1"})
     assert response.status_code == 200
+    body = response.text
+    assert "secret" not in body
+    assert "field in cdb illegal" not in body
     reason = response.json()["drives"][0]["tapeAlertReason"]
-    # The exit code is the actionable half and survives; the tool's own text does
-    # not go on the wire (it is logged server-side instead).
     assert "sg_logs exited 5" in reason
-    assert "secret" not in reason
-    assert "field in cdb illegal" not in reason
+
+
+def test_paren_heavy_tool_stderr_never_reaches_the_wire(
+    client: TestClient, hardware_enabled: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reviewer-repro'd leak: the old regex scrub over the COMBINED reason
+    string stopped at the first ')' inside real sg3_utils stderr, so
+    'sense_key=0x5 (Invalid field in cdb) opening /dev/sg9 dsn=secret)'
+    leaked a device path and a DSN in a 200. Curation now happens at the
+    source: reason never contains tool text; reason_detail stays server-side.
+    This exercises read_tape_alerts itself against the hostile stderr."""
+    hostile = "sense_key=0x5 (Invalid field in cdb) opening /dev/sg9 dsn=secret-token)"
+
+    from openblade.hardware.sg import SAMPLE_SG_INQ_MODERN
+
+    def hostile_run(
+        self: SafeRunner,
+        args: list[str],
+        timeout: int | None = None,
+        redact_args: list[int] | None = None,
+    ) -> CommandResult:
+        if args[0] == "sg_logs":
+            return CommandResult(
+                args=args, returncode=5, stdout="", stderr=hostile, elapsed_seconds=0.0
+            )
+        return CommandResult(
+            args=args, returncode=0, stdout=SAMPLE_SG_INQ_MODERN, stderr="", elapsed_seconds=0.0
+        )
+
+    # The hardware_enabled fixture keeps hardware_dry_run=True, and dry-run
+    # short-circuits BEFORE runner.run — so patching run alone exercises
+    # nothing. Hand the route a non-dry runner whose run IS the hostile stub.
+    class HostileRunner(SafeRunner):
+        def __init__(self, dry_run: bool = False) -> None:
+            super().__init__(dry_run=False)
+
+    monkeypatch.setattr(HostileRunner, "run", hostile_run)
+    monkeypatch.setattr("openblade.api.routes_drive_health.SafeRunner", HostileRunner)
+    response = client.get("/hardware/drive-health", params={"device": "/dev/sg1"})
+    assert response.status_code == 200
+    body = response.text
+    assert "dsn=secret-token" not in body
+    assert "sense_key" not in body
+    reason = response.json()["drives"][0]["tapeAlertReason"]
+    assert "see server logs" in reason
+    assert "sg_logs exited 5" in reason

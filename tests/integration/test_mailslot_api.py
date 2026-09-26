@@ -189,13 +189,13 @@ def test_export_of_a_cartridge_carrying_data_is_refused_and_names_it(
     assert client.get("/mailslot/slots").json()["occupiedCount"] == 0
 
 
-def test_force_exports_the_same_cartridge(client: TestClient, tmp_path: Path) -> None:
+def test_typed_confirmation_exports_the_same_cartridge(client: TestClient, tmp_path: Path) -> None:
     barcode = _data_barcodes(limit=1)[0]
     _format_and_assign(client, "photos", barcode)
     _archive_one_file(client, tmp_path / "photos-source", "photos", "a.txt")
     assert client.post("/mailslot/export", json={"barcode": barcode}).status_code == 409
 
-    forced = client.post("/mailslot/export", json={"barcode": barcode, "force": True})
+    forced = client.post("/mailslot/export", json={"barcode": barcode, "confirmBarcode": barcode})
     assert forced.status_code == 200, forced.text
     payload = forced.json()
     assert payload["barcode"] == barcode
@@ -243,3 +243,14 @@ def test_export_preview_of_an_unknown_barcode_is_a_404_not_a_cheerful_zero(
     response = client.get("/mailslot/export-preview/NOSUCH1L8")
     assert response.status_code == 404
     assert "NOSUCH1L8" in response.json()["detail"]
+
+
+def test_a_mistyped_confirm_barcode_is_refused(client: TestClient, tmp_path: Path) -> None:
+    """Typed confirmation means EXACT match — a near-miss must not export.
+    (This is the API-side twin of the CLI's --confirm-barcode guard.)"""
+    barcode = _archive_one_file(client, tmp_path)
+    wrong = client.post(
+        "/mailslot/export", json={"barcode": barcode, "confirmBarcode": barcode.lower()}
+    )
+    assert wrong.status_code == 409, wrong.text
+    assert barcode in wrong.json()["detail"]

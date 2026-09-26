@@ -335,8 +335,12 @@ class TapeAlertReport:
     device: str
     supported: bool
     flags: tuple[TapeAlertFlag, ...]
-    #: Curated, operator-facing reason when ``supported`` is False.
+    #: Curated, operator-facing reason when ``supported`` is False. Served
+    #: over the wire verbatim — must never contain tool output.
     reason: str | None = None
+    #: Raw first line of the failing tool's output. Log-and-CLI only; the API
+    #: route must not serialize it.
+    reason_detail: str | None = None
 
     @property
     def active(self) -> tuple[TapeAlertFlag, ...]:
@@ -447,14 +451,18 @@ def read_tape_alerts(
     if not report.supported and not result.success and report.reason is not None:
         # Distinguish "drive has no TapeAlert page" from "the command itself
         # failed" -- otherwise a missing sg_logs or a bad device path reads as a
-        # healthy-but-silent drive.
+        # healthy-but-silent drive. The tool's own text goes in reason_detail,
+        # NEVER in reason: reason is served over the API verbatim, and sg3_utils
+        # stderr can carry device paths and DSNs. (A downstream regex used to
+        # scrub the combined string; it stopped at the first ')' inside real
+        # stderr like "sense_key=0x5 (Invalid field in cdb)" and leaked.)
         detail = (result.stderr.strip() or result.stdout.strip()).splitlines()
         report = TapeAlertReport(
             device=sg_device,
             supported=False,
             flags=(),
-            reason=f"{report.reason} (sg_logs exited {result.returncode}"
-            + (f": {detail[0].strip()})" if detail else ")"),
+            reason=f"{report.reason} (sg_logs exited {result.returncode}; see server logs)",
+            reason_detail=detail[0].strip() if detail else None,
         )
     if not report.supported:
         logger.info(

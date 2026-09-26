@@ -16,7 +16,6 @@ error, and it is a 200.
 from __future__ import annotations
 
 import logging
-import re
 
 from anyio import to_thread
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -67,20 +66,6 @@ class DriveHealthListResponse(BaseModel):
     drives: list[DriveHealthResponse]
 
 
-#: ``read_tape_alerts`` appends the failing tool's own stderr to its reason when
-#: ``sg_logs`` exits non-zero, which is useful in the server log and must not go
-#: on the wire: it is raw tool output at an untrusted boundary (see
-#: ``safe_job_error``'s docstring for the rule). The exit code survives, because
-#: "sg_logs exited 5" is the part an operator can act on.
-_SG_TOOL_DETAIL = re.compile(r"\(sg_logs exited (-?\d+):[^)]*\)")
-
-
-def _curated_reason(reason: str | None) -> str | None:
-    if reason is None:
-        return None
-    return _SG_TOOL_DETAIL.sub(r"(sg_logs exited \1; see server logs)", reason)
-
-
 def _serialize(device: str, inquiry: ScsiInquiry, report: TapeAlertReport) -> DriveHealthResponse:
     worst = report.worst_severity
     return DriveHealthResponse(
@@ -93,7 +78,11 @@ def _serialize(device: str, inquiry: ScsiInquiry, report: TapeAlertReport) -> Dr
             serial=inquiry.serial,
         ),
         tapeAlertSupported=report.supported,
-        tapeAlertReason=_curated_reason(report.reason),
+        # report.reason is curated AT THE SOURCE (tapealert.py keeps tool output
+        # in reason_detail, which is logged and never serialized here). The old
+        # regex scrub over the combined string stopped at the first ')' inside
+        # real sg3_utils stderr and leaked device paths — reviewer-repro'd.
+        tapeAlertReason=report.reason,
         worstSeverity=None if worst is None else str(worst),
         flagsRead=len(report.flags),
         activeFlags=[

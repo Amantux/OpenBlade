@@ -88,7 +88,7 @@ export default function Mailslot() {
   const [targetSlot, setTargetSlot] = useState('');
   const [exportBarcode, setExportBarcode] = useState('');
   const [confirmBarcode, setConfirmBarcode] = useState<string>();
-  // The barcode the SERVER refused. `force` may only ever be offered for this one:
+  // The barcode the SERVER refused. A typed confirmBarcode may only ever be offered for this one:
   // the refusal panel outlives an edit of the field, and reading the field at click
   // time would arm the dialog for a cartridge nothing has assessed.
   const [refusedBarcode, setRefusedBarcode] = useState<string>();
@@ -115,8 +115,8 @@ export default function Mailslot() {
   });
 
   const exportMutation = useMutation({
-    mutationFn: ({ barcode, force }: { barcode: string; force: boolean }) =>
-      exportThroughMailslot(barcode, { force }),
+    mutationFn: ({ barcode, confirmBarcode }: { barcode: string; confirmBarcode?: string }) =>
+      exportThroughMailslot(barcode, { confirmBarcode }),
     onSuccess: async () => {
       setConfirmBarcode(undefined);
       setRefusedBarcode(undefined);
@@ -132,7 +132,7 @@ export default function Mailslot() {
   function changeExportBarcode(next: string) {
     setExportBarcode(next);
     // Editing the field invalidates every answer the server gave about the old
-    // one — including the refusal that unlocks `force`.
+    // one — including the refusal that unlocks the typed confirmation.
     setRefusedBarcode(undefined);
     setConfirmBarcode(undefined);
     exportMutation.reset();
@@ -347,7 +347,7 @@ export default function Mailslot() {
               <Button
                 disabled={!exportBarcode.trim() || exportMutation.isPending}
                 onClick={() =>
-                  exportMutation.mutate({ barcode: exportBarcode.trim(), force: false })
+                  exportMutation.mutate({ barcode: exportBarcode.trim() })
                 }
               >
                 {exportMutation.isPending && !confirmBarcode ? 'Exporting…' : 'Export cartridge'}
@@ -403,7 +403,7 @@ export default function Mailslot() {
         isAssessmentPending={previewMutation.isPending}
         onRetryAssessment={() => previewMutation.mutate(confirmBarcode!)}
         isProcessing={exportMutation.isPending}
-        onConfirm={() => exportMutation.mutate({ barcode: confirmBarcode!, force: true })}
+        onConfirm={(typed) => exportMutation.mutate({ barcode: confirmBarcode!, confirmBarcode: typed })}
         onCancel={() => setConfirmBarcode(undefined)}
       />
     </div>

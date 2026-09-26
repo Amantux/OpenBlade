@@ -12,7 +12,9 @@ interface ExportConfirmDialogProps {
   isAssessmentPending?: boolean;
   isProcessing?: boolean;
   onRetryAssessment?: () => void;
-  onConfirm: () => void;
+  // Receives the operator's typed barcode — the server-side typed
+  // confirmation (confirmBarcode) is exactly this value, never the prop.
+  onConfirm: (typedBarcode: string) => void;
   onCancel: () => void;
 }
 
@@ -162,7 +164,7 @@ export default function ExportConfirmDialog({
             type="button"
             variant="danger"
             disabled={!barcodeMatches || !hasAssessment || isProcessing}
-            onClick={onConfirm}
+            onClick={() => onConfirm(typedBarcode.trim())}
           >
             {isProcessing ? 'Exporting…' : 'Export anyway'}
           </Button>

@@ -10,7 +10,7 @@ const mailslotModule = vi.hoisted(() => ({
   previewMailslotExport: vi.fn<(barcode: string) => Promise<ExportAssessment>>(),
   importFromMailslot: vi.fn<(ieSlot: number, toSlot?: number) => Promise<MailslotMoveResult>>(),
   exportThroughMailslot: vi.fn<
-    (barcode: string, options?: { ieSlot?: number; force?: boolean }) => Promise<MailslotMoveResult>
+    (barcode: string, options?: { ieSlot?: number; confirmBarcode?: string }) => Promise<MailslotMoveResult>
   >(),
 }));
 
@@ -65,7 +65,7 @@ function refusal(): ApiError {
   return new ApiError(
     'Cartridge ARC001L8 still carries archived data: 3 file instance(s), 4096 bytes; '
       + 'volume group photo-archive; e.g. /photo-archive/a.raw. Exporting makes these '
-      + 'unrestorable until the cartridge is imported again. Pass --force if that is what you mean.',
+      + 'unrestorable until the cartridge is imported again. Re-run with --confirm-barcode if that is what you mean.',
     409,
     'The backend could not complete POST /mailslot/export.',
     'Check the appliance state, then retry the request.',
@@ -220,7 +220,6 @@ describe('Mailslot', () => {
 
     await waitFor(() => {
       expect(mailslotModule.exportThroughMailslot).toHaveBeenCalledWith('SCR001L8', {
-        force: false,
       });
     });
     expect(screen.getByText(/Exported SCR001L8/)).toBeTruthy();
@@ -243,7 +242,7 @@ describe('Mailslot', () => {
     });
     expect(screen.getByText(/still carries archived data: 3 file instance\(s\)/)).toBeTruthy();
     expect(mailslotModule.exportThroughMailslot).toHaveBeenCalledTimes(1);
-    expect(mailslotModule.exportThroughMailslot).toHaveBeenCalledWith('ARC001L8', { force: false });
+    expect(mailslotModule.exportThroughMailslot).toHaveBeenCalledWith('ARC001L8', {});
   });
 
   it('gates the forced export behind the typed barcode', async () => {
@@ -290,7 +289,7 @@ describe('Mailslot', () => {
       expect(mailslotModule.exportThroughMailslot).toHaveBeenCalledTimes(2);
     });
     expect(mailslotModule.exportThroughMailslot).toHaveBeenLastCalledWith('ARC001L8', {
-      force: true,
+      confirmBarcode: 'ARC001L8',
     });
   });
 
@@ -373,7 +372,7 @@ describe('Mailslot', () => {
     fireEvent.click(confirmButton);
     expect(mailslotModule.exportThroughMailslot).toHaveBeenCalledTimes(1);
     expect(mailslotModule.exportThroughMailslot).not.toHaveBeenCalledWith('ARC001L8', {
-      force: true,
+      confirmBarcode: 'ARC001L8',
     });
   });
 

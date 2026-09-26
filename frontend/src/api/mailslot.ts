@@ -57,19 +57,20 @@ export function importFromMailslot(ieSlot: number, toSlot?: number): Promise<Mai
  * Export a cartridge out of the library.
  *
  * The API answers 409 with the refusal message when the cartridge still carries
- * archived data; `force` is the only way past it and must never be sent without
+ * archived data; a typed `confirmBarcode` equal to the cartridge is the only way
+ * past it and must never be sent without
  * an explicit operator confirmation (see ExportConfirmDialog).
  */
 export function exportThroughMailslot(
   barcode: string,
-  options: { ieSlot?: number; force?: boolean } = {},
+  options: { ieSlot?: number; confirmBarcode?: string } = {},
 ): Promise<MailslotMoveResult> {
   return rootApiRequest<MailslotMoveResult>('/mailslot/export', {
     method: 'POST',
     body: {
       barcode,
       ie_slot: options.ieSlot ?? null,
-      force: options.force ?? false,
+      ...(options.confirmBarcode ? { confirmBarcode: options.confirmBarcode } : {}),
     },
   });
 }

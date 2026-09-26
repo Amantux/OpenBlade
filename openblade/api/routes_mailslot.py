@@ -8,8 +8,9 @@ the service and the tape orchestrator. Nothing here reimplements policy.
 
 The export refusal is the one thing worth reading twice: ``POST /mailslot/export``
 answers **409** with the orchestrator's own message, which names the cartridge,
-its volume group and sample paths. ``force`` is the only way past it, exactly as
-``--force`` is on the CLI, and callers are expected to have shown the operator the
+its volume group and sample paths. A typed ``confirmBarcode`` (matching the
+cartridge exactly) is the only way past it, exactly as ``--confirm-barcode`` is on
+the CLI, and callers are expected to have shown the operator the
 ``GET /mailslot/export-preview/{barcode}`` assessment first.
 """
 
@@ -70,7 +71,11 @@ class MailslotExportRequest(BaseModel):
     ie_slot: int | None = Field(default=None, ge=0)
     #: Export a cartridge that still carries archived data. The refusal names what
     #: would leave; this is the operator saying they meant it.
-    force: bool = False
+    # Typed confirmation for a data-carrying export: must equal `barcode`
+    # exactly. Replaces the earlier boolean `force` — a bare true is too easy
+    # to send, and native API auth is OFF by default, so this route can be an
+    # unauthenticated POST; the typed barcode is the deliberate-action proof.
+    confirm_barcode: str | None = Field(default=None, alias="confirmBarcode")
 
 
 class MailslotMoveResponse(BaseModel):
@@ -173,12 +178,13 @@ async def export_through_mailslot(
     """Move a cartridge out of storage into the I/E station.
 
     Refuses with 409 while the cartridge still carries archived or in-flight file
-    instances; the detail is the refusal message naming them. ``force: true``
-    overrides, and is the HTTP spelling of ``--force``.
+    instances; the detail is the refusal message naming them.
+    ``confirmBarcode`` equal to the cartridge barcode overrides — the HTTP
+    spelling of the CLI's ``--confirm-barcode`` typed confirmation.
     """
     try:
         result = _service(context).export_cartridge(
-            payload.barcode, ie_slot=payload.ie_slot, force=payload.force
+            payload.barcode, ie_slot=payload.ie_slot, confirm_barcode=payload.confirm_barcode
         )
     except ExportRefusedError as exc:
         # 409, not 400: the request is well-formed and the refusal is about the
