@@ -288,7 +288,14 @@ for _ in $(seq 1 30); do
   sleep 1
   changers_sg=$(lsscsi -g 2>/dev/null | awk '/ mediumx /{print $NF}' | grep -c '^/dev/sg' || true)
   drives_sg=$(lsscsi -g 2>/dev/null | awk '/ tape /{print $NF}' | grep -c '^/dev/sg' || true)
-  tape_nodes=$(ls -d /sys/class/scsi_tape/nst* 2>/dev/null | grep -c . || true)
+  # Counted with a glob rather than `ls | grep -c`: an unmatched glob stays
+  # literal, so the -e test is what distinguishes "no nodes" from "one node".
+  # The `if` rather than `&&` matters — a failing test as the last command in a
+  # loop body aborts the script under `set -e`.
+  tape_nodes=0
+  for _t in /sys/class/scsi_tape/nst*; do
+    if [ -e "$_t" ]; then tape_nodes=$((tape_nodes + 1)); fi
+  done
   if [ "$changers_sg" -ge 1 ] && [ "$drives_sg" -ge 3 ] && [ "$tape_nodes" -ge 3 ]; then break; fi
 done
 command -v udevadm >/dev/null && udevadm settle --timeout=30 || true
