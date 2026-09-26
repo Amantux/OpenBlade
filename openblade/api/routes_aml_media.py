@@ -353,12 +353,14 @@ def _validate_pool_payload(
 def _lto_capacity_gb(tape_type: str) -> int:
     match = re.search(r"LTO-(\d+)", tape_type.upper())
     generation = int(match.group(1)) if match else None
-    return {
+    # Key type includes None so an unparsed tape type falls through to the default.
+    capacities: dict[int | None, int] = {
         6: 2500,
         7: 6000,
         8: 12000,
         9: 18000,
-    }.get(generation, 6000)
+    }
+    return capacities.get(generation, 6000)
 
 
 def _estimate_used_gb(barcode: str, capacity_gb: int) -> int:
@@ -502,7 +504,8 @@ def _media_history(media: dict[str, Any]) -> list[HistoryEvent]:
 def _media_stats(media: dict[str, Any]) -> MediaStats:
     load_count = int(media.get("loadCount", 0))
     error_count = int(media.get("errorCount", 0))
-    statistics = media.get("statistics") if isinstance(media.get("statistics"), dict) else {}
+    raw_statistics = media.get("statistics")
+    statistics: dict[str, Any] = raw_statistics if isinstance(raw_statistics, dict) else {}
     return MediaStats(
         loadCount=load_count,
         errorCount=error_count,

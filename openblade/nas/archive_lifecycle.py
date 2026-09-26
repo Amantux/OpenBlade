@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
@@ -104,7 +105,7 @@ class ArchiveLifecycleManager:
             success=False,
             final_file_state=self._current_file_state(file_record.id, fallback=file_record.status),
         )
-        step_calls = [
+        step_calls: list[tuple[str, Callable[[], bool]]] = [
             (
                 "verify_checksum",
                 lambda: self._step_verify_checksum(file_record, barcode, tape_path),

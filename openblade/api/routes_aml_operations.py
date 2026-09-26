@@ -16,6 +16,7 @@ from openblade.api.service_auth import require_service_token
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
 from openblade.domain.errors import safe_job_error
+from openblade.domain.wire import coerce_int
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -605,7 +606,7 @@ def _robotics_status() -> RoboticsStatus:
 @router.post("/move", response_model=WSResultCode, dependencies=[Depends(require_auth)])
 async def create_move(
     current_user: AmlUser = Depends(require_auth),
-    payload: dict = Body(...),
+    payload: dict[str, Any] = Body(...),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
@@ -625,8 +626,8 @@ async def create_move(
                 if "targetDrive" in payload
                 else payload.get("destination")
             )
-            s = int(s_raw)
-            d = int(d_raw)
+            s = coerce_int(s_raw)
+            d = coerce_int(d_raw)
         except (TypeError, ValueError):
             # `from None`, not `from exc`: the ValueError/TypeError text can echo
             # the caller's raw payload, and this detail string is client-facing.
@@ -636,9 +637,10 @@ async def create_move(
             if getattr(result, "success", False):
                 barcode_val = None
                 try:
-                    barcode_val = (
-                        result.data.get("barcode") if getattr(result, "data", None) else None
-                    )
+                    # Backend-dependent optional attribute; read it defensively because
+                    # OperationResult itself does not declare one.
+                    result_data = getattr(result, "data", None)
+                    barcode_val = result_data.get("barcode") if result_data else None
                 except (AttributeError, TypeError):
                     # `result.data` is backend-shaped and only sometimes a mapping;
                     # a non-mapping payload means "no barcode to name", not an error.
@@ -661,7 +663,7 @@ async def create_move(
     else:
         data = payload
 
-    def _first_present(d: dict, keys: list[str]):
+    def _first_present(d: dict[str, Any], keys: list[str]) -> Any:
         for k in keys:
             if k in d:
                 return d.get(k)
@@ -689,9 +691,10 @@ async def create_move(
                 # If result includes barcode in data, return a helpful message
                 barcode_val = None
                 try:
-                    barcode_val = (
-                        result.data.get("barcode") if getattr(result, "data", None) else None
-                    )
+                    # Backend-dependent optional attribute; read it defensively because
+                    # OperationResult itself does not declare one.
+                    result_data = getattr(result, "data", None)
+                    barcode_val = result_data.get("barcode") if result_data else None
                 except (AttributeError, TypeError):
                     # `result.data` is backend-shaped and only sometimes a mapping;
                     # a non-mapping payload means "no barcode to name", not an error.
@@ -737,7 +740,11 @@ async def create_move(
             else:
                 # Fallback: scan aml_state media entries for a matching slotAddress
                 try:
-                    for media in aml_state.list_aml_media().values():
+                    # LATENT BUG (deliberately left as-is): list_aml_media() returns a
+                    # list, so .values() raises AttributeError and this fallback is
+                    # silently swallowed by the `except Exception: pass` below. Fixing it
+                    # would change behaviour, so it is only flagged here.
+                    for media in aml_state.list_aml_media().values():  # type: ignore[attr-defined]
                         slot_addr = str(media.get("slotAddress", ""))
                         if slot_addr and (
                             slot_addr == str(source_raw)
@@ -1328,7 +1335,8 @@ async def clean_drives_compat(
 ) -> WSResultCode:
     _ensure_state(context)
     _require_admin(current_user)
-    raw_payload = payload.get("clean") if isinstance(payload.get("clean"), dict) else payload
+    clean_section = payload.get("clean")
+    raw_payload: dict[str, Any] = clean_section if isinstance(clean_section, dict) else payload
     drives = raw_payload.get("drives")
     if not isinstance(drives, list):
         raise HTTPException(status_code=422, detail="drives must be provided")

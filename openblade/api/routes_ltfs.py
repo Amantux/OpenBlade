@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Any, Protocol, runtime_checkable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.repository import CatalogBrowseEntry
+from openblade.domain.models import MountHandle
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _SupportsToJson(Protocol):
+    """Optional LTFS-backend introspection used by GET /ltfs/status."""
+
+    def to_json(self) -> dict[str, Any]: ...
+
 
 router = APIRouter()
 
 # Simple in-memory mount registry for LTFS mounts (only for simulator/testing)
-_active_mounts: dict[str, object] = {}  # barcode -> MountHandle
+_active_mounts: dict[str, MountHandle] = {}
 
 
 class LtfsBrowseEntryResponse(BaseModel):
@@ -59,7 +69,9 @@ async def list_ltfs_catalog_tapes(
 
 # LTFS operational endpoints expected by i3 tests
 @router.post("/format")
-async def ltfs_format(payload: dict, context: AppContext = Depends(get_context)) -> dict:
+async def ltfs_format(
+    payload: dict[str, Any], context: AppContext = Depends(get_context)
+) -> dict[str, Any]:
     barcode = payload.get("barcode")
     if not barcode:
         raise HTTPException(status_code=422, detail="barcode is required")
@@ -89,7 +101,9 @@ async def ltfs_format(payload: dict, context: AppContext = Depends(get_context))
 
 
 @router.post("/mount")
-async def ltfs_mount(payload: dict, context: AppContext = Depends(get_context)) -> dict:
+async def ltfs_mount(
+    payload: dict[str, Any], context: AppContext = Depends(get_context)
+) -> dict[str, Any]:
     barcode = payload.get("barcode")
     if not barcode:
         raise HTTPException(status_code=422, detail="barcode is required")
@@ -119,7 +133,9 @@ async def ltfs_mount(payload: dict, context: AppContext = Depends(get_context)) 
 
 
 @router.post("/unmount")
-async def ltfs_unmount(payload: dict, context: AppContext = Depends(get_context)) -> dict:
+async def ltfs_unmount(
+    payload: dict[str, Any], context: AppContext = Depends(get_context)
+) -> dict[str, Any]:
     barcode = payload.get("barcode")
     if not barcode:
         raise HTTPException(status_code=422, detail="barcode is required")
@@ -136,10 +152,15 @@ async def ltfs_unmount(payload: dict, context: AppContext = Depends(get_context)
 
 
 @router.get("/status")
-async def ltfs_status(context: AppContext = Depends(get_context)) -> dict:
+async def ltfs_status(context: AppContext = Depends(get_context)) -> dict[str, Any]:
     # Return LTFS backend status if available
     try:
-        return context.ltfs.to_json()
+        # Only the simulator LTFS backend exposes to_json(); the real backend does
+        # not, and previously raised AttributeError into this same fallback.
+        backend = context.ltfs
+        if isinstance(backend, _SupportsToJson):
+            return backend.to_json()
+        return {"status": "unknown"}
     # Status endpoints report, they do not fail: any backend shape that cannot
     # serialise itself becomes "unknown" rather than a 500. Logged because the
     # original swallow left no trace of why the backend went dark.

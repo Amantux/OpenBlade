@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntFlag
 
+from openblade.domain.wire import coerce_int
+
 
 @dataclass(frozen=True)
 class ScalarCoordinate:
@@ -54,12 +56,12 @@ class ScalarCoordinate:
         """Parse the full {frame,rack,section,column,row,type} form."""
         try:
             return cls(
-                frame=int(data["frame"]),  # type: ignore[arg-type]
-                rack=int(data["rack"]),  # type: ignore[arg-type]
-                section=int(data["section"]),  # type: ignore[arg-type]
-                column=int(data["column"]),  # type: ignore[arg-type]
-                row=int(data["row"]),  # type: ignore[arg-type]
-                element_type=int(data.get("type", data.get("element_type", 0))),  # type: ignore[arg-type]
+                frame=coerce_int(data["frame"]),
+                rack=coerce_int(data["rack"]),
+                section=coerce_int(data["section"]),
+                column=coerce_int(data["column"]),
+                row=coerce_int(data["row"]),
+                element_type=coerce_int(data.get("type", data.get("element_type", 0))),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"invalid ScalarCoordinate dict: {data!r}") from exc

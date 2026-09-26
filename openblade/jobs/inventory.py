@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend
+from openblade.domain.models import LibraryInventory
 
 
 class InventoryService:
     def __init__(self, library: LibraryBackend) -> None:
         self.library = library
 
-    def snapshot(self):
+    def snapshot(self) -> LibraryInventory:
         return self.library.inventory()
 
 

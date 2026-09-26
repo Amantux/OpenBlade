@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from openblade.catalog.repository import CatalogRepository
 from openblade.nas.types import (
     NasFileState,
@@ -94,7 +96,7 @@ class PathMappingService:
             tapes.update(barcode for barcode in record.all_barcodes if barcode)
         return sorted(tapes)
 
-    def get_stats(self, pool_id: str = "", dataset_id: str = "") -> dict:
+    def get_stats(self, pool_id: str = "", dataset_id: str = "") -> dict[str, Any]:
         """
         Return stats dict: total_files, total_bytes, by_state (dict[state, count]),
         tape_count (distinct barcodes), pool_id, dataset_id.

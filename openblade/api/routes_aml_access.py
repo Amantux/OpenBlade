@@ -121,7 +121,13 @@ def _available_devices(context: AppContext) -> list[dict[str, str | None]]:
 
 def _available_device_map(context: AppContext) -> dict[str, dict[str, str | None]]:
     devices = _available_devices(context)
-    return {device["serialNumber"]: device for device in devices}
+    device_map: dict[str, dict[str, str | None]] = {}
+    for device in devices:
+        serial = device["serialNumber"]
+        # _available_devices() always builds serialNumber from an f-string, never None.
+        assert serial is not None
+        device_map[serial] = device
+    return device_map
 
 
 def _serialize_access_group(group: dict[str, object]) -> AccessGroup:
@@ -296,8 +302,11 @@ async def list_group_devices(
     _require_admin_access(current_user)
     group_name = _require_group(name)
     group = _get_group_or_404(group_name)
+    group_devices = group.get("devices", [])
+    # Access-group records always store "devices" as a list of serial numbers.
+    assert isinstance(group_devices, list)
     return DeviceList(
-        device=[Device(serialNumber=serial_number) for serial_number in group.get("devices", [])]
+        device=[Device(serialNumber=serial_number) for serial_number in group_devices]
     )
 
 

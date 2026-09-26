@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import (
     Boolean,
-    Column,
     DateTime,
     ForeignKey,
     Integer,
@@ -140,7 +139,7 @@ class Job(Base):
 
     @property
     def metadata_dict(self) -> dict[str, Any]:
-        return json.loads(self.metadata_json or "{}")
+        return cast("dict[str, Any]", json.loads(self.metadata_json or "{}"))
 
 
 class SafetyTokenRecord(Base):
@@ -356,20 +355,28 @@ class PathMapping(Base):
 
     __tablename__ = "path_mappings"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    logical_path = Column(String, nullable=False, index=True)
-    pool_id = Column(String, nullable=True, index=True)
-    dataset_id = Column(String, nullable=True, index=True)
-    primary_barcode = Column(String, nullable=True)
-    all_barcodes = Column(String, nullable=False, default="[]")
-    file_record_id = Column(String, nullable=True)
-    file_state = Column(String, nullable=False, default="offline_on_tape")
-    restore_strategy = Column(String, nullable=False, default="single_tape")
-    size = Column(Integer, nullable=True)
-    checksum = Column(String, nullable=True)
-    last_seen_at = Column(String, nullable=True)
-    created_at = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z")
-    updated_at = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z")
+    # Declared with Mapped[]/mapped_column like every other model here. The bare
+    # `Column(...)` form this table used gives the attributes type `Column[str]`
+    # instead of `str`, so every read/write of a PathMapping field was a type
+    # error at the call site. Same columns, same nullability, same defaults.
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    logical_path: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    pool_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    dataset_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    primary_barcode: Mapped[str | None] = mapped_column(String, nullable=True)
+    all_barcodes: Mapped[str] = mapped_column(String, nullable=False, default="[]")
+    file_record_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    file_state: Mapped[str] = mapped_column(String, nullable=False, default="offline_on_tape")
+    restore_strategy: Mapped[str] = mapped_column(String, nullable=False, default="single_tape")
+    size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_seen_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(
+        String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z"
+    )
+    updated_at: Mapped[str] = mapped_column(
+        String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z"
+    )
 
     __table_args__ = (UniqueConstraint("logical_path", "pool_id", name="uq_path_pool"),)
 

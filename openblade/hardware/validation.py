@@ -7,7 +7,7 @@ from openblade.config import OpenBladeConfig
 from openblade.domain.backends import LibraryBackend
 from openblade.domain.errors import DriveCorrelationError
 from openblade.domain.models import LibraryInventory
-from openblade.domain.policies import DryRunPlan
+from openblade.domain.policies import DryRunPlan, RealHardwareGuard
 from openblade.hardware.discovery import LibraryDiscovery, discover_library, resolve_sg_device
 from openblade.hardware.library import RealLibraryBackend
 from openblade.hardware.ltfs import LTFSCommandBackend, LTFSDevice
@@ -251,7 +251,7 @@ def _drive_devices(discovery: LibraryDiscovery) -> list[str]:
 
 
 def _inquiry_payloads(
-    discovery: LibraryDiscovery, runner: SafeRunner, guard
+    discovery: LibraryDiscovery, runner: SafeRunner, guard: RealHardwareGuard
 ) -> list[dict[str, str]]:
     payloads: list[dict[str, str]] = []
     for device in _inquiry_devices(discovery):

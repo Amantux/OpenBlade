@@ -41,7 +41,7 @@ class CatalogShardDatasetEntry(BaseModel):
 
 
 class CatalogShard(BaseModel):
-    schema_: str = Field("openblade.catalog_shard.v1", alias="schema")
+    schema_: str = Field(default="openblade.catalog_shard.v1", alias="schema")
     barcode: str
     openblade_tape_id: str
     volume_group: str = ""

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from openblade.api import aml_state
+from openblade.catalog.models import Job
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.capacity import has_room_for
@@ -348,7 +349,17 @@ def run_archive_job(
         errors=[],
     )
     catalog.update_job_state(job_id, "completed")
-    logger.info("archive job completed", job_id=job_id, files_archived=files_archived)
+    # structlog-style kwargs on a stdlib logger: `Logger.info(msg, job_id=...)`
+    # raises TypeError from `Logger._log()`. It only ever fired when INFO was
+    # enabled -- `isEnabledFor(INFO)` short-circuits first -- so it slept through
+    # a test suite that never turns INFO on, and crashed the SUCCESS path of an
+    # archive job (after the catalog was already marked completed) in any
+    # deployment that logs at INFO. `logger` here is `logging.getLogger`, not
+    # structlog; structured fields go in `extra`.
+    logger.info(
+        "archive job completed",
+        extra={"job_id": job_id, "files_archived": files_archived},
+    )
     return result
 
 
@@ -365,7 +376,7 @@ class ArchiveService:
         self.catalog = catalog
         self.queue = queue
 
-    def enqueue(self, volume_group_name: str, source_path: Path):
+    def enqueue(self, volume_group_name: str, source_path: Path) -> Job:
         job = self.catalog.create_job(
             JobType.ARCHIVE.value,
             {"source_path": str(source_path), "volume_group": volume_group_name},

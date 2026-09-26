@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from openblade.bootstrap import get_context
+from openblade.bootstrap import AppContext, get_context
 
 router = APIRouter()
 
@@ -16,7 +18,7 @@ class ArchivePlanningResponse(BaseModel):
 
 @router.post("/storage/archive-planning")
 async def storage_archive_planning(
-    payload: dict, context=Depends(get_context)
+    payload: dict[str, Any], context: AppContext = Depends(get_context)
 ) -> ArchivePlanningResponse:
     # Lightweight compatibility shim for the UI tests.
     # Return an empty plan when no actionable input provided.
@@ -25,13 +27,15 @@ async def storage_archive_planning(
 
 
 @router.get("/storage/restore-queue")
-async def storage_restore_queue(context=Depends(get_context)) -> list:
+async def storage_restore_queue(context: AppContext = Depends(get_context)) -> list[Any]:
     # Compatibility endpoint: surface an empty restore queue if backend not configured.
     return []
 
 
 @router.post("/restore/plan")
-async def restore_plan_compat(payload: dict, context=Depends(get_context)) -> dict:
+async def restore_plan_compat(
+    payload: dict[str, Any], context: AppContext = Depends(get_context)
+) -> dict[str, Any]:
     # Tests expect this endpoint to exist and return either 200/202/422.
     # If pool_id missing, return 422 to indicate validation.
     if not payload or (

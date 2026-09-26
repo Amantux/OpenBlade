@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
 
 from openblade.config import OpenBladeConfig
 from openblade.domain.models import (
@@ -67,11 +66,12 @@ class RealLibraryBackend:
                 element_count=active_changer.inventory().drive_count or None,
             ),
         )
+        self._mount_states: dict[int, MountState]
         object.__setattr__(self, "_mount_states", {})
 
     def inventory(self) -> LibraryInventory:
         status = self.changer.inventory()
-        mount_states = cast(dict[int, MountState], self._mount_states)
+        mount_states = self._mount_states
         return LibraryInventory(
             library_id=self.library_id,
             slots=[

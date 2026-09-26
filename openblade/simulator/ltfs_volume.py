@@ -278,7 +278,11 @@ class MockLTFSBackend:
         )
 
     def write_file(self, handle: MountHandle, source: Path, dest: PurePosixPath) -> FileInstance:
-        return self.write_bytes(handle, dest, source.read_bytes())
+        instance = self.write_bytes(handle, dest, source.read_bytes())
+        # write_bytes only returns None on its barcode-string (metadata) branch;
+        # handle is a MountHandle here, so a FileInstance is always produced.
+        assert instance is not None
+        return instance
 
     def write_bytes(
         self,

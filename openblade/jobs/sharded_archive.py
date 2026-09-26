@@ -15,7 +15,7 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.capacity import has_room_for
 from openblade.domain.errors import TapeFullError, safe_job_error
-from openblade.domain.models import MountMode
+from openblade.domain.models import MountHandle, MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
     DEFAULT_BLOCK_SIZE,
@@ -261,7 +261,7 @@ def _clean_unmount_and_unload(
     catalog: CatalogRepository,
     library: LibraryBackend,
     ltfs: LTFSBackend,
-    mounts: dict[str, object],
+    mounts: dict[str, MountHandle],
     handles: list[DriveHandle],
     loaded_slots: dict[int, int | None],
     job_id: str,
@@ -342,7 +342,7 @@ def _archive_stripe(
     for batch in batches:
         batch_barcodes = list(dict.fromkeys(barcode for _, barcode in batch))
         handles = scheduler.acquire_drives(batch_barcodes)
-        mounts: dict[str, object] = {}
+        mounts: dict[str, MountHandle] = {}
         loaded_slots: dict[int, int | None] = {}
         # (main_instance_id, shard_instance_id, size_bytes) for shards written+verified
         # this batch. Nothing here is marked archived until the WHOLE batch has verified
@@ -357,7 +357,7 @@ def _archive_stripe(
             def _write_one(
                 source_file: Path,
                 barcode: str,
-                mount: object,
+                mount: MountHandle,
             ) -> tuple[Path, str, str, str, int]:
                 tape_path = _stripe_tape_path(source_file, request.source_path)
                 _require_lane_room(ltfs, barcode, source_file.stat().st_size)
@@ -479,7 +479,7 @@ def _archive_block_stripe(
     )
     shard_group_ids.append(plan.shard_group_id)
     handles = scheduler.acquire_drives(request.lane_barcodes)
-    mounts: dict[str, object] = {}
+    mounts: dict[str, MountHandle] = {}
     loaded_slots: dict[int, int | None] = {}
     shard_dir = scratch_dir / plan.shard_group_id
     shard_dir.mkdir(parents=True, exist_ok=True)
@@ -524,8 +524,8 @@ def _archive_block_stripe(
                 pool.submit(_write_shard, spec, shard_tmp_files[spec.shard_index])
                 for spec in plan.shards
             ]
-            for future in concurrent.futures.as_completed(futures):
-                shard_index, checksum, shard_size = future.result()
+            for shard_future in concurrent.futures.as_completed(futures):
+                shard_index, checksum, shard_size = shard_future.result()
                 shard_checksums[shard_index] = checksum
                 shard_sizes[shard_index] = shard_size
 

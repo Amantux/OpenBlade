@@ -7,7 +7,7 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
 import structlog
 
@@ -28,7 +28,19 @@ from openblade.jobs.queue import JobQueue
 from openblade.jobs.restore import RestoreService
 from openblade.jobs.worker import Worker
 from openblade.nas.service import NasService
-from openblade.nas.types import NasDataset, NasFileRecord, NasFileState, NasPool, StoragePolicy
+from openblade.nas.types import (
+    DatasetStatus,
+    HydrationBehavior,
+    IngestMode,
+    NasDataset,
+    NasFileRecord,
+    NasFileState,
+    NasPool,
+    PolicyType,
+    PoolAccessMode,
+    ShardStrategy,
+    StoragePolicy,
+)
 from openblade.simulator.i3_config import scalar_i3_active_config
 from openblade.simulator.scenarios import scalar_i3_default
 
@@ -45,27 +57,51 @@ _ltfs: LTFSBackend | None = None
 _catalog: CatalogRepository | None = None
 
 
+class _LibrarySpec(TypedDict):
+    """One configured library instance, as the seeder describes it."""
+
+    name: str
+    emulator_url: str
+    serial_number: str
+    model: str
+    role: str
+    sort_order: int
+    legacy_names: set[str]
+
+
+class _DemoDatasetSpec(TypedDict):
+    """One demo dataset. ``files`` is (relative_path, size_bytes, barcode)."""
+
+    dataset_id: str
+    name: str
+    volume_group: str
+    pool_id: str
+    policy_id: str
+    source_path: str
+    files: list[tuple[str, int, str]]
+
+
 def _default_policies() -> list[StoragePolicy]:
     return [
         StoragePolicy(
             id="critical_sequential",
             name="Critical Sequential",
-            policy_type="critical_sequential",
+            policy_type=PolicyType.CRITICAL_SEQUENTIAL,
             allow_spillover=False,
             max_parallelism=1,
         ),
         StoragePolicy(
             id="noncritical_sharded",
             name="Noncritical Sharded",
-            policy_type="noncritical_sharded",
+            policy_type=PolicyType.NONCRITICAL_SHARDED,
             allow_sharding=True,
             max_parallelism=4,
-            shard_strategy="round_robin",
+            shard_strategy=ShardStrategy.ROUND_ROBIN,
         ),
         StoragePolicy(
             id="balanced",
             name="Balanced",
-            policy_type="balanced",
+            policy_type=PolicyType.BALANCED,
             allow_spillover=True,
             max_parallelism=2,
         ),
@@ -85,13 +121,13 @@ def _seed_nas_defaults(catalog: CatalogRepository) -> None:
             service.upsert_share(share)
 
 
-def _configured_library_specs(config: OpenBladeConfig) -> list[dict[str, object]]:
+def _configured_library_specs(config: OpenBladeConfig) -> list[_LibrarySpec]:
     default_metadata = [
         ("Primary Tape Library", "OB-SCALAR-I3-001", "primary", {"primary"}),
         ("Secondary Archive", "OB-SCALAR-I3-002", "archive", {"Library 2"}),
         ("Cold Storage Vault", "OB-SCALAR-I3-003", "cold_storage", {"Library 3"}),
     ]
-    specs: list[dict[str, object]] = []
+    specs: list[_LibrarySpec] = []
     for index, emulator_url in enumerate(config.emulator_urls):
         if index < len(default_metadata):
             name, serial, role, legacy_names = default_metadata[index]
@@ -151,7 +187,7 @@ def _seed_library_defaults(catalog: CatalogRepository, config: OpenBladeConfig) 
 
 
 def _seed_demo_catalog(catalog: CatalogRepository) -> None:
-    demo_specs = [
+    demo_specs: list[_DemoDatasetSpec] = [
         {
             "dataset_id": "demo-project-alpha",
             "name": "Project Alpha",
@@ -243,13 +279,13 @@ def _seed_demo_catalog(catalog: CatalogRepository) -> None:
                 pool_id=spec["pool_id"],
                 policy_id=spec["policy_id"],
                 source_path=spec["source_path"],
-                ingest_mode="cache_drive",
+                ingest_mode=IngestMode.CACHE_DRIVE,
                 volume_group_id=volume_group.id,
                 tape_set=tape_set,
                 shard_map=shard_map,
                 file_count=len(spec["files"]),
                 total_bytes=total_bytes,
-                status="archived",
+                status=DatasetStatus.ARCHIVED,
                 copies_completed=len(tape_set),
                 manifest_path=f"{spec['source_path']}/manifest.json",
                 created_at="2024-01-22T08:00:00Z",
@@ -319,9 +355,9 @@ def _seed_nas_pools(catalog: CatalogRepository) -> None:
             volume_group_ids=[catalog.create_volume_group("project-alpha").id],
             default_policy_id="critical_sequential",
             mount_path="/openblade/pools/critical-projects",
-            hydration_behavior="queue",
+            hydration_behavior=HydrationBehavior.QUEUE,
             restore_target_path="/openblade/restore/critical-projects",
-            access_mode="read_only",
+            access_mode=PoolAccessMode.READ_ONLY,
         ),
         NasPool(
             id="general-archive",
@@ -330,9 +366,9 @@ def _seed_nas_pools(catalog: CatalogRepository) -> None:
             volume_group_ids=[catalog.create_volume_group("media-archive-2024").id],
             default_policy_id="balanced",
             mount_path="/openblade/pools/general-archive",
-            hydration_behavior="queue",
+            hydration_behavior=HydrationBehavior.QUEUE,
             restore_target_path="/openblade/restore/general-archive",
-            access_mode="read_only",
+            access_mode=PoolAccessMode.READ_ONLY,
         ),
         NasPool(
             id="media-cache",
@@ -341,9 +377,9 @@ def _seed_nas_pools(catalog: CatalogRepository) -> None:
             volume_group_ids=[catalog.create_volume_group("backup-set-a").id],
             default_policy_id="balanced",
             mount_path="/openblade/pools/media-cache",
-            hydration_behavior="auto",
+            hydration_behavior=HydrationBehavior.AUTO,
             restore_target_path="/openblade/restore/media-cache",
-            access_mode="read_write",
+            access_mode=PoolAccessMode.READ_WRITE,
         ),
     ]
     existing_pool_ids = {pool.id for pool in service.list_pools()}
@@ -494,7 +530,7 @@ def get_catalog() -> CatalogRepository:
     return _catalog
 
 
-def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
+def _seed_demo_ltfs(catalog: CatalogRepository, ltfs: LTFSBackend) -> None:
     """Populate MockLTFSBackend with small example files based on catalog NAS records.
 
     This helps emulator-backed tests that expect LTFS content to exist.
@@ -507,7 +543,12 @@ def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
 
     datasets = catalog.list_nas_datasets()
     for ds in datasets:
+        # These rows are `dict[str, object]` (serialized NAS models), so the
+        # id/barcode/path reads need narrowing. A non-str id previously reached
+        # list_nas_file_records and matched nothing, so skipping is equivalent.
         dataset_id = ds.get("id")
+        if not isinstance(dataset_id, str):
+            continue
         try:
             files = catalog.list_nas_file_records(dataset_id)
         # Demo seeding is best-effort and must never break startup, so this stays
@@ -519,6 +560,8 @@ def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
         for f in files:
             barcode = f.get("tape_barcode")
             path = f.get("relative_path")
+            if not isinstance(barcode, str) or not isinstance(path, str):
+                continue
             if not barcode or not path:
                 continue
             try:
@@ -543,6 +586,8 @@ def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
 def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     active_config = config or load_config()
     init_db(active_config.db_url)
+    library: LibraryBackend
+    ltfs: LTFSBackend
     if active_config.backend == BackendMode.MOCK:
         library, ltfs = scalar_i3_default()
     else:

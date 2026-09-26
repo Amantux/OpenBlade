@@ -17,6 +17,7 @@ import socket
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 
 class GatewayStatus(str, Enum):
@@ -145,7 +146,7 @@ class GatewaySession:
 class ProtocolGateway:
     """In-process protocol gateway manager for emulated SFTP/SCP ingest."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._credentials: dict[str, GatewayCredential] = {}
         self._sessions: list[GatewaySession] = []
         self._last_error: str | None = None
@@ -164,7 +165,7 @@ class ProtocolGateway:
         return self._status
 
     @property
-    def config(self) -> dict:
+    def config(self) -> dict[str, Any]:
         return {
             "bind_host": self._bind_host,
             "bind_port": self._bind_port,
@@ -293,7 +294,7 @@ class ProtocolGateway:
             return [s for s in self._sessions if s.disconnected_at is None]
         return list(self._sessions)
 
-    def list_credentials(self) -> list[dict]:
+    def list_credentials(self) -> list[dict[str, Any]]:
         return [
             {
                 "username": c.username,
@@ -347,7 +348,7 @@ class ProtocolGateway:
         self._last_error = message
         self._status = GatewayStatus.ERROR
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, Any]:
         sessions = self._sessions
         active = [s for s in sessions if s.disconnected_at is None]
         return {

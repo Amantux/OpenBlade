@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
@@ -78,7 +79,9 @@ def _result_payload(summary: str) -> dict[str, Any]:
     }
 
 
-def _build_endpoint(method: str, path_template: str, operation_class: str):
+def _build_endpoint(
+    method: str, path_template: str, operation_class: str
+) -> Callable[..., Awaitable[dict[str, Any]]]:
     async def endpoint(
         request: Request,
         current_user: AmlUser = Depends(require_auth),

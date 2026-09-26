@@ -57,7 +57,18 @@ dev = [
   # so the pin costs zero churn). Bump deliberately, in its own commit, after
   # re-running `ruff check . && ruff format --check .`.
   "ruff==0.15.22",
-  "mypy>=1.11",
+  # EXACT pin, for the same reason as ruff above, now that backend-typecheck is a
+  # blocking gate: mypy adds error codes and tightens inference between minor
+  # releases, so a floating `>=` would let a new upload turn a green tree red with
+  # no commit behind it. Pinned to the version the zero-error baseline was cleared
+  # against (verified: `mypy openblade` exits 0 on 2.3.0). Bump deliberately, in
+  # its own commit, after re-running `mypy openblade`.
+  "mypy==2.3.0",
+  # Stubs for PyYAML (a transitive runtime dep via uvicorn[standard]), so
+  # openblade/nas/sidecar.py type-checks without a blanket import ignore.
+  # Pinned for the same reason as the two above: a stub release can introduce
+  # errors in unchanged code, and backend-typecheck now blocks.
+  "types-PyYAML==6.0.12.20260906",
   "asyncssh>=2.21",
   "pyfakefs>=5.6",
 ]
