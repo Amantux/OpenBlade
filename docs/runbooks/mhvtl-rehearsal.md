@@ -458,3 +458,148 @@ still unrehearsed:
 
 Phases 3 and 4 stand unchanged. What this phase removes is the class of failure
 where the *parsers and device plumbing* are wrong — and it found seven of those.
+
+---
+
+## 7. GitHub runner — the weekly canary's own bring-up
+
+`.github/workflows/mhvtl-weekly.yml` reproduces all of §1 on a hosted
+`ubuntu-latest` runner every Tuesday. Its first two real runs (2026-09-15
+`34930111187`, 2026-09-22 `35688121678`) failed identically; run
+`36222156436` is the first green one — **51 passed, 11 skipped, 0 failed in
+22.7 s**, LTFS included. Nothing is degraded and nothing is skipped that is not
+also skipped on this host (§2).
+
+### The three documented assumptions all HELD
+
+Worth stating plainly, because the workflow header predicted these as the likely
+blockers and every one of them was fine:
+
+| Assumption | Runner reality |
+|---|---|
+| headers for the running kernel exist | `linux-headers-6.17.0-1022-azure  Installed: 6.17.0-1022.22` |
+| unsigned out-of-tree module can load | `SecureBoot disabled`, `sig_enforce` = `N`, module built + loaded |
+| systemd is PID 1 | `systemctl is-system-running` → `running`, `ps -p 1` → `systemd` |
+
+`mhvtl` registered 1 `mediumx` + 3 `tape`, `mtx status` listed all 12 elements,
+and `setup.sh` printed `=== Rig is up ===`. The failure was elsewhere.
+
+### 7.1 `st` and `ch` are not in an Azure kernel's module set (the real blocker)
+
+A **fourth** assumption nobody had written down. mhvtl registers SCSI *targets*;
+`/dev/nstN` and `/dev/schN` are created by the kernel's **upper-level** drivers
+`st` and `ch`, which is a separate matter from mhvtl entirely. Ubuntu's generic
+kernel ships them inside `linux-modules-$(uname -r)` and udev autoloads them —
+which is why this host got `/dev/st0-2` and `/dev/sch0` for free and `setup.sh`
+never mentioned them. An Azure-tuned kernel puts them in
+**`linux-modules-extra-$(uname -r)`, which is not installed on the runner image**:
+
+```
++ modinfo st
+modinfo: ERROR: Module st not found.
++ apt-cache policy linux-modules-extra-6.17.0-1022-azure
+  Installed: (none)
+  Candidate: 6.17.0-1022.22
+```
+
+The rig therefore came up with every tape row showing `-` in `lsscsi`'s block
+column, an empty `/sys/class/scsi_tape`, and `ls: cannot access '/dev/nst*': No
+such file or directory`. `OPENBLADE_DRIVE_DEVICES` is a list of `/dev/nstN`
+nodes, so the rig was unusable while looking healthy.
+
+`setup.sh` now `modprobe`s `st` before starting the daemons, apt-installs
+`linux-modules-extra-$(uname -r)` and retries if that fails, and **hard-fails**
+if it still cannot — no `/dev/nst` means no drive to open, so there is nothing to
+degrade to. `ch` is attempted the same way but is only a `NOTE:` when absent:
+this rig drives the changer through its `/dev/sg` node with `mtx`.
+
+Confirmed side benefit — the runner's mapping is **non-monotonic**, which is the
+independent confirmation §3.4's "must be read, not derived" rule wanted:
+
+```
+SCSI_ADDR      BLOCK      SG         NST        SERIAL
+2:0:1:0        /dev/st0   /dev/sg2   /dev/nst0  OBLADE_D01
+2:0:2:0        /dev/st2   /dev/sg4   /dev/nst2  OBLADE_D02
+2:0:3:0        /dev/st1   /dev/sg3   /dev/nst1  OBLADE_D03
+```
+
+### 7.2 `sg_inq` needs the `tape` group — and reported the wrong cause
+
+`env.sh` refused with
+
+```
+ERROR: found medium changer(s) /dev/sg1 but none reporting unit serial
+         'OBLADE_L10'.
+```
+
+on a rig whose `device.conf` says exactly `OBLADE_L10`. The `/dev/sgN` nodes are
+`0660 root:tape`; the runner user is
+`uid=1001(runner) groups=1001(runner),4(adm),100(users),118(docker),999(systemd-journal)`
+— **not in `tape`**. `sg_inq` failed with EACCES, whose stderr the serial lookup
+swallowed, and an empty serial is indistinguishable from "that is somebody
+else's library". On this host the operator was in `tape`, so it never showed.
+
+`rig_sg_inq()` now escalates via `sudo -n` when the node is unreadable, and
+`rig_changer` checks for exactly that condition and reports a **permission**
+problem as a permission problem. The refusal-to-guess guard is unchanged.
+
+### 7.3 LTFS needed `libsnmp-dev`, not the documented blockers
+
+The `icu-config` shim and `--recurse-submodules` from §1 were both correct and
+both worked. The build died earlier than either, on a dependency §1 does not
+mention because this host already had it:
+
+```
+./configure: line 14786: net-snmp-config: command not found
+configure: error: Package requirements (net-snmp >= 5.3) were not met
+```
+
+There is no `--disable-snmp`. `libsnmp-dev` provides `net-snmp-config` and the
+pkg-config file; with it, LTFS builds, `mkltfs` formats `OB0007L8`/`OB0008L8`,
+and the full suite runs. Runtime libraries are now apt-installed **one package
+per call**, because noble renamed `libfuse2` → `libfuse2t64` and a single batched
+`apt-get ... || true` containing one unknown name installs *nothing* and hides it.
+
+### 7.4 Loudness: the failure that reported itself three steps late
+
+The canary's first red run named the failing step as the pytest one, with
+`OPENBLADE_BACKEND: unbound variable`. The real error was `env.sh`'s, 20 lines
+earlier, as mere stderr. Cause: `eval "$(scripts/mhvtl/env.sh)"` — **a failing
+command substitution does not fail the enclosing command even under `set -e`**,
+so the refusal became `eval ""` and the step carried on.
+
+Three changes, and the rule behind them: *if a step's failure means the rig
+cannot work, that step must be the red one.*
+
+- Resolution is its own workflow step that checks `env.sh`'s exit status,
+  `::error::`s, and exports via `$GITHUB_ENV`. The pytest step additionally
+  `${VAR:?}`-guards each variable.
+- `setup.sh` identifies the changer with `rig_changer` (serial-keyed) and asserts
+  an `/dev/nst` node per drive **before** printing `Rig is up`, so anything that
+  would make `env.sh` refuse fails at bring-up instead.
+- The `st` driver is a hard failure; only LTFS remains a documented soft cut.
+
+### 7.5 What the canary covers, and what stays degraded
+
+Nothing is degraded on a green run: LTFS builds, so all suites execute. The one
+remaining soft cut is unchanged — if the LTFS build ever breaks, the job emits a
+`::warning::` and runs the four non-LTFS suites (discovery, changer, drive
+health, catalog integrity) rather than going red on a third-party build. The
+11 skips are the same legitimate set as §2: 5 TapeAlert/diagnostic pages mhvtl
+does not emulate, 4 opt-in fault-injection tests, 1 opt-in dirty unmount, 1
+absent higher-level locking backend.
+
+Cold runs build LTFS from source inside the 20-minute step budget; the
+`actions/cache` entry is keyed on `LTFS_REF` + runner image identity, and
+**Actions cache scoping means a branch's cache is not visible to the default
+branch**, so the first scheduled run after any image bump pays the cold cost.
+
+### 7.6 Where this would block on a different runner image
+
+Add to the §5 table, for hosted runners specifically:
+
+| Requirement | Failure if missing |
+|---|---|
+| `st` in `linux-modules*-$(uname -r)` | no `/dev/nstN`; `setup.sh` fails with the apt hint |
+| caller in `tape`, root, or able to `sudo -n` | `sg_inq` EACCES; `rig_changer` says so explicitly |
+| `libsnmp-dev` | LTFS `./configure` fails on `net-snmp >= 5.3`; job degrades with a `::warning::` |
