@@ -514,3 +514,34 @@ def test_preflight_refusals_keep_their_curated_text(tmp_path: Path) -> None:
     exc = IngestRefusedError("Cache drive cache-1 cannot reserve 10 bytes")
     assert safe_job_error(exc) == "Cache drive cache-1 cannot reserve 10 bytes"
     assert isinstance(exc, RuntimeError)
+
+
+def test_ingest_per_file_failure_is_logged(tmp_path: Path, monkeypatch, caplog) -> None:
+    """The per-file handler is exempt from BLE001 only because ruff ignores except
+    bodies containing a `raise` — and that raise is unreachable on the default
+    continue-on-error path. The cause must still reach the log."""
+    import logging
+
+    service, cache_root = _setup_service(tmp_path)
+    plan = register_archive_plan(_make_plan(cache_root))
+    job = start_ingest_job(
+        plan=plan,
+        dataset_name="dataset-a",
+        pool_id="pool-1",
+        nas_service=service,
+        cache_drive_id="cache-1",
+    )
+
+    context = get_context()
+
+    def boom(handle, dest, content, **kwargs):
+        raise RuntimeError("simulated per-file failure")
+
+    monkeypatch.setattr(context.ltfs, "write_bytes", boom)
+
+    with caplog.at_level(logging.WARNING, logger="openblade.nas.ingest"):
+        result = _run_job(service, job.job_id)
+
+    assert result.files_failed == 2
+    assert caplog.records, "the per-file failure was not logged at all"
+    assert any(r.exc_info is not None for r in caplog.records), "no traceback captured"

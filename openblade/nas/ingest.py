@@ -259,7 +259,18 @@ class _BaseIngest:
                     self._tape_paths[file_record.id] = str(tape_path)
                     self.job.files_processed += 1
                     self.job.bytes_written += prepared.size_bytes
+                # Per-file isolation, and NOT exempt from the BLE policy just because
+                # ruff skips it: BLE001 ignores any except body containing a `raise`,
+                # and the `raise` below is unreachable whenever
+                # _abort_on_file_error() is False — the default for CacheDriveIngest
+                # and the allow_partial_dataset_success case for SourceStreamIngest.
+                # So the common path is a swallow, and it gets logged like the rest.
                 except Exception as exc:
+                    logger.warning(
+                        "ingest file write failed",
+                        extra={"relative_path": relative_path, "barcode": assignment.barcode},
+                        exc_info=True,
+                    )
                     self.job.files_failed += 1
                     # safe_job_error: job.errors is served by GET /nas/ingest/{job_id}
                     # with no auth dependency, same contract as jobs.error.

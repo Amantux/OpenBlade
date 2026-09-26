@@ -22,6 +22,7 @@ jobs:
       api: ${{ steps.filter.outputs.api }}
       simulator: ${{ steps.filter.outputs.simulator }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      webflask: ${{ steps.filter.outputs.webflask }}
       cicd: ${{ steps.filter.outputs.cicd }}
       wiki: ${{ steps.filter.outputs.wiki }}
     steps:
@@ -65,6 +66,12 @@ jobs:
               - 'tools/emulator_spec/**'
             frontend:
               - 'frontend/**'
+            webflask:
+              - 'openblade/web_flask/**'
+              - 'tests/unit/test_web_flask_app.py'
+              - 'Dockerfile.web'
+              - 'docker-compose.yml'
+              - 'pyproject.toml'
             cicd:
               - '.github/workflows/**'
             # docs/wiki/reference/{cli,api}.md are GENERATED from the Typer CLI
@@ -213,10 +220,17 @@ jobs:
       - run: npm run build
       - run: npm run test -- --run
 
+<<<<<<< Updated upstream
   wiki-reference:
     name: wiki-reference
     needs: changes
     if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.wiki == 'true' }}
+=======
+  web-flask-smoke:
+    name: web-flask-smoke
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.webflask == 'true' }}
+>>>>>>> Stashed changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -225,11 +239,17 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
+<<<<<<< Updated upstream
       # The generator imports the app and introspects it, so it needs the real
       # dependency set — not just a markdown diff. `--check` writes nothing and
       # exits 1 naming each stale page.
       - name: Generated wiki reference matches the code
         run: python3 tools/gen_wiki_reference.py --check
+=======
+      - run: mypy openblade/web_flask
+      - run: pytest tests/unit/test_web_flask_app.py -q --tb=short
+      - run: docker compose build web
+>>>>>>> Stashed changes
 
   cicd-workflow-validate:
     name: cicd-workflow-validate

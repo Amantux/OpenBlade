@@ -15,7 +15,7 @@ OpenBlade is a simulator-first DIY tape archive controller inspired by iBlade-st
 1. **Safety-first operations**: keep destructive and hardware-sensitive workflows gated and explicit.
 2. **Simulator-first reliability**: make the Quantum i3 emulator deterministic enough for archive/restore/inventory/fault regression work.
 3. **Quantum compatibility**: maintain AML/API/state behavior aligned with the documented i3/i6 Web Services surface in strict scope.
-4. **Operator control plane clarity**: provide a focused API/UI/CLI for fleet and library workflows without out-of-scope feature leakage.
+4. **Operator control plane clarity**: provide a focused API/UI/CLI for NAS-first operations with device-scoped deep controls.
 5. **Continuous verification**: enforce compatibility and regression evidence in CI/CD before changes land on `master`.
 
 ## Layered CI/CD (targeted)
@@ -25,7 +25,7 @@ OpenBlade CI/CD is intentionally split by layer so each change runs only relevan
 | --- | --- | --- |
 | API + backend domain | `CI`: `backend-lint`, `backend-typecheck`, `backend-tests`, `api-aml-integration` | `openblade/**/*.py`, AML integration tests, backend config |
 | Simulator/emulator parity | `CI`: `i3-smoke`; `i3-emulator-compliance`; `emulator-change-gates` | simulator, AML routes, emulator contract/tools, i3 tests, compose/runtime wiring |
-| Frontend/UI | `CI`: `frontend-build-test` | `frontend/**` |
+| Frontend/UI | `CI`: `frontend-build-test` (React), `web-flask-smoke` (Flask NAS UI) | `frontend/**`, `openblade/web_flask/**`, `Dockerfile.web` |
 | CI/CD policy layer | `CI`: `cicd-workflow-validate` | `.github/workflows/**` |
 
 This keeps checks up to date and targeted while preserving full coverage on workflow dispatch and on emulator-specific workflows.
@@ -34,11 +34,12 @@ This keeps checks up to date and targeted while preserving full coverage on work
 ```bash
 pip install -e '.[dev]'
 pytest -m 'not real_hardware'
-cd frontend && npm install && npm run test && npm run build
 openblade inventory
 uvicorn openblade.api.main:app --reload
 # Flask-style WSGI deployment option (same API behavior):
 gunicorn openblade.api.wsgi:application
+# Flask NAS frontend:
+gunicorn -k gevent -w 1 -b 0.0.0.0:5173 openblade.web_flask.app:app
 ```
 
 ## Multi-Library Setup
@@ -67,3 +68,24 @@ gunicorn openblade.api.wsgi:application
 - Use `openblade hardware validate-ltfs --device /dev/nst0 --barcode ABC123L9` to validate LTFS capabilities explicitly (always the **no-rewind** `nst` node — see `docs/hardware-setup.md`)
 - Formatting requires barcode confirmation plus a one-time safety token
 - Drive unload is blocked if LTFS is mounted or dirty
+
+## Flask NAS control-plane additions
+- **Multi-user management** is available in Flask `System`:
+  - Lists existing AML users and role assignments
+  - Creates users (`admin`, `operator`, `service`) via `POST /system/users`
+- **Write Path** controls are available in Flask `Storage -> Write Path`:
+  - Policy tuning for replication, sharding, shard-size, auto-clean, ingest mode, and parallelism (`POST /storage/policies`)
+  - Cache-drive staging profiles for burst writes (`POST /storage/cache-drives`)
+  - Direct source-stream-to-tape profile (`POST /storage/source-stream`)
+  - Folder-to-pool share mappings with per-folder access modes (`POST /storage/shares`)
+- **Catalog** includes a dataset verification workbench in Flask `Storage -> Catalog`:
+  - Searchable dataset table with per-dataset checksum verification action (`POST /storage/datasets/{dataset_id}/verify`)
+  - Last verify-run summary for quick operator validation signal
+
+These Flask forms use the backend NAS/AML APIs:
+- `GET/POST /aml/users`
+- `GET/POST /nas/policies`
+- `GET/POST /nas/cache-drives`
+- `GET/PUT /nas/source-stream`
+- `GET/POST /nas/shares`
+- `GET /nas/datasets` and `POST /nas/datasets/{dataset_id}/verify`
