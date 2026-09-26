@@ -137,7 +137,7 @@ Move a cartridge out of storage into the I/E station.
 | --- | --- | --- | --- | --- | --- |
 | `BARCODE` | argument | `STR` | yes | - | Barcode of the cartridge to export |
 | `--ie-slot` | option | `INT` | no | none | Import/export element to use (default: first empty) |
-| `--force` | option | `BOOLEAN` | no | false | Export even though the cartridge carries archived data |
+| `--confirm-barcode` | option | `STR` | no | none | Export even though the cartridge carries archived data. Must equal the cartridge's own barcode exactly. |
 
 ### `openblade mailslot import`
 

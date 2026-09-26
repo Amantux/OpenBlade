@@ -110,7 +110,7 @@ class TestImport:
     def test_clears_the_exported_flag_so_restores_work_again(self) -> None:
         repo, library, service = make_service()
         archive_one_file(repo, library, "OB0001L8", "/photos/a.txt")
-        service.export_cartridge("OB0001L8", force=True)
+        service.export_cartridge("OB0001L8", confirm_barcode="OB0001L8")
         assert repo.get_cartridge("OB0001L8").state == "exported"
 
         service.import_cartridge(7)
@@ -165,7 +165,7 @@ class TestExport:
 
         Verified by deleting the ``if assessment.carries_data: raise`` block in
         ``TapeOperationOrchestrator._guard_export``: this test then fails while
-        ``test_export_with_force_moves_the_cartridge_anyway`` still passes.
+        ``test_export_with_matching_confirm_barcode_moves_the_cartridge_anyway`` still passes.
         """
         repo, library, service = make_service()
         archive_one_file(repo, library, "OB0001L8", "/photos/holiday.jpg")
@@ -190,8 +190,8 @@ class TestExport:
         cartridge holding part of a striped file has instances of its own and
         the real check catches it. A cartridge with zero instances carries
         nothing -- and refusing it with the sentence "still carries archived
-        data" was both false and a good way to teach operators that `--force`
-        is the normal way to export. (Adversarial review finding.)
+        data" was both false and a good way to teach operators that
+        `--confirm-barcode` is the normal way to export. (Adversarial review finding.)
         """
         repo, library, service = make_service()
         group = repo.create_volume_group("shards")
@@ -220,11 +220,11 @@ class TestExport:
 
         assert library.find_slot_by_barcode("OB0001L8") == 1
 
-    def test_export_with_force_moves_the_cartridge_anyway(self) -> None:
+    def test_export_with_matching_confirm_barcode_moves_the_cartridge_anyway(self) -> None:
         repo, library, service = make_service()
         archive_one_file(repo, library, "OB0001L8", "/photos/holiday.jpg")
 
-        result = service.export_cartridge("OB0001L8", force=True)
+        result = service.export_cartridge("OB0001L8", confirm_barcode="OB0001L8")
 
         assert result.destination_slot == 7
         assert library.find_slot_by_barcode("OB0001L8") is None
@@ -232,11 +232,30 @@ class TestExport:
         assert result.assessment is not None
         assert result.assessment.archived_files_on_cartridge == 1
 
+    def test_confirm_barcode_must_match_exactly(self) -> None:
+        """MUTATION ANCHOR. A mismatched (or merely truthy) confirm_barcode must
+        not bypass the guard -- that would just be ``--force`` wearing a string.
+
+        Verified by changing the equality check in
+        ``TapeOperationOrchestrator._guard_export`` to accept any non-empty
+        value (e.g. ``if confirm_barcode:``): this test then fails while
+        ``test_export_with_matching_confirm_barcode_moves_the_cartridge_anyway``
+        still passes.
+        """
+        repo, library, service = make_service()
+        archive_one_file(repo, library, "OB0001L8", "/photos/holiday.jpg")
+
+        with pytest.raises(ExportRefusedError):
+            service.export_cartridge("OB0001L8", confirm_barcode="OB0002L8")
+
+        assert library.find_slot_by_barcode("OB0001L8") == 1
+        assert repo.get_cartridge("OB0001L8").state != "exported"
+
     def test_export_marks_the_catalog_cartridge_offline(self) -> None:
         repo, library, service = make_service()
         archive_one_file(repo, library, "OB0001L8", "/photos/holiday.jpg")
 
-        service.export_cartridge("OB0001L8", force=True)
+        service.export_cartridge("OB0001L8", confirm_barcode="OB0001L8")
 
         # This is the flag jobs/restore.py and jobs/sharded_restore.py read.
         assert repo.get_cartridge("OB0001L8").state == "exported"
@@ -255,7 +274,7 @@ class TestExport:
         repo.mark_instance_archived(instance.id)
         assert repo.get_cartridge("OB0001L8") is None
 
-        service.export_cartridge("OB0001L8", force=True)
+        service.export_cartridge("OB0001L8", confirm_barcode="OB0001L8")
 
         assert repo.get_cartridge("OB0001L8").state == "exported"
 
@@ -269,7 +288,7 @@ class TestExport:
         service = MailslotService(repo, library, ltfs)
         archive_one_file(repo, library, "OB0001L8", "/photos/holiday.jpg")
 
-        service.export_cartridge("OB0001L8", force=True)
+        service.export_cartridge("OB0001L8", confirm_barcode="OB0001L8")
 
         job = repo.create_job("restore", {})
         with pytest.raises(CartridgeOfflineError):
@@ -409,7 +428,7 @@ class TestOrchestratorGuardIsUnbypassable:
             TapeOpRequest(
                 op_type=TapeOpType.EXPORT,
                 barcode="OB0002L8",
-                extras={"ie_slot": 3, "force": True},  # 3 is a STORAGE slot
+                extras={"ie_slot": 3, "confirmBarcode": "OB0002L8"},  # 3 is a STORAGE slot
             ),
         )
         assert record.status is TapeOpStatus.FAILED
@@ -500,7 +519,7 @@ class TestOrchestratorGuardIsUnbypassable:
             TapeOpRequest(
                 op_type=TapeOpType.EXPORT,
                 barcode="OB0001L8",
-                extras={"ie_slot": 5, "force": True},
+                extras={"ie_slot": 5, "confirmBarcode": "OB0001L8"},
             ),
         )
         assert record.status is TapeOpStatus.COMPLETED

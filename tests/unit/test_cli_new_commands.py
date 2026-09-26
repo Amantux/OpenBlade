@@ -176,7 +176,7 @@ class TestRestoreTree:
         seed_tree(source)
         invoke("archive", "--volume-group", "photos", "--path", str(source))
         # Take the tape out of the library, forcibly.
-        invoke("mailslot", "export", "MCK00001", "--force")
+        invoke("mailslot", "export", "MCK00001", "--confirm-barcode", "MCK00001")
 
         result = invoke("restore", "tree", "/photos", "--dest", str(tmp_path / "out"))
 
@@ -393,7 +393,38 @@ class TestMailslot:
         assert result.stdout.strip() == ""
         assert stdout_json(invoke("mailslot", "list"))["occupiedCount"] == 0
 
-    def test_export_with_force_reports_what_went_out_of_the_door(self, cli_home, tmp_path) -> None:
+    def test_export_with_matching_confirm_barcode_reports_what_went_out_of_the_door(
+        self, cli_home, tmp_path
+    ) -> None:
+        bootstrap(cli_home)
+        source = tmp_path / "src"
+        seed_tree(source)
+        invoke("archive", "--volume-group", "photos", "--path", str(source))
+
+        result = invoke("mailslot", "export", "MCK00001", "--confirm-barcode", "MCK00001")
+
+        assert result.exit_code == 0, result.output
+        payload = stdout_json(result)
+        assert payload["exported"]["carriesData"] is True
+        assert payload["exported"]["archivedFilesOnCartridge"] == 3
+        assert payload["exported"]["volumeGroup"] == "photos"
+
+    def test_export_refuses_a_mistyped_confirm_barcode(self, cli_home, tmp_path) -> None:
+        """``--confirm-barcode`` must equal the cartridge exactly -- a typo, or
+        the barcode of a different cartridge, must still refuse."""
+        bootstrap(cli_home)
+        source = tmp_path / "src"
+        seed_tree(source)
+        invoke("archive", "--volume-group", "photos", "--path", str(source))
+
+        result = invoke("mailslot", "export", "MCK00001", "--confirm-barcode", "MCK00002")
+
+        assert result.exit_code == 1
+        assert "Export refused" in result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_export_no_longer_accepts_a_force_flag(self, cli_home, tmp_path) -> None:
+        """``--force`` was replaced by typed ``--confirm-barcode``; it must be gone."""
         bootstrap(cli_home)
         source = tmp_path / "src"
         seed_tree(source)
@@ -401,11 +432,9 @@ class TestMailslot:
 
         result = invoke("mailslot", "export", "MCK00001", "--force")
 
-        assert result.exit_code == 0, result.output
-        payload = stdout_json(result)
-        assert payload["exported"]["carriesData"] is True
-        assert payload["exported"]["archivedFilesOnCartridge"] == 3
-        assert payload["exported"]["volumeGroup"] == "photos"
+        assert result.exit_code != 0
+        combined = (result.stderr + result.output).lower()
+        assert "no such option" in combined
 
     def test_import_from_an_empty_element_exits_one_with_a_typed_error(self, cli_home) -> None:
         bootstrap(cli_home)

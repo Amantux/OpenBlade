@@ -160,7 +160,7 @@ class MailslotService:
         )
 
     def export_cartridge(
-        self, barcode: str, *, ie_slot: int | None = None, force: bool = False
+        self, barcode: str, *, ie_slot: int | None = None, confirm_barcode: str | None = None
     ) -> MailslotMoveResult:
         """Move a cartridge from storage into the first empty I/E element."""
         assessment = self.preview_export(barcode)
@@ -189,7 +189,7 @@ class MailslotService:
                 barcode=barcode,
                 slot_id=source_slot,
                 requested_by="mailslot",
-                extras={"ie_slot": target_ie, "force": force},
+                extras={"ie_slot": target_ie, "confirmBarcode": confirm_barcode},
             )
         )
         self._raise_if_failed(record, "export")

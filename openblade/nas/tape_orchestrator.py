@@ -431,8 +431,10 @@ class TapeOperationOrchestrator:
         """Move media from a storage slot into an import/export element.
 
         The data guard lives HERE rather than only in the service, because this
-        is the choke point every surface goes through. ``extras["force"]`` is
-        the single documented override.
+        is the choke point every surface goes through. ``extras["confirmBarcode"]``
+        is the single documented override, and it must equal ``request.barcode``
+        exactly -- a boolean flag let a scripted caller wave every export
+        through without ever naming the cartridge it was letting out the door.
 
         The source slot is resolved FROM THE BARCODE, never taken from
         ``request.slot_id``. Trusting that field meant the guard assessed one
@@ -488,7 +490,8 @@ class TapeOperationOrchestrator:
         setter(barcode, state)
 
     def _guard_export(self, request: TapeOpRequest) -> None:
-        if request.extras.get("force") is True:
+        confirm_barcode = request.extras.get("confirmBarcode")
+        if confirm_barcode is not None and str(confirm_barcode) == request.barcode:
             return
         assess = getattr(self.repo, "list_instances_for_barcode", None)
         if assess is None:
@@ -496,7 +499,8 @@ class TapeOperationOrchestrator:
             # cartridge. Fail closed: an unknown payload is not an empty one.
             raise ExportRefusedError(
                 f"Cannot determine what is on cartridge {request.barcode} without a "
-                "catalog; refusing to export. Re-run against the catalog, or force."
+                "catalog; refusing to export. Re-run against the catalog, or pass "
+                "--confirm-barcode matching the cartridge exactly."
             )
         from openblade.catalog.export_policy import assess_export
 

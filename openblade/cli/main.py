@@ -880,8 +880,13 @@ def mailslot_export(
     ie_slot: int | None = typer.Option(
         None, "--ie-slot", help="Import/export element to use (default: first empty)"
     ),
-    force: bool = typer.Option(
-        False, "--force", help="Export even though the cartridge carries archived data"
+    confirm_barcode: str | None = typer.Option(
+        None,
+        "--confirm-barcode",
+        help=(
+            "Export even though the cartridge carries archived data. Must equal "
+            "the cartridge's own barcode exactly."
+        ),
     ),
 ) -> None:
     """Move a cartridge out of storage into the I/E station.
@@ -889,11 +894,12 @@ def mailslot_export(
     This is how data walks out of the library: once exported, every file on that
     cartridge is unrestorable until it is imported back. It refuses by default
     when the cartridge (or its volume group) still holds archived files, and
-    names what is on it.
+    names what is on it. Overriding that refusal requires typing the cartridge's
+    own barcode via ``--confirm-barcode``, not a bare flag.
     """
     context, service = _mailslot_service()
     try:
-        result = service.export_cartridge(barcode, ie_slot=ie_slot, force=force)
+        result = service.export_cartridge(barcode, ie_slot=ie_slot, confirm_barcode=confirm_barcode)
     except ExportRefusedError as exc:
         err_console.print(f"[red]Export refused:[/red] {exc}")
         raise typer.Exit(code=1) from None
