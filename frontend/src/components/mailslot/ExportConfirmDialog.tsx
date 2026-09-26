@@ -8,7 +8,10 @@ interface ExportConfirmDialogProps {
   barcode: string;
   /** What the API says would leave with this cartridge. Null while unknown. */
   assessment: ExportAssessment | null;
+  /** True while the assessment is being fetched. */
+  isAssessmentPending?: boolean;
   isProcessing?: boolean;
+  onRetryAssessment?: () => void;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -21,12 +24,18 @@ interface ExportConfirmDialogProps {
  * `force` is set. `force` therefore never travels on a single click: the operator
  * has to type the barcode, which is the same posture as the CLI's `--force` —
  * you cannot get there without naming the cartridge.
+ *
+ * It also refuses to confirm without a loaded assessment. An operator cannot
+ * consent to losing access to something nobody has told them about, and the
+ * orchestrator takes the same line: "an unknown payload is not an empty one".
  */
 export default function ExportConfirmDialog({
   open,
   barcode,
   assessment,
+  isAssessmentPending = false,
   isProcessing = false,
+  onRetryAssessment,
   onConfirm,
   onCancel,
 }: ExportConfirmDialogProps) {
@@ -42,6 +51,9 @@ export default function ExportConfirmDialog({
   }
 
   const barcodeMatches = typedBarcode.trim() === barcode;
+  // Two independent conditions, both required: the right barcode typed, and a
+  // loaded assessment for THAT barcode to have typed it against.
+  const hasAssessment = assessment !== null && assessment.barcode === barcode;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
@@ -54,7 +66,35 @@ export default function ExportConfirmDialog({
           unrestorable until the cartridge is imported again.
         </p>
 
-        {assessment ? (
+        {!hasAssessment ? (
+          <div className="mt-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+            {isAssessmentPending ? (
+              'Reading what is on this cartridge…'
+            ) : (
+              <>
+                <div className="font-semibold">
+                  Cannot read what is on {barcode}
+                </div>
+                <p className="mt-1 text-amber-100/80">
+                  Nothing will be exported until this succeeds — an unknown payload is not an
+                  empty one.
+                </p>
+                {onRetryAssessment ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="mt-3"
+                    onClick={onRetryAssessment}
+                  >
+                    Check again
+                  </Button>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+
+        {hasAssessment && assessment ? (
           <dl className="mt-4 space-y-2 rounded-md border border-red-500/20 bg-red-950/20 p-4 text-sm text-red-100/90">
             <div className="flex justify-between gap-4">
               <dt>Archived file instances</dt>
@@ -121,7 +161,7 @@ export default function ExportConfirmDialog({
           <Button
             type="button"
             variant="danger"
-            disabled={!barcodeMatches || isProcessing}
+            disabled={!barcodeMatches || !hasAssessment || isProcessing}
             onClick={onConfirm}
           >
             {isProcessing ? 'Exporting…' : 'Export anyway'}

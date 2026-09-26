@@ -88,6 +88,10 @@ export default function Mailslot() {
   const [targetSlot, setTargetSlot] = useState('');
   const [exportBarcode, setExportBarcode] = useState('');
   const [confirmBarcode, setConfirmBarcode] = useState<string>();
+  // The barcode the SERVER refused. `force` may only ever be offered for this one:
+  // the refusal panel outlives an edit of the field, and reading the field at click
+  // time would arm the dialog for a cartridge nothing has assessed.
+  const [refusedBarcode, setRefusedBarcode] = useState<string>();
 
   const slotsQuery = useQuery({
     queryKey: SLOTS_QUERY_KEY,
@@ -115,9 +119,24 @@ export default function Mailslot() {
       exportThroughMailslot(barcode, { force }),
     onSuccess: async () => {
       setConfirmBarcode(undefined);
+      setRefusedBarcode(undefined);
       await queryClient.invalidateQueries({ queryKey: SLOTS_QUERY_KEY });
     },
+    onError: (error, variables) => {
+      setRefusedBarcode(
+        error instanceof ApiError && error.status === 409 ? variables.barcode : undefined,
+      );
+    },
   });
+
+  function changeExportBarcode(next: string) {
+    setExportBarcode(next);
+    // Editing the field invalidates every answer the server gave about the old
+    // one — including the refusal that unlocks `force`.
+    setRefusedBarcode(undefined);
+    setConfirmBarcode(undefined);
+    exportMutation.reset();
+  }
 
   if (slotsQuery.isLoading) {
     return <Spinner />;
@@ -140,7 +159,10 @@ export default function Mailslot() {
       ? previewMutation.data
       : null;
   const exportError = exportMutation.error;
-  const exportRefused = exportError instanceof ApiError && exportError.status === 409;
+  const exportRefused =
+    exportError instanceof ApiError &&
+    exportError.status === 409 &&
+    refusedBarcode === exportBarcode.trim();
 
   return (
     <div className="space-y-4">
@@ -224,7 +246,11 @@ export default function Mailslot() {
                 <select
                   id="import-source-slot"
                   value={sourceIeSlot ?? ''}
-                  onChange={(event) => setSourceIeSlot(Number(event.target.value))}
+                  onChange={(event) =>
+                    // The placeholder option's value is '', and Number('') is 0 —
+                    // a real element id, which would fire an import for I/E slot 0.
+                    setSourceIeSlot(event.target.value === '' ? undefined : Number(event.target.value))
+                  }
                   className="mt-2 w-full rounded-md border border-quantum-border bg-quantum-panel px-3 py-2 text-sm text-slate-100 outline-none focus:border-quantum-red"
                 >
                   <option value="">Select an element…</option>
@@ -303,7 +329,7 @@ export default function Mailslot() {
               <input
                 id="export-barcode"
                 value={exportBarcode}
-                onChange={(event) => setExportBarcode(event.target.value)}
+                onChange={(event) => changeExportBarcode(event.target.value)}
                 autoComplete="off"
                 placeholder="e.g. PHO001L8"
                 className="mt-2 w-full rounded-md border border-quantum-border bg-quantum-panel px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-quantum-red"
@@ -346,9 +372,11 @@ export default function Mailslot() {
                 <Button
                   variant="danger"
                   onClick={() => {
-                    const barcode = exportBarcode.trim();
-                    // The dialog shows what leaves with it; fetch that if the
-                    // operator went straight for Export without checking first.
+                    // `refusedBarcode`, never the input field: this must be the
+                    // cartridge the server actually refused.
+                    const barcode = refusedBarcode!;
+                    // The dialog will not enable confirm without an assessment;
+                    // fetch it if the operator went straight for Export.
                     if (!assessment || assessment.barcode !== barcode) {
                       previewMutation.mutate(barcode);
                     }
@@ -367,7 +395,13 @@ export default function Mailslot() {
       <ExportConfirmDialog
         open={Boolean(confirmBarcode)}
         barcode={confirmBarcode ?? ''}
-        assessment={assessment && assessment.barcode === confirmBarcode ? assessment : null}
+        assessment={
+          previewMutation.data && previewMutation.data.barcode === confirmBarcode
+            ? previewMutation.data
+            : null
+        }
+        isAssessmentPending={previewMutation.isPending}
+        onRetryAssessment={() => previewMutation.mutate(confirmBarcode!)}
         isProcessing={exportMutation.isPending}
         onConfirm={() => exportMutation.mutate({ barcode: confirmBarcode!, force: true })}
         onCancel={() => setConfirmBarcode(undefined)}

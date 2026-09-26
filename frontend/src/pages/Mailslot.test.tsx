@@ -318,6 +318,65 @@ describe('Mailslot', () => {
     expect(screen.getAllByText(/ARC002L8/).length).toBeGreaterThan(0);
   });
 
+  it('drops the force affordance when the barcode changes after a refusal', async () => {
+    mailslotModule.exportThroughMailslot.mockRejectedValue(refusal());
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Cartridge barcode')).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText('Cartridge barcode'), {
+      target: { value: 'ARC001L8' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Export cartridge' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Force export…' })).toBeTruthy();
+    });
+
+    // The refusal was about ARC001L8. Editing the field must not leave a force
+    // button armed that would then export a cartridge nobody assessed.
+    fireEvent.change(screen.getByLabelText('Cartridge barcode'), {
+      target: { value: 'SCR002L8' },
+    });
+    expect(screen.queryByRole('button', { name: 'Force export…' })).toBeNull();
+    expect(screen.queryByText('Export refused')).toBeNull();
+  });
+
+  it('refuses to confirm a force when what is on the cartridge cannot be read', async () => {
+    mailslotModule.exportThroughMailslot.mockRejectedValue(refusal());
+    mailslotModule.previewMailslotExport.mockRejectedValue(
+      new ApiError('catalog unavailable', 500, 'impact', 'action'),
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Cartridge barcode')).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText('Cartridge barcode'), {
+      target: { value: 'ARC001L8' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Export cartridge' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Force export…' })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Force export…' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Cannot read what is on ARC001L8')).toBeTruthy();
+    });
+    // Right barcode typed, but there is no assessment to have consented to.
+    fireEvent.change(screen.getByLabelText(/Type the barcode/), {
+      target: { value: 'ARC001L8' },
+    });
+    const confirmButton = screen.getByRole('button', { name: 'Export anyway' }) as HTMLButtonElement;
+    expect(confirmButton.disabled).toBe(true);
+    fireEvent.click(confirmButton);
+    expect(mailslotModule.exportThroughMailslot).toHaveBeenCalledTimes(1);
+    expect(mailslotModule.exportThroughMailslot).not.toHaveBeenCalledWith('ARC001L8', {
+      force: true,
+    });
+  });
+
   it('renders a load failure with a retry instead of an empty station', async () => {
     mailslotModule.listMailslotSlots.mockRejectedValue(new Error('backend down'));
     renderPage();
