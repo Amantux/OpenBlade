@@ -70,6 +70,12 @@ def scalar_i3_default() -> tuple[MockLibraryBackend, MockLTFSBackend]:
         library_id=str(config["library"].get("mockLibraryId", "mock-i3-001")),
         num_slots=int(partition["slotCount"]),
         num_drives=len(config["drives"]),
+        # The i3 profile has declared `ieSlotCount` since it was written, but this
+        # scenario never passed it on, so the default simulator backend reported an
+        # I/E station of zero elements: every mailslot operation answered "this
+        # library has no import/export elements" while /aml advertised two. The
+        # config is the single source of truth for the simulated library's shape.
+        num_import_export_slots=int(partition.get("ieSlotCount", 0)),
     )
     for item in config["media"]:
         barcode = str(item["barcode"])

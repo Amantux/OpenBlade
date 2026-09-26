@@ -8,10 +8,12 @@ import { AuthProvider, useAuth } from './lib/auth-context';
 import AdminSafetyPage from './pages/AdminSafetyPage';
 import AdminSecurityPage from './pages/AdminSecurityPage';
 import Archive from './pages/Archive';
+import Assistant from './pages/Assistant';
 import Catalog from './pages/Catalog';
 import CatalogRebuildPage from './pages/CatalogRebuildPage';
 import CatalogStatusPage from './pages/CatalogStatusPage';
 import Dashboard from './pages/Dashboard';
+import DriveHealth from './pages/DriveHealth';
 import Drives from './pages/Drives';
 import ErrorCodesPage from './pages/ErrorCodesPage';
 import ImportExport from './pages/ImportExport';
@@ -25,6 +27,7 @@ import LibraryStatusPage from './pages/LibraryStatusPage';
 import Login from './pages/Login';
 import LtfsBrowse from './pages/LtfsBrowse';
 import ManifestVersionsPage from './pages/ManifestVersionsPage';
+import Mailslot from './pages/Mailslot';
 import Media from './pages/Media';
 import MediaPools from './pages/MediaPools';
 import MoveOperations from './pages/MoveOperations';
@@ -39,6 +42,7 @@ import SystemFirmware from './pages/SystemFirmware';
 import SystemHealthPage from './pages/SystemHealthPage';
 import SystemNetwork from './pages/SystemNetwork';
 import TestRunner from './pages/TestRunner';
+import TreeRestore from './pages/TreeRestore';
 
 function ProtectedLayout() {
   const location = useLocation();
@@ -121,6 +125,10 @@ function RoutedApp() {
         <Route path="operations/move" element={<ActiveLibraryPathRedirect suffix="/items/move" />} />
         <Route path="operations/inventory" element={<ActiveLibraryPathRedirect suffix="/items/inventory-scan" />} />
         <Route path="operations/ie" element={<ActiveLibraryPathRedirect suffix="/items/import-export" />} />
+        <Route path="mailslot" element={<Mailslot />} />
+        <Route path="drives/health" element={<DriveHealth />} />
+        <Route path="restore/tree" element={<TreeRestore />} />
+        <Route path="assistant" element={<Assistant />} />
         <Route path="media/pools" element={<MediaPools />} />
         <Route path="catalog" element={<Catalog />} />
         <Route path="catalog/rebuild" element={<CatalogRebuildPage />} />
