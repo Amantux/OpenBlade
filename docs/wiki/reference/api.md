@@ -260,12 +260,12 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/gateway/config` | Get Gateway Config | - | - | `GatewayConfigResponse` |
-| `GET` | `/api/gateway/credentials` | List Credentials | - | - | `application/json` |
-| `POST` | `/api/gateway/credentials` | Add Credential | - | `CredentialCreate` | `application/json` |
-| `PUT` | `/api/gateway/credentials/{username}` | Update Credential | `username` (path) | `CredentialUpdate` | `application/json` |
-| `DELETE` | `/api/gateway/credentials/{username}` | Remove Credential | `username` (path) | - | `application/json` |
+| `GET` | `/api/gateway/credentials` | List Credentials | - | - | `object[]` |
+| `POST` | `/api/gateway/credentials` | Add Credential | - | `CredentialCreate` | `object` |
+| `PUT` | `/api/gateway/credentials/{username}` | Update Credential | `username` (path) | `CredentialUpdate` | `object` |
+| `DELETE` | `/api/gateway/credentials/{username}` | Remove Credential | `username` (path) | - | `object` |
 | `GET` | `/api/gateway/inbox-paths` | List Inbox Paths | - | - | `InboxPathOption[]` |
-| `GET` | `/api/gateway/sessions` | List Sessions | `active_only`? (query) | - | `application/json` |
+| `GET` | `/api/gateway/sessions` | List Sessions | `active_only`? (query) | - | `object[]` |
 | `POST` | `/api/gateway/start` | Start Gateway | - | - | `GatewayCommandResponse` |
 | `GET` | `/api/gateway/status` | Get Gateway Status | - | - | `GatewayStatusResponse` |
 | `POST` | `/api/gateway/stop` | Stop Gateway | - | - | `GatewayCommandResponse` |
