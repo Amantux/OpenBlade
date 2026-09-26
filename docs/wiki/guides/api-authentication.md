@@ -204,10 +204,9 @@ dry-run → token → confirm dance to format a tape.
 Every client of the native API needs the header before you flip the switch.
 In a default deployment that is at least:
 
-1. **The React frontend**, if it talks to the API from a browser. It has no
-   place to put a bearer token that a browser user cannot also read — if you
-   serve the UI publicly, front it with a reverse proxy that injects the header
-   and authenticates users itself, rather than shipping the token to the client.
+1. **The React frontend**, if it talks to the API from a browser. It prompts the
+   operator for the token the first time a request is refused — see
+   [Web UI](#web-ui), including what it means for a publicly served UI.
 2. **Your own scripts and cron jobs.**
 3. **Monitoring**, unless it only polls `/health`.
 
@@ -260,6 +259,40 @@ this works in both modes and is what the i3 compliance suite does.
 
 ---
 
+## Web UI
+
+The React console sends the token too, and it costs nothing when auth is off.
+
+**With the token unset, nothing changes.** The UI only adds an
+`Authorization` header when a token is stored in the browser, and it only asks
+for one after a request actually comes back 401 from this gate. There is no login
+wall, no extra probe request, and no new screen in the default deployment.
+
+**When auth is on**, the first refused request replaces the view with an
+*API token required* panel. Paste the value of `OPENBLADE_API_TOKEN` (or the
+contents of the file named by `OPENBLADE_API_TOKEN_FILE`) and the console reloads
+the page you were on, so the navigation that failed simply retries.
+
+- **Remember on this device** stores the token in `localStorage` — it survives
+  closing the browser. Leave it unchecked and the token lives in `sessionStorage`
+  and is forgotten when the tab closes. That is the default.
+- A token the server rejects is **discarded**, not retried, and the panel says so
+  without echoing what you typed. The field is masked and the token never appears
+  in a URL, a log line, or an error message.
+- The AML console pages are unaffected: `/aml/*` and `/iblade/*` requests keep
+  using the session cookie from `POST /aml/users/login` and never carry the
+  bearer token. If you are prompted for a *username and password*, that is the
+  AML session; a token prompt is this gate.
+- To forget a stored token, clear site data for the console's origin, or just
+  wait for the next 401 — a rejected token is cleared automatically.
+
+**This is not a way to hide the token from the person using the browser.** They
+typed it, and anything running in that page can read it. If you serve the UI to
+people who should not hold an API token, front it with a reverse proxy that
+authenticates users itself and injects the header server-side.
+
+---
+
 ## Troubleshooting
 
 **Everything returns 401, including with the token.** Check the server actually
@@ -283,8 +316,9 @@ surface does not accept it. Log in with `POST /aml/users/login`.
 A 401 with `"error": "Unauthorized"` came from this one. The body tells you which
 gate you hit.
 
-**The frontend stopped working.** It has no token. See
-[rolling it out](#rolling-it-out-without-an-outage).
+**The frontend stopped working.** It has no token. It should be asking you for
+one — see [Web UI](#web-ui). If it is not, the 401 came from the AML session
+layer instead; the body tells you which gate you hit.
 
 ---
 

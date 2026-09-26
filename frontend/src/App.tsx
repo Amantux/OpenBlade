@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import ApiTokenGate from './components/auth/ApiTokenGate';
 import Layout from './components/layout/Layout';
 import Spinner from './components/ui/Spinner';
 import { getActiveLibraryId, setActiveLibraryId } from './lib/activeLibrary';
@@ -152,6 +153,8 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <RoutedApp />
+        {/* Renders nothing until the native token gate answers 401. */}
+        <ApiTokenGate />
       </AuthProvider>
     </BrowserRouter>
   );
