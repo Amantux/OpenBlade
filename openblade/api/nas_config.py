@@ -11,10 +11,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from openblade.api import aml_state
-from openblade.api.routes_aml_auth import AmlUser, require_auth
+from openblade.api.routes_aml_auth import require_auth
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
-from openblade.domain.models import MountMode
+from openblade.catalog.models import AmlUser
+from openblade.catalog.repository import CatalogRepository
+from openblade.domain.models import MountHandle, MountMode
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
 from openblade.nas.catalog_rebuild_worker import SAFE_REBUILD_PREFLIGHT_ERROR, CatalogRebuildWorker
 from openblade.nas.catalog_shard import CatalogShardWriter
@@ -47,6 +49,7 @@ from openblade.nas.types import (
     EffectivePolicy,
     IngestMode,
     ManifestVersionRecord,
+    NasDataset,
     NasFileRecord,
     NasFileState,
     NasPool,
@@ -71,16 +74,18 @@ router = APIRouter(prefix="/nas", tags=["NAS Config"])
 _FUSE_HOOKS: dict[int, FuseHook] = {}
 
 
-def get_nas_service(repo=Depends(get_catalog_repository)) -> NasService:
+def get_nas_service(repo: CatalogRepository = Depends(get_catalog_repository)) -> NasService:
     return NasService(repo)
 
 
-def get_path_mapping_service(repo=Depends(get_catalog_repository)) -> PathMappingService:
+def get_path_mapping_service(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> PathMappingService:
     return PathMappingService(repo)
 
 
 def get_catalog_rebuild_planner(
-    repo=Depends(get_catalog_repository),
+    repo: CatalogRepository = Depends(get_catalog_repository),
 ) -> CatalogRebuildPlanner:
     metadata_writer = TapeMetadataWriter(get_context().ltfs)
     shard_writer = CatalogShardWriter(metadata_writer)
@@ -95,13 +100,13 @@ def get_catalog_rebuild_planner(
 
 
 def get_catalog_rebuild_worker(
-    repo=Depends(get_catalog_repository),
+    repo: CatalogRepository = Depends(get_catalog_repository),
     planner: CatalogRebuildPlanner = Depends(get_catalog_rebuild_planner),
 ) -> CatalogRebuildWorker:
     return CatalogRebuildWorker(repo=repo, planner=planner)
 
 
-def _loaded_tape_barcodes(repo) -> list[str]:
+def _loaded_tape_barcodes(repo: CatalogRepository) -> list[str]:
     seen: set[str] = set()
     barcodes: list[str] = []
     for cartridge in repo.list_cartridges():
@@ -162,7 +167,7 @@ def _require_restore_job(service: NasService, job_id: str) -> NasRestoreJob:
     return job
 
 
-def _require_dataset(service: NasService, dataset_id: str):
+def _require_dataset(service: NasService, dataset_id: str) -> NasDataset:
     dataset = service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(
@@ -237,15 +242,28 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _as_int(value: object) -> int:
+    """``int(value)`` over a decoded-JSON drive field, with identical failures.
+
+    The drive dicts come from ``aml_state`` as ``dict[str, object]`` and ``int()``
+    has no overload for ``object``. This narrows to the types ``int()`` accepts
+    and raises TypeError for the rest -- exactly what ``int()`` itself did -- so
+    every success and failure path is unchanged.
+    """
+    if isinstance(value, int | float | str | bytes | bytearray):
+        return int(value)
+    raise TypeError(f"expected an int-like value, got {type(value).__name__}")
+
+
 def _drive_needs_cleaning(drive: dict[str, object]) -> bool:
     if bool(drive.get("cleaningRequired", False)):
         return True
     state = str(drive.get("state", "")).lower()
     if state in {"cleaning_required", "cleaning-required", "needs_cleaning"}:
         return True
-    threshold = int(drive.get("cleaningThreshold", 100))
-    load_count = int(drive.get("loadCount", 0))
-    cleaning_count = int(drive.get("cleaningCount", 0))
+    threshold = _as_int(drive.get("cleaningThreshold", 100))
+    load_count = _as_int(drive.get("loadCount", 0))
+    cleaning_count = _as_int(drive.get("cleaningCount", 0))
     return load_count > 0 and (load_count - cleaning_count * 50) >= threshold
 
 
@@ -379,7 +397,7 @@ async def verify_dataset(
     dataset = _require_dataset(service, dataset_id)
     context = get_context()
     ltfs = context.ltfs
-    mounts: dict[str, tuple[object, int, int | None]] = {}
+    mounts: dict[str, tuple[MountHandle, int, int | None]] = {}
     files_verified = 0
     files_corrupt = 0
     files_updated = 0
@@ -423,10 +441,12 @@ async def verify_dataset(
             files_corrupt += 1
             service.upsert_file_record(record.model_copy(update={"status": NasFileState.CORRUPT}))
     finally:
-        for handle, drive_id, slot_id in mounts.values():
-            ltfs.unmount(handle)
-            if slot_id is not None:
-                context.library.unload(drive_id, slot_id)
+        # Distinct names: `handle` above holds the whole (handle, drive, slot)
+        # tuple, so reusing it here gave the unpacked mount handle two types.
+        for mount_handle, mount_drive_id, mount_slot_id in mounts.values():
+            ltfs.unmount(mount_handle)
+            if mount_slot_id is not None:
+                context.library.unload(mount_drive_id, mount_slot_id)
 
     return {
         "dataset_id": dataset_id,
@@ -546,7 +566,7 @@ async def plan_catalog_rebuild(
 @router.post("/catalog/rebuild/activate", response_model=RebuildActivationResult)
 async def activate_catalog_rebuild(
     request: RebuildActivationRequest,
-    repo=Depends(get_catalog_repository),
+    repo: CatalogRepository = Depends(get_catalog_repository),
     planner: CatalogRebuildPlanner = Depends(get_catalog_rebuild_planner),
     worker: CatalogRebuildWorker = Depends(get_catalog_rebuild_worker),
     _: AmlUser = Depends(require_auth),
@@ -598,7 +618,7 @@ async def activate_catalog_rebuild(
 
 @router.get("/catalog/rebuild/loaded-tapes", response_model=list[str])
 async def list_catalog_rebuild_loaded_tapes(
-    repo=Depends(get_catalog_repository),
+    repo: CatalogRepository = Depends(get_catalog_repository),
     _: AmlUser = Depends(require_auth),
 ) -> list[str]:
     return _loaded_tape_barcodes(repo)
@@ -623,7 +643,7 @@ async def execute_catalog_rebuild(
 @router.get("/catalog/rebuild/runs", response_model=list[CatalogRebuildRunRecord])
 async def list_catalog_rebuild_runs(
     limit: int = Query(default=50, ge=1, le=500),
-    repo=Depends(get_catalog_repository),
+    repo: CatalogRepository = Depends(get_catalog_repository),
     _: AmlUser = Depends(require_auth),
 ) -> list[CatalogRebuildRunRecord]:
     return [CatalogRebuildRunRecord.model_validate(run) for run in repo.list_rebuild_runs(limit)]
@@ -632,7 +652,7 @@ async def list_catalog_rebuild_runs(
 @router.get("/catalog/rebuild/{run_id}", response_model=CatalogRebuildRunRecord)
 async def get_catalog_rebuild_run(
     run_id: str,
-    repo=Depends(get_catalog_repository),
+    repo: CatalogRepository = Depends(get_catalog_repository),
     _: AmlUser = Depends(require_auth),
 ) -> CatalogRebuildRunRecord:
     run = repo.get_rebuild_run(run_id)
@@ -644,7 +664,7 @@ async def get_catalog_rebuild_run(
 @router.get("/catalog/manifest-versions/{barcode}", response_model=list[ManifestVersionRecord])
 async def list_catalog_manifest_versions(
     barcode: str,
-    repo=Depends(get_catalog_repository),
+    repo: CatalogRepository = Depends(get_catalog_repository),
     _: AmlUser = Depends(require_auth),
 ) -> list[ManifestVersionRecord]:
     return [

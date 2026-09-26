@@ -12,7 +12,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from openblade.domain.models import MountMode
+from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.domain.models import MountHandle, MountMode
 from openblade.domain.policies import FormatConfirmation, SafetyToken
 from openblade.nas.archive_lifecycle import (
     ArchiveLifecycleManager,
@@ -36,8 +38,6 @@ from openblade.nas.types import (
     SourceStreamConfig,
     TapeAssignment,
 )
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +127,8 @@ class _BaseIngest:
         job: IngestJob,
         dataset: NasDataset,
         service: NasService,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
     ) -> None:
         self.job = job
         self.dataset = dataset
@@ -324,7 +324,7 @@ class _BaseIngest:
     def _simulate_tape_write(
         self,
         *,
-        handle,
+        handle: MountHandle,
         barcode: str,
         relative_path: str,
         prepared: _PreparedFile,
@@ -362,7 +362,7 @@ class _BaseIngest:
 
     def _verify_tape_copy(
         self,
-        handle,
+        handle: MountHandle,
         tape_path: PurePosixPath,
         prepared: _PreparedFile,
     ) -> None:
@@ -485,8 +485,8 @@ class CacheDriveIngest(_BaseIngest):
         job: IngestJob,
         dataset: NasDataset,
         service: NasService,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
         cache_drive: CacheDriveConfig,
     ) -> None:
         super().__init__(job=job, dataset=dataset, service=service, library=library, ltfs=ltfs)
@@ -563,8 +563,8 @@ class SourceStreamIngest(_BaseIngest):
         job: IngestJob,
         dataset: NasDataset,
         service: NasService,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
         config: SourceStreamConfig,
     ) -> None:
         super().__init__(job=job, dataset=dataset, service=service, library=library, ltfs=ltfs)
@@ -725,8 +725,8 @@ def run_ingest_job(
     job_id: str,
     *,
     nas_service: NasService,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     cache_drive_id: str | None = None,
 ) -> IngestJob:
     job = get_ingest_job(job_id)
@@ -735,6 +735,7 @@ def run_ingest_job(
     dataset = nas_service.get_dataset(job.dataset_id)
     if dataset is None:
         raise KeyError(f"Unknown dataset {job.dataset_id}")
+    executor: _BaseIngest
     if job.plan.ingest_mode is IngestMode.CACHE_DRIVE:
         if cache_drive_id is None:
             raise ValueError("cache_drive_id is required for cache-drive ingest")
@@ -762,8 +763,8 @@ def run_ingest_job(
 
 
 def _build_archive_lifecycle_manager(
-    repo,
-    backend: MockLTFSBackend,
+    repo: CatalogRepository,
+    backend: LTFSBackend,
 ) -> ArchiveLifecycleManager:
     metadata_writer = TapeMetadataWriter(backend)
     shard_writer = CatalogShardWriter(metadata_writer)
@@ -785,15 +786,15 @@ def _run_lifecycle_for_file(
     barcode: str,
     tape_path: str,
     policy_name: str,
-    repo,
-    backend: MockLTFSBackend,
+    repo: CatalogRepository,
+    backend: LTFSBackend,
 ) -> ArchiveLifecycleResult:
     """Construct lifecycle manager and complete one file archive."""
     manager = _build_archive_lifecycle_manager(repo, backend)
     return manager.complete_file_archive(file_record, barcode, tape_path, policy_name)
 
 
-def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int | None]:
+def _load_if_needed(library: LibraryBackend, barcode: str) -> tuple[int, int | None]:
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
         return drive_id, None

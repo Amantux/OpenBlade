@@ -9,12 +9,12 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from openblade.domain.backends import LTFSBackend
 from openblade.domain.errors import ChecksumMismatchError
 from openblade.nas.restore_planner import RestorePlan
 from openblade.nas.service import NasService
 from openblade.nas.tape_paths import dataset_tape_path
 from openblade.nas.types import NasFileRecord, NasFileState, NasRestoreJob, RestoreJobStatus
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class HydrationJob:
 class HydrationExecutor:
     """Execute NAS restore jobs against the simulator without real filesystem I/O."""
 
-    def __init__(self, service: NasService, ltfs: MockLTFSBackend) -> None:
+    def __init__(self, service: NasService, ltfs: LTFSBackend) -> None:
         self.service = service
         self.ltfs = ltfs
 
