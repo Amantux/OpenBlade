@@ -23,7 +23,8 @@ from fastapi.testclient import TestClient
 from openblade.api.main import app
 from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import BackendMode, OpenBladeConfig
-from openblade.hardware import tapealert
+from openblade.hardware import sg, tapealert
+from openblade.hardware.runner import CommandResult, SafeRunner
 
 
 @pytest.fixture()
@@ -142,3 +143,88 @@ def test_the_route_is_read_only(client: TestClient, hardware_enabled: None) -> N
     # a human is worried about, and a write here would be the worst possible bug.
     for method in (client.post, client.put, client.delete, client.patch):
         assert method("/hardware/drive-health").status_code == 405
+
+
+def test_it_issues_only_the_two_read_commands(
+    client: TestClient, hardware_enabled: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 405s above are free from FastAPI; this asserts the actual SCSI traffic.
+
+    Captured at the SafeRunner boundary with dry_run OFF, so every argv the route
+    would really execute is recorded. A LOG SELECT, a rewind, an `mt` command or a
+    format would all show up here.
+    """
+    issued: list[list[str]] = []
+
+    def record(self: SafeRunner, args: list[str], **kwargs: object) -> CommandResult:
+        issued.append(list(args))
+        sample = (
+            sg.SAMPLE_SG_INQ
+            if args[0] == "sg_inq"
+            else tapealert.SAMPLE_SG_LOGS_TAPEALERT_CLEAN
+            if args[0] == "sg_logs"
+            else ""
+        )
+        return CommandResult(
+            args=list(args), returncode=0, stdout=sample, stderr="", elapsed_seconds=0.0
+        )
+
+    context = get_context()
+    reset_context(replace(context, config=replace(context.config, hardware_dry_run=False)))
+    monkeypatch.setattr(SafeRunner, "run", record)
+
+    response = client.get("/hardware/drive-health", params={"device": "/dev/sg1"})
+    assert response.status_code == 200, response.text
+    assert issued == [["sg_inq", "/dev/sg1"], ["sg_logs", "-p", "0x2e", "/dev/sg1"]]
+
+
+def test_a_tool_failure_answers_502_without_the_argv_or_stderr(
+    client: TestClient, hardware_enabled: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def explode(self: SafeRunner, args: list[str], **kwargs: object) -> CommandResult:
+        return CommandResult(
+            args=list(args),
+            returncode=2,
+            stdout="",
+            stderr="sg_inq: error opening file: /dev/sg9 (dsn=secret-token)",
+            elapsed_seconds=0.0,
+        )
+
+    context = get_context()
+    reset_context(replace(context, config=replace(context.config, hardware_dry_run=False)))
+    monkeypatch.setattr(SafeRunner, "run", explode)
+
+    response = client.get("/hardware/drive-health", params={"device": "/dev/sg9"})
+    # CommandError is not an OpenBladeError, so without the route's own handler
+    # this would escape as a bare 500 carrying the full argv and the tool's stderr.
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert "secret-token" not in detail
+    assert "sg_inq:" not in detail
+    assert "sg3_utils" in detail
+
+
+def test_the_tapealert_reason_never_carries_the_tools_stderr(
+    client: TestClient, hardware_enabled: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "openblade.api.routes_drive_health.read_tape_alerts",
+        lambda device, runner, guard: tapealert.TapeAlertReport(
+            device=device,
+            supported=False,
+            flags=(),
+            reason=(
+                "no TapeAlert page in sg_logs output "
+                "(sg_logs exited 5: log_sense: field in cdb illegal, /dev/sg1 dsn=secret)"
+            ),
+        ),
+    )
+
+    response = client.get("/hardware/drive-health", params={"device": "/dev/sg1"})
+    assert response.status_code == 200
+    reason = response.json()["drives"][0]["tapeAlertReason"]
+    # The exit code is the actionable half and survives; the tool's own text does
+    # not go on the wire (it is logged server-side instead).
+    assert "sg_logs exited 5" in reason
+    assert "secret" not in reason
+    assert "field in cdb illegal" not in reason
