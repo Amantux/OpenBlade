@@ -26,9 +26,72 @@ rig_die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # resorting to a substring test - a loose match here could select a real
 # library, which is the whole thing this is guarding against.
 rig_serial_of() {
-  sg_inq "$1" 2>/dev/null \
+  rig_sg_inq "$1" \
     | awk -F': *' '/Unit serial number/{print $2; exit}' \
     | awk '{print $NF}'
+}
+
+# `sg_inq` on a device, escalating to `sudo -n` when the calling user cannot
+# open the node.
+#
+# mhvtl's /dev/sgN nodes are mode 0660 root:tape. On the bare-metal rehearsal
+# host the operator was in the `tape` group, so a plain `sg_inq` worked. A
+# GitHub-hosted runner's `runner` user is NOT in `tape`, so every `sg_inq`
+# failed with EACCES; because the serial lookup swallows stderr, that surfaced
+# as an EMPTY serial and rig_changer reported "found medium changer(s) /dev/sg1
+# but none reporting unit serial 'OBLADE_L10'" on a perfectly healthy rig
+# (mhvtl weekly run 35688121678). A permission problem must not be
+# indistinguishable from "that is somebody else's library".
+rig_sg_inq() {
+  local dev="$1"
+  if [ -r "$dev" ] && sg_inq "$dev" 2>/dev/null; then
+    return 0
+  fi
+  [ "$(id -u)" -eq 0 ] && return 1
+  command -v sudo >/dev/null || return 1
+  sudo -n sg_inq "$dev" 2>/dev/null
+}
+
+# True when this user cannot read the sg node directly and cannot escalate.
+# Used to turn "no serial" into an accurate diagnosis instead of a wrong one.
+rig_sg_unreadable() {
+  local dev="$1"
+  [ -r "$dev" ] && return 1
+  [ "$(id -u)" -eq 0 ] && return 1
+  sudo -n true 2>/dev/null && return 1
+  return 0
+}
+
+# Echo the no-rewind tape node (/dev/nstN) for an sg node, using the same sysfs
+# relationship openblade.hardware.discovery.resolve_sg_device() reads forwards.
+# st and sg numbers are allocated independently (st0 -> sg1 and st2 -> sg4 are
+# both real pairings on this rig), so this must be looked up, never derived.
+#
+# Failure means the kernel's `st` upper-level driver has not claimed the device
+# — see the "upper-level SCSI drivers" section of setup.sh.
+rig_nst_for_sg() {
+  local want="${1#/dev/}" tape
+  for tape in /sys/class/scsi_tape/nst*; do
+    [ -e "$tape/device/scsi_generic/$want" ] || continue
+    printf '/dev/%s' "$(basename "$tape")"
+    return 0
+  done
+  return 1
+}
+
+# Why there is no /dev/nst node. Printed by both setup.sh and env.sh so the
+# operator gets the same diagnosis whichever one they hit first.
+rig_no_nst_hint() {
+  cat <<'EOF'
+The kernel's SCSI tape upper-level driver ('st') has not attached to the rig's
+drives: no /dev/nstN nodes exist and lsscsi prints '-' in the block column.
+On Ubuntu's generic kernel st/ch ship inside linux-modules-$(uname -r) and udev
+autoloads them, which is why the bare-metal rehearsal host never needed this.
+On an Azure-tuned kernel (GitHub-hosted runners) they live in
+linux-modules-extra-$(uname -r), which is NOT installed on the runner image.
+Fix:  sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+      sudo modprobe st && sudo scripts/mhvtl/setup.sh
+EOF
 }
 
 # Echo the /dev/sg node of THIS rig's medium changer.
@@ -52,6 +115,14 @@ EOF
     rig_die "no medium changer with an sg node found - is the rig up?
          Run: sudo scripts/mhvtl/setup.sh"
   fi
+  for dev in $candidates; do
+    if rig_sg_unreadable "$dev"; then
+      rig_die "cannot read $dev to check its unit serial (it is mode 0660
+         root:tape and this user is neither root, in the 'tape' group, nor able
+         to 'sudo -n'). This is a PERMISSION problem, not a wrong library.
+         Re-run as root, or: sudo usermod -aG tape \$USER (then re-login)."
+    fi
+  done
   rig_die "found medium changer(s)$candidates but none reporting unit serial
          '$RIG_CHANGER_SERIAL'. Refusing to guess: a real library attached to
          this host must not be driven by the rehearsal scripts. Check

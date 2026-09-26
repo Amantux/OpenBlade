@@ -29,25 +29,16 @@ changer_sg=$(rig_changer)
 # issuing SCSI commands on a rewinding node makes it rewind on close, which
 # fails on an empty drive and is a corruption footgun under LTFS. See Phase 0.3
 # of docs/runbooks/real-i3-bringup-plan.md.
-# Map an sg node back to its no-rewind tape node using the same sysfs
-# relationship openblade.hardware.discovery.resolve_sg_device() reads forwards.
-# st and sg numbers are allocated independently (st0 -> sg1 and st2 -> sg4 are
-# both real pairings here), so this must be looked up, never derived.
-nst_for_sg() {
-  local want="${1#/dev/}" tape
-  for tape in /sys/class/scsi_tape/nst*; do
-    [ -e "$tape/device/scsi_generic/$want" ] || continue
-    printf '/dev/%s' "$(basename "$tape")"
-    return 0
-  done
-  return 1
-}
+# The sg -> nst lookup lives in _rig.sh (rig_nst_for_sg) so setup.sh can verify
+# it at bring-up time rather than leaving the test suite to discover it.
 
 drive_nst=""
 while read -r sg; do
   [ -n "$sg" ] || continue
-  node=$(nst_for_sg "$sg") \
-    || rig_die "could not map $sg back to a /dev/nst node via sysfs"
+  if ! node=$(rig_nst_for_sg "$sg"); then
+    rig_no_nst_hint >&2
+    rig_die "could not map $sg back to a /dev/nst node via sysfs (see above)"
+  fi
   drive_nst="${drive_nst:+$drive_nst,}${node}"
 done <<EOF
 $(rig_drive_sgs "$changer_sg")

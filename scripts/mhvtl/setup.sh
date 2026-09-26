@@ -32,6 +32,13 @@ CONFIG_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
 log()  { printf '\n=== %s\n' "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# rig_changer / rig_drive_sgs / rig_nst_for_sg — the SAME helpers env.sh uses.
+# Verifying the rig with them at the end of this script is deliberate: whatever
+# would make env.sh refuse must fail HERE, where the diagnosis is in reach, not
+# three steps later as an unbound-variable error inside the test runner.
+# shellcheck source=scripts/mhvtl/_rig.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rig.sh"
+
 [ "$(id -u)" -eq 0 ] || fail "must run as root (needs modprobe + /etc/mhvtl)"
 
 # ---------------------------------------------------------------- packages
@@ -114,6 +121,48 @@ else
          module loading is not permitted from inside it at all."
 fi
 module_loaded || fail "mhvtl module is not loaded after modprobe"
+
+# --------------------------------------------- upper-level SCSI drivers (st/ch)
+# mhvtl registers SCSI *targets*. The /dev/nstN (tape) and /dev/schN (changer)
+# nodes are created by the kernel's UPPER-LEVEL drivers `st` and `ch`, which are
+# a separate matter from mhvtl entirely.
+#
+# Ubuntu's generic kernel ships st/ch inside linux-modules-$(uname -r) and udev
+# autoloads them on device attach, which is why the bare-metal rehearsal host
+# (5.15.0-174-generic) got /dev/st0-2 and /dev/sch0 for free and this script
+# never mentioned them. An Azure-tuned kernel — i.e. every GitHub-hosted runner
+# — puts them in linux-modules-extra-$(uname -r), which is NOT installed on the
+# runner image. Evidence, mhvtl weekly run 35688121678: lsscsi printed all three
+# tape rows with "-" in the block column, /sys/class/scsi_tape was empty, and
+# env.sh could not map a single sg node to an nst node.
+#
+# `st` is REQUIRED: OPENBLADE_DRIVE_DEVICES is a list of /dev/nstN nodes and the
+# hardware backend has nothing to talk to without them. `ch` is optional — the
+# changer is driven through its sg node via mtx — so it is best-effort.
+ensure_scsi_driver() {
+  local mod="$1"
+  # A built-in driver has no /proc/modules row; modprobe still exits 0 for it.
+  modprobe "$mod" 2>/dev/null && return 0
+  [ "${SKIP_APT:-0}" = "1" ] && return 1
+  log "'$mod' is not in this kernel's module set — trying linux-modules-extra-$(uname -r)"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    "linux-modules-extra-$(uname -r)" || true
+  depmod -a || true
+  modprobe "$mod" 2>/dev/null
+}
+
+log "Ensuring the SCSI tape ('st') and changer ('ch') drivers are loaded"
+ensure_scsi_driver st || fail "the kernel's SCSI tape driver 'st' is unavailable
+         on this host, so no /dev/nstN nodes can ever appear and the OpenBlade
+         hardware backend has no drive to open.
+         Running kernel: $(uname -r)
+         Tried: modprobe st, then apt-get install linux-modules-extra-\$(uname -r).
+         Check 'apt-cache policy linux-modules-extra-$(uname -r)' and
+         'modinfo st'."
+ensure_scsi_driver ch \
+  || printf "NOTE: the 'ch' changer driver is unavailable; no /dev/schN node.\n\
+This rig drives the changer through its /dev/sg node with mtx, so this is not\n\
+fatal — it only means lsscsi shows '-' in the changer's block column.\n"
 
 # ---------------------------------------------------------------- userspace
 log "Building and installing mhvtl userspace daemons"
@@ -229,12 +278,25 @@ fi
 # /dev/sg nodes are created by udev a moment after that. Waiting only for the
 # mediumx ROW is not enough: lsscsi will happily print it with a "-" in the sg
 # column, and the rig then looks broken. Wait for the sg node itself.
+#
+# The /dev/nstN nodes are a THIRD, independent event: `st` binds the device and
+# then udev creates the node. Waiting only for the sg nodes let setup.sh declare
+# "Rig is up" on a rig whose drives had no tape node at all — so wait for the
+# scsi_tape class entries too.
 log "Waiting for SCSI devices and udev to settle"
 for _ in $(seq 1 30); do
   sleep 1
   changers_sg=$(lsscsi -g 2>/dev/null | awk '/ mediumx /{print $NF}' | grep -c '^/dev/sg' || true)
   drives_sg=$(lsscsi -g 2>/dev/null | awk '/ tape /{print $NF}' | grep -c '^/dev/sg' || true)
-  if [ "$changers_sg" -ge 1 ] && [ "$drives_sg" -ge 3 ]; then break; fi
+  # Counted with a glob rather than `ls | grep -c`: an unmatched glob stays
+  # literal, so the -e test is what distinguishes "no nodes" from "one node".
+  # The `if` rather than `&&` matters — a failing test as the last command in a
+  # loop body aborts the script under `set -e`.
+  tape_nodes=0
+  for _t in /sys/class/scsi_tape/nst*; do
+    if [ -e "$_t" ]; then tape_nodes=$((tape_nodes + 1)); fi
+  done
+  if [ "$changers_sg" -ge 1 ] && [ "$drives_sg" -ge 3 ] && [ "$tape_nodes" -ge 3 ]; then break; fi
 done
 command -v udevadm >/dev/null && udevadm settle --timeout=30 || true
 
@@ -250,7 +312,14 @@ printf '\nmediumx devices: %s (want >= 1)\ntape devices:    %s (want >= 3)\n' \
 [ "$changers" -ge 1 ] || fail "no medium changer appeared — check 'ps ax | grep vtl' and dmesg"
 [ "$drives"   -ge 3 ] || fail "expected 3 tape devices, found $drives — check vtltape daemons"
 
-changer_sg=$(lsscsi -g | awk '/ mediumx /{print $NF}' | head -1)
+# Identify the changer the way env.sh and every other rig script does: by unit
+# serial, never "first mediumx". Two reasons this is the right call HERE as well
+# as there. It keeps a real i3 cabled to the same host from being selected
+# (Phase 3 of the bring-up plan), and — the reason it moved into this script —
+# it makes setup.sh fail on exactly the condition that made env.sh refuse. Run
+# 35688121678 printed "Rig is up" and then died two steps later because the
+# serial lookup returned nothing.
+changer_sg=$(rig_changer)
 case "$changer_sg" in
   /dev/sg*) ;;
   *) fail "the changer has no /dev/sg node yet (lsscsi shows '$changer_sg').
@@ -265,11 +334,31 @@ mtx -f "$changer_sg" status
 # the "wrote to the wrong drive" trap from Phase 2 of the bring-up plan, so
 # print the correlation every time rather than letting anyone assume it.
 log "Drive correlation (SCSI address -> devices -> serial)"
-printf '%-14s %-10s %-10s %s\n' "SCSI_ADDR" "BLOCK" "SG" "SERIAL"
+printf '%-14s %-10s %-10s %-10s %s\n' "SCSI_ADDR" "BLOCK" "SG" "NST" "SERIAL"
 lsscsi -g | awk '/ tape /{print $1, $(NF-1), $NF}' | tr -d '[]' | while read -r addr blk sg; do
-  serial=$(sg_inq "$sg" 2>/dev/null | awk -F': *' '/Unit serial number/{print $2}')
-  printf '%-14s %-10s %-10s %s\n' "$addr" "$blk" "$sg" "${serial:-<unreadable>}"
+  serial=$(rig_serial_of "$sg")
+  nst=$(rig_nst_for_sg "$sg" || true)
+  printf '%-14s %-10s %-10s %-10s %s\n' \
+    "$addr" "$blk" "$sg" "${nst:-<none>}" "${serial:-<unreadable>}"
 done
+
+# The nst nodes ARE the rig's usable surface: OPENBLADE_DRIVE_DEVICES is a list
+# of them, so a rig without them cannot run a single drive-touching test. Assert
+# it here, using the same lookup env.sh uses, so "the rig cannot work" fails at
+# bring-up with a diagnosis instead of surfacing as an unbound variable in the
+# CI step that runs pytest.
+missing_nst=""
+while read -r sg; do
+  [ -n "$sg" ] || continue
+  rig_nst_for_sg "$sg" >/dev/null || missing_nst="${missing_nst} $sg"
+done <<EOF
+$(rig_drive_sgs "$changer_sg")
+EOF
+if [ -n "$missing_nst" ]; then
+  rig_no_nst_hint >&2
+  fail "no /dev/nst node for:${missing_nst} (see the diagnosis above).
+         The rig's drives are unusable in this state; refusing to report success."
+fi
 
 # ---------------------------------------------------------------- scratch media
 # The archive/restore jobs mount scratch media without formatting it first, so
