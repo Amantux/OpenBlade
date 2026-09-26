@@ -9,6 +9,8 @@ import os
 import shutil
 import tempfile
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path, PurePosixPath
 
 import typer
@@ -47,7 +49,37 @@ from openblade.nas.types import TapeOpRequest, TapeOpType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockFileRecord, MockLTFSBackend, MockTapeContents
 
+
+def _version_callback(value: bool) -> None:
+    if not value:
+        return
+    try:
+        typer.echo(_pkg_version("openblade"))
+    except PackageNotFoundError:
+        # Running from a checkout that was never `pip install -e .`'d — the
+        # console-script entry point wouldn't exist either in that case, but
+        # `python -m openblade.cli.main` still reaches here.
+        typer.echo("unknown (package not installed)")
+    raise typer.Exit()
+
+
 app = typer.Typer(name="openblade", help="OpenBlade tape archive controller")
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Print the installed openblade version and exit.",
+    ),
+) -> None:
+    """OpenBlade tape archive controller."""
+    return None
+
+
 mock_app = typer.Typer(help="Mock library commands")
 app.add_typer(mock_app, name="mock")
 format_app = typer.Typer(help="Format commands")
