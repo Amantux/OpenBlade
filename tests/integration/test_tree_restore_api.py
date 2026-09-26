@@ -8,6 +8,7 @@ layout, and a short result names the files it did not restore.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,8 @@ from fastapi.testclient import TestClient
 from openblade.api.main import app
 from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
+from openblade.domain.errors import CartridgeOfflineError
+from openblade.jobs import tree_restore as tree_restore_module
 
 SERVICE_TOKEN = "openblade-controller-dev-token-do-not-expose"
 
@@ -182,3 +185,54 @@ def test_a_failure_answers_with_curated_text_and_fails_the_job(
     assert "hunter2" not in detail
     assert "/dev/sg3" not in detail
     assert "Boom" in detail
+
+
+def test_the_restore_does_not_run_on_the_event_loop(
+    client: TestClient, tmp_path: Path, archived: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tree restore is minutes of blocking work; the loop must stay free.
+
+    Asserted by capturing the thread it runs on: on the loop thread every other
+    request in the process -- `/health`, which the container health check gives
+    5s, and the AML parity surface -- waits for the whole restore.
+    """
+    seen: dict[str, object] = {}
+    real = tree_restore_module.run_tree_restore
+
+    def capture(*args: object, **kwargs: object) -> object:
+        # `get_running_loop()` is thread-local: it succeeds only when called from
+        # the thread the loop runs in. NOT `threading.main_thread()` -- the
+        # TestClient drives the app from its own portal thread, so a main-thread
+        # check passes even when the work is sitting on the loop (verified: that
+        # version of this test survived reverting the fix).
+        try:
+            asyncio.get_running_loop()
+            seen["on_event_loop"] = True
+        except RuntimeError:
+            seen["on_event_loop"] = False
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("openblade.api.routes_restore.run_tree_restore", capture)
+    response = client.post(
+        "/restore/tree",
+        json={"catalog_prefix": "/photos", "dest_dir": str(tmp_path / "off-loop")},
+    )
+    assert response.status_code == 200, response.text
+    assert seen["on_event_loop"] is False
+
+
+def test_a_typed_domain_error_keeps_its_own_status(
+    client: TestClient, tmp_path: Path, archived: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def offline(*_args: object, **_kwargs: object) -> None:
+        raise CartridgeOfflineError("Cartridge PHO001L8 is exported and cannot be read")
+
+    monkeypatch.setattr("openblade.api.routes_restore.run_tree_restore", offline)
+    response = client.post(
+        "/restore/tree",
+        json={"catalog_prefix": "/photos", "dest_dir": str(tmp_path / "out")},
+    )
+    # 409 from the app's OpenBladeError handler, not a flattened 500: the message
+    # is operator-written and the status is part of its meaning.
+    assert response.status_code == 409
+    assert "exported" in response.json()["detail"]

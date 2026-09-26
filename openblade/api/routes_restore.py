@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from anyio import to_thread
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from openblade.api import aml_state
 from openblade.bootstrap import AppContext, get_context
-from openblade.domain.errors import safe_job_error
+from openblade.catalog.db import get_session
+from openblade.catalog.repository import CatalogRepository
+from openblade.domain.errors import OpenBladeError, safe_job_error
 from openblade.jobs.restore import RestoreRequest as RestoreJobRequest
 from openblade.jobs.restore import run_restore_job
 from openblade.jobs.scheduler import DriveScheduler
 from openblade.jobs.sharded_restore import ShardedRestoreRequest, run_sharded_restore
-from openblade.jobs.tree_restore import TreeRestoreRequest, run_tree_restore
+from openblade.jobs.tree_restore import TreeRestoreRequest, TreeRestoreResult, run_tree_restore
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -205,6 +211,15 @@ async def restore_tree(
     Runs to completion before answering (like ``POST /restore/``) rather than
     enqueueing, so the caller gets the authoritative per-tape result; progress
     ticks are the CLI's stderr affordance and have no home in one response.
+
+    The restore itself runs on a worker thread with its own database session. A
+    tree restore is minutes of blocking work, and holding the event loop for that
+    long stalls every other request in this process -- including ``/health``,
+    which the container health check gives 5s, and the AML emulator parity surface
+    this repo exists to serve. The per-thread session is the pattern
+    :mod:`openblade.api.routes_assist` established for exactly this reason:
+    ``AppContext.catalog`` wraps ONE process-global SQLAlchemy ``Session`` which
+    is not thread-safe, so the worker gets its own rather than borrowing it.
     """
     job = context.catalog.create_job(
         "restore",
@@ -216,28 +231,42 @@ async def restore_tree(
         },
     )
     scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+    tree_request = TreeRestoreRequest(
+        catalog_prefix=request.catalog_prefix,
+        dest_dir=Path(request.dest_dir),
+        dry_run=request.dry_run,
+    )
+
+    def _run() -> TreeRestoreResult:
+        db_session = get_session()
+        try:
+            return run_tree_restore(
+                tree_request,
+                context.library,
+                context.ltfs,
+                CatalogRepository(db_session),
+                scheduler,
+                job.id,
+            )
+        finally:
+            db_session.close()
+
     try:
-        # Deliberately NOT handed to a worker thread: `context.catalog` wraps one
-        # process-global SQLAlchemy Session which is not thread-safe, and every
-        # other handler in this router touches it from the event loop thread only
-        # (see routes_assist.py for what running it off-loop costs).
-        result = run_tree_restore(
-            TreeRestoreRequest(
-                catalog_prefix=request.catalog_prefix,
-                dest_dir=Path(request.dest_dir),
-                dry_run=request.dry_run,
-            ),
-            context.library,
-            context.ltfs,
-            context.catalog,
-            scheduler,
-            job.id,
-        )
+        result = await to_thread.run_sync(_run)
     except Exception as exc:
         # Curated text only: a tree restore wraps mkltfs/mtx output, which must
-        # never reach the wire (see safe_job_error).
+        # never reach the wire (see safe_job_error). Logging the full exception
+        # server-side is the other half of that contract.
+        _log.exception(
+            "tree restore failed", extra={"job_id": job.id, "prefix": request.catalog_prefix}
+        )
         message = safe_job_error(exc)
         context.catalog.update_job_state(job.id, "failed", error=message)
+        if isinstance(exc, OpenBladeError):
+            # Typed domain errors carry operator-written messages AND a status
+            # mapping in the app's handler -- an unsafe catalog path is a 400, not
+            # a 500. Let it through rather than flattening it.
+            raise
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message
         ) from None
