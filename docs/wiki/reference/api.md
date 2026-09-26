@@ -6,7 +6,7 @@
 
 Introspected from the OpenAPI schema of `openblade.api.main:app`.
 
-**1172 operations** total: 192 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
+**1178 operations** total: 198 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
 
 The application serves two surfaces from one ASGI app. Setting
 `OPENBLADE_SCALAR_API_ONLY=true` puts it in emulator-only mode, where the
@@ -76,11 +76,12 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `POST` | `/archive/` | Enqueue Archive | - | `ArchiveRequest` | `EnqueuedJobResponse` |
 | `POST` | `/archive/sharded` | Enqueue Sharded Archive | - | `ShardedArchiveApiRequest` | `EnqueuedJobResponse` |
 
-### `restore` (1 operation)
+### `restore` (2 operations)
 
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `POST` | `/restore/` | Enqueue Restore | - | `openblade__api__routes_restore__RestoreRequest` | `EnqueuedJobResponse` |
+| `POST` | `/restore/tree` | Restore Tree | - | `TreeRestoreApiRequest` | `TreeRestoreResponse` |
 
 ### `jobs` (2 operations)
 
@@ -312,6 +313,21 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `POST` | `/assist` | Assist | - | `AssistRequest` | `AssistResponse` |
+
+### `hardware` (1 operation)
+
+| Method | Path | Summary | Parameters | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/hardware/drive-health` | Get Drive Health | `device`? (query) | - | `DriveHealthListResponse` |
+
+### `mailslot` (4 operations)
+
+| Method | Path | Summary | Parameters | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/mailslot/export` | Export Through Mailslot | - | `MailslotExportRequest` | `MailslotMoveResponse` |
+| `GET` | `/mailslot/export-preview/{barcode}` | Preview Mailslot Export | `barcode` (path) | - | `ExportAssessmentResponse` |
+| `POST` | `/mailslot/import` | Import From Mailslot | - | `MailslotImportRequest` | `MailslotMoveResponse` |
+| `GET` | `/mailslot/slots` | List Mailslot Slots | - | - | `MailslotListingResponse` |
 
 ## Quantum AML / iBlade emulator surface
 
