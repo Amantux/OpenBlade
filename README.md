@@ -92,7 +92,10 @@ Surfaces, each backed by existing API endpoints:
 | `OPENBLADE_API_TOKEN` | Must match the backend's value. The backend gates its native surface (`/api`, `/jobs`, `/nas`, `/catalog`, `/status`, `/system`, `/volume-groups`, `/archive`, `/restore`) on this bearer, while `/aml/*` uses the per-user session this UI obtains at login. Omit it only where the backend also leaves native auth off. |
 | `OPENBLADE_SERVICE_TOKEN` | Must match the backend's value; `/aml/mount` and `/aml/unmount` require it. |
 | `OPENBLADE_WEB_SECURE_COOKIES` | Forces `Secure` session cookies; defaults on under `OPENBLADE_ENV=production`. |
-| `OPENBLADE_WEB_ALLOW_UNSAFE_DEVICE_TARGETS` | Development escape hatch: permits loopback/link-local/metadata hosts as device connection URLs, which are refused by default. Leave unset in production. |
+| `OPENBLADE_WEB_ALLOW_UNSAFE_DEVICE_TARGETS` | Development escape hatch: permits loopback, link-local (including cloud metadata) and multicast device connection URLs. By default these are refused based on the host's **resolved addresses**, so respellings like `127.1` or `2130706433` are refused too. RFC1918 LAN addresses are always allowed — that is where real libraries live. Leave unset in production. |
+| `OPENBLADE_WEB_ALLOWED_PATH_ROOTS` | Comma-separated absolute roots that operator-supplied archive/restore/cache paths must sit under. Defaults to `/openblade,/var/lib/openblade,/pools,/data,/share,/shares,/datasets,/mnt,/srv`. This is a confinement boundary, not just a traversal check: the backend's `/archive` and `/restore` routes have no per-user authorization, so without it a logged-in operator could archive `/etc` or `/proc/self/environ` to tape. |
+| `OPENBLADE_CONNECT_HOST` | Pins the hostname printed in the copy-paste `net use` / `mount -t cifs` / `sftp` hints. Otherwise the (character-validated) request `Host` header is used — pin this wherever that header is not trustworthy. |
+| `OPENBLADE_WEB_TIMEOUT_SECONDS` | Backend HTTP timeout, default 8. |
 
 ## Safety defaults
 - Mock backend is the default

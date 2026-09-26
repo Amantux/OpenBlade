@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from ipaddress import ip_address
 
 import pytest
 
-from openblade.web_flask.app import create_app
+from openblade.web_flask import app as web_flask_app
+from openblade.web_flask.app import _validate_device_url, create_app
 from openblade.web_flask.client import BackendClient, BackendError
 from openblade.web_flask.models import Device
 
@@ -151,11 +153,27 @@ class FakeBackendClient(BackendClient):
             }
         ]
         self.last_dataset_verify_id: str | None = None
+        self.last_archive: dict[str, object] | None = None
+        #: AML role the fake reports from /aml/users/me. 0 == Administrator, which
+        #: is what most tests need; set it to 1 or 2 to exercise the write gates.
+        self.current_role = 0
+        self.logout_calls: list[str] = []
 
     def login(self, *, username: str, password: str) -> str:
         if username == "admin" and password == "admin":
             return "session-token"
         raise BackendError(status_code=401, detail="invalid credentials")
+
+    def get_current_user(self, token: str) -> dict[str, object]:
+        assert token == "session-token"
+        return {
+            "name": "admin",
+            "role": self.current_role,
+            "requirePasswordChange": False,
+        }
+
+    def logout(self, token: str) -> None:
+        self.logout_calls.append(token)
 
     def list_devices(self, token: str) -> list[Device]:
         assert token == "session-token"
@@ -607,6 +625,7 @@ class FakeBackendClient(BackendClient):
         assert token == "session-token"
         assert source_path
         assert volume_group
+        self.last_archive = {"source_path": source_path, "volume_group": volume_group}
         return {"job_id": "job-archive", "status": "pending"}
 
     def create_restore_job(
@@ -622,6 +641,14 @@ class FakeBackendClient(BackendClient):
 @pytest.fixture
 def app_client(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret-key")
+    # _validate_device_url resolves device hostnames and fails closed on names that
+    # do not resolve. The fixture's device names ("device-b") are fictional, so stub
+    # the resolver to a public address rather than making the suite depend on live
+    # DNS. The deny-list behaviour itself is covered directly against
+    # _validate_device_url in the SSRF tests below.
+    monkeypatch.setattr(
+        web_flask_app, "_resolve_device_host", lambda hostname: [ip_address("198.51.100.10")]
+    )
     app = create_app(client_factory=FakeBackendClient)
     app.config["TESTING"] = True
     return app.test_client()
@@ -1132,7 +1159,10 @@ def test_hydrate_restore_action_uses_latest_tape_copy(app_client) -> None:
         "/devices/1/operations/restore",
         data={
             "catalog_path": "/archive/file-a.bin",
-            "dest_path": "/restore",
+            # /openblade/restore, not a bare /restore: dest_path is a real
+            # filesystem write in jobs/restore.py, so it must sit under an allowed
+            # storage root. This matches tests/i3/test_09_restore_cycle.py.
+            "dest_path": "/openblade/restore",
             "csrf_token": _csrf(app_client),
         },
         follow_redirects=False,
@@ -1140,7 +1170,7 @@ def test_hydrate_restore_action_uses_latest_tape_copy(app_client) -> None:
     assert response.status_code == 302
     backend = _backend_from_client(app_client)
     assert backend.last_restore is not None
-    assert backend.last_restore["destination_path"] == "/restore"
+    assert backend.last_restore["destination_path"] == "/openblade/restore"
 
 
 def test_magazine_eject_action_calls_backend(app_client) -> None:
@@ -1229,6 +1259,377 @@ def test_headers_fall_back_to_session_bearer_when_no_native_token() -> None:
     headers = client._headers("aml-session-token")
     assert headers["Authorization"] == "Bearer aml-session-token"
     assert headers["Cookie"] == "sessionID=aml-session-token"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Loopback, spelled every way that defeats a string deny-list. Each of the
+        # first three was PROVEN to reach a live listener on 127.0.0.1 before the
+        # resolve-and-check fix.
+        "http://127.0.0.1:9911",
+        "http://127.1:9911",
+        "http://2130706433:9911",
+        "http://localhost.:9911",
+        "http://[::1]:9911",
+        "http://0/",
+        # Cloud metadata, by name and as a packed integer.
+        "http://169.254.169.254/",
+        "http://2852039166/",
+        "http://metadata.google.internal/",
+        # Other non-routable classes.
+        "http://224.0.0.1/",
+        "http://240.0.0.1/",
+    ],
+)
+def test_validate_device_url_blocks_ssrf_targets(url: str) -> None:
+    """A device URL must never be pointed at loopback, metadata, or multicast.
+
+    Mutation check: delete the `_is_unsafe_ip` call from `_validate_device_url` (or
+    drop `is_loopback`/`is_link_local` from `_is_unsafe_ip`) and these fail. The
+    previous implementation compared HOST SPELLINGS against a set, which is why
+    "127.1" and "2130706433" both sailed through it.
+    """
+    assert _validate_device_url(url) is not None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # RFC1918 stays allowed ON PURPOSE: a real Scalar i3 lives on the operator's
+        # LAN, so blocking private space would refuse every legitimate device.
+        "http://10.0.0.5:8010/",
+        "http://192.168.1.10:8010/",
+        "http://172.16.0.1:8010/",
+    ],
+)
+def test_validate_device_url_allows_lan_devices(url: str) -> None:
+    assert _validate_device_url(url) is None
+
+
+def test_validate_device_url_rejects_unresolvable_host() -> None:
+    """Fail closed: an unresolvable name is refused, not probed."""
+    assert _validate_device_url("http://no-such-host.invalid:8010/") is not None
+
+
+def test_validate_device_url_checks_resolved_address_not_spelling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A benign-looking name that RESOLVES to loopback must be refused.
+
+    This is the case a deny-list can never catch, because the attacker owns the DNS
+    record. Mutation check: make _validate_device_url skip the resolved-address loop
+    and this fails.
+    """
+    monkeypatch.setattr(
+        web_flask_app, "_resolve_device_host", lambda hostname: [ip_address("127.0.0.1")]
+    )
+    assert _validate_device_url("http://totally-normal.example.com:8010/") is not None
+
+
+def test_validate_device_url_rejects_embedded_credentials() -> None:
+    assert _validate_device_url("http://user:pw@10.0.0.5:8010/") is not None
+
+
+def test_validate_device_url_override_allows_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The documented development escape hatch still works."""
+    monkeypatch.setenv("OPENBLADE_WEB_ALLOW_UNSAFE_DEVICE_TARGETS", "true")
+    assert _validate_device_url("http://127.0.0.1:8010/") is None
+
+
+def test_probe_does_not_follow_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The probe must not chase a redirect to an unvetted host.
+
+    The vetted URL is only the FIRST hop; a redirect is a second destination nobody
+    checked, and httpx replays the POST body on 307/308, which would hand the
+    submitted device password to whatever host the redirect names.
+
+    Mutation check: set follow_redirects=True in probe_device_endpoint and this test
+    fails, because the 302 would be chased to a 200.
+    """
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 302
+        headers = {"Location": "http://127.0.0.1:9913/healthz"}
+
+    class FakeHttpxClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def __enter__(self) -> FakeHttpxClient:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def get(self, *args: object, **kwargs: object) -> FakeResponse:
+            return FakeResponse()
+
+        def post(self, *args: object, **kwargs: object) -> FakeResponse:
+            return FakeResponse()
+
+    import openblade.web_flask.client as client_module
+
+    monkeypatch.setattr(client_module.httpx, "Client", FakeHttpxClient)
+    client = BackendClient(base_url="http://backend")
+    with pytest.raises(BackendError):
+        client.probe_device_endpoint(connection_url="http://10.0.0.5:8010")
+    assert captured.get("follow_redirects") is False
+
+
+@pytest.mark.parametrize(
+    ("path", "field", "payload", "recorder"),
+    [
+        ("/storage/archive", "source_path", {"volume_group": "vg-default"}, "last_archive"),
+        ("/storage/restore", "dest_path", {"catalog_path": "/archive/f.bin"}, "last_restore"),
+        (
+            "/storage/cache-drives",
+            "root_path",
+            {"drive_id": "c1", "name": "C"},
+            "last_cache_drive",
+        ),
+    ],
+)
+def test_storage_writes_reject_paths_outside_allowed_roots(
+    app_client, path: str, field: str, payload: dict[str, str], recorder: str
+) -> None:
+    """Operator paths are confined to allowed roots, not merely traversal-checked.
+
+    These values reach real filesystem sinks in the API container: source_path is
+    rglob'd by routes_archive, dest_path is written by jobs/restore, root_path
+    becomes a cache-drive root. Those backend routes have no per-user authorization,
+    so /etc, /root and /proc/self/environ -- which holds OPENBLADE_API_TOKEN -- must
+    be unreachable from this form even though none of them contains "..".
+
+    Mutation check: swap _is_allowed_storage_root back to _is_safe_storage_path at
+    the call site and these fail, because "/etc/passwd" passes a traversal check.
+    """
+    _login(app_client)
+    backend = _backend_from_client(app_client)
+    app_client.get("/storage/overview")
+    for bad in ("/etc/passwd", "/root/.ssh", "/proc/self/environ", "/"):
+        data = {**payload, field: bad, "csrf_token": _csrf(app_client)}
+        app_client.post(path, data=data, follow_redirects=False)
+        assert getattr(backend, recorder) is None, f"{bad} reached the backend via {field}"
+
+
+def test_archive_accepts_path_under_allowed_root(app_client) -> None:
+    """The confinement must not block the legitimate case."""
+    _login(app_client)
+    app_client.get("/storage/overview")
+    response = app_client.post(
+        "/storage/archive",
+        data={
+            "source_path": "/openblade/inbox/finance",
+            "volume_group": "vg-default",
+            "csrf_token": _csrf(app_client),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/jobs")
+
+
+def test_archive_rejects_unvalidated_volume_group(app_client) -> None:
+    """volume_group was the one field reaching the backend with no allowlist.
+
+    It becomes a catalog path component via PurePosixPath("/") / volume_group, and
+    PurePosixPath does not normalise, so ".." would persist into catalog keys.
+    """
+    _login(app_client)
+    app_client.get("/storage/overview")
+    response = app_client.post(
+        "/storage/archive",
+        data={
+            "source_path": "/openblade/inbox/finance",
+            "volume_group": "../../etc",
+            "csrf_token": _csrf(app_client),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/storage/archive")
+
+
+@pytest.mark.parametrize("role", [1, 2])
+def test_config_writes_require_admin_role(app_client, role: int) -> None:
+    """Non-admin sessions cannot rewrite storage configuration.
+
+    This gate lives in the UI because the backend's config surface has none:
+    /nas/policies, /nas/shares, /nas/pools, /nas/cache-drives and
+    /nas/source-stream carry no require_auth. Since BackendClient presents the
+    instance-wide OPENBLADE_API_TOKEN as the native bearer, every session would
+    otherwise act with full native authority regardless of its AML role.
+
+    Mutation check: remove the _require_admin() calls and these fail -- role 1 and 2
+    reach the backend and last_policy/last_cache_drive get set.
+    """
+    backend = _backend_from_client(app_client)
+    backend.current_role = role
+    _login(app_client)
+    app_client.get("/storage/overview")
+    for path, data in (
+        ("/storage/policies", {"policy_id": "p1", "name": "P", "policy_type": "balanced"}),
+        ("/storage/cache-drives", {"drive_id": "c1", "name": "C", "root_path": "/openblade/cache"}),
+        ("/storage/source-stream", {"checksum_mode": "streaming", "max_retries": "2"}),
+        (
+            "/storage/shares",
+            {"share_path": "/openblade/x", "share_name": "x", "share_type": "pool"},
+        ),
+    ):
+        response = app_client.post(
+            path, data={**data, "csrf_token": _csrf(app_client)}, follow_redirects=False
+        )
+        assert response.status_code == 302
+    assert backend.last_policy is None
+    assert backend.last_cache_drive is None
+    assert backend.last_source_stream is None
+    assert backend.last_share is None
+
+
+def test_config_writes_allowed_for_admin_role(app_client) -> None:
+    """The admin path still works -- the gate is not a blanket refusal."""
+    _login(app_client)
+    backend = _backend_from_client(app_client)
+    app_client.get("/storage/write-path")
+    response = app_client.post(
+        "/storage/policies",
+        data={
+            "policy_id": "critical-fast",
+            "name": "Critical Fast",
+            "policy_type": "critical_sequential",
+            "copies_required": "2",
+            "max_parallelism": "1",
+            "csrf_token": _csrf(app_client),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert backend.last_policy is not None
+
+
+def test_unknown_role_fails_closed(app_client) -> None:
+    """If /aml/users/me cannot be read, writes are denied rather than allowed.
+
+    A role we could not determine must never default to Administrator.
+    """
+    backend = _backend_from_client(app_client)
+
+    def boom(token: str) -> dict[str, object]:
+        raise BackendError(status_code=503, detail="unavailable")
+
+    backend.get_current_user = boom  # type: ignore[method-assign]
+    _login(app_client)
+    app_client.get("/storage/overview")
+    response = app_client.post(
+        "/storage/policies",
+        data={"policy_id": "p1", "name": "P", "csrf_token": _csrf(app_client)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert backend.last_policy is None
+
+
+def test_logout_revokes_the_backend_session(app_client) -> None:
+    """Clearing the Flask cookie is not enough; the AML sessionID must be revoked."""
+    _login(app_client)
+    backend = _backend_from_client(app_client)
+    app_client.post("/logout", data={"csrf_token": _csrf(app_client)}, follow_redirects=False)
+    assert backend.logout_calls == ["session-token"]
+
+
+@pytest.mark.parametrize("value", ["..", ".", "..."])
+def test_identifier_allowlist_rejects_dot_only_segments(app_client, value: str) -> None:
+    """Dot-only identifiers are refused before they reach a URL or a path.
+
+    _POOL_ID_ALLOWED permits ".", so ".." matched the alphabet. These values are
+    interpolated into backend URLs and into /pools/<pool_id>, and both httpx and
+    POSIX normalisation collapse a ".." segment -- verified: POST
+    /storage/datasets/../verify rewrote the backend URL to /nas/verify.
+
+    Mutation check: call pattern.fullmatch directly instead of _is_safe_identifier
+    and these fail.
+    """
+    _login(app_client)
+    backend = _backend_from_client(app_client)
+    app_client.get("/storage/catalog")
+    app_client.post(
+        f"/storage/datasets/{value}/verify",
+        data={"csrf_token": _csrf(app_client)},
+        follow_redirects=False,
+    )
+    assert backend.last_dataset_verify_id is None
+
+
+def test_redirect_target_rejects_backslash() -> None:
+    """ "/\\evil.example" must not be accepted as a local redirect.
+
+    urlparse reports no netloc for it, so without an explicit check the only thing
+    preventing an off-site redirect is Werkzeug percent-encoding the backslash in
+    the Location header -- someone else's escaping doing our security.
+    """
+    from openblade.web_flask.app import _is_safe_redirect_target
+
+    assert _is_safe_redirect_target("/devices") is True
+    assert _is_safe_redirect_target("/\\evil.example") is False
+    assert _is_safe_redirect_target("//evil.example") is False
+
+
+def test_backend_error_does_not_echo_non_json_body() -> None:
+    """A non-JSON upstream body must not be relayed into the operator's browser.
+
+    _handle_backend_error flashes BackendError.detail, so echoing response.text put
+    proxy/gunicorn HTML error pages -- internal paths, hostnames, stack frames -- on
+    screen. Only the backend's own curated JSON detail is surfaced.
+
+    Mutation check: restore `detail = response.text` and this fails.
+    """
+
+    class FakeResponse:
+        status_code = 500
+        text = "<html>Traceback: /srv/app/secret.py line 3, password=hunter2</html>"
+
+        def json(self) -> object:
+            raise ValueError("not json")
+
+    client = BackendClient(base_url="http://backend")
+    with pytest.raises(BackendError) as excinfo:
+        client._raise_for_error(FakeResponse())  # type: ignore[arg-type]
+    assert "hunter2" not in excinfo.value.detail
+    assert "Traceback" not in excinfo.value.detail
+    assert "500" in excinfo.value.detail
+
+
+def test_backend_error_surfaces_curated_json_detail() -> None:
+    """The curated FastAPI detail IS still shown -- error quality is not degraded."""
+
+    class FakeResponse:
+        status_code = 400
+        text = ""
+
+        def json(self) -> object:
+            return {"detail": "Barcode ABC123L9 is not in the library"}
+
+    client = BackendClient(base_url="http://backend")
+    with pytest.raises(BackendError) as excinfo:
+        client._raise_for_error(FakeResponse())  # type: ignore[arg-type]
+    assert excinfo.value.detail == "Barcode ABC123L9 is not in the library"
+
+
+def test_login_bucket_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pre-auth login-attempt dict must not grow without bound.
+
+    It is keyed partly by a caller-supplied username, and _is_login_blocked sweeps
+    the whole dict on every attempt, so an unbounded dict is both a memory leak and
+    a self-amplifying CPU cost (measured: 50k keys -> ~13ms per login attempt).
+    """
+    monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret-key")
+    app = create_app(client_factory=FakeBackendClient)
+    for index in range(web_flask_app._LOGIN_BUCKET_MAX_KEYS + 500):
+        web_flask_app._record_login_failure(app, f"1.2.3.4:user{index}")
+    bucket = web_flask_app._attempt_bucket(app)
+    assert len(bucket) <= web_flask_app._LOGIN_BUCKET_MAX_KEYS
 
 
 def test_headers_omit_credentials_when_unauthenticated() -> None:

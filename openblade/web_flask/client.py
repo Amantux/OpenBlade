@@ -64,16 +64,38 @@ class BackendClient:
             headers["X-OpenBlade-Library-Id"] = str(library_id)
         return headers
 
+    #: Cap on the curated backend message surfaced to the browser. FastAPI details
+    #: are short sentences; anything longer is a sign we are relaying something we
+    #: did not curate, and it would blow out the flash banner regardless.
+    _MAX_DETAIL_CHARS = 300
+
     def _raise_for_error(self, response: httpx.Response) -> None:
-        if response.status_code < HTTPStatus.BAD_REQUEST:
+        """Turn a backend error response into a BackendError with a SAFE message.
+
+        Only the backend's own curated ``detail``/``message`` JSON field is
+        surfaced, because ``app._handle_backend_error`` flashes this straight into
+        the operator's browser. A non-JSON body is deliberately NOT echoed: an
+        unhandled 500, or a gunicorn/proxy error page in front of the API, would
+        otherwise put a stack trace -- internal paths, hostnames, frames -- on
+        screen. Jinja escapes it, so this is disclosure rather than XSS, but the
+        body is still not ours to relay. The status code is preserved on the
+        exception for callers that branch on it (401 clears the session).
+        """
+        # >= 300, not >= 400. Backend calls run with follow_redirects off, so a 3xx
+        # is an unexpected response with no JSON body; letting it through meant the
+        # caller's response.json() raised an uncaught ValueError and Flask returned
+        # a 500 instead of a flash message.
+        if response.status_code < HTTPStatus.MULTIPLE_CHOICES:
             return
-        detail = "Backend request failed"
+        detail = f"Backend request failed (HTTP {response.status_code})"
         try:
             payload = response.json()
-            if isinstance(payload, dict):
-                detail = str(payload.get("detail") or payload.get("message") or detail)
         except ValueError:
-            detail = response.text or detail
+            payload = None
+        if isinstance(payload, dict):
+            curated = payload.get("detail") or payload.get("message")
+            if isinstance(curated, str) and curated.strip():
+                detail = curated.strip()[: self._MAX_DETAIL_CHARS]
         raise BackendError(response.status_code, detail)
 
     def login(self, *, username: str, password: str) -> str:
@@ -92,6 +114,40 @@ class BackendClient:
                 HTTPStatus.BAD_GATEWAY, "Backend login response did not include a token"
             )
         return token
+
+    def get_current_user(self, token: str) -> dict[str, Any]:
+        """The logged-in AML user, including their role.
+
+        Needed because /aml/users/login does not return the role, and the UI has to
+        know it: the OpenBlade-native config surface carries no per-user
+        authorization of its own, so the role check has to happen here.
+        """
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.get(
+                f"{self.base_url}/aml/users/me",
+                headers=self._headers(token),
+            )
+        self._raise_for_error(response)
+        body = response.json()
+        if not isinstance(body, dict):
+            raise BackendError(HTTPStatus.BAD_GATEWAY, "Backend returned an invalid user record")
+        return body
+
+    def logout(self, token: str) -> None:
+        """Revoke the AML session server-side.
+
+        Clearing the Flask cookie alone left the sessionID minted at login valid on
+        the backend until it aged out.
+        """
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.delete(
+                f"{self.base_url}/aml/users/login",
+                headers=self._headers(token),
+            )
+        # A failure here must not block the local logout; the caller clears the
+        # session regardless. 401 simply means it was already invalid.
+        if response.status_code not in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
+            self._raise_for_error(response)
 
     def list_devices(self, token: str) -> list[Device]:
         with httpx.Client(timeout=self.timeout_seconds) as client:
@@ -777,7 +833,15 @@ class BackendClient:
             raise BackendError(HTTPStatus.BAD_REQUEST, "Invalid device URL")
         base_url = connection_url.rstrip("/")
         timeout = min(self.timeout_seconds, 5.0)
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        # follow_redirects=False is a SECURITY requirement, not a preference. The
+        # URL was vetted by app._validate_device_url, but a redirect is a second,
+        # UNVETTED destination: an operator-supplied host answering
+        # "302 Location: http://127.0.0.1:.../healthz" turned a blocked target into
+        # a reachable one (verified against a live listener). Worse, the login probe
+        # below POSTs the device password, and httpx replays the body on 307/308, so
+        # following redirects would let an arbitrary host harvest that credential.
+        # A device health endpoint has no legitimate reason to redirect.
+        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
             reachable = False
             for path in ("/healthz", "/health", "/aml/system/status"):
                 try:
@@ -786,7 +850,10 @@ class BackendClient:
                     )
                 except httpx.HTTPError:
                     continue
-                if response.status_code < HTTPStatus.BAD_REQUEST:
+                # A 3xx is NOT a healthy device. Redirects are no longer followed,
+                # so treating one as success would report a redirector as a working
+                # library, and below would count it as a successful auth.
+                if response.status_code < HTTPStatus.MULTIPLE_CHOICES:
                     reachable = True
                     break
             if not reachable:
@@ -798,7 +865,7 @@ class BackendClient:
                     json={"name": username, "password": password or ""},
                     headers={"Accept": "application/json"},
                 )
-                if login_response.status_code >= HTTPStatus.BAD_REQUEST:
+                if login_response.status_code >= HTTPStatus.MULTIPLE_CHOICES:
                     raise BackendError(HTTPStatus.BAD_REQUEST, "Device authentication check failed")
                 authenticated = True
         return {"reachable": True, "authenticated": authenticated}
