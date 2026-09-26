@@ -1,7 +1,13 @@
 # Parked: CI + README tail of the Flask NAS UI and iBlade parity-coverage work
 
 **Date:** 2026-09-11
-**Status:** parked in `git stash` (not lost, not landed)
+**Status:** ⚠️ SUPERSEDED 2026-09-26 — the parked state has been resolved. See
+[`2026-09-26-flask-nas-disposition.md`](2026-09-26-flask-nas-disposition.md) for
+the final per-component disposition and the stash cleanup commands. The "How to
+recover" section below is **obsolete**: the Flask UI, `Dockerfile.web` and the
+`web-flask-smoke` job were landed (with corrections), and the parity generator
+plus its artifacts turned out to have already landed on master in `ce89749`.
+Read the rest of this file as the historical record of *why* it was parked.
 **Origin:** abandoned session of 2026-08-22, checkpoint `caca9241` (see `.claude/RESUME.md`)
 
 ## Why this note exists
