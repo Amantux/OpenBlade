@@ -25,7 +25,7 @@ OpenBlade CI/CD is intentionally split by layer so each change runs only relevan
 | --- | --- | --- |
 | API + backend domain | `CI`: `backend-lint`, `backend-typecheck`, `backend-tests`, `api-aml-integration` | `openblade/**/*.py`, AML integration tests, backend config |
 | Simulator/emulator parity | `CI`: `i3-smoke`; `i3-emulator-compliance`; `emulator-change-gates` | simulator, AML routes, emulator contract/tools, i3 tests, compose/runtime wiring |
-| Frontend/UI | `CI`: `frontend-build-test` | `frontend/**` |
+| Frontend/UI | `CI`: `frontend-build-test` (React SPA), `web-flask-smoke` (Flask NAS UI) | `frontend/**`; `openblade/web_flask/**`, `Dockerfile.web`, `docker-compose.yml` |
 | CI/CD policy layer | `CI`: `cicd-workflow-validate` | `.github/workflows/**` |
 
 This keeps checks up to date and targeted while preserving full coverage on workflow dispatch and on emulator-specific workflows.
@@ -39,6 +39,8 @@ openblade inventory
 uvicorn openblade.api.main:app --reload
 # Flask-style WSGI deployment option (same API behavior):
 gunicorn openblade.api.wsgi:application
+# Flask NAS operator UI (a separate app that talks to the API over HTTP):
+FLASK_SECRET_KEY=dev-only gunicorn -k gevent -w 1 -b 0.0.0.0:5175 openblade.web_flask.app:app
 ```
 
 ## Multi-Library Setup
@@ -59,6 +61,38 @@ gunicorn openblade.api.wsgi:application
 - Access the standalone Quantum i3 UI at `http://localhost:5174` (or `http://localhost:${EMULATOR_UI_PORT}` if overridden)
 - Override UI proxy targets with `EMULATOR_UI_TARGET_LIBRARY{1,2,3}_URL` in the standalone env file
 - Override OpenBlade controller routing with `OPENBLADE_EMULATOR_URLS` when targeting the standalone emulator endpoints
+
+## Flask NAS operator UI
+`openblade/web_flask/` is a NAS-first operator console. It is a **separate WSGI
+app**, not a second implementation: it owns no domain logic and reaches the
+FastAPI control plane over HTTP through `web_flask.client.BackendClient`. It sits
+alongside the React SPA in `frontend/` rather than replacing it — both surfaces
+are named in `CLAUDE.md`, and each has its own CI job.
+
+Run it with `docker compose --profile web-flask up` (http://localhost:5175); it is
+profile-gated so the default stack is unchanged.
+
+Surfaces, each backed by existing API endpoints:
+- **Storage → Write Path** — replication/sharding/cache-drive/ingest policy
+  (`/nas/policies`, `/nas/cache-drives`, `/nas/source-stream`), and folder-to-pool
+  share mappings with per-folder access modes (`/nas/shares`)
+- **Storage → Catalog** — dataset table with per-dataset checksum verification
+  (`/nas/datasets`, `/nas/datasets/{dataset_id}/verify`)
+- **Storage → Archive / Restore** — archive and restore submission (`/archive/`,
+  `/restore/`)
+- **Devices** — register/probe libraries and drive inventory, mount/unmount, move,
+  import/export, and magazine eject/insert against `/api/libraries` and `/aml/*`
+- **System** — AML users and role assignments (`/aml/users`)
+
+### Configuration
+| Variable | Purpose |
+| --- | --- |
+| `FLASK_SECRET_KEY` | Session signing key. **Required** when `OPENBLADE_ENV=production` (the `Dockerfile.web` default) — the app refuses to start without it rather than minting a throwaway key that would invalidate every session on restart. |
+| `OPENBLADE_WEB_BACKEND_URL` | Base URL of the FastAPI control plane. |
+| `OPENBLADE_API_TOKEN` | Must match the backend's value. The backend gates its native surface (`/api`, `/jobs`, `/nas`, `/catalog`, `/status`, `/system`, `/volume-groups`, `/archive`, `/restore`) on this bearer, while `/aml/*` uses the per-user session this UI obtains at login. Omit it only where the backend also leaves native auth off. |
+| `OPENBLADE_SERVICE_TOKEN` | Must match the backend's value; `/aml/mount` and `/aml/unmount` require it. |
+| `OPENBLADE_WEB_SECURE_COOKIES` | Forces `Secure` session cookies; defaults on under `OPENBLADE_ENV=production`. |
+| `OPENBLADE_WEB_ALLOW_UNSAFE_DEVICE_TARGETS` | Development escape hatch: permits loopback/link-local/metadata hosts as device connection URLs, which are refused by default. Leave unset in production. |
 
 ## Safety defaults
 - Mock backend is the default
