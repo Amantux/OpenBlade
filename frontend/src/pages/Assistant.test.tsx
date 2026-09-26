@@ -111,7 +111,7 @@ describe('Assistant', () => {
     expect(screen.getByText('Ask about the library')).toBeTruthy();
   });
 
-  it('renders an upstream failure as an error, keeping the thread', async () => {
+  it('renders an upstream failure as an error and returns the question to the composer', async () => {
     assistModule.askAssistant.mockRejectedValue(
       new ApiError('The model endpoint could not be reached', 502, 'impact', 'action'),
     );
@@ -125,7 +125,34 @@ describe('Assistant', () => {
         0,
       );
     });
+    // A 502 is not a setup problem, so no setup panel — but the unanswered turn
+    // is still popped and the text handed back, so the operator can retry it.
     expect(screen.queryByText('The assistant is not configured')).toBeNull();
-    expect(screen.getByText('why is it slow?')).toBeTruthy();
+    expect((screen.getByLabelText('Question') as HTMLInputElement).value).toBe('why is it slow?');
+    expect(screen.getByText('Ask about the library')).toBeTruthy();
+  });
+
+  it('keeps an answered turn when a LATER question fails', async () => {
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'first question' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+    await waitFor(() => {
+      expect(screen.getByText('Two: PH000001 and PH000002.')).toBeTruthy();
+    });
+
+    assistModule.askAssistant.mockRejectedValue(
+      new ApiError('Too many assistant requests', 429, 'impact', 'action'),
+    );
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'second question' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Too many assistant requests/).length).toBeGreaterThan(0);
+    });
+    // Only the unanswered turn goes; the conversation so far survives.
+    expect(screen.getByText('first question')).toBeTruthy();
+    expect(screen.getByText('Two: PH000001 and PH000002.')).toBeTruthy();
+    expect((screen.getByLabelText('Question') as HTMLInputElement).value).toBe('second question');
   });
 });

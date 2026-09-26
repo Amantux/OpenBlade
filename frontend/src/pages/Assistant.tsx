@@ -57,13 +57,12 @@ export default function Assistant() {
         { role: 'assistant', content: reply.reply, toolCalls: reply.toolCalls },
       ]);
     },
-    onError: (error, variables) => {
-      if (error instanceof ApiError && error.status === 503) {
-        // Nothing answered the question, so the thread must not keep a turn that
-        // looks answered: pop it and hand the text back to the composer.
-        setTurns((current) => current.slice(0, -1));
-        setDraft(variables[variables.length - 1]?.content ?? '');
-      }
+    onError: (_error, variables) => {
+      // Nothing answered the question, whatever the reason (not configured, rate
+      // limited, provider down), so the thread must not keep a turn that looks
+      // answered: pop it and hand the text back to the composer to retry.
+      setTurns((current) => current.slice(0, -1));
+      setDraft(variables[variables.length - 1]?.content ?? '');
     },
   });
 
