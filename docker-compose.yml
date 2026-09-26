@@ -7,6 +7,12 @@ services:
       OPENBLADE_BACKEND: mock
       OPENBLADE_DB_URL: sqlite:////data/openblade.db
       OPENBLADE_EMULATOR_URLS: ${OPENBLADE_EMULATOR_URLS:-http://host.docker.internal:8010,http://host.docker.internal:8011,http://host.docker.internal:8012}
+      # Declared so `api` and `web-flask` cannot drift apart on either credential.
+      # Empty is the documented "unset" for both (api_auth: empty => native auth
+      # disabled; service_auth: empty => dev fallback token), so the default stack
+      # behaves exactly as before. Export either var and BOTH services pick it up.
+      OPENBLADE_API_TOKEN: ${OPENBLADE_API_TOKEN:-}
+      OPENBLADE_SERVICE_TOKEN: ${OPENBLADE_SERVICE_TOKEN:-}
     volumes:
       - openblade-data:/data
     ports:
@@ -36,6 +42,41 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # The Flask NAS operator UI (openblade/web_flask). ADDITIVE, not a replacement
+  # for `web` above: CLAUDE.md describes "React frontend + Flask NAS UI" as two
+  # surfaces, and frontend-build-test still gates the React one. Off by default
+  # via a profile, following `emulator`: `docker compose --profile web-flask up`
+  # runs it, and the default stack is byte-for-byte unchanged. Host port 5175
+  # deliberately: 5173 is the React service and 5174 is the standalone emulator UI
+  # (deploy/emulator/docker-compose.standalone.yml), so both would clash under
+  # `make fleet-up`.
+  web-flask:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    profiles: ["web-flask"]
+    environment:
+      # Relaxes Dockerfile.web's production default: the local stack is plain
+      # HTTP, so a per-boot random SECRET_KEY and non-Secure cookies are correct
+      # here. A real deployment keeps production and supplies FLASK_SECRET_KEY.
+      OPENBLADE_ENV: development
+      OPENBLADE_WEB_BACKEND_URL: http://api:8000
+      # Both halves of the backend's auth model; both MUST match `api`.
+      # OPENBLADE_API_TOKEN is the native-surface bearer (empty => api has native
+      # auth off, so an empty bearer here is equally correct).
+      OPENBLADE_API_TOKEN: ${OPENBLADE_API_TOKEN:-}
+      # The controller header, required by /aml/mount and /aml/unmount, which this
+      # UI calls. Unlike the bearer it has no "off" state: when the var is unset
+      # api falls back to service_auth._DEFAULT_SERVICE_TOKEN, so the UI has to
+      # send that exact value or mount/unmount 403s in the dev stack. Naming the
+      # literal here keeps the two in step; exporting the var overrides both.
+      OPENBLADE_SERVICE_TOKEN: ${OPENBLADE_SERVICE_TOKEN:-openblade-controller-dev-token-do-not-expose}
+    ports:
+      - "5175:8080"
     depends_on:
       api:
         condition: service_healthy
