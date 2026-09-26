@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -72,7 +73,7 @@ class HealthService:
             return ReadyResponse(
                 ready=not reasons, reason="; ".join(reasons), checked_at=checked_at
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - readiness must answer, not 500: logged with exc_info; the curated escape is a degraded HealthStatus, never an exception to the caller
             logger.warning("readiness check failed", exc_info=True)
             return ReadyResponse(
                 ready=False, reason="dependency check unavailable", checked_at=checked_at
@@ -101,7 +102,7 @@ class HealthService:
                 cartridges_loaded=sum(1 for drive in inventory.drives if drive.barcode is not None),
                 last_updated_at=checked_at,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - library status must answer, not 500: logged with exc_info; the curated escape is a degraded HealthStatus, never an exception to the caller
             logger.warning("library status check failed", exc_info=True)
             return LibraryStatusResponse(
                 library_connected=False,
@@ -128,7 +129,7 @@ class HealthService:
                 self.repo.session.execute(select(func.count()).select_from(NasDataset)).scalar_one()
             )
             successful_checks += 1
-        except Exception:
+        except Exception:  # noqa: BLE001 - one failed count must not hide the others: logged with exc_info, the field stays -1 and db_reachable reflects the survivors
             logger.warning("catalog dataset count failed", exc_info=True)
 
         try:
@@ -138,7 +139,7 @@ class HealthService:
                 ).scalar_one()
             )
             successful_checks += 1
-        except Exception:
+        except Exception:  # noqa: BLE001 - one failed count must not hide the others: logged with exc_info, the field stays -1 and db_reachable reflects the survivors
             logger.warning("catalog file record count failed", exc_info=True)
 
         try:
@@ -148,7 +149,7 @@ class HealthService:
                 ).scalar_one()
             )
             successful_checks += 1
-        except Exception:
+        except Exception:  # noqa: BLE001 - one failed count must not hide the others: logged with exc_info, the field stays -1 and db_reachable reflects the survivors
             logger.warning("catalog path mapping count failed", exc_info=True)
 
         try:
@@ -156,7 +157,7 @@ class HealthService:
                 self.repo.session.execute(select(func.count()).select_from(Cartridge)).scalar_one()
             )
             successful_checks += 1
-        except Exception:
+        except Exception:  # noqa: BLE001 - one failed count must not hide the others: logged with exc_info, the field stays -1 and db_reachable reflects the survivors
             logger.warning("catalog cartridge count failed", exc_info=True)
 
         try:
@@ -169,7 +170,7 @@ class HealthService:
                 str(latest_rebuild_run["status"]) if latest_rebuild_run is not None else None
             )
             successful_checks += 1
-        except Exception:
+        except Exception:  # noqa: BLE001 - one failed count must not hide the others: logged with exc_info, the field stays -1 and db_reachable reflects the survivors
             logger.warning("catalog rebuild lookup failed", exc_info=True)
 
         return CatalogStatusResponse(
@@ -187,7 +188,7 @@ class HealthService:
         """Probe representative catalog tables and downgrade health when only part of the DB is readable."""
         checked_at = _utcnow_iso()
         started_at = time.perf_counter()
-        probes = {
+        probes: dict[str, Callable[[], object]] = {
             "datasets": lambda: self.repo.list_nas_datasets(),
             "path_mappings": lambda: self.repo.count_path_mappings(),
             "cartridges": lambda: self.repo.list_cartridges(),
@@ -198,7 +199,7 @@ class HealthService:
         for probe_name, probe in probes.items():
             try:
                 probe()
-            except Exception:
+            except Exception:  # noqa: BLE001 - per-probe isolation: logged with exc_info and named in failed_probes, which decides OK/DEGRADED/UNHEALTHY
                 failed_probes.append(probe_name)
                 logger.warning("database health probe failed", probe=probe_name, exc_info=True)
 
@@ -242,7 +243,7 @@ class HealthService:
                 latency_ms=round((time.perf_counter() - started_at) * 1000, 3),
                 last_checked_at=checked_at,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - logged with exc_info; the curated escape is a degraded HealthStatus, never an exception to the caller
             logger.warning("library health check failed", exc_info=True)
             return ComponentHealth(
                 name="library",
@@ -274,7 +275,7 @@ class HealthService:
                 latency_ms=round((time.perf_counter() - started_at) * 1000, 3),
                 last_checked_at=checked_at,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - logged with exc_info; the curated escape is a degraded HealthStatus, never an exception to the caller
             logger.warning("ltfs health check failed", exc_info=True)
             return ComponentHealth(
                 name="ltfs",

@@ -126,6 +126,18 @@ jobs:
           echo "--- systemd (assumption 3):"
           systemctl is-system-running 2>&1 || true
           ps -p 1 -o comm= || true
+          # Assumption 4, added after run 35688121678: mhvtl only registers SCSI
+          # targets; /dev/nstN comes from the kernel's `st` upper-level driver,
+          # which an Azure kernel keeps in linux-modules-extra rather than the
+          # base linux-modules package the generic kernel uses.
+          echo "--- upper-level SCSI drivers st/ch (assumption 4):"
+          modinfo st 2>&1 | head -3 || echo "st: NOT in this kernel's module set"
+          modinfo ch 2>&1 | head -3 || echo "ch: NOT in this kernel's module set"
+          apt-cache policy "linux-modules-extra-$(uname -r)" || true
+          # Assumption 5: /dev/sgN is 0660 root:tape, and env.sh runs sg_inq as
+          # the unprivileged runner user.
+          echo "--- identity of the user that will run env.sh (assumption 5):"
+          id || true
           echo "--- disk / cpu budget:"
           df -h / || true
           nproc || true
@@ -160,9 +172,17 @@ jobs:
         timeout-minutes: 20
         run: |
           set -euxo pipefail
+          # libsnmp-dev added after run 35688121678: ltfs configure looks for
+          # net-snmp >= 5.3 and there is no --disable-snmp, so without it the
+          # build dies at
+          #   ./configure: line 14786: net-snmp-config: command not found
+          #   configure: error: Package requirements (net-snmp >= 5.3) were not met
+          # libsnmp-dev is what provides net-snmp-config and the pkg-config file.
+          # The rehearsal host already had it installed for unrelated reasons,
+          # which is why docs/runbooks/mhvtl-rehearsal.md §1 never mentions it.
           sudo apt-get install -y --no-install-recommends \
             build-essential autoconf automake libtool pkg-config git \
-            libfuse-dev libicu-dev libxml2-dev uuid-dev
+            libfuse-dev libicu-dev libxml2-dev uuid-dev libsnmp-dev
 
           # ./configure probes `icu-config`, removed in ICU 62+. The documented
           # ICU_MODULE_CFLAGS / ICU_MODULE_LIBS escape hatch does NOT work —
@@ -203,9 +223,24 @@ jobs:
         continue-on-error: true
         run: |
           set -euxo pipefail
+          # No tarball means the build step failed (or was skipped). Say so and
+          # stop, rather than emitting a confusing `tar: Cannot open` on top of
+          # the real error further up the log.
+          if [ ! -f /tmp/ltfs-stage.tar ]; then
+            echo "No /tmp/ltfs-stage.tar — the LTFS build did not produce one. See the build step above."
+            exit 1
+          fi
           # The cached tarball only carries the build products; the shared
           # libraries it links against still have to be present at runtime.
-          sudo apt-get install -y --no-install-recommends libfuse2 libicu-dev libxml2 uuid-runtime || true
+          # Installed ONE AT A TIME on purpose: these names are release-specific
+          # (noble renamed libfuse2 -> libfuse2t64 and bumps libsnmpNN), and a
+          # single apt-get with one unknown name installs NOTHING while the
+          # trailing `|| true` hides it. Per-package means a wrong guess costs
+          # only that guess.
+          for pkg in libfuse2t64 libfuse2 libicu-dev libxml2 uuid-runtime \
+                     libsnmp40 libsnmp-dev; do
+            sudo apt-get install -y --no-install-recommends "$pkg" || true
+          done
           sudo tar -C / -xf /tmp/ltfs-stage.tar
           sudo ldconfig
           command -v mkltfs
@@ -246,6 +281,31 @@ jobs:
           sudo dmesg | tail -80 || true
           cat /etc/mhvtl/device.conf || true
 
+      # Resolving the rig is its own step so that "the rig cannot be addressed"
+      # fails HERE, loudly, instead of leaking into the pytest step.
+      #
+      # Run 35688121678 is exactly why. The old code was
+      # `eval "$(scripts/mhvtl/env.sh)"` inside the pytest step: a failing
+      # command substitution does NOT fail the enclosing command even under
+      # `set -e`, so env.sh's refusal became `eval ""`, the step carried on, and
+      # the first visible symptom was `OPENBLADE_BACKEND: unbound variable` 20
+      # lines later — with the real diagnosis scrolled off as mere stderr.
+      - name: Resolve the rig's device paths
+        id: rig-env
+        run: |
+          set -euo pipefail
+          # env.sh DISCOVERS the device paths (they move between boots) and
+          # identifies the changer by unit serial, never by "first mediumx".
+          if ! block=$(scripts/mhvtl/env.sh); then
+            echo "::error::scripts/mhvtl/env.sh could not resolve the rig; the hardware suite cannot run. The diagnosis is in this step's stderr above."
+            exit 1
+          fi
+          printf '%s\n' "$block"
+          # Only the `export K=V` lines — env.sh also emits comments, which
+          # $GITHUB_ENV would reject.
+          printf '%s\n' "$block" \
+            | sed -n 's/^export \([A-Z_][A-Z0-9_]*\)=\(.*\)$/\1=\2/p' >> "$GITHUB_ENV"
+
       - name: Run the hardware suite against the rig
         timeout-minutes: 20
         env:
@@ -255,9 +315,13 @@ jobs:
           OPENBLADE_FAULT_TESTS: ${{ inputs.fault_tests == true && 'enabled' || '' }}
         run: |
           set -euxo pipefail
-          # env.sh DISCOVERS the device paths (they move between boots) and
-          # identifies the changer by unit serial, never by "first mediumx".
-          eval "$(scripts/mhvtl/env.sh)"
+          # Belt and braces: the previous step is what guarantees these exist,
+          # and if it somehow did not, say which one is missing.
+          : "${OPENBLADE_BACKEND:?not set — the rig-env step did not run}"
+          : "${OPENBLADE_REAL_HARDWARE_ENABLED:?not set — the rig-env step did not run}"
+          : "${OPENBLADE_CHANGER_DEVICE:?not set — the rig-env step did not run}"
+          : "${OPENBLADE_DRIVE_DEVICES:?not set — the rig-env step did not run}"
+          : "${OPENBLADE_SCRATCH_BARCODES:?not set — the rig-env step did not run}"
           env | grep '^OPENBLADE_' | sort
 
           if [ "${{ steps.ltfs.outputs.available }}" = "true" ]; then

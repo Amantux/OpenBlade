@@ -216,7 +216,7 @@ async def create_token(
     return service.create_token(rbac_user.id, payload)
 
 
-@router.get("/tokens", response_model=list[dict])
+@router.get("/tokens", response_model=list[dict[str, object]])
 async def list_tokens(
     current_user: AmlUser = Depends(require_permission(RbacPermission.TOKEN_MANAGE)),
     service: RbacService = Depends(get_rbac_service),

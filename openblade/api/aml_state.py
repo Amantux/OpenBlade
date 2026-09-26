@@ -13,7 +13,7 @@ import time
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import pyotp
@@ -2054,7 +2054,14 @@ def hash_password(password: str) -> str:
 def _decode_password_hash(password_hash: str) -> tuple[bytes, bytes] | None:
     try:
         decoded = base64.b64decode(password_hash.encode("ascii"), validate=True)
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
+        # ValueError covers both real failure modes of the expression above:
+        # binascii.Error (non-base64 / bad padding) and UnicodeEncodeError
+        # (non-ASCII hash) are both ValueError subclasses. TypeError/
+        # AttributeError cover a stored hash that is not a str at all (a NULL
+        # password column read back as None). Anything else here is a defect in
+        # this function, not a malformed hash, and must not be reported as
+        # "password does not verify".
         return None
     expected_length = _PASSWORD_SALT_BYTES + _PASSWORD_KEY_BYTES
     if len(decoded) != expected_length:
@@ -2678,7 +2685,7 @@ def update_eth_port(blade_id: str, port_id: str, updates: dict[str, Any]) -> dic
     for port in blade.get("ports", []):
         if port.get("id") == port_id:
             port.update(deepcopy(updates))
-            return deepcopy(port)
+            return cast("dict[str, Any]", deepcopy(port))
     return None
 
 
@@ -2720,7 +2727,7 @@ def update_fc_port(blade_id: str, port_id: str, updates: dict[str, Any]) -> dict
     for port in blade.get("ports", []):
         if port.get("id") == port_id:
             port.update(deepcopy(updates))
-            return deepcopy(port)
+            return cast("dict[str, Any]", deepcopy(port))
     return None
 
 
@@ -3468,8 +3475,8 @@ def remove_aml_partition_access_value(name: str, field: str, value: str) -> bool
 def _sync_aml_media_counts() -> None:
     partition_counts: dict[str, int] = {}
     for media in _STATE.aml_media.values():
-        partition = str(media.get("partition", "partition1"))
-        partition_counts[partition] = partition_counts.get(partition, 0) + 1
+        partition_name = str(media.get("partition", "partition1"))
+        partition_counts[partition_name] = partition_counts.get(partition_name, 0) + 1
     for name, partition in _STATE.aml_partitions.items():
         media_count = partition_counts.get(name, 0)
         partition["mediaCount"] = media_count
@@ -3575,7 +3582,7 @@ def delete_aml_media(barcode: str) -> bool:
     return True
 
 
-def _next_media_slot_address(partition: str) -> str:
+def _next_media_slot_address(partition: str | None) -> str:
     slot_numbers: list[int] = []
     for media in _STATE.aml_media.values():
         if media.get("partition") != partition:
@@ -3721,18 +3728,14 @@ def assign_aml_media_to_pool(pool_id: str, barcodes: list[str]) -> dict[str, Any
         return get_aml_media_pool(normalized_pool_id)
 
     for candidate in _STATE.aml_media_pools.values():
-        existing = (
-            candidate.get("assignedBarcodes")
-            if isinstance(candidate.get("assignedBarcodes"), list)
-            else []
-        )
+        candidate_barcodes = candidate.get("assignedBarcodes")
+        existing = candidate_barcodes if isinstance(candidate_barcodes, list) else []
         candidate["assignedBarcodes"] = [
             barcode for barcode in existing if barcode not in normalized_barcodes
         ]
 
-    assigned = (
-        pool.get("assignedBarcodes") if isinstance(pool.get("assignedBarcodes"), list) else []
-    )
+    pool_barcodes = pool.get("assignedBarcodes")
+    assigned = pool_barcodes if isinstance(pool_barcodes, list) else []
     for barcode in normalized_barcodes:
         if barcode not in assigned:
             assigned.append(barcode)
@@ -3748,9 +3751,8 @@ def unassign_aml_media_from_pool(pool_id: str, barcodes: list[str]) -> dict[str,
         return None
 
     normalized_barcodes = set(barcodes)
-    existing = (
-        pool.get("assignedBarcodes") if isinstance(pool.get("assignedBarcodes"), list) else []
-    )
+    pool_barcodes = pool.get("assignedBarcodes")
+    existing = pool_barcodes if isinstance(pool_barcodes, list) else []
     pool["assignedBarcodes"] = [
         barcode for barcode in existing if barcode not in normalized_barcodes
     ]
@@ -4572,7 +4574,7 @@ def get_fc_port_by_number(serial_number: str, port_number: int) -> dict[str, Any
         return None
     for port in blade.get("ports", []):
         if int(port.get("portNumber", 0)) == port_number:
-            return port
+            return cast("dict[str, Any]", port)
     return None
 
 
@@ -4585,7 +4587,7 @@ def update_fc_port_by_number(
         for port in blade.get("ports", []):
             if int(port.get("portNumber", 0)) == port_number:
                 port.update(deepcopy(updates))
-                return deepcopy(port)
+                return cast("dict[str, Any]", deepcopy(port))
         return None
     return None
 

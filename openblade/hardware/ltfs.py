@@ -561,9 +561,9 @@ class RealLTFSBackend:
         self, barcode_or_path: str, path: PurePosixPath | str | None = None
     ) -> bytes | None:
         if path is None:
-            target = PurePosixPath(str(barcode_or_path))
+            logical_target = PurePosixPath(str(barcode_or_path))
             for handle in self._active_mounts.values():
-                candidate = handle.mount_path / _relative_tape_path(target)
+                candidate = handle.mount_path / _relative_tape_path(logical_target)
                 if candidate.exists():
                     return candidate.read_bytes()
             return None

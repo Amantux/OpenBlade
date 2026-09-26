@@ -22,10 +22,10 @@ for lib in libs:
     try:
         h = requests.get(url + "/health", timeout=5)
         print(url + "/health", h.status_code)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - operator probe script: an unreachable emulator is the result, printed, not a crash
         print("emulator", url, "unreachable", e)
     try:
         inv = requests.get(url + "/api/aml/inventory", timeout=5)
         print(url + "/api/aml/inventory", inv.status_code)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - operator probe script: an unreachable endpoint is the result, printed, not a crash
         print("inventory failed for", url, e)

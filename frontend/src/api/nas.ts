@@ -1,4 +1,5 @@
 import { ApiError } from './client';
+import { attachApiTokenHeader, handleUnauthorized } from '../lib/apiToken';
 import { clearStoredUsername, notifyAuthRedirect } from '../lib/auth';
 
 export type PolicyType = 'critical_sequential' | 'noncritical_sharded' | 'balanced';
@@ -695,7 +696,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   const payload = text ? safeJsonParse(text) : null;
 
-  if (response.status === 401) {
+  if (response.status === 401 && !handleUnauthorized(response.url || '/api/nas', response, payload)) {
     redirectToLogin();
   }
 
@@ -723,6 +724,7 @@ async function nasRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
+  attachApiTokenHeader(headers, '/api/nas');
   const response = await fetch(`/api/nas${path}`, {
     ...init,
     headers,

@@ -1,4 +1,5 @@
 import { rootApiRequest } from './client';
+import { apiTokenHeaderValue, attachApiTokenHeader, handleUnauthorized } from '../lib/apiToken';
 
 const API = '/api';
 
@@ -54,6 +55,10 @@ export async function uploadToPool(poolId: string, file: File, onProgress?: (pct
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API}/pools/${encodeURIComponent(poolId)}/upload`);
     xhr.withCredentials = true;
+    const bearer = apiTokenHeaderValue(API);
+    if (bearer) {
+      xhr.setRequestHeader('Authorization', bearer);
+    }
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
@@ -72,6 +77,10 @@ export async function uploadToPool(poolId: string, file: File, onProgress?: (pct
           }
           resolve(uploaded);
           return;
+        }
+
+        if (xhr.status === 401) {
+          handleUnauthorized(API, { headers: new Headers() }, payload);
         }
 
         const detail =
@@ -98,10 +107,17 @@ export function listFiles(poolId: string): Promise<FileListResponse> {
 }
 
 export async function downloadFile(fileId: string, filename?: string): Promise<void> {
-  const response = await fetch(`${API}/files/${encodeURIComponent(fileId)}/download`, {
+  const downloadUrl = `${API}/files/${encodeURIComponent(fileId)}/download`;
+  const headers = new Headers();
+  attachApiTokenHeader(headers, downloadUrl);
+  const response = await fetch(downloadUrl, {
     credentials: 'include',
+    headers,
   });
   if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized(downloadUrl, response, null);
+    }
     throw new Error(`HTTP ${response.status}`);
   }
 

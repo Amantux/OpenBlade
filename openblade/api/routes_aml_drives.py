@@ -402,9 +402,13 @@ def _drive_errors(drive: dict[str, Any]) -> list[DriveError]:
 
 
 def _drive_stats(drive: dict[str, Any]) -> DriveStats:
-    statistics = drive.get("statistics") if isinstance(drive.get("statistics"), dict) else {}
+    raw_statistics = drive.get("statistics")
+    statistics: dict[str, Any] = raw_statistics if isinstance(raw_statistics, dict) else {}
     load_count = int(drive.get("loadCount", 0))
-    loaded_media = drive.get("loadedMedia") if isinstance(drive.get("loadedMedia"), dict) else None
+    raw_loaded_media = drive.get("loadedMedia")
+    loaded_media: dict[str, Any] | None = (
+        raw_loaded_media if isinstance(raw_loaded_media, dict) else None
+    )
     last_loaded = statistics.get("lastLoaded") or (loaded_media or {}).get("lastLoaded")
     return DriveStats(
         loadCount=load_count,
@@ -420,7 +424,8 @@ def _drive_stats(drive: dict[str, Any]) -> DriveStats:
 
 def _firmware_info(drive: dict[str, Any]) -> FirmwareInfo:
     current = str(drive.get("firmware", "unknown"))
-    firmware_info = drive.get("firmwareInfo") if isinstance(drive.get("firmwareInfo"), dict) else {}
+    raw_firmware_info = drive.get("firmwareInfo")
+    firmware_info: dict[str, Any] = raw_firmware_info if isinstance(raw_firmware_info, dict) else {}
     available = str(firmware_info.get("available") or ("H3J5" if current == "H3J4" else current))
     return FirmwareInfo(current=current, available=available, updateRequired=current != available)
 
@@ -433,7 +438,8 @@ def _diagnostic_result(drive: dict[str, Any]) -> DiagnosticResult:
 
 
 def _drive_config(drive: dict[str, Any]) -> DriveConfig:
-    config = drive.get("config") if isinstance(drive.get("config"), dict) else {}
+    raw_config = drive.get("config")
+    config: dict[str, Any] = raw_config if isinstance(raw_config, dict) else {}
     return DriveConfig.model_validate(
         {
             "compression": bool(config.get("compression", True)),
@@ -505,10 +511,11 @@ async def clean_all_drives(
         if not _drive_needs_cleaning(drive):
             continue
         cleaned += 1
+        loaded = _loaded_media(drive)
         history = _append_history(
             drive,
             event_type="clean",
-            media=(_loaded_media(drive).barcode if _loaded_media(drive) else None),
+            media=(loaded.barcode if loaded else None),
         )
         _update_drive(
             str(drive["serialNumber"]),
@@ -992,7 +999,8 @@ async def put_drive_operation_state(
         for key, value in payload.items()
         if key in {"state", "status"} and value is not None
     }
-    updated = _update_drive(serial_number, {**{k: drive.get(k) for k in ()}, **updates})
+    carry_keys: tuple[str, ...] = ()
+    updated = _update_drive(serial_number, {**{k: drive.get(k) for k in carry_keys}, **updates})
     return {
         "serialNumber": serial_number,
         "state": str(updated.get("state", "idle")),

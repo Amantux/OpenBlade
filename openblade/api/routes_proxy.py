@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 from urllib.parse import quote
 
@@ -12,6 +13,7 @@ from openblade.api.routes_aml_auth import require_auth
 from openblade.catalog.models import AmlUser
 
 router = APIRouter(prefix="/aml/proxy", tags=["proxy"])
+logger = logging.getLogger(__name__)
 
 
 class RemoteLibraryProbeRequest(BaseModel):
@@ -223,5 +225,15 @@ async def probe_remote_library(
                     "activeJobs": _count_active_jobs(jobs),
                 },
             }
-    except Exception as exc:
-        return {"status": "offline", "error": str(exc)}
+    # Probing an operator-supplied host: every failure mode (DNS, TLS, timeout,
+    # a non-JSON body) is the same answer — "offline" — so this stays broad.
+    # str(exc) did NOT stay: httpx exception text carries the probe URL and
+    # httpx.ConnectError wraps OS-level text, and this dict is returned to the
+    # client. Full detail goes to the log; the wire gets the class name, the same
+    # contract as safe_job_error() on jobs.error.
+    except Exception as exc:  # noqa: BLE001 - see above
+        logger.warning("remote library probe failed", exc_info=True)
+        return {
+            "status": "offline",
+            "error": f"Remote library unreachable ({type(exc).__name__}); see server logs",
+        }

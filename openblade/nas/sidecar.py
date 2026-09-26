@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import ValidationError
+
+if TYPE_CHECKING:  # avoid importing the service layer at module import time
+    from openblade.nas.service import NasService
 
 from openblade.nas.types import (
     EffectivePolicy,
@@ -19,7 +23,7 @@ SIDECAR_FILENAME = ".openblade-policy.yaml"
 
 
 class SidecarResolver:
-    def __init__(self, nas_service=None):
+    def __init__(self, nas_service: NasService | None = None) -> None:
         self.nas_service = nas_service
 
     def find_sidecar(self, directory: str) -> Path | None:

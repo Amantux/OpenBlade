@@ -7,9 +7,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from openblade.api.rbac_deps import ensure_permission_for_user, require_permission
-from openblade.api.routes_aml_auth import AmlUser, require_auth
+from openblade.api.routes_aml_auth import require_auth
 from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
+from openblade.catalog.models import AmlUser
 from openblade.catalog.repository import CatalogRepository
 from openblade.nas.rbac_service import RbacService
 from openblade.nas.tape_orchestrator import OperationNotConfirmedError, TapeOperationOrchestrator

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
+from typing import cast
 from uuid import uuid4
 
 from openblade.catalog.repository import CatalogRepository
@@ -26,9 +28,23 @@ from openblade.nas.types import (
     RebuildRunStatus,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _utcnow_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
+
+
+# The catalog rows below come back as `dict[str, object]` (serialized from the
+# same pydantic models that are rebuilt from them), so every column read needs a
+# type. These are `cast` only -- no runtime narrowing, no new failure mode:
+# validation stays exactly where it was, in the model construction one line down.
+def _text_column(value: object) -> str | None:
+    return cast("str | None", value)
+
+
+def _int_column(value: object) -> int | None:
+    return cast("int | None", value)
 
 
 class CatalogRebuildPlanner:
@@ -191,7 +207,17 @@ class CatalogRebuildPlanner:
                 path_mappings_recovered += self._recover_path_mappings(shard)
                 self._recover_manifest_versions(barcode)
                 completed.append(barcode)
-            except Exception:
+            # Per-barcode isolation: one unreadable tape must not abandon the
+            # rebuild of the others, so this stays broad and the barcode is named
+            # in error_summary (curated text — the summary is operator-facing).
+            # The log is the point of this change: disaster recovery previously
+            # discarded the only evidence of why a tape could not be recovered.
+            except Exception:  # noqa: BLE001 - see above
+                logger.warning(
+                    "catalog rebuild failed for cartridge",
+                    extra={"barcode": barcode},
+                    exc_info=True,
+                )
                 failed.append(barcode)
                 error_summary.append(f"failed to recover catalog data for {barcode}")
 
@@ -222,7 +248,7 @@ class CatalogRebuildPlanner:
         for entry in shard.datasets:
             existing = self.repo.get_nas_dataset(entry.dataset_id) or {}
             is_new = not existing
-            existing_tape_set: list[str] = list(existing.get("tape_set") or [])
+            existing_tape_set: list[str] = list(cast("list[str]", existing.get("tape_set") or []))
             tape_set = list(entry.tape_set or [barcode])
             # Merge: add this barcode and any from existing without duplicates.
             merged = list(existing_tape_set)
@@ -231,22 +257,22 @@ class CatalogRebuildPlanner:
                     merged.append(bc)
             dataset = NasDataset(
                 id=entry.dataset_id,
-                pool_id=entry.pool_id or existing.get("pool_id"),
+                pool_id=entry.pool_id or _text_column(existing.get("pool_id")),
                 name=str(existing.get("name") or entry.dataset_id),
-                source_path=existing.get("source_path"),
-                source_host=existing.get("source_host"),
-                policy_id=entry.policy or existing.get("policy_id"),
+                source_path=_text_column(existing.get("source_path")),
+                source_host=_text_column(existing.get("source_host")),
+                policy_id=entry.policy or _text_column(existing.get("policy_id")),
                 ingest_mode=self._parse_ingest_mode(entry.ingest_mode)
-                or existing.get("ingest_mode"),
-                volume_group_id=entry.volume_group or existing.get("volume_group_id"),
+                or cast("IngestMode | None", existing.get("ingest_mode")),
+                volume_group_id=entry.volume_group or _text_column(existing.get("volume_group_id")),
                 tape_set=merged,
-                shard_map=dict(existing.get("shard_map") or {}),
+                shard_map=dict(cast("dict[str, list[str]]", existing.get("shard_map") or {})),
                 file_count=entry.file_count,
                 total_bytes=entry.total_bytes,
                 status=DatasetStatus.ARCHIVED,
                 copies_completed=len(merged),
                 manifest_path="/.openblade/manifest.json",
-                created_at=existing.get("created_at"),
+                created_at=_text_column(existing.get("created_at")),
                 updated_at=_utcnow_iso(),
             )
             self.repo.upsert_nas_dataset(dataset.model_dump(mode="json"))
@@ -261,21 +287,21 @@ class CatalogRebuildPlanner:
             existing = self.repo.get_nas_file_record(entry.file_record_id) or {}
             is_new = not existing
             # Preserve existing tape_barcode when file already catalogued elsewhere.
-            tape_barcode = existing.get("tape_barcode") or barcode
+            tape_barcode = _text_column(existing.get("tape_barcode")) or barcode
             file_record = NasFileRecord(
                 id=entry.file_record_id,
                 dataset_id=entry.dataset_id,
-                pool_id=entry.pool_id or existing.get("pool_id"),
+                pool_id=entry.pool_id or _text_column(existing.get("pool_id")),
                 relative_path=entry.logical_path,
-                source_path=existing.get("source_path"),
+                source_path=_text_column(existing.get("source_path")),
                 size_bytes=entry.size,
-                mtime=entry.mtime or existing.get("mtime"),
-                checksum_sha256=entry.checksum or existing.get("checksum_sha256"),
+                mtime=entry.mtime or _text_column(existing.get("mtime")),
+                checksum_sha256=entry.checksum or _text_column(existing.get("checksum_sha256")),
                 tape_barcode=tape_barcode,
-                tape_offset=existing.get("tape_offset"),
+                tape_offset=_int_column(existing.get("tape_offset")),
                 status=NasFileState.OFFLINE_ON_TAPE,
                 cache_path=None,
-                created_at=existing.get("created_at"),
+                created_at=_text_column(existing.get("created_at")),
                 updated_at=_utcnow_iso(),
             )
             self.repo.upsert_nas_file_record(file_record.model_dump(mode="json"))

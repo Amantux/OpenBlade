@@ -4,8 +4,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from openblade.config import OpenBladeConfig
+from openblade.domain.backends import LibraryBackend
 from openblade.domain.errors import DriveCorrelationError
-from openblade.domain.policies import DryRunPlan
+from openblade.domain.models import LibraryInventory
+from openblade.domain.policies import DryRunPlan, RealHardwareGuard
 from openblade.hardware.discovery import LibraryDiscovery, discover_library, resolve_sg_device
 from openblade.hardware.library import RealLibraryBackend
 from openblade.hardware.ltfs import LTFSCommandBackend, LTFSDevice
@@ -59,14 +61,39 @@ def connect_quantum_i3(
     *,
     runner: SafeRunner | None = None,
 ) -> QuantumI3ConnectionReport:
+    """Diagnose the real robotics backend ``config`` selects.
+
+    Transport-aware: builds the SCSI (``mtx``) or Web Services backend the same
+    way ``openblade.bootstrap`` does for a running app, so this command
+    diagnoses whichever transport is actually configured -- previously it
+    always built ``RealLibraryBackend`` regardless of
+    ``OPENBLADE_ROBOTICS_TRANSPORT``, which crashed (or silently probed the
+    wrong thing) against a Scalar reached only over webservices. Fields that
+    genuinely do not exist on the Web Services backend (a local changer
+    device, an up-front correlation summary -- see
+    ``ScalarHttpLibraryBackend``'s docstring) are reported as not applicable
+    rather than raising ``AttributeError``.
+    """
     guard = require_real_hardware(config)
     active_runner = runner or SafeRunner(dry_run=config.hardware_dry_run)
     discovery = discover_library(active_runner, guard)
-    library = RealLibraryBackend(config=config, runner=active_runner, discovery=discovery)
+    library: LibraryBackend
+    if config.robotics_transport == "webservices":
+        from openblade.bootstrap import _create_scalar_http_library
+
+        library = _create_scalar_http_library(config, active_runner, guard)
+    else:
+        library = RealLibraryBackend(config=config, runner=active_runner, discovery=discovery)
     inventory = library.inventory()
+    (
+        drive_correlation,
+        drive_correlation_source,
+        drive_correlation_serials_verified,
+        drive_correlation_warnings,
+    ) = _drive_correlation_report(library, inventory)
     return QuantumI3ConnectionReport(
         library_id=inventory.library_id,
-        changer_device=library.changer.device,
+        changer_device=_changer_device_or_not_applicable(library),
         discovered_changers=_changer_devices(discovery),
         discovered_drives=_drive_devices(discovery),
         slot_count=len(inventory.slots),
@@ -79,10 +106,10 @@ def connect_quantum_i3(
             _drive_device_or_blank(library, drive.drive_id) for drive in inventory.drives
         ],
         sg_inquiry=_inquiry_payloads(discovery, active_runner, guard),
-        drive_correlation=library.correlation.to_payload(),
-        drive_correlation_source=library.correlation.source,
-        drive_correlation_serials_verified=library.correlation.serials_verified,
-        drive_correlation_warnings=list(library.correlation.warnings),
+        drive_correlation=drive_correlation,
+        drive_correlation_source=drive_correlation_source,
+        drive_correlation_serials_verified=drive_correlation_serials_verified,
+        drive_correlation_warnings=drive_correlation_warnings,
     )
 
 
@@ -132,11 +159,75 @@ def validate_ltfs_capabilities(
     )
 
 
-def _drive_device_or_blank(library: RealLibraryBackend, drive_id: int) -> str:
+def _drive_device_or_blank(library: LibraryBackend, drive_id: int) -> str:
+    """``library.drive_device`` if this backend has one, else "".
+
+    Both real backends (``RealLibraryBackend``, ``ScalarHttpLibraryBackend``)
+    implement ``drive_device``; the ``LibraryBackend`` protocol does not
+    declare it (the simulator has no host devices to correlate), so this is a
+    duck-typed capability check rather than an isinstance branch on a
+    specific backend class.
+    """
+    drive_device = getattr(library, "drive_device", None)
+    if drive_device is None:
+        return ""
     try:
-        return library.drive_device(drive_id)
+        return str(drive_device(drive_id))
     except DriveCorrelationError:
         return ""
+
+
+def _changer_device_or_not_applicable(library: LibraryBackend) -> str:
+    """``library.changer.device`` if this backend has a local changer.
+
+    The Web Services backend (``OPENBLADE_ROBOTICS_TRANSPORT=webservices``)
+    drives the changer over HTTP and has no local device to report -- see
+    ``ScalarHttpLibraryBackend``, which has no ``changer`` attribute at all.
+    """
+    changer = getattr(library, "changer", None)
+    if changer is not None:
+        return str(changer.device)
+    return (
+        "not applicable on webservices transport (the changer is driven over "
+        "AML Web Services; there is no local changer device)"
+    )
+
+
+def _drive_correlation_report(
+    library: LibraryBackend, inventory: LibraryInventory
+) -> tuple[list[dict[str, str | int]], str, bool, list[str]]:
+    """(drive_correlation, source, serials_verified, warnings) for the report.
+
+    ``RealLibraryBackend`` builds and caches a ``DriveCorrelation`` up front
+    (``library.correlation``); ``ScalarHttpLibraryBackend`` has no such
+    aggregate object by design (its class docstring: correlation is resolved
+    and verified lazily, per drive, the first time ``drive_device()`` is
+    called) -- so that summary is genuinely not applicable for that
+    transport, not merely unimplemented. Per-drive devices are still reported
+    via ``drive_devices``/``_drive_device_or_blank``, which already exercises
+    -- and reports the refusal from -- that per-drive verification.
+    """
+    correlation = getattr(library, "correlation", None)
+    if correlation is not None:
+        return (
+            correlation.to_payload(),
+            correlation.source,
+            correlation.serials_verified,
+            list(correlation.warnings),
+        )
+    payload: list[dict[str, str | int]] = [
+        {"driveId": drive.drive_id, "device": device, "serial": ""}
+        for drive in inventory.drives
+        if (device := _drive_device_or_blank(library, drive.drive_id))
+    ]
+    warnings = [
+        "drive correlation summary (source/serials_verified) is not applicable "
+        "on the webservices transport; each drive_devices entry already went "
+        "through ScalarHttpLibraryBackend.drive_device()'s own "
+        "OPENBLADE_DRIVE_SERIAL_MAP verification, and refuses per-drive on a "
+        "mismatch rather than reporting one here."
+    ]
+    return payload, "not_applicable", False, warnings
 
 
 def _changer_devices(discovery: LibraryDiscovery) -> list[str]:
@@ -160,7 +251,7 @@ def _drive_devices(discovery: LibraryDiscovery) -> list[str]:
 
 
 def _inquiry_payloads(
-    discovery: LibraryDiscovery, runner: SafeRunner, guard
+    discovery: LibraryDiscovery, runner: SafeRunner, guard: RealHardwareGuard
 ) -> list[dict[str, str]]:
     payloads: list[dict[str, str]] = []
     for device in _inquiry_devices(discovery):

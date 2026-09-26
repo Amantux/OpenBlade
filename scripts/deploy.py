@@ -16,7 +16,7 @@ import argparse
 import json
 import os
 import shlex
-import subprocess  # noqa: S404 - deploy command is operator-supplied, run without a shell
+import subprocess  # argv-list only, shell=False — see _deploy()
 import sys
 import urllib.error
 import urllib.request
@@ -37,7 +37,9 @@ def _precheck() -> StageResult:
 def _deploy(cmd: list[str] | None) -> StageResult:
     if not cmd:
         return StageResult(Stage.DEPLOY, True, "skipped (no --deploy-cmd)")
-    completed = subprocess.run(cmd, check=False)  # noqa: S603 - list form, no shell
+    # `cmd` is already an argv list (shlex.split of --deploy-cmd) and no shell=True:
+    # an operator string can therefore never become shell syntax.
+    completed = subprocess.run(cmd, check=False)
     ok = completed.returncode == 0
     return StageResult(Stage.DEPLOY, ok, f"`{' '.join(cmd)}` exited {completed.returncode}")
 
@@ -68,7 +70,10 @@ def _postcheck_live(base_url: str) -> StageResult:
     def probe(method: str, path: str) -> int:
         req = urllib.request.Request(base_url.rstrip("/") + path, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 - operator-supplied URL
+            # The URL is operator-supplied (--postcheck-url), so the scheme is not
+            # constrained here; this runs as a deliberate deploy-time probe from the
+            # operator's own shell, never on behalf of a request.
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status
         except urllib.error.HTTPError as exc:
             return exc.code

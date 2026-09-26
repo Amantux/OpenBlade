@@ -71,7 +71,9 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def no_auth(endpoint: F) -> F:
-    endpoint.no_auth = True
+    # Stamps a marker attribute on the endpoint function; a Callable TypeVar cannot
+    # express "function with arbitrary extra attributes", so the ignore is required.
+    endpoint.no_auth = True  # type: ignore[attr-defined]
     return endpoint
 
 
@@ -528,10 +530,10 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
         raise HTTPException(status_code=503, detail="Service access is disabled")
     session_record = aml_state.create_session(user)
     aml_state.record_login_activity(user.name, success=True, remote_address=remote_address)
-    payload = _ws_result("Login successful").model_dump()
+    body = _ws_result("Login successful").model_dump()
     # Provide session token in response body for API clients/tests that expect it
-    payload["token"] = session_record.token
-    response = JSONResponse(content=payload)
+    body["token"] = session_record.token
+    response = JSONResponse(content=body)
     _is_production = os.environ.get("OPENBLADE_ENV", "development").lower() == "production"
     response.set_cookie(
         "sessionID",

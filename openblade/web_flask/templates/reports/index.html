@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Reports · OpenBlade NAS{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Reports</h1>
+      <p>Event and alert reporting scoped to a selected connected device.</p>
+    </div>
+    <form method="get" action="{{ url_for('reports') }}" class="filter-form">
+      <label>
+        Device
+        <select name="library_id">
+          {% for device in devices %}
+            <option value="{{ device.id }}" {% if active_device and active_device.id == device.id %}selected{% endif %}>{{ device.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Severity
+        <select name="severity">
+          <option value="all" {% if severity == 'all' %}selected{% endif %}>All</option>
+          <option value="critical" {% if severity == 'critical' %}selected{% endif %}>Critical</option>
+          <option value="warning" {% if severity == 'warning' %}selected{% endif %}>Warning</option>
+          <option value="info" {% if severity == 'info' %}selected{% endif %}>Info</option>
+        </select>
+      </label>
+      <button type="submit" class="button button-secondary">Apply</button>
+    </form>
+  </section>
+
+  {% if active_device %}
+    <section class="grid grid-70-30">
+      <article class="panel">
+        <h2>Event Log</h2>
+        {% if events %}
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Severity</th>
+                <th>Component</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for event in events %}
+                <tr>
+                  <td>{{ event.timestamp or "—" }}</td>
+                  <td><span class="status {{ status_class(event.severity or 'unknown') }}">{{ status_text(event.severity or "unknown") }}</span></td>
+                  <td>{{ event.component or "—" }}</td>
+                  <td>{{ event.message or "—" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty-state">
+            <h2>No events found</h2>
+            <p>No events were recorded for this filter on {{ active_device.name }}.</p>
+          </div>
+        {% endif %}
+      </article>
+      <article class="panel">
+        <h2>Alert Summary</h2>
+        <div class="summary vertical">
+          <span class="chip status-offline">Critical: <strong>{{ (event_summary.critical or 0) + (alert_summary.critical or 0) }}</strong></span>
+          <span class="chip status-warning">Warnings: <strong>{{ (event_summary.warning or 0) + (alert_summary.warning or 0) }}</strong></span>
+          <span class="chip status-unknown">Info: <strong>{{ (event_summary.info or 0) + (alert_summary.info or 0) }}</strong></span>
+        </div>
+        <p><strong>Total events:</strong> {{ event_summary.total or 0 }}</p>
+      </article>
+    </section>
+  {% else %}
+    <section class="panel empty-state">
+      <h2>No devices connected</h2>
+      <p>Register a device first to unlock report and alert views.</p>
+      <a class="button" href="{{ url_for('devices_register') }}">Register Device</a>
+    </section>
+  {% endif %}
+{% endblock %}
+

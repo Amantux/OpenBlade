@@ -1303,7 +1303,7 @@ def _network_interfaces() -> list[dict[str, Any]]:
 
 
 def _get_interface_or_404(name: str) -> dict[str, Any]:
-    interface = get_aml_network_config()["interfaces"].get(name)
+    interface: dict[str, Any] | None = get_aml_network_config()["interfaces"].get(name)
     if interface is None:
         raise HTTPException(status_code=404, detail="Interface not found")
     return interface

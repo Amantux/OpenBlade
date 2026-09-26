@@ -12,7 +12,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from openblade.domain.models import MountMode
+from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.domain.errors import OpenBladeError, safe_job_error
+from openblade.domain.models import MountHandle, MountMode
 from openblade.domain.policies import FormatConfirmation, SafetyToken
 from openblade.nas.archive_lifecycle import (
     ArchiveLifecycleManager,
@@ -36,8 +39,6 @@ from openblade.nas.types import (
     SourceStreamConfig,
     TapeAssignment,
 )
-from openblade.simulator.library import MockLibraryBackend
-from openblade.simulator.ltfs_volume import MockLTFSBackend
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,20 @@ class IngestCancelledError(RuntimeError):
     pass
 
 
+class IngestRefusedError(OpenBladeError, RuntimeError):
+    """An ingest refusal whose message is curated operator text.
+
+    Preflight budget/availability refusals, the source-changed-under-us guard and
+    the post-write verification failure all say something the operator has to act
+    on. Typed so ``safe_job_error`` passes the message through: "cache drive
+    cannot reserve N bytes" reduced to "Job failed (RuntimeError)" on
+    ``GET /nas/ingest/{job_id}`` would be a worse answer than the leak the
+    sanitizer exists to stop. Genuinely unexpected exceptions stay untyped and
+    still reduce to a class name. ``RuntimeError`` is kept in the bases so the
+    existing ``except RuntimeError`` callers are unaffected.
+    """
+
+
 def _reserve_cache_drive_bytes(drive_id: str, job_id: str, bytes_required: int) -> None:
     with _STORE_LOCK:
         reservations = _CACHE_DRIVE_RESERVATIONS.setdefault(drive_id, {})
@@ -127,8 +142,8 @@ class _BaseIngest:
         job: IngestJob,
         dataset: NasDataset,
         service: NasService,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
     ) -> None:
         self.job = job
         self.dataset = dataset
@@ -161,8 +176,14 @@ class _BaseIngest:
             self._finalize_job()
         except IngestCancelledError as exc:
             self._mark_dataset_cancelled(str(exc))
-        except Exception as exc:
-            self._mark_dataset_failed(str(exc))
+        # Job-runner boundary: run() owns the dataset's terminal state, so it has
+        # to catch everything or a defect leaves the dataset stuck in ARCHIVING.
+        # safe_job_error() replaced the raw str(exc): job.errors is served by
+        # GET /nas/ingest/{job_id}, which has no auth dependency, and a
+        # CommandError there would publish mkltfs/mtx argv and stderr.
+        except Exception as exc:  # noqa: BLE001 - see above
+            logger.warning("ingest run failed", exc_info=True)
+            self._mark_dataset_failed(safe_job_error(exc))
         finally:
             self._cleanup()
             self.job.current_tape = None
@@ -231,16 +252,29 @@ class _BaseIngest:
                         self.ltfs,
                     )
                     if not lifecycle_result.success:
-                        raise RuntimeError(
+                        raise IngestRefusedError(
                             "; ".join(lifecycle_result.errors)
                             or f"archive lifecycle failed for {prepared.relative_path}"
                         )
                     self._tape_paths[file_record.id] = str(tape_path)
                     self.job.files_processed += 1
                     self.job.bytes_written += prepared.size_bytes
+                # Per-file isolation, and NOT exempt from the BLE policy just because
+                # ruff skips it: BLE001 ignores any except body containing a `raise`,
+                # and the `raise` below is unreachable whenever
+                # _abort_on_file_error() is False — the default for CacheDriveIngest
+                # and the allow_partial_dataset_success case for SourceStreamIngest.
+                # So the common path is a swallow, and it gets logged like the rest.
                 except Exception as exc:
+                    logger.warning(
+                        "ingest file write failed",
+                        extra={"relative_path": relative_path, "barcode": assignment.barcode},
+                        exc_info=True,
+                    )
                     self.job.files_failed += 1
-                    self.job.errors.append(f"{relative_path}: {exc}")
+                    # safe_job_error: job.errors is served by GET /nas/ingest/{job_id}
+                    # with no auth dependency, same contract as jobs.error.
+                    self.job.errors.append(f"{relative_path}: {safe_job_error(exc)}")
                     self._upsert_file_record(
                         prepared,
                         tape_barcode=assignment.barcode,
@@ -324,7 +358,7 @@ class _BaseIngest:
     def _simulate_tape_write(
         self,
         *,
-        handle,
+        handle: MountHandle,
         barcode: str,
         relative_path: str,
         prepared: _PreparedFile,
@@ -362,7 +396,7 @@ class _BaseIngest:
 
     def _verify_tape_copy(
         self,
-        handle,
+        handle: MountHandle,
         tape_path: PurePosixPath,
         prepared: _PreparedFile,
     ) -> None:
@@ -373,7 +407,7 @@ class _BaseIngest:
             stat.checksum_sha256 != prepared.checksum_sha256
             or stat.size_bytes != prepared.size_bytes
         ):
-            raise RuntimeError(f"verification failed for {prepared.relative_path}")
+            raise IngestRefusedError(f"verification failed for {prepared.relative_path}")
 
     def _upsert_file_record(
         self,
@@ -485,8 +519,8 @@ class CacheDriveIngest(_BaseIngest):
         job: IngestJob,
         dataset: NasDataset,
         service: NasService,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
         cache_drive: CacheDriveConfig,
     ) -> None:
         super().__init__(job=job, dataset=dataset, service=service, library=library, ltfs=ltfs)
@@ -515,7 +549,7 @@ class CacheDriveIngest(_BaseIngest):
     def _preflight(self, job: IngestJob) -> list[str]:
         cache_root = Path(self.cache_drive.root_path)
         if not cache_root.exists() or not cache_root.is_dir():
-            raise RuntimeError(f"Cache drive root_path {cache_root} is not available")
+            raise IngestRefusedError(f"Cache drive root_path {cache_root} is not available")
 
         total_bytes = 0
         seen_paths: set[str] = set()
@@ -525,13 +559,13 @@ class CacheDriveIngest(_BaseIngest):
             seen_paths.add(prepared.source_path)
             source_path = Path(prepared.source_path).resolve()
             if not source_path.exists():
-                raise RuntimeError(
+                raise IngestRefusedError(
                     f"Cache-drive source file {prepared.source_path} is not available"
                 )
             try:
                 source_path.relative_to(cache_root.resolve())
             except ValueError as exc:
-                raise RuntimeError(
+                raise IngestRefusedError(
                     f"Cache-drive source file {prepared.source_path} is outside cache root {cache_root}"
                 ) from exc
             total_bytes += prepared.size_bytes
@@ -541,7 +575,7 @@ class CacheDriveIngest(_BaseIngest):
             self.cache_drive.id, exclude_job_id=self.job.job_id
         )
         if total_bytes + reserved_bytes > available_bytes:
-            raise RuntimeError(
+            raise IngestRefusedError(
                 f"Cache drive {self.cache_drive.id} cannot reserve {total_bytes} bytes; "
                 f"{available_bytes - reserved_bytes} bytes remain within configured budget"
             )
@@ -563,8 +597,8 @@ class SourceStreamIngest(_BaseIngest):
         job: IngestJob,
         dataset: NasDataset,
         service: NasService,
-        library: MockLibraryBackend,
-        ltfs: MockLTFSBackend,
+        library: LibraryBackend,
+        ltfs: LTFSBackend,
         config: SourceStreamConfig,
     ) -> None:
         super().__init__(job=job, dataset=dataset, service=service, library=library, ltfs=ltfs)
@@ -581,7 +615,7 @@ class SourceStreamIngest(_BaseIngest):
 
     def _preflight(self, job: IngestJob) -> list[str]:
         if not self.config.enabled:
-            raise RuntimeError("Source-stream ingest is disabled")
+            raise IngestRefusedError("Source-stream ingest is disabled")
 
         if not job.plan.source_path:
             if any(
@@ -592,7 +626,7 @@ class SourceStreamIngest(_BaseIngest):
                     self.config.snapshot_required,
                 )
             ):
-                raise RuntimeError("source_path is required for robust source-stream ingest")
+                raise IngestRefusedError("source_path is required for robust source-stream ingest")
             warnings = []
             for assignment in job.plan.tape_assignments:
                 for filepath in assignment.files:
@@ -603,7 +637,7 @@ class SourceStreamIngest(_BaseIngest):
 
         source_root = Path(job.plan.source_path)
         if not source_root.exists() or not source_root.is_dir():
-            raise RuntimeError(f"Source path {source_root} is not available")
+            raise IngestRefusedError(f"Source path {source_root} is not available")
 
         for assignment in job.plan.tape_assignments:
             for relative_path in assignment.files:
@@ -632,7 +666,7 @@ class SourceStreamIngest(_BaseIngest):
             self._capture_snapshot(prepared.relative_path)
             != self._source_snapshots[prepared.relative_path]
         ):
-            raise RuntimeError(
+            raise IngestRefusedError(
                 f"Source changed during source-stream ingest: {prepared.relative_path}"
             )
 
@@ -643,7 +677,7 @@ class SourceStreamIngest(_BaseIngest):
     def _capture_snapshot(self, relative_path: str) -> _SourceSnapshot:
         source_path = Path(self._resolve_source_path(relative_path))
         if not source_path.exists() or not source_path.is_file():
-            raise RuntimeError(f"Source file {source_path} is not available")
+            raise IngestRefusedError(f"Source file {source_path} is not available")
         stat = source_path.stat()
         checksum = None
         if "checksum" in self.config.source_change_detection or self.config.checksum_mode in {
@@ -725,8 +759,8 @@ def run_ingest_job(
     job_id: str,
     *,
     nas_service: NasService,
-    library: MockLibraryBackend,
-    ltfs: MockLTFSBackend,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     cache_drive_id: str | None = None,
 ) -> IngestJob:
     job = get_ingest_job(job_id)
@@ -735,6 +769,7 @@ def run_ingest_job(
     dataset = nas_service.get_dataset(job.dataset_id)
     if dataset is None:
         raise KeyError(f"Unknown dataset {job.dataset_id}")
+    executor: _BaseIngest
     if job.plan.ingest_mode is IngestMode.CACHE_DRIVE:
         if cache_drive_id is None:
             raise ValueError("cache_drive_id is required for cache-drive ingest")
@@ -762,8 +797,8 @@ def run_ingest_job(
 
 
 def _build_archive_lifecycle_manager(
-    repo,
-    backend: MockLTFSBackend,
+    repo: CatalogRepository,
+    backend: LTFSBackend,
 ) -> ArchiveLifecycleManager:
     metadata_writer = TapeMetadataWriter(backend)
     shard_writer = CatalogShardWriter(metadata_writer)
@@ -785,15 +820,15 @@ def _run_lifecycle_for_file(
     barcode: str,
     tape_path: str,
     policy_name: str,
-    repo,
-    backend: MockLTFSBackend,
+    repo: CatalogRepository,
+    backend: LTFSBackend,
 ) -> ArchiveLifecycleResult:
     """Construct lifecycle manager and complete one file archive."""
     manager = _build_archive_lifecycle_manager(repo, backend)
     return manager.complete_file_archive(file_record, barcode, tape_path, policy_name)
 
 
-def _load_if_needed(library: MockLibraryBackend, barcode: str) -> tuple[int, int | None]:
+def _load_if_needed(library: LibraryBackend, barcode: str) -> tuple[int, int | None]:
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
         return drive_id, None

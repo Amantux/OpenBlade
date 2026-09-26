@@ -6,7 +6,7 @@
 
 Introspected from the OpenAPI schema of `openblade.api.main:app`.
 
-**1172 operations** total: 192 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
+**1178 operations** total: 198 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
 
 The application serves two surfaces from one ASGI app. Setting
 `OPENBLADE_SCALAR_API_ONLY=true` puts it in emulator-only mode, where the
@@ -76,11 +76,12 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `POST` | `/archive/` | Enqueue Archive | - | `ArchiveRequest` | `EnqueuedJobResponse` |
 | `POST` | `/archive/sharded` | Enqueue Sharded Archive | - | `ShardedArchiveApiRequest` | `EnqueuedJobResponse` |
 
-### `restore` (1 operation)
+### `restore` (2 operations)
 
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `POST` | `/restore/` | Enqueue Restore | - | `openblade__api__routes_restore__RestoreRequest` | `EnqueuedJobResponse` |
+| `POST` | `/restore/tree` | Restore Tree | - | `TreeRestoreApiRequest` | `TreeRestoreResponse` |
 
 ### `jobs` (2 operations)
 
@@ -260,12 +261,12 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/gateway/config` | Get Gateway Config | - | - | `GatewayConfigResponse` |
-| `GET` | `/api/gateway/credentials` | List Credentials | - | - | `application/json` |
-| `POST` | `/api/gateway/credentials` | Add Credential | - | `CredentialCreate` | `application/json` |
-| `PUT` | `/api/gateway/credentials/{username}` | Update Credential | `username` (path) | `CredentialUpdate` | `application/json` |
-| `DELETE` | `/api/gateway/credentials/{username}` | Remove Credential | `username` (path) | - | `application/json` |
+| `GET` | `/api/gateway/credentials` | List Credentials | - | - | `object[]` |
+| `POST` | `/api/gateway/credentials` | Add Credential | - | `CredentialCreate` | `object` |
+| `PUT` | `/api/gateway/credentials/{username}` | Update Credential | `username` (path) | `CredentialUpdate` | `object` |
+| `DELETE` | `/api/gateway/credentials/{username}` | Remove Credential | `username` (path) | - | `object` |
 | `GET` | `/api/gateway/inbox-paths` | List Inbox Paths | - | - | `InboxPathOption[]` |
-| `GET` | `/api/gateway/sessions` | List Sessions | `active_only`? (query) | - | `application/json` |
+| `GET` | `/api/gateway/sessions` | List Sessions | `active_only`? (query) | - | `object[]` |
 | `POST` | `/api/gateway/start` | Start Gateway | - | - | `GatewayCommandResponse` |
 | `GET` | `/api/gateway/status` | Get Gateway Status | - | - | `GatewayStatusResponse` |
 | `POST` | `/api/gateway/stop` | Stop Gateway | - | - | `GatewayCommandResponse` |
@@ -312,6 +313,21 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `POST` | `/assist` | Assist | - | `AssistRequest` | `AssistResponse` |
+
+### `hardware` (1 operation)
+
+| Method | Path | Summary | Parameters | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/hardware/drive-health` | Get Drive Health | `device`? (query) | - | `DriveHealthListResponse` |
+
+### `mailslot` (4 operations)
+
+| Method | Path | Summary | Parameters | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/mailslot/export` | Export Through Mailslot | - | `MailslotExportRequest` | `MailslotMoveResponse` |
+| `GET` | `/mailslot/export-preview/{barcode}` | Preview Mailslot Export | `barcode` (path) | - | `ExportAssessmentResponse` |
+| `POST` | `/mailslot/import` | Import From Mailslot | - | `MailslotImportRequest` | `MailslotMoveResponse` |
+| `GET` | `/mailslot/slots` | List Mailslot Slots | - | - | `MailslotListingResponse` |
 
 ## Quantum AML / iBlade emulator surface
 

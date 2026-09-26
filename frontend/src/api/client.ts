@@ -1,3 +1,4 @@
+import { attachApiTokenHeader, handleUnauthorized } from '../lib/apiToken';
 import { clearStoredUsername, notifyAuthRedirect } from '../lib/auth';
 
 type BodyInitLike = BodyInit | FormData | URLSearchParams | Blob;
@@ -100,7 +101,12 @@ export async function apiRequest<T>(
     headers.set('X-OpenBlade-Library-Id', resolvedLibraryId);
   }
 
-  const response = await fetch(buildUrl(path, namespace), {
+  const url = buildUrl(path, namespace);
+  // The single chokepoint for the native bearer token: no-op when no token is
+  // stored (auth-disabled deployments are unchanged) and on AML URLs.
+  attachApiTokenHeader(headers, url);
+
+  const response = await fetch(url, {
     ...init,
     headers,
     body,
@@ -110,8 +116,14 @@ export async function apiRequest<T>(
   const text = await response.text();
   const payload = text ? safeJsonParse(text) : null;
 
+  let nativeTokenRequired = false;
   if (response.status === 401 && !init.skipAuthRedirect) {
-    redirectToLogin();
+    // The native token gate and the AML session gate both answer 401 on native
+    // paths; only the AML one leads to the sign-in page.
+    nativeTokenRequired = handleUnauthorized(url, response, payload);
+    if (!nativeTokenRequired) {
+      redirectToLogin();
+    }
   }
 
   if (!response.ok) {
@@ -129,9 +141,11 @@ export async function apiRequest<T>(
       message,
       response.status,
       `The backend could not complete ${init.method ?? 'GET'} ${path}.`,
-      response.status === 401
-        ? 'Sign in again to continue using the AML console.'
-        : 'Check the appliance state, then retry the request.',
+      nativeTokenRequired
+        ? 'Enter the API token for this appliance to continue.'
+        : response.status === 401
+          ? 'Sign in again to continue using the AML console.'
+          : 'Check the appliance state, then retry the request.',
       details,
     );
   }

@@ -546,14 +546,18 @@ def _magazine_slots(magazine: dict[str, Any]) -> list[Slot]:
     slots: list[Slot] = []
     for index, library_coordinate in enumerate(slot_addresses, start=1):
         barcode = barcode_by_address.get(library_coordinate)
+        # Built through model_validate because `libraryCoordinate` is an extra field
+        # (Slot has extra="allow") and so cannot be passed as a typed keyword argument.
         slots.append(
-            Slot(
-                id=f"{current['id']}-S{index}",
-                address=f"{current['id']},{index}",
-                state="occupied" if barcode else "empty",
-                barcode=barcode,
-                type="magazine",
-                libraryCoordinate=library_coordinate,
+            Slot.model_validate(
+                {
+                    "id": f"{current['id']}-S{index}",
+                    "address": f"{current['id']},{index}",
+                    "state": "occupied" if barcode else "empty",
+                    "barcode": barcode,
+                    "type": "magazine",
+                    "libraryCoordinate": library_coordinate,
+                }
             )
         )
     return slots

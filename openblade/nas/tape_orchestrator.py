@@ -6,7 +6,7 @@ import hashlib
 import threading
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import structlog
@@ -18,7 +18,7 @@ from openblade.domain.errors import (
     ImportExportSlotError,
     MailslotUnsupportedError,
 )
-from openblade.domain.models import MountMode
+from openblade.domain.models import LibraryInventory, MountMode
 from openblade.domain.policies import FormatConfirmation
 from openblade.nas.types import TapeOpRecord, TapeOpRequest, TapeOpStatus, TapeOpType
 
@@ -431,8 +431,10 @@ class TapeOperationOrchestrator:
         """Move media from a storage slot into an import/export element.
 
         The data guard lives HERE rather than only in the service, because this
-        is the choke point every surface goes through. ``extras["force"]`` is
-        the single documented override.
+        is the choke point every surface goes through. ``extras["confirmBarcode"]``
+        is the single documented override, and it must equal ``request.barcode``
+        exactly -- a boolean flag let a scripted caller wave every export
+        through without ever naming the cartridge it was letting out the door.
 
         The source slot is resolved FROM THE BARCODE, never taken from
         ``request.slot_id``. Trusting that field meant the guard assessed one
@@ -488,7 +490,8 @@ class TapeOperationOrchestrator:
         setter(barcode, state)
 
     def _guard_export(self, request: TapeOpRequest) -> None:
-        if request.extras.get("force") is True:
+        confirm_barcode = request.extras.get("confirmBarcode")
+        if confirm_barcode is not None and str(confirm_barcode) == request.barcode:
             return
         assess = getattr(self.repo, "list_instances_for_barcode", None)
         if assess is None:
@@ -496,7 +499,8 @@ class TapeOperationOrchestrator:
             # cartridge. Fail closed: an unknown payload is not an empty one.
             raise ExportRefusedError(
                 f"Cannot determine what is on cartridge {request.barcode} without a "
-                "catalog; refusing to export. Re-run against the catalog, or force."
+                "catalog; refusing to export. Re-run against the catalog, or pass "
+                "--confirm-barcode matching the cartridge exactly."
             )
         from openblade.catalog.export_policy import assess_export
 
@@ -518,7 +522,8 @@ class TapeOperationOrchestrator:
     def _resolve_drive_for_write(self, request: TapeOpRequest) -> int:
         if request.drive_id is not None:
             return request.drive_id
-        loaded_drive_id = self.library.find_drive_by_barcode(request.barcode)
+        # library is duck-typed (simulator or real backend), so its helpers are untyped.
+        loaded_drive_id: int | None = self.library.find_drive_by_barcode(request.barcode)
         if loaded_drive_id is not None:
             return loaded_drive_id
         return 0
@@ -528,7 +533,7 @@ class TapeOperationOrchestrator:
             "source_slot_id", request.extras.get("source_slot", request.slot_id)
         )
         if source_slot is None:
-            slot_id = self.library.find_slot_by_barcode(request.barcode)
+            slot_id: int | None = self.library.find_slot_by_barcode(request.barcode)
             if slot_id is None:
                 raise ValueError(f"Barcode {request.barcode} is not present in a slot")
             return slot_id
@@ -563,7 +568,7 @@ class TapeOperationOrchestrator:
         return destination_id
 
     def _find_empty_slot(self) -> int:
-        inventory = self.library.inventory()
+        inventory: LibraryInventory = self.library.inventory()
         for slot in inventory.slots:
             if slot.barcode is None:
                 return slot.slot_id
@@ -642,7 +647,11 @@ def execute_tape_request(
     active_repo: CatalogRepository | _TransientTapeOpRepository = (
         repo or _TransientTapeOpRepository()
     )
-    record = TapeOperationOrchestrator(active_repo, library, ltfs).execute(request)
+    # _TransientTapeOpRepository implements the create_tape_op/update_tape_op
+    # subset that execute() uses; the orchestrator's read helpers are not reached
+    # from this entry point.
+    orchestrator = TapeOperationOrchestrator(cast(CatalogRepository, active_repo), library, ltfs)
+    record = orchestrator.execute(request)
     if raise_on_failed and record.status is TapeOpStatus.FAILED:
         raise TapeOperationFailedError(
             record.error or f"Tape {request.op_type.value} operation failed"

@@ -1052,7 +1052,10 @@ async def get_physical_library_subset_resources(
     context: AppContext = Depends(get_context),
 ) -> PhysicalLibraryResourcesResponse:
     _ensure_state(context)
-    slots_total, slots_occupied, drives_online, _, cleaning_slots = _library_counts(context)
+    # Unpack target renamed off `_` so it does not collide with the auth dependency param.
+    slots_total, slots_occupied, drives_online, _drives_offline, cleaning_slots = _library_counts(
+        context
+    )
     return PhysicalLibraryResourcesResponse(
         physicalLibraryResources=PhysicalLibraryResourcesResource(
             slotsTotal=slots_total,
@@ -1293,7 +1296,7 @@ async def get_library_physical_alias(
 async def get_library_inventory_alias(
     user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
-) -> dict:
+) -> dict[str, Any]:
     """Backwards-compatible inventory response shape expected by UI/tests."""
     _ensure_state(context)
     inventory = context.library.inventory()

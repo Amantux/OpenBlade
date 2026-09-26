@@ -32,6 +32,19 @@ class LibraryBackend(Protocol):
 
 
 @runtime_checkable
+class TapeListingBackend(Protocol):
+    """Optional "list every tape and the slot it sits in" capability.
+
+    Deliberately NOT folded into ``LibraryBackend``: ``MockLibraryBackend`` and
+    ``RealLibraryBackend`` implement it, but ``ScalarHttpLibraryBackend`` (the
+    ``OPENBLADE_ROBOTICS_TRANSPORT=webservices`` transport) does not, so putting
+    it on the base protocol would be a lie about a shipped backend.
+    """
+
+    def list_tapes(self) -> list[dict[str, Any]]: ...
+
+
+@runtime_checkable
 class MailslotBackend(Protocol):
     """Optional import/export (mailslot) capability of a library backend.
 
@@ -68,3 +81,19 @@ class LTFSBackend(Protocol):
     def read_bytes(
         self, barcode_or_path: str, path: PurePosixPath | str | None = None
     ) -> bytes | None: ...
+    # Positional-only, returning the wider `FileInstance | None`, so both
+    # implementations conform: the real backend names the first parameter
+    # `handle` and always returns a FileInstance; the simulator names it
+    # `handle_or_barcode` (it also accepts a bare barcode for metadata writes)
+    # and returns None for that form. Declared here because callers already
+    # reach it through this protocol.
+    def write_bytes(
+        self,
+        handle: MountHandle,
+        dest: PurePosixPath | str,
+        content: bytes,
+        /,
+        *,
+        size_bytes: int | None = None,
+        checksum_sha256: str | None = None,
+    ) -> FileInstance | None: ...

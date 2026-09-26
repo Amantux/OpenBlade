@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.middleware.base import RequestResponseEndpoint
 
 from openblade.api import (
     aml_scope,
@@ -38,12 +39,14 @@ from openblade.api import (
     routes_assist,
     routes_catalog,
     routes_dashboard,
+    routes_drive_health,
     routes_health,
     routes_iblade,
     routes_inventory,
     routes_jobs,
     routes_libraries,
     routes_ltfs,
+    routes_mailslot,
     routes_proxy,
     routes_rbac,
     routes_restore,
@@ -112,16 +115,18 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def apply_forwarded_root_path(request: Request, call_next: object) -> Response:
+async def apply_forwarded_root_path(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     forwarded_prefix = request.headers.get("x-forwarded-prefix", "").strip()
     if forwarded_prefix.startswith("/"):
         request.scope["root_path"] = forwarded_prefix.rstrip("/")
-    return await call_next(request)  # type: ignore[operator]
+    return await call_next(request)
 
 
 @app.middleware("http")
-async def add_security_headers(request: Request, call_next: object) -> Response:
-    response: Response = await call_next(request)  # type: ignore[operator]
+async def add_security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     if request.url.path.startswith("/docs") or request.url.path.startswith("/redoc"):
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -135,16 +140,20 @@ async def add_security_headers(request: Request, call_next: object) -> Response:
 
 
 @app.middleware("http")
-async def bind_active_library_context(request: Request, call_next: object) -> Response:
+async def bind_active_library_context(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     token = library_context.set_active_library_id(request.headers.get("X-OpenBlade-Library-Id", ""))
     try:
-        return await call_next(request)  # type: ignore[operator]
+        return await call_next(request)
     finally:
         library_context.reset_active_library_id(token)
 
 
 @app.middleware("http")
-async def apply_iblade_strict_uri_gateway(request: Request, call_next: object) -> Response:
+async def apply_iblade_strict_uri_gateway(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     context = get_context()
     compat_mode = getattr(context.config, "iblade_compat_mode", "extended")
     strict_interface = str(getattr(compat_mode, "value", compat_mode)).lower() == "strict"
@@ -160,26 +169,28 @@ async def apply_iblade_strict_uri_gateway(request: Request, call_next: object) -
             content=_aml_error_payload(exc.status_code, exc.detail),
         )
     if alias is None:
-        return await call_next(request)  # type: ignore[operator]
+        return await call_next(request)
 
     blade_type, section_number, strict_alias_path = alias
     request.scope["path"] = strict_alias_path
     request.scope["raw_path"] = strict_alias_path.encode("utf-8")
     request.scope["openblade_blade_type"] = blade_type
     request.scope["openblade_blade_section_number"] = section_number
-    return await call_next(request)  # type: ignore[operator]
+    return await call_next(request)
 
 
 @app.middleware("http")
-async def apply_aml_emulator_latency(request: Request, call_next: object) -> Response:
+async def apply_aml_emulator_latency(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     if not should_capture_latency_metrics(request.url.path):
-        return await call_next(request)  # type: ignore[operator]
+        return await call_next(request)
 
     start = time.perf_counter()
     simulated_delay = await apply_request_latency(request)
     status_code = 500
     try:
-        response: Response = await call_next(request)  # type: ignore[operator]
+        response: Response = await call_next(request)
         status_code = response.status_code
         return response
     finally:
@@ -226,6 +237,8 @@ app.include_router(routes_catalog.router, prefix="/catalog", tags=["catalog"])
 app.include_router(routes_dashboard.router, prefix="/dashboard", tags=["dashboard"])
 app.include_router(routes_ltfs.router, prefix="/ltfs", tags=["ltfs"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
+app.include_router(routes_mailslot.router)
+app.include_router(routes_drive_health.router)
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_libraries.router)
 app.include_router(routes_assist.router, tags=["assist"])
@@ -290,21 +303,23 @@ _STRICT_NON_MATRIX_ALLOWED_PATHS = frozenset(
 
 
 @app.middleware("http")
-async def enforce_scalar_api_scope(request: Request, call_next: object) -> Response:
+async def enforce_scalar_api_scope(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     if request.method.upper() == "OPTIONS":
-        return await call_next(request)  # type: ignore[operator]
+        return await call_next(request)
 
     context = get_context()
     if not context.config.scalar_api_only:
-        return await call_next(request)  # type: ignore[operator]
+        return await call_next(request)
 
     path = aml_scope.normalize_aml_path(request.url.path)
     if path in _STRICT_NON_MATRIX_ALLOWED_PATHS:
-        return await call_next(request)  # type: ignore[operator]
+        return await call_next(request)
 
     if path.startswith("/aml") or path.startswith("/iblade"):
         if aml_scope.is_matrix_endpoint(request.method, path):
-            return await call_next(request)  # type: ignore[operator]
+            return await call_next(request)
         return JSONResponse(
             status_code=404,
             content=_aml_error_payload(404, "Endpoint not available in matrix scope"),
@@ -351,7 +366,7 @@ def _aml_error_payload(status_code: int, detail: object) -> dict[str, object]:
 
 
 @app.exception_handler(HTTPException)
-async def handle_http_exception(request: Request, exc: HTTPException):
+async def handle_http_exception(request: Request, exc: HTTPException) -> Response:
     if not _is_aml_compatible_path(request.url.path):
         return await http_exception_handler(request, exc)
     return JSONResponse(
@@ -360,7 +375,9 @@ async def handle_http_exception(request: Request, exc: HTTPException):
 
 
 @app.exception_handler(RequestValidationError)
-async def handle_request_validation_error(request: Request, exc: RequestValidationError):
+async def handle_request_validation_error(
+    request: Request, exc: RequestValidationError
+) -> Response:
     if not _is_aml_compatible_path(request.url.path):
         return await request_validation_exception_handler(request, exc)
     description = (
@@ -496,4 +513,8 @@ def custom_openapi() -> dict[str, object]:
     return schema
 
 
-app.openapi = custom_openapi
+# The documented FastAPI idiom for overriding the schema builder is to replace
+# the bound method on the instance (see fastapi.applications.FastAPI.openapi and
+# the "Extending OpenAPI" guide). mypy flags any method assignment; there is no
+# subclass-based alternative that keeps `app` a module-level FastAPI instance.
+app.openapi = custom_openapi  # type: ignore[method-assign]  # documented override idiom

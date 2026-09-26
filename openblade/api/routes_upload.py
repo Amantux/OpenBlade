@@ -51,6 +51,8 @@ from pydantic import BaseModel, Field
 from openblade.api.routes_aml_auth import require_auth
 from openblade.bootstrap import get_catalog, get_context
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.backends import LibraryBackend, LTFSBackend
+from openblade.domain.wire import coerce_int
 from openblade.nas.ingest import (
     get_ingest_job,
     register_archive_plan,
@@ -227,8 +229,8 @@ def _run_share_push_ingest_job(
     *,
     job_id: str,
     nas_service: NasService,
-    library,
-    ltfs,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
     workspace: Path,
     repo: CatalogRepository,
     pool_id: str,
@@ -278,7 +280,7 @@ def _sync_dataset_summary(repo: CatalogRepository, dataset: dict[str, object]) -
         {
             **dataset,
             "file_count": len(records),
-            "total_bytes": sum(int(record.get("size_bytes") or 0) for record in records),
+            "total_bytes": sum(coerce_int(record.get("size_bytes") or 0) for record in records),
             "updated_at": None,
         }
     )
@@ -296,18 +298,18 @@ def _present_status(record: dict[str, object]) -> str:
 
 
 def _serialize_record(record: dict[str, object]) -> PoolFileEntry:
+    relative_path = record.get("relative_path")
+    checksum_sha256 = record.get("checksum_sha256")
+    pool_id = record.get("pool_id")
+    created_at = record.get("created_at")
     return PoolFileEntry(
         file_id=str(record["id"]),
-        filename=_sanitize_filename(
-            record.get("relative_path") if isinstance(record.get("relative_path"), str) else None
-        ),
-        size_bytes=int(record.get("size_bytes") or 0),
-        checksum_sha256=record.get("checksum_sha256")
-        if isinstance(record.get("checksum_sha256"), str)
-        else None,
-        pool_id=record.get("pool_id") if isinstance(record.get("pool_id"), str) else None,
+        filename=_sanitize_filename(relative_path if isinstance(relative_path, str) else None),
+        size_bytes=coerce_int(record.get("size_bytes") or 0),
+        checksum_sha256=checksum_sha256 if isinstance(checksum_sha256, str) else None,
+        pool_id=pool_id if isinstance(pool_id, str) else None,
         status=_present_status(record),
-        created_at=record.get("created_at") if isinstance(record.get("created_at"), str) else None,
+        created_at=created_at if isinstance(created_at, str) else None,
     )
 
 
@@ -417,7 +419,8 @@ async def download_file(
                 ),
             )
         raise HTTPException(status_code=404, detail=f"File {file_id} not found")
-    filename = _sanitize_filename(record.get("relative_path") if record else file_id)
+    raw_filename = record.get("relative_path") if record else file_id
+    filename = _sanitize_filename(raw_filename if isinstance(raw_filename, str) else None)
     return FileResponse(path=path, filename=filename)
 
 
@@ -565,8 +568,9 @@ async def push_staged_files_to_share(
                     status_code=404, detail=f"Staged content for {file_id} was not found"
                 )
 
+            raw_relative_path = record.get("relative_path") if isinstance(record, dict) else None
             base_name = _sanitize_filename(
-                record.get("relative_path") if isinstance(record, dict) else None
+                raw_relative_path if isinstance(raw_relative_path, str) else None
             )
             candidate = f"{target_prefix}/{base_name}" if target_prefix else base_name
             if candidate in used_paths:

@@ -22,7 +22,7 @@ export OPENBLADE_DRIVE_SERIAL_MAP="OBLADE_D01:0,OBLADE_D02:1,OBLADE_D03:2"
 |---|---|
 | `openblade mailslot list` | Every I/E element and what is in it. |
 | `openblade mailslot import <ie-slot> [--to-slot N]` | I/E → storage. Without `--to-slot` it picks the first empty storage slot **and names it** in the output. |
-| `openblade mailslot export <barcode> [--ie-slot N] [--force]` | Storage → first empty I/E. **Refuses** when the cartridge itself carries archived data, or a write to it is still in flight. |
+| `openblade mailslot export <barcode> [--ie-slot N] [--confirm-barcode BARCODE]` | Storage → first empty I/E. **Refuses** when the cartridge itself carries archived data, or a write to it is still in flight. |
 | `openblade restore tree <catalog-prefix> --dest DIR [--dry-run]` | Every archived file under a prefix, spanning tapes. |
 | `openblade restore file <catalog-path> --dest PATH [--into-dir]` | One file, using the sharded reassembly path when the catalog says it is sharded. `--dest` is a file path unless it is an existing directory or `--into-dir` is given. |
 | `openblade archive sharded <src> --volume-group G --mode stripe\|block-stripe [--lanes N \| --lane-barcode B …] [--block-size-mb N]` | The CLI half of `POST /archive/sharded`. |
@@ -126,8 +126,8 @@ stdout bytes = 0
 Export refused: Cartridge OB0001L8 still carries archived data: 4 file
 instance(s), 250028 bytes; volume group rigtree; e.g. /rigtree/alpha/same.txt,
 /rigtree/beta/deep/n.txt, /rigtree/beta/same.txt, /rigtree/blob.bin. Exporting
-makes these unrestorable until the cartridge is imported again. Pass --force if
-that is what you mean.
+makes these unrestorable until the cartridge is imported again. Pass
+--confirm-barcode OB0001L8 if that is what you mean.
 
 $ mtx -f /dev/sg2 status | grep -E "Element 1:|IMPORT"
       Storage Element 1:Full :VolumeTag=OB0001L8
@@ -151,7 +151,8 @@ exit=0
 
 The sibling situation is reported as context, not used to refuse. An earlier
 draft *did* refuse here, with the sentence "still carries archived data" — which
-was false, and would have taught operators that `--force` is how you export.
+was false, and would have taught operators that `--confirm-barcode` is how you
+export.
 
 ### 2.4 sharded archive + tree restore across three tapes
 
@@ -256,12 +257,17 @@ nothing can load or unload to it by accident.
   failed archive leaves exactly that shape; the summary carries `filesSkipped`
   and `skippedPaths` and the CLI says so on stderr, because a tree that silently
   comes back short is the failure this command exists to prevent.
-- **`--force` is still a plain flag, not a two-phase token.** `openblade format`
-  requires a dry-run plan plus a one-time `SafetyToken`; export does not, and an
-  API caller can pass `extras: {"force": true}` as a bare JSON boolean. Export
-  destroys *availability* rather than data, and the operator is shown exactly
-  what is on the cartridge first — but the asymmetry with FORMAT is deliberate
-  only in the sense that nobody has decided otherwise. Worth a decision.
+- **Resolved:** export used to accept a bare `--force` flag (and an API caller
+  could pass `extras: {"force": true}` as a plain JSON boolean) to override the
+  data-carrying refusal. That has been replaced with typed confirmation:
+  `--confirm-barcode <BARCODE>` on the CLI, `extras: {"confirmBarcode":
+  "<BARCODE>"}` on `POST /tape-ops/execute`, and it must equal the cartridge's
+  own barcode exactly — a mismatch (or a merely truthy value) still refuses.
+  This does not make export a full two-phase token like `openblade format`
+  (no dry-run plan, no one-time `SafetyToken`); the asymmetry is unchanged,
+  it's just that overriding the refusal now requires naming the cartridge
+  instead of flipping a boolean. Blank/scratch-tape exports are unaffected —
+  they were never gated by `--force` and stay friction-free.
 - **`docs/wiki/reference/cli.md` is stale on this branch** and
   `tests/unit/test_wiki_reference_generated.py` is red because of it. The page is
   a build artifact of `tools/gen_wiki_reference.py`; regenerating it is owned

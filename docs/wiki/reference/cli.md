@@ -17,13 +17,14 @@ Every command below also accepts `--help`.
 > regression-tested; see docs/runbooks/real-data-campaign.md.) Real-
 > hardware commands still refuse without both flags set.
 
-**21 commands**, in 7 sub-group(s) plus the top level.
+**23 commands**, in 8 sub-group(s) plus the top level.
 
 ## Command groups
 
 | Group | Purpose |
 | --- | --- |
 | `openblade archive` | Archive commands |
+| `openblade catalog` | Catalog browsing and backup/restore commands |
 | `openblade format` | Format commands |
 | `openblade fuse` | Read-only FUSE mount over the catalog namespace |
 | `openblade hardware` | Real hardware validation commands |
@@ -54,13 +55,31 @@ Ask the OpenBlade assistant about this installation, or talk through setup.
 | --- | --- | --- | --- | --- | --- |
 | `QUESTION` | argument | `STR` | no | none | Ask one question and exit. Omit for an interactive session. |
 
-### `openblade catalog`
+### `openblade catalog backup`
+
+Take an online backup of the catalog database and gzip it.
+
+| Parameter | Kind | Type | Required | Default | Help |
+| --- | --- | --- | --- | --- | --- |
+| `--dest` | option | `PATH` | yes | - | Destination directory for the compressed backup |
+| `--keep` | option | `INT` | no | `14` | Number of most-recent backups to retain in --dest; older ones are deleted |
+
+### `openblade catalog ls`
 
 List files in the catalog.
 
 | Parameter | Kind | Type | Required | Default | Help |
 | --- | --- | --- | --- | --- | --- |
 | `PATH` | argument | `STR` | no | `/` | - |
+
+### `openblade catalog restore-backup`
+
+Restore the catalog database from a backup, OVERWRITING the live catalog.
+
+| Parameter | Kind | Type | Required | Default | Help |
+| --- | --- | --- | --- | --- | --- |
+| `BACKUP_FILE` | argument | `PATH` | yes | - | Path to a gzip-compressed catalog backup produced by `catalog backup` |
+| `--confirm-db-path` | option | `STR` | yes | - | Type the exact live catalog DB path to confirm. THIS OVERWRITES THE CATALOG. |
 
 ### `openblade format confirm`
 
@@ -137,7 +156,7 @@ Move a cartridge out of storage into the I/E station.
 | --- | --- | --- | --- | --- | --- |
 | `BARCODE` | argument | `STR` | yes | - | Barcode of the cartridge to export |
 | `--ie-slot` | option | `INT` | no | none | Import/export element to use (default: first empty) |
-| `--force` | option | `BOOLEAN` | no | false | Export even though the cartridge carries archived data |
+| `--confirm-barcode` | option | `STR` | no | none | Export even though the cartridge carries archived data. Must equal the cartridge's own barcode exactly. |
 
 ### `openblade mailslot import`
 
