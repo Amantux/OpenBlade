@@ -192,11 +192,55 @@ about. Every endpoint and Flask route named in it was verified to exist.
   Landing a UI is no reason to restate the project's goals, and the reword drops
   an explicit scope-discipline clause.
 
+## Adversarial review round (T3)
+
+The reviewer returned **BLOCK** with four MUST-FIX items, two carrying working
+repros against live sockets. All are fixed; the suite went 37 → 73 tests.
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| 1 | **SSRF.** The device-URL deny-list compared host *spellings*, so `127.1`, `2130706433` and `localhost.` all reached a loopback listener (proven), and any attacker-controlled DNS name could resolve into private space. Gave a logged-in user an internal port scanner and a cloud-metadata reach test. | Resolve the host and judge every returned address |
+| 2 | **Redirect bypass + credential replay.** The probe followed redirects, so a host answering `302 Location: http://127.0.0.1/…` turned a blocked target into a reachable one; httpx replays the body on 307/308, so the submitted device password could be harvested. | `follow_redirects=False`; 3xx no longer counts as reachable |
+| 3 | **No path confinement.** The guard blocked `..` but not *which* absolute roots were reachable, and the values become real filesystem sinks in a backend whose `/archive` and `/restore` have no per-user authz — so `/proc/self/environ`, which holds `OPENBLADE_API_TOKEN`, was archivable to tape. | `_is_allowed_storage_root` on the four genuine filesystem paths |
+| 4 | **Confused deputy.** Because the client presents the instance-wide `OPENBLADE_API_TOKEN` as the native bearer, and the native config surface has no `require_auth`, **any** session could rewrite storage policy regardless of AML role. Fix (2) in the landing commit turned "broken for everyone" into "authorized for everyone", so this was a widening introduced by that change. | Role gate on the six config-write routes, resolved from `/aml/users/me`, failing closed on an unknown role |
+
+Ten SHOULD-FIX/NIT items were also closed: dot-only identifiers (`_POOL_ID_ALLOWED`
+permitted `.`, so `..` matched and collapsed a URL segment), unvalidated
+`volume_group`, non-JSON upstream bodies echoed into the browser, 3xx crashing
+`.json()`, an unbounded pre-auth login bucket plus a missing IP-only counter, no
+logout revocation, backslash accepted in redirect targets, the reflected `Host` in
+copy-paste mount commands, and bare `int()` on backend values.
+
+**One reviewer recommendation was deliberately not taken.** It proposed adding
+`is_private` to the blocked-address set. That would block `10.x`, `172.16.x` and
+`192.168.x` — which is exactly where a real Scalar i3 lives — and would refuse
+every legitimate device. The check blocks loopback, link-local (which covers
+169.254.169.254), unspecified, multicast and reserved, and allows RFC1918. This
+matches the original intent of `_DANGEROUS_DEVICE_HOSTS`, which never listed
+private ranges; the defect was that it compared spellings, not that its *scope* was
+wrong.
+
+**Areas the reviewer attacked and found clean:** session/CSRF/privilege plumbing
+(independently re-verified here — all 36 non-exempt endpoints 302 to login when
+anonymous, and all 24 mutating routes return 400 without a CSRF token, with no GET
+mutating state); template/XSS (no `|safe`, `Markup`, `render_template_string`,
+inline `<script>` or `innerHTML`; `script-src 'self'` is sufficient for the six
+static JS files, which write via `textContent` only).
+
+### Mutation checks
+
+Every new guard was mutation-checked: **13 of 13 produce a failing test when
+removed.** Two first drafts were vacuous and were rewritten until they failed —
+including the parametrised path-confinement test, which initially asserted the
+wrong recorder and passed with the guard gone. The pre-existing
+`test_login_rate_limit_blocks_after_repeated_failures` likewise passed against the
+forged-header bypass, which is the failure mode this rule exists to catch.
+
 ## Verification
 
 | Gate | Result |
 | --- | --- |
-| `pytest tests/unit/test_web_flask_app.py` | 37 passed (31 inherited + 6 added) |
+| `pytest tests/unit/test_web_flask_app.py` | 73 passed (31 inherited + 42 added) |
 | `mypy openblade/web_flask` (strict) | clean, 4 files |
 | `ruff check .` | clean, tree-wide |
 | `ruff format --check .` | clean, 352 files |
@@ -206,7 +250,11 @@ about. Every endpoint and Flask route named in it was verified to exist.
 | Built image, no `FLASK_SECRET_KEY` | fails closed as designed |
 | Built image, with key | `/login` 200, `XFO: DENY`, all processes `uid=999` |
 | Live-backend auth probe, native auth ON | 7/7 native + AML endpoints OK (4/4 native were 401 before) |
-| Mutation check, both new guards | each new test fails when its guard is removed |
+| Mutation check, all 13 guards | each produces a failing test when removed |
+| Anonymous sweep of every GET route | all 36 non-exempt endpoints 302 to `/login`; only `login`/`static` exempt |
+| CSRF sweep of every mutating route | all 24 return 400 without a token; no GET mutates state |
+| SSRF repro replay | all 11 proven bypasses blocked; 3/3 RFC1918 LAN devices still allowed |
+| Redirect/credential-replay repro replay | both closed (502 before the probe proceeds) |
 
 Not run: the full `pytest -m 'not real_hardware'` suite and the i3/emulator
 gates. Nothing here touches `/aml/*` routes, `aml_state.py`, `emulator_contract/**`,
