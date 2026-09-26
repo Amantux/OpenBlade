@@ -118,6 +118,21 @@ export default function TreeRestore() {
     onSuccess: (result) => setPlan(result),
   });
 
+  function changeSelection(next: { prefix?: string; dest?: string }) {
+    if (next.prefix !== undefined) {
+      setCatalogPrefix(next.prefix);
+    }
+    if (next.dest !== undefined) {
+      setDestDir(next.dest);
+    }
+    // Every result on screen answers for the OLD selection. Clearing them also
+    // re-arms the dry-run gate, so an edited form cannot be run on a stale plan
+    // and a finished run cannot be repeated by one more click.
+    setPlan(undefined);
+    dryRunMutation.reset();
+    runMutation.reset();
+  }
+
   const runMutation = useMutation({
     mutationFn: () =>
       runTreeRestore({
@@ -161,7 +176,7 @@ export default function TreeRestore() {
             <input
               id="tree-restore-prefix"
               value={catalogPrefix}
-              onChange={(event) => setCatalogPrefix(event.target.value)}
+              onChange={(event) => changeSelection({ prefix: event.target.value })}
               placeholder="/photo-archive"
               autoComplete="off"
               className="mt-2 w-full rounded-md border border-quantum-border bg-quantum-panel px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-quantum-red"
@@ -182,7 +197,7 @@ export default function TreeRestore() {
                   <button
                     key={prefix}
                     type="button"
-                    onClick={() => setCatalogPrefix(prefix)}
+                    onClick={() => changeSelection({ prefix })}
                     className={`rounded-full border px-3 py-1 font-mono text-xs transition ${
                       prefix === catalogPrefix.trim()
                         ? 'border-quantum-red bg-quantum-north text-white'
@@ -203,7 +218,7 @@ export default function TreeRestore() {
             <input
               id="tree-restore-dest"
               value={destDir}
-              onChange={(event) => setDestDir(event.target.value)}
+              onChange={(event) => changeSelection({ dest: event.target.value })}
               placeholder="/restore/photo-archive"
               autoComplete="off"
               className="mt-2 w-full rounded-md border border-quantum-border bg-quantum-panel px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-quantum-red"
@@ -219,7 +234,15 @@ export default function TreeRestore() {
               {dryRunMutation.isPending ? 'Planning…' : 'Dry-run preview'}
             </Button>
             <Button
-              disabled={!ready || !planMatchesForm || runMutation.isPending || dryRunMutation.isPending}
+              disabled={
+                !ready ||
+                !planMatchesForm ||
+                // A finished run is not a licence to run it again: change the form
+                // (or re-plan) rather than double-restoring by accident.
+                runMutation.data !== undefined ||
+                runMutation.isPending ||
+                dryRunMutation.isPending
+              }
               onClick={() => runMutation.mutate()}
             >
               {runMutation.isPending ? 'Restoring…' : 'Run restore'}

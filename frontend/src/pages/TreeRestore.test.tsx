@@ -167,6 +167,48 @@ describe('TreeRestore', () => {
     expect(screen.getByText(/ChecksumMismatchError/)).toBeTruthy();
   });
 
+  it('clears a finished run so one more click cannot repeat it', async () => {
+    renderPage();
+    await fillForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Dry-run preview' }));
+    await waitFor(() => {
+      expect(
+        (screen.getByRole('button', { name: 'Run restore' }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    });
+
+    treeRestoreModule.runTreeRestore.mockResolvedValue(result({ dryRun: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run restore' }));
+    await waitFor(() => {
+      expect(screen.getByText('Files restored')).toBeTruthy();
+    });
+
+    // A restore that already happened must not be one click from happening again.
+    expect((screen.getByRole('button', { name: 'Run restore' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(treeRestoreModule.runTreeRestore).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops a stale result when the selection changes', async () => {
+    renderPage();
+    await fillForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Dry-run preview' }));
+    await waitFor(() => {
+      expect(screen.getByText('/photo-archive → /restore/photos')).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText('Destination directory'), {
+      target: { value: '/restore/elsewhere' },
+    });
+    // The panel answered for the old destination; keeping it on screen next to a
+    // changed form is how someone restores to the wrong place.
+    expect(screen.queryByText('/photo-archive → /restore/photos')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Run restore' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
   it('renders a failed dry-run as an error and leaves the run gated', async () => {
     treeRestoreModule.runTreeRestore.mockRejectedValue(
       new ApiError('Job failed (CommandError); see server logs for detail', 500, 'impact', 'action'),
