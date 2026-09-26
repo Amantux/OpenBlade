@@ -32,6 +32,19 @@ class LibraryBackend(Protocol):
 
 
 @runtime_checkable
+class TapeListingBackend(Protocol):
+    """Optional "list every tape and the slot it sits in" capability.
+
+    Deliberately NOT folded into ``LibraryBackend``: ``MockLibraryBackend`` and
+    ``RealLibraryBackend`` implement it, but ``ScalarHttpLibraryBackend`` (the
+    ``OPENBLADE_ROBOTICS_TRANSPORT=webservices`` transport) does not, so putting
+    it on the base protocol would be a lie about a shipped backend.
+    """
+
+    def list_tapes(self) -> list[dict[str, Any]]: ...
+
+
+@runtime_checkable
 class MailslotBackend(Protocol):
     """Optional import/export (mailslot) capability of a library backend.
 

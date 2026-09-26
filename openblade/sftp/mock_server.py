@@ -13,7 +13,7 @@ from typing import NamedTuple
 
 import structlog
 
-from openblade.nas.types import HydrationRequest, VirtualFileStatus
+from openblade.nas.types import HydrationRequest, VirtualFileEntry, VirtualFileStatus
 from openblade.nas.virtual_fs import VirtualFilesystem
 
 logger = structlog.get_logger(__name__)
@@ -99,7 +99,7 @@ class MockSftpSession:
         content = self._render_stub_content(entry.path, entry.status.value)
         return MockSftpFile(entry.path, content)
 
-    def _to_attributes(self, entry) -> SFTPAttributes:
+    def _to_attributes(self, entry: VirtualFileEntry) -> SFTPAttributes:
         timestamp = self._to_timestamp(entry.mtime)
         mode = _DIRECTORY_MODE if entry.is_directory else _FILE_MODE
         longname = f"{entry.status.value} {entry.size_bytes} {entry.path}"

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from openblade.api import aml_state
+from openblade.catalog.models import Job
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError
@@ -186,7 +187,7 @@ class RestoreService:
         self.catalog = catalog
         self.queue = queue
 
-    def enqueue(self, catalog_path: str, destination: Path):
+    def enqueue(self, catalog_path: str, destination: Path) -> Job:
         job = self.catalog.create_job(
             JobType.RESTORE.value,
             {"catalog_path": catalog_path, "dest_path": str(destination)},

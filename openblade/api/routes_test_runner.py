@@ -15,7 +15,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 import structlog
 from fastapi import APIRouter, HTTPException
@@ -27,7 +27,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/test-runner", tags=["test-runner"])
 
 # In-memory run registry — sufficient for single-instance dev use
-_RUNS: dict[str, dict] = {}
+_RUNS: dict[str, dict[str, Any]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -109,13 +109,13 @@ def _build_pytest_command(run_id: str, req: TestRunRequest) -> list[str]:
     return cmd
 
 
-def _parse_json_report(run_id: str) -> dict:
+def _parse_json_report(run_id: str) -> dict[str, Any]:
     """Read the pytest-json-report output file if it exists."""
     path = Path(f"/tmp/i3-run-{run_id}.json")
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text())
+        return cast("dict[str, Any]", json.loads(path.read_text()))
     except Exception:
         return {}
 
@@ -209,7 +209,7 @@ async def stream_run_output(run_id: str) -> StreamingResponse:
 
 
 @router.get("/runs")
-async def list_runs() -> list[dict]:
+async def list_runs() -> list[dict[str, Any]]:
     """List recent test runs (last 20)."""
     runs = list(_RUNS.values())[-20:]
     return [
@@ -298,7 +298,7 @@ async def _run_tests(run_id: str, req: TestRunRequest) -> None:
     )
 
 
-def _update_counts_from_line(run: dict, line: str) -> None:
+def _update_counts_from_line(run: dict[str, Any], line: str) -> None:
     """Parse pytest verbose output lines for incremental pass/fail counts."""
     if " PASSED" in line:
         run["passed"] += 1

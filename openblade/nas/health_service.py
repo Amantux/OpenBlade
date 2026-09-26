@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -187,7 +188,7 @@ class HealthService:
         """Probe representative catalog tables and downgrade health when only part of the DB is readable."""
         checked_at = _utcnow_iso()
         started_at = time.perf_counter()
-        probes = {
+        probes: dict[str, Callable[[], object]] = {
             "datasets": lambda: self.repo.list_nas_datasets(),
             "path_mappings": lambda: self.repo.count_path_mappings(),
             "cartridges": lambda: self.repo.list_cartridges(),

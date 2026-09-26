@@ -45,7 +45,11 @@ class RbacService:
         role = self.repo.get_role(user.role_id)
         if role is None:
             return False
-        permissions = {RbacPermission(value) for value in list(role.get("permissions", []))}
+        # Role rows are decoded JSON (dict[str, object]); the repository always
+        # stores "permissions" as a JSON list, defaulting to [].
+        raw_permissions = role.get("permissions", [])
+        permission_values = raw_permissions if isinstance(raw_permissions, list) else []
+        permissions = {RbacPermission(value) for value in permission_values}
         return permission in permissions
 
     def require_permission(self, user_id: str, permission: RbacPermission) -> None:
@@ -217,7 +221,7 @@ class RbacService:
         resource: str,
         action: str,
         outcome: str,
-        details: dict | None = None,
+        details: dict[str, Any] | None = None,
         ip_address: str | None = None,
     ) -> None:
         """Create audit event — strip any password/token fields from details before storing."""

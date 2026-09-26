@@ -407,7 +407,8 @@ def _serialize_ticket(ticket: dict[str, Any]) -> Ticket:
 
 
 def _serialize_log(log: dict[str, Any]) -> LogFile:
-    lines = log.get("lines") if isinstance(log.get("lines"), list) else []
+    raw_lines = log.get("lines")
+    lines: list[Any] = raw_lines if isinstance(raw_lines, list) else []
     size = log.get("size")
     if not isinstance(size, int) or size < 0:
         size = sum(len(line) + 1 for line in lines)
@@ -493,7 +494,8 @@ def _create_notification(*, notification_type: str, message: str) -> dict[str, A
 
 def _refresh_log(name: str, log: dict[str, Any]) -> dict[str, Any]:
     payload = dict(log)
-    lines = payload.get("lines") if isinstance(payload.get("lines"), list) else []
+    raw_lines = payload.get("lines")
+    lines: list[Any] = raw_lines if isinstance(raw_lines, list) else []
     payload["lines"] = list(lines)
     payload["size"] = sum(len(line) + 1 for line in lines)
     payload.setdefault("lastModified", _timestamp())
@@ -994,7 +996,8 @@ async def rotate_logs(
     for log in aml_state.list_aml_logs():
         name = str(log["name"])
         rotated_name = f"{name}.1"
-        lines = list(log.get("lines") if isinstance(log.get("lines"), list) else [])
+        raw_lines = log.get("lines")
+        lines = list(raw_lines) if isinstance(raw_lines, list) else []
         aml_state.set_aml_log(
             rotated_name,
             {
@@ -1037,12 +1040,11 @@ async def set_log_level(
     _ensure_state(context)
     _require_admin(current_user)
     current = aml_state.get_aml_log_level()
+    raw_components = current.get("components")
     aml_state.set_aml_log_level(
         {
             "level": _validate_log_level(payload.logLevel.level),
-            "components": dict(
-                current.get("components") if isinstance(current.get("components"), dict) else {}
-            ),
+            "components": dict(raw_components) if isinstance(raw_components, dict) else {},
         }
     )
     _create_notification(notification_type="logs", message="Log level updated")
@@ -1062,7 +1064,8 @@ async def get_log_content(
         _validate_text(name, field_name="name"),
         _get_log_or_404(_validate_text(name, field_name="name")),
     )
-    content = log.get("lines") if isinstance(log.get("lines"), list) else []
+    raw_content = log.get("lines")
+    content: list[Any] = raw_content if isinstance(raw_content, list) else []
     return LogContentResponse(
         logContent=LogContent(
             name=str(log["name"]),

@@ -17,6 +17,7 @@ from openblade.catalog.db import get_catalog_repository
 from openblade.catalog.models import AmlUser
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.models import MountHandle, MountMode
+from openblade.domain.wire import coerce_int
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
 from openblade.nas.catalog_rebuild_worker import SAFE_REBUILD_PREFLIGHT_ERROR, CatalogRebuildWorker
 from openblade.nas.catalog_shard import CatalogShardWriter
@@ -242,28 +243,15 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _as_int(value: object) -> int:
-    """``int(value)`` over a decoded-JSON drive field, with identical failures.
-
-    The drive dicts come from ``aml_state`` as ``dict[str, object]`` and ``int()``
-    has no overload for ``object``. This narrows to the types ``int()`` accepts
-    and raises TypeError for the rest -- exactly what ``int()`` itself did -- so
-    every success and failure path is unchanged.
-    """
-    if isinstance(value, int | float | str | bytes | bytearray):
-        return int(value)
-    raise TypeError(f"expected an int-like value, got {type(value).__name__}")
-
-
 def _drive_needs_cleaning(drive: dict[str, object]) -> bool:
     if bool(drive.get("cleaningRequired", False)):
         return True
     state = str(drive.get("state", "")).lower()
     if state in {"cleaning_required", "cleaning-required", "needs_cleaning"}:
         return True
-    threshold = _as_int(drive.get("cleaningThreshold", 100))
-    load_count = _as_int(drive.get("loadCount", 0))
-    cleaning_count = _as_int(drive.get("cleaningCount", 0))
+    threshold = coerce_int(drive.get("cleaningThreshold", 100))
+    load_count = coerce_int(drive.get("loadCount", 0))
+    cleaning_count = coerce_int(drive.get("cleaningCount", 0))
     return load_count > 0 and (load_count - cleaning_count * 50) >= threshold
 
 

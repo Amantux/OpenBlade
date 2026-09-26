@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 
 class TapeJson(BaseModel):
-    schema_: str = Field("openblade.tape.v1", alias="schema")
+    schema_: str = Field(default="openblade.tape.v1", alias="schema")
     openblade_tape_id: str
     barcode: str
     ltfs_volume_uuid: str = ""
@@ -41,7 +41,7 @@ class ManifestFileEntry(BaseModel):
 
 
 class ManifestJson(BaseModel):
-    schema_: str = Field("openblade.manifest.v1", alias="schema")
+    schema_: str = Field(default="openblade.manifest.v1", alias="schema")
     barcode: str
     openblade_tape_id: str
     volume_group: str = ""
@@ -63,7 +63,7 @@ class ManifestJson(BaseModel):
 
 
 class TapeSetManifest(BaseModel):
-    schema_: str = Field("openblade.tape_set.v1", alias="schema")
+    schema_: str = Field(default="openblade.tape_set.v1", alias="schema")
     tape_set_id: str
     policy: str = "critical_sequential"
     dataset_id: str
@@ -77,7 +77,7 @@ class TapeSetManifest(BaseModel):
 
 
 class ShardSetManifest(BaseModel):
-    schema_: str = Field("openblade.shard_set.v1", alias="schema")
+    schema_: str = Field(default="openblade.shard_set.v1", alias="schema")
     shard_set_id: str
     policy: str = "noncritical_sharded"
     dataset_id: str
@@ -243,7 +243,8 @@ class TapeMetadataWriter:
         content = self._read_text(barcode, path)
         if content is None:
             return None
-        return json.loads(content)
+        payload: dict[str, Any] = json.loads(content)
+        return payload
 
     def _write_text(self, barcode: str, path: str, content: str) -> None:
         self._write_bytes(barcode, path, content.encode("utf-8"))
@@ -261,10 +262,13 @@ class TapeMetadataWriter:
             self._backend_write(path, content)
 
     def _read_bytes(self, barcode: str, path: str) -> bytes | None:
+        # backend is duck-typed (mock/simulator/real), so read_bytes is untyped.
+        content: bytes | None
         try:
-            return self._backend_read(barcode, path)
+            content = self._backend_read(barcode, path)
         except TypeError:
-            return self._backend_read(path)
+            content = self._backend_read(path)
+        return content
 
     def list_metadata_files(self, barcode: str, prefix: str) -> list[str]:
         """Return all /.openblade/ paths whose key starts with the given prefix."""

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,6 +12,7 @@ from openblade.api import aml_state
 from openblade.api.routes_aml_auth import WSResultCode, _ensure_state, _require_admin, require_auth
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.models import AmlUser
+from openblade.domain.backends import TapeListingBackend
 
 router = APIRouter()
 
@@ -379,7 +380,7 @@ def _unique_strings(values: list[str]) -> list[str]:
 
 
 def _policy_defaults(name: str) -> dict[str, Any]:
-    defaults = {
+    defaults: dict[str, dict[str, Any]] = {
         "activeVault": {"enabled": False, "retentionDays": 0, "mode": "manual"},
         "autoImport": {"enabled": True, "source": "ieStation", "scanInterval": 300},
         "autoExport": {"enabled": False, "destination": "mailSlot", "schedule": "manual"},
@@ -403,7 +404,14 @@ def _global_policy(name: str) -> dict[str, Any]:
 def _partition_slots(partition: dict[str, Any], context: AppContext) -> list[SlotResource]:
     if partition["name"] != "partition1":
         return []
-    occupied = {str(item["slotId"]): item["barcode"] for item in context.library.list_tapes()}
+    # LATENT BUG, recorded not fixed: ScalarHttpLibraryBackend (the
+    # OPENBLADE_ROBOTICS_TRANSPORT=webservices transport) does NOT implement
+    # list_tapes, so this raises AttributeError -> 500 on that transport. The
+    # `cast` is a no-op and keeps that behaviour exactly; giving the missing
+    # capability a graceful answer would change an /aml route's response and
+    # belongs in its own change.
+    tapes: list[dict[str, Any]] = cast("TapeListingBackend", context.library).list_tapes()
+    occupied = {str(item["slotId"]): item["barcode"] for item in tapes}
     slot_count = int(partition.get("slotCount", 0))
     cleaning_start = max(slot_count - int(partition.get("cleaningSlots", 0)) + 1, 1)
     slots: list[SlotResource] = []

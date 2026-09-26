@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from openblade.nas.service import NasService
 from openblade.nas.types import NasFileState
@@ -17,7 +18,7 @@ class FuseHook:
 
     def __init__(self, service: NasService):
         self.service = service
-        self._access_log: list[dict] = []
+        self._access_log: list[dict[str, Any]] = []
 
     def _log_access(self, *, pool_id: str, logical_path: str, state: str, action: str) -> None:
         self._access_log.append(
@@ -30,7 +31,7 @@ class FuseHook:
             }
         )
 
-    def on_file_open(self, pool_id: str, logical_path: str) -> dict:
+    def on_file_open(self, pool_id: str, logical_path: str) -> dict[str, Any]:
         """
         Called when a virtual pool file is opened.
         - Look up file record
@@ -46,7 +47,7 @@ class FuseHook:
         try:
             record = self.service.get_pool_file_detail(pool_id, logical_path)
         except KeyError:
-            result = {"action": "error", "message": "File not found"}
+            result: dict[str, Any] = {"action": "error", "message": "File not found"}
             self._log_access(
                 pool_id=pool_id,
                 logical_path=logical_path,
@@ -79,8 +80,8 @@ class FuseHook:
         )
         return result
 
-    def get_access_log(self) -> list[dict]:
+    def get_access_log(self) -> list[dict[str, Any]]:
         return list(self._access_log)
 
-    def clear_access_log(self):
+    def clear_access_log(self) -> None:
         self._access_log.clear()
