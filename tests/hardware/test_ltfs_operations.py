@@ -126,7 +126,7 @@ def test_ltfs_mount_formatted(
     finally:
         try:
             _unmount_ltfs(runner, tmp_mount_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 - real-hardware teardown: a failed unmount must not mask the assertion that failed first, and the unload below still has to run
             pass
         _unload_barcode(changer_device, runner, slot_id)
 
@@ -154,7 +154,7 @@ def test_ltfs_write_small_file(
     finally:
         try:
             _unmount_ltfs(runner, tmp_mount_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 - real-hardware teardown: a failed unmount must not mask the assertion that failed first, and the unload below still has to run
             pass
         _unload_barcode(changer_device, runner, slot_id)
 
@@ -184,7 +184,7 @@ def test_ltfs_read_small_file(
     finally:
         try:
             _unmount_ltfs(runner, tmp_mount_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 - real-hardware teardown: a failed unmount must not mask the assertion that failed first, and the unload below still has to run
             pass
         _unload_barcode(changer_device, runner, slot_id)
 
@@ -234,7 +234,7 @@ def test_ltfs_remount_persistence(
     finally:
         try:
             _unmount_ltfs(runner, tmp_mount_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 - real-hardware teardown: a failed unmount must not mask the assertion that failed first, and the unload below still has to run
             pass
         _unload_barcode(changer_device, runner, slot_id)
 
@@ -261,7 +261,7 @@ def test_ltfs_capacity_reporting(
     finally:
         try:
             _unmount_ltfs(runner, tmp_mount_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 - real-hardware teardown: a failed unmount must not mask the assertion that failed first, and the unload below still has to run
             pass
         _unload_barcode(changer_device, runner, slot_id)
 

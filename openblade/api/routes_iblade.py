@@ -308,7 +308,7 @@ def _negotiate_iblade_response(request: Request, response: Response) -> Response
         try:
             payload = json.loads(bytes(response.body))
             csv_payload = _report_payload_to_csv(payload)
-        except Exception:
+        except Exception:  # noqa: BLE001 - content negotiation must never 500 a parity-gated endpoint: the escape is the original JSON body plus X-OpenBlade-Content-Negotiation: json-fallback; reason=csv-serialization-failed
             response.headers["X-OpenBlade-Content-Negotiation"] = (
                 "json-fallback; reason=csv-serialization-failed"
             )
@@ -337,7 +337,7 @@ def _negotiate_iblade_response(request: Request, response: Response) -> Response
     try:
         payload = json.loads(bytes(response.body))
         xml_payload = _json_payload_to_xml(payload)
-    except Exception:
+    except Exception:  # noqa: BLE001 - content negotiation must never 500 a parity-gated endpoint: the escape is the original JSON body plus X-OpenBlade-Content-Negotiation: json-fallback; reason=xml-serialization-failed
         response.headers["X-OpenBlade-Content-Negotiation"] = (
             "json-fallback; reason=xml-serialization-failed"
         )

@@ -277,7 +277,7 @@ async def _run_tests(run_id: str, req: TestRunRequest) -> None:
         await proc.wait()
         run["exit_code"] = proc.returncode
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - background task boundary: logged via log.error, and the escape is the run record itself (status=failed, exit_code=-1) since nothing can catch this task's exception
         log.error("test_run_error", error=str(exc))
         run["output_lines"].append(f"ERROR: {exc}")
         run["exit_code"] = -1

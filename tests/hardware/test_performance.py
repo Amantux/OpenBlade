@@ -128,7 +128,7 @@ def test_single_drive_write_throughput(
     finally:
         try:
             _unmount_ltfs(runner, tmp_mount_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 - real-hardware teardown: a failed unmount must not mask the assertion that failed first, and the unload below still has to run
             pass
         _unload_barcode(changer_device, runner, slot_id)
 
@@ -162,7 +162,7 @@ def test_single_drive_read_throughput(
     finally:
         try:
             _unmount_ltfs(runner, tmp_mount_dir)
-        except Exception:
+        except Exception:  # noqa: BLE001 - real-hardware teardown: a failed unmount must not mask the assertion that failed first, and the unload below still has to run
             pass
         _unload_barcode(changer_device, runner, slot_id)
 
