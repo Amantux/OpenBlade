@@ -76,7 +76,8 @@ def emulator_url(tmp_path_factory: pytest.TempPathFactory) -> Generator[str, Non
         "OPENBLADE_DB_URL": f"sqlite:///{db_path}",
         "PYTHONPATH": str(REPO_ROOT),
     }
-    process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+    # Fixed argv list, shell=False: nothing here is caller-controlled.
+    process = subprocess.Popen(
         [
             sys.executable,
             "-m",

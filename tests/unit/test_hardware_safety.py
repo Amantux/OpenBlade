@@ -307,7 +307,8 @@ class TestWaitForLtfsRelease:
         # `executable=` lets us choose argv[0] independently of the binary, so
         # the child genuinely presents as `ltfs <mount point>` in procfs - a
         # shebang script would show up as /bin/sh and prove nothing.
-        process = subprocess.Popen(  # noqa: S603
+        # Fixed argv list, shell=False.
+        process = subprocess.Popen(
             ["ltfs", "-c", "import time; time.sleep(30)", mount_point],
             executable=sys.executable,
             stdout=subprocess.DEVNULL,

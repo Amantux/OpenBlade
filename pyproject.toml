@@ -70,13 +70,27 @@ target-version = "py312"
 [tool.ruff.lint]
 # EXPLICIT rule set — never rely on ruff's defaults, which widen between minor
 # releases (this is why the version above is pinned exactly as well). Anything
-# not listed here is OFF, including rules referenced by `# noqa` comments in the
-# tree: 23 `# noqa: BLE001` and 4 `# noqa: S3xx/S4xx` markers are currently inert
-# documentation, because BLE and S are deliberately not selected yet. Enabling
-# them is a scoped follow-up (BLE = 44 findings, S = 3,748, mostly S101 in
-# tests) — see docs/decisions/2026-09-11-pin-ruff-toolchain.md. Do not delete those
-# noqa markers to "clean up"; they record intent for that follow-up.
-select = ["E", "F", "I", "B", "UP", "A", "SIM"]
+# not listed here is OFF.
+#
+# BLE is now SELECTED, so every `# noqa: BLE001` in the tree is live and enforced
+# rather than inert documentation. The policy behind those markers: a broad
+# `except Exception` is legitimate only at a boundary whose job is to catch
+# everything (job/step runners, CLI top level, health probes, content-negotiation
+# fallbacks, best-effort probes and demo seeding, real-hardware test teardown).
+# Each one carries a reason naming WHERE the error is logged and WHAT curated form
+# escapes — `safe_job_error()` (openblade/domain/errors.py) for anything that
+# reaches an unauthenticated field, a degraded status for health, a response
+# header for content negotiation. A handler that can name its failure modes is
+# narrowed instead; a handler that swallows silently is a bug, not a style issue.
+#
+# S stays deliberately UNSELECTED: 3,748 findings, overwhelmingly S101 (`assert`
+# in tests, which is the point of tests). The `# noqa: S6xx/S3xx/S4xx` markers
+# that used to sit in the tree pretending to be enforcement are now plain
+# comments stating the safety property they documented (argv-list/`shell=False`
+# discipline in scripts/deploy.py and the subprocess-based tests, the
+# operator-supplied probe URL). Selecting S is still a separate, scoped decision
+# — see docs/decisions/2026-09-11-pin-ruff-toolchain.md.
+select = ["E", "F", "I", "B", "UP", "A", "SIM", "BLE"]
 # A002 (argument shadows a builtin) is ignored: FastAPI path/query params like
 # `id`, `type`, `filter` ARE the wire contract — renaming them would break the
 # /aml endpoints (see docs/tech-debt.md).
