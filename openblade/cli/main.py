@@ -670,7 +670,7 @@ def restore_file(
                 "status": "completed",
             }
             failed = False
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI top level: safe_job_error() curates the text into the job record and stderr, then exit 1 (`from None` keeps the traceback off the console)
         message = safe_job_error(exc)
         context.catalog.update_job_state(job.id, "failed", error=message)
         _save_state(context)
@@ -718,7 +718,7 @@ def restore_tree(
             job.id,
             progress=_progress,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI top level: safe_job_error() curates the text into the job record and stderr, then exit 1
         message = safe_job_error(exc)
         context.catalog.update_job_state(job.id, "failed", error=message)
         _save_state(context)
@@ -855,7 +855,7 @@ def archive_sharded(
             scheduler,
             job.id,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI top level: safe_job_error() curates the text into the job record and stderr, then exit 1
         message = safe_job_error(exc)
         context.catalog.update_job_state(job.id, "failed", error=message)
         _save_state(context)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -17,6 +18,7 @@ from openblade.catalog.models import AmlUser
 from openblade.domain.errors import safe_job_error
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _normalize_move_address(address: str) -> str:
@@ -625,7 +627,7 @@ async def create_move(
             )
             s = int(s_raw)
             d = int(d_raw)
-        except Exception:
+        except (TypeError, ValueError):
             # `from None`, not `from exc`: the ValueError/TypeError text can echo
             # the caller's raw payload, and this detail string is client-facing.
             raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers") from None
@@ -637,7 +639,9 @@ async def create_move(
                     barcode_val = (
                         result.data.get("barcode") if getattr(result, "data", None) else None
                     )
-                except Exception:
+                except (AttributeError, TypeError):
+                    # `result.data` is backend-shaped and only sometimes a mapping;
+                    # a non-mapping payload means "no barcode to name", not an error.
                     barcode_val = None
                 return _ws_result(f"Queued move for {barcode_val or str(s)}")
             else:
@@ -674,7 +678,7 @@ async def create_move(
         try:
             s = int(source_raw)
             d = int(dest_raw)
-        except Exception:
+        except (TypeError, ValueError):
             # `from None`, not `from exc`: the ValueError/TypeError text can echo
             # the caller's raw payload, and this detail string is client-facing.
             raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers") from None
@@ -688,7 +692,9 @@ async def create_move(
                     barcode_val = (
                         result.data.get("barcode") if getattr(result, "data", None) else None
                     )
-                except Exception:
+                except (AttributeError, TypeError):
+                    # `result.data` is backend-shaped and only sometimes a mapping;
+                    # a non-mapping payload means "no barcode to name", not an error.
                     barcode_val = None
                 return _ws_result(f"Queued move for {barcode_val or str(s)}")
             else:
@@ -739,11 +745,18 @@ async def create_move(
                         ):
                             barcode_raw = str(media.get("barcode"))
                             break
-                except Exception:
-                    pass
-        except Exception:
-            # If inventory lookup fails, continue and let validation handle it
-            barcode_raw = barcode_raw
+                except (AttributeError, TypeError, ValueError) as exc:
+                    # A malformed aml_state media entry only costs us the
+                    # barcode hint; validation below still rejects the move.
+                    logger.warning("aml media slot scan failed: %s", type(exc).__name__)
+        # Best-effort inventory probe: any failure degrades to "no barcode hint"
+        # and the _is_missing() validation below answers 422. Logged (class name
+        # only, never the client-facing detail) because the original swallow —
+        # `barcode_raw = barcode_raw` — lost the cause entirely.
+        except Exception as exc:  # noqa: BLE001 - see above
+            logger.warning(
+                "move-medium barcode inference failed: %s", type(exc).__name__, exc_info=True
+            )
 
     # If any core move fields are missing, return 422 (validation error) so clients see a clear validation response
     def _is_missing(val: object) -> bool:

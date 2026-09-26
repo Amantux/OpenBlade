@@ -432,3 +432,29 @@ def test_hydration_logs_why_the_tape_read_failed(caplog) -> None:
     )
     assert "hydration tape read failed" in joined
     assert any(r.exc_info is not None for r in caplog.records), "no traceback captured"
+
+
+def test_per_file_error_message_is_sanitized(monkeypatch) -> None:
+    """NasRestoreJob.error_message is served by GET /nas/restore-jobs/{id}, a route
+    with no auth dependency. A CommandError there would publish mtx/mkltfs argv and
+    raw tool stderr, which is exactly what safe_job_error() exists to prevent on
+    jobs.error. The relative path stays — it names which file failed and is already
+    readable through the dataset listing."""
+    from openblade.hardware.runner import CommandError
+
+    service, job = setup_restore_fixture(paths=["photos/a.jpg"], tapes=["VOL001L9"])
+    executor = hydration_executor(service)
+
+    def leaky(record: NasFileRecord) -> bytes:
+        raise CommandError(["mtx", "-f", "/dev/sg0", "status"], 1, "raw stderr LEAK")
+
+    monkeypatch.setattr(executor, "_simulate_content", leaky)
+
+    restored = executor.run(job.id)
+
+    assert restored.error_message is not None
+    assert "LEAK" not in restored.error_message
+    assert "/dev/sg0" not in restored.error_message
+    assert "mtx" not in restored.error_message
+    assert "CommandError" in restored.error_message
+    assert "photos/a.jpg" in restored.error_message

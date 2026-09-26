@@ -71,7 +71,10 @@ def main(argv: list[str] | None = None) -> int:
         path = record.path
         try:
             _, instance = catalog.get_latest_instance_for_path(path)
-        except Exception:
+        # A path with no resolvable archived instance is not a campaign target;
+        # skipping it is correct, but the skip is now visible in the run log.
+        except Exception as exc:  # noqa: BLE001 - see above
+            print(f"skipping {path}: no archived instance ({type(exc).__name__})", file=sys.stderr)
             continue
         targets.append((path, instance.barcode))
 

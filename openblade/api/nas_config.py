@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from uuid import uuid4
@@ -68,6 +69,7 @@ from openblade.nas.types import (
 )
 
 router = APIRouter(prefix="/nas", tags=["NAS Config"])
+logger = logging.getLogger(__name__)
 _FUSE_HOOKS: dict[int, FuseHook] = {}
 
 
@@ -404,7 +406,18 @@ async def verify_dataset(
                     handle = mounts[record.tape_barcode]
                 tape_path = PurePosixPath("/") / dataset.name / record.relative_path
                 observed_checksum = ltfs.stat(handle[0], tape_path).checksum_sha256
-            except Exception:
+            # Per-file isolation: verify has to report on every file, so a load,
+            # mount or stat failure on one record cannot abort the sweep. NOTE the
+            # classification is coarser than it looks — an unavailable drive or a
+            # failed mount is counted as CORRUPT, not "unverifiable". Narrowing
+            # that needs a new NasFileState, so it is logged and flagged rather
+            # than silently reclassified here.
+            except Exception:  # noqa: BLE001 - see above
+                logger.warning(
+                    "dataset verify could not read file",
+                    extra={"barcode": record.tape_barcode, "path": record.relative_path},
+                    exc_info=True,
+                )
                 checksums[record.relative_path] = ""
                 files_corrupt += 1
                 service.upsert_file_record(

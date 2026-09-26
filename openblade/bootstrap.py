@@ -499,9 +499,10 @@ def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
 
     This helps emulator-backed tests that expect LTFS content to exist.
     """
+    logger = structlog.get_logger(__name__)
     try:
         from openblade.simulator.ltfs_volume import MockFileRecord
-    except Exception:
+    except ImportError:
         return
 
     datasets = catalog.list_nas_datasets()
@@ -509,7 +510,11 @@ def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
         dataset_id = ds.get("id")
         try:
             files = catalog.list_nas_file_records(dataset_id)
-        except Exception:
+        # Demo seeding is best-effort and must never break startup, so this stays
+        # broad; the log replaces a silent empty list that made a half-seeded
+        # demo environment look like an empty one.
+        except Exception:  # noqa: BLE001 - see above
+            logger.warning("demo ltfs seed: file records unavailable", dataset_id=dataset_id)
             files = []
         for f in files:
             barcode = f.get("tape_barcode")
@@ -518,7 +523,8 @@ def _seed_demo_ltfs(catalog: CatalogRepository, ltfs) -> None:
                 continue
             try:
                 tape = ltfs.ensure_tape(barcode)
-            except Exception:
+            except Exception:  # noqa: BLE001 - best-effort demo seeding, see above
+                logger.warning("demo ltfs seed: tape unavailable", barcode=barcode)
                 continue
             # create small deterministic content to avoid large memory usage
             content = (f"{dataset_id}:{path}").encode()[:1024]

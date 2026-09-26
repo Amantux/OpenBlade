@@ -81,7 +81,14 @@ def real_library_backend(real_hardware_guard):
             return backend_cls(changer_device=changer)
         except TypeError:
             return backend_cls(changer)
-    except Exception:
+    # Deliberately broad, and NOT narrowed to (ImportError, AttributeError): the
+    # contract of this fixture is "give me some real changer backend", and the
+    # construction of RealLibraryBackend can fail on a device open (OSError), a bad
+    # OPENBLADE_CHANGER_DEVICE string (ValueError) or a signature change
+    # (TypeError/AttributeError) — every one of which the mtx fallback handles. This
+    # only runs under the real-hardware marker, so narrowing it would change
+    # hardware-test setup behaviour on a rig this change cannot be tested against.
+    except Exception:  # noqa: BLE001 - see above
         return MtxChangerBackend(
             device=changer,
             guard=_real_hardware_guard(),

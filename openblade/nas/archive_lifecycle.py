@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
@@ -27,6 +28,8 @@ from openblade.nas.types import (
     NasFileState,
     PathMappingRecord,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ArchiveLifecycleResult(BaseModel):
@@ -142,7 +145,14 @@ class ArchiveLifecycleManager:
                     )
                     return result
                 result.steps_completed.append(step_name)
-            except Exception:  # pragma: no cover - guarded by failure-path tests
+            # Step dispatcher: every step is a different subsystem, and the
+            # contract is that the lifecycle reports which step failed instead of
+            # propagating. Curated text ("unexpected error") goes in the result;
+            # the exception itself now goes to the log instead of nowhere.
+            except Exception:  # noqa: BLE001 - see above
+                logger.warning(
+                    "archive lifecycle step failed", extra={"step": step_name}, exc_info=True
+                )
                 result.steps_failed.append(step_name)
                 result.errors.append(f"{step_name} encountered an unexpected error")
                 result.final_file_state = self._current_file_state(
