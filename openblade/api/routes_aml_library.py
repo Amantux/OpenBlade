@@ -1293,7 +1293,7 @@ async def get_library_physical_alias(
 async def get_library_inventory_alias(
     user: AmlUser = Depends(require_auth),
     context: AppContext = Depends(get_context),
-) -> dict:
+) -> dict[str, Any]:
     """Backwards-compatible inventory response shape expected by UI/tests."""
     _ensure_state(context)
     inventory = context.library.inventory()

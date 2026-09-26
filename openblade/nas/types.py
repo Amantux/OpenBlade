@@ -263,7 +263,7 @@ class RbacAuditEventRecord(BaseModel):
     resource: str = ""
     action: str = ""
     outcome: str = ""
-    details: dict = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
     created_at: str
     ip_address: str | None = None
 
@@ -335,7 +335,7 @@ class StoragePolicy(BaseModel):
 
 
 class SidecarValidationError(Exception):
-    def __init__(self, message: str, field: str = None, raw_value=None):
+    def __init__(self, message: str, field: str | None = None, raw_value: object = None) -> None:
         super().__init__(message)
         self.field = field
         self.raw_value = raw_value

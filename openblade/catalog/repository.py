@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
+from typing import Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -75,10 +77,29 @@ _ARCHIVED_INSTANCE_STATES = {
 }
 
 
+@runtime_checkable
+class _SupportsModelDump(Protocol):
+    """Pydantic v2 model surface this module relies on."""
+
+    def model_dump(self, *, mode: str = ...) -> dict[str, Any]: ...
+
+
+class _FileRecordLike(Protocol):
+    """The attributes ``save_file_record`` reads off a domain file record."""
+
+    path: str
+    size_bytes: int
+    checksum_sha256: str
+    volume_group_id: str
+
+
 def _model_to_json_dict(model: object) -> dict[str, object]:
-    if hasattr(model, "model_dump"):
+    if isinstance(model, _SupportsModelDump):
         return model.model_dump(mode="json")
-    return model.dict()
+    # pydantic v1 models (and test doubles) still expose .dict(); an object with
+    # neither raises AttributeError here exactly as it did before.
+    legacy_dict = getattr(model, "dict")  # noqa: B009
+    return cast("dict[str, object]", legacy_dict())
 
 
 def _load_json_value(value: str | None, default: object) -> object:
@@ -327,12 +348,12 @@ class CatalogRepository:
             "completed_at": row.completed_at,
         }
 
-    def __getattribute__(self, name: str):
+    def __getattribute__(self, name: str) -> Any:
         attr = object.__getattribute__(self, name)
         if name.startswith("_") or name == "session" or not callable(attr):
             return attr
 
-        def _locked(*args, **kwargs):
+        def _locked(*args: Any, **kwargs: Any) -> Any:
             with object.__getattribute__(self, "_lock"):
                 return attr(*args, **kwargs)
 
@@ -374,7 +395,7 @@ class CatalogRepository:
         stmt = select(LibraryInstance).order_by(LibraryInstance.sort_order, LibraryInstance.name)
         return list(self.session.execute(stmt).scalars().all())
 
-    def update_library_instance(self, library_id: int, **kwargs) -> LibraryInstance | None:
+    def update_library_instance(self, library_id: int, **kwargs: object) -> LibraryInstance | None:
         library = self.get_library_instance(library_id)
         if library is None:
             return None
@@ -669,7 +690,7 @@ class CatalogRepository:
 
     def save_file_record(
         self,
-        record: object,
+        record: _FileRecordLike,
         barcode: str,
         tape_path: PurePosixPath,
         state: FileInstanceState,
@@ -1288,7 +1309,7 @@ class CatalogRepository:
             stmt = stmt.where(PathMapping.dataset_id == dataset_id)
         return int(self.session.execute(stmt).scalar_one())
 
-    def create_role(self, role: dict[str, object]) -> dict[str, object]:
+    def create_role(self, role: Mapping[str, object]) -> dict[str, object]:
         """Create or replace an RBAC role record."""
         now = _utcnow_iso()
         parsed = RbacRoleRecord.model_validate(
@@ -1686,7 +1707,7 @@ class CatalogRepository:
     def seed_default_roles(self) -> None:
         """Create built-in roles if they don't exist: admin, operator, readonly."""
         all_permissions = [permission.value for permission in RbacPermission]
-        defaults = [
+        defaults: list[dict[str, Sequence[str] | str]] = [
             {
                 "id": "admin",
                 "name": "admin",

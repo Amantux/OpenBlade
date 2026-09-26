@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from fastapi import Depends, HTTPException, Request
 
 from openblade.api.routes_aml_auth import require_auth
@@ -56,7 +58,9 @@ def ensure_permission_for_user(
     raise HTTPException(status_code=403, detail="Permission denied")
 
 
-def require_permission(permission: RbacPermission):
+def require_permission(
+    permission: RbacPermission,
+) -> Callable[..., Awaitable[AmlUser]]:
     """FastAPI dependency factory. Returns a dependency that checks the cookie-authed user has permission."""
 
     async def _dep(

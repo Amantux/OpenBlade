@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -54,7 +56,7 @@ class InboxPathOption(BaseModel):
 
 
 @router.get("/config", response_model=GatewayConfigResponse, dependencies=[Depends(require_auth)])
-def get_gateway_config():
+def get_gateway_config() -> dict[str, Any]:
     return get_gateway().config
 
 
@@ -89,12 +91,12 @@ def stop_gateway() -> GatewayCommandResponse:
 
 
 @router.get("/credentials", dependencies=[Depends(require_auth)])
-def list_credentials():
+def list_credentials() -> list[dict[str, Any]]:
     return get_gateway().list_credentials()
 
 
 @router.post("/credentials", dependencies=[Depends(require_auth)])
-def add_credential(data: CredentialCreate):
+def add_credential(data: CredentialCreate) -> dict[str, Any]:
     try:
         cred = get_gateway().add_credential(
             data.username,
@@ -111,7 +113,7 @@ def add_credential(data: CredentialCreate):
 
 
 @router.put("/credentials/{username}", dependencies=[Depends(require_auth)])
-def update_credential(username: str, data: CredentialUpdate):
+def update_credential(username: str, data: CredentialUpdate) -> dict[str, Any]:
     try:
         cred = get_gateway().update_credential(
             username,
@@ -129,14 +131,14 @@ def update_credential(username: str, data: CredentialUpdate):
 
 
 @router.delete("/credentials/{username}", dependencies=[Depends(require_auth)])
-def remove_credential(username: str):
+def remove_credential(username: str) -> dict[str, Any]:
     if not get_gateway().remove_credential(username):
         raise HTTPException(404, f"Credential {username!r} not found")
     return {"deleted": username}
 
 
 @router.get("/sessions", dependencies=[Depends(require_auth)])
-def list_sessions(active_only: bool = False):
+def list_sessions(active_only: bool = False) -> list[dict[str, Any]]:
     sessions = get_gateway().list_sessions(active_only=active_only)
     return [
         {
