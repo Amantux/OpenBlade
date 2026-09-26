@@ -1,0 +1,34 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY openblade/ ./openblade/
+
+RUN pip install --no-cache-dir -e . \
+    && pip install --no-cache-dir gunicorn gevent packaging
+
+# packaging is explicit on purpose: gunicorn.workers.ggevent imports it, but
+# neither gunicorn nor gevent declares it, so `-k gevent` died at container start
+# with ModuleNotFoundError while `docker compose build` stayed green. Verified by
+# running the image, which is the only way this class of bug shows up.
+
+# Non-root, mirroring Dockerfile. The Flask UI holds no state, so it needs no
+# /data volume and therefore no chown entrypoint -- a plain USER switch suffices.
+RUN groupadd -r openblade && useradd -r -g openblade -d /app openblade
+
+# production, NOT development. This image is the deployable artifact, and
+# OPENBLADE_ENV gates two hardening checks in openblade.web_flask.app: _secret_key()
+# refuses to start without FLASK_SECRET_KEY, and SESSION_COOKIE_SECURE defaults on.
+# Baking "development" here silently disabled both for anyone deploying the image
+# as-is. docker-compose.yml overrides it back to development for the local dev
+# stack, where a per-boot random key and plain-HTTP cookies are what you want.
+ENV OPENBLADE_ENV=production
+ENV OPENBLADE_WEB_BACKEND_URL=http://api:8000
+ENV PYTHONUNBUFFERED=1
+
+USER openblade
+
+EXPOSE 8080
+
+CMD ["gunicorn", "-k", "gevent", "-w", "1", "-b", "0.0.0.0:8080", "openblade.web_flask.app:app"]

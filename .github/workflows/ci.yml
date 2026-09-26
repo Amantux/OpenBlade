@@ -22,6 +22,7 @@ jobs:
       api: ${{ steps.filter.outputs.api }}
       simulator: ${{ steps.filter.outputs.simulator }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      webflask: ${{ steps.filter.outputs.webflask }}
       cicd: ${{ steps.filter.outputs.cicd }}
       wiki: ${{ steps.filter.outputs.wiki }}
     steps:
@@ -65,6 +66,17 @@ jobs:
               - 'tools/emulator_spec/**'
             frontend:
               - 'frontend/**'
+            # The Flask NAS UI. Deliberately NOT including 'pyproject.toml' here:
+            # the `backend` filter already carries it, so a dependency bump
+            # (including every Dependabot PR) still gets ruff + mypy + the whole
+            # tests/unit run, which imports this package. Adding it here would
+            # only tack a docker build onto that traffic. 'docker-compose.yml' IS
+            # included because it defines the web-flask service this job builds.
+            webflask:
+              - 'openblade/web_flask/**'
+              - 'tests/unit/test_web_flask_app.py'
+              - 'Dockerfile.web'
+              - 'docker-compose.yml'
             cicd:
               - '.github/workflows/**'
             # docs/wiki/reference/{cli,api}.md are GENERATED from the Typer CLI
@@ -213,6 +225,32 @@ jobs:
       - run: npm run build
       - run: npm run test -- --run
 
+  web-flask-smoke:
+    name: web-flask-smoke
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.webflask == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      # BLOCKING mypy, scoped to this package alone. `mypy openblade` in
+      # backend-typecheck has to stay advisory because of ~300 pre-existing errors
+      # in the god-file modules; openblade/web_flask is clean under strict mode
+      # today, and this job is what keeps it that way instead of letting it join
+      # the backlog.
+      - run: mypy openblade/web_flask
+      # Redundant with backend-tests (tests/unit covers this file) but kept so the
+      # job is a complete gate on its own for a web_flask-only change. Seconds.
+      - run: pytest tests/unit/test_web_flask_app.py -q --tb=short
+      # The only thing in CI that builds this image. web-flask sits behind a
+      # compose profile, so name it explicitly — a bare `docker compose build`
+      # skips profiled services.
+      - run: docker compose build web-flask
+
   wiki-reference:
     name: wiki-reference
     needs: changes
@@ -270,6 +308,7 @@ jobs:
       - api-aml-integration
       - i3-smoke
       - frontend-build-test
+      - web-flask-smoke
       - cicd-workflow-validate
       - wiki-reference
     if: ${{ always() }}
@@ -288,6 +327,7 @@ jobs:
           check api-aml-integration  "${{ needs.api-aml-integration.result }}"
           check i3-smoke             "${{ needs.i3-smoke.result }}"
           check frontend-build-test  "${{ needs.frontend-build-test.result }}"
+          check web-flask-smoke      "${{ needs.web-flask-smoke.result }}"
           check cicd-workflow-validate "${{ needs.cicd-workflow-validate.result }}"
           # Blocking on purpose: the fix is one command
           # (`python3 tools/gen_wiki_reference.py`) and a stale generated page

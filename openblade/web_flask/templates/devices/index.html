@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Connected Devices · OpenBlade NAS{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Connected Devices</h1>
+      <p>Register and monitor each Quantum device from a single NAS-focused dashboard.</p>
+    </div>
+    <a class="button" href="{{ url_for('devices_register') }}">Register Device</a>
+  </section>
+
+  <section class="summary" id="device-summary">
+    <span class="chip status-online">Online: <strong data-summary="online">{{ summary.online }}</strong></span>
+    <span class="chip status-warning">Degraded: <strong data-summary="warning">{{ summary.warning }}</strong></span>
+    <span class="chip status-offline">Offline: <strong data-summary="offline">{{ summary.offline }}</strong></span>
+    <span class="chip status-unknown">Unknown: <strong data-summary="unknown">{{ summary.unknown }}</strong></span>
+    <span class="chip">Total: <strong data-summary="total">{{ summary.total }}</strong></span>
+    <span class="chip">Last update: <strong id="devices-last-update">initial</strong></span>
+  </section>
+
+  {% if devices %}
+    <section class="grid" id="devices-grid">
+      {% for device in devices %}
+        <article class="card" data-device-id="{{ device.id }}">
+          <div class="card-top">
+            <span class="status {{ status_class(device.status) }}" data-device-field="status">{{ status_text(device.status) }}</span>
+            <div class="actions">
+              <a class="button button-secondary" href="{{ url_for('storage', section='access', library_id=device.id) }}">Client Access</a>
+              <a class="button button-secondary" href="{{ url_for('devices_manage', device_id=device.id) }}">Manage</a>
+            </div>
+          </div>
+          <h2 data-device-field="name">{{ device.name }}</h2>
+          <div class="meta">
+            <span><strong>Model:</strong> {{ device.model }}</span>
+            <span><strong>URL:</strong> {{ device.emulator_url }}</span>
+          </div>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="panel">
+      <h2>No devices registered yet</h2>
+      <p>Register your first device to unlock library management pages.</p>
+      <a class="button" href="{{ url_for('devices_register') }}">Register your first device</a>
+    </section>
+  {% endif %}
+
+  <div id="sse-warning" class="alert warning hidden" aria-live="polite">
+    Live updates paused. Showing last known device state.
+  </div>
+{% endblock %}

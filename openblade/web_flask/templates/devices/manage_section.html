@@ -1,0 +1,723 @@
+{% extends "base.html" %}
+{% block title %}{{ section|capitalize }} · {{ device.name }} · OpenBlade NAS{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <div>
+      <p><a href="{{ url_for('devices_index') }}">Devices</a> / {{ device.name }}</p>
+      <h1>{{ device.name }}</h1>
+      <p>
+        <span class="status {{ status_class(device.status) }}">{{ status_text(device.status) }}</span>
+        · {{ device.model }}
+      </p>
+    </div>
+  </section>
+
+  <nav class="tab-bar" aria-label="Device sections">
+    {% for key, label in sections %}
+      <a
+        href="{{ url_for('devices_manage_section', device_id=device.id, section=key) }}"
+        class="tab {% if section == key %}tab-active{% endif %}"
+      >{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if section == "overview" %}
+    <section class="grid">
+      <article class="card">
+        <h2>Device Health</h2>
+        <p><strong>Status:</strong> <span class="status {{ status_class(device.status) }}">{{ status_text(device.status) }}</span></p>
+        <p><strong>Connection:</strong> {{ device.emulator_url }}</p>
+      </article>
+      <article class="card">
+        <h2>Library Snapshot</h2>
+        {% set status = section_data.library_status or {} %}
+        <p><strong>Overall:</strong> <span class="status {{ status_class(status.overall or status.get('overall', 'unknown')) }}">{{ status_text(status.overall or status.get('overall', 'unknown')) }}</span></p>
+        <p><strong>Drives:</strong> {{ section_data.drives|length }}</p>
+        <p><strong>Media:</strong> {{ section_data.media_count or 0 }}</p>
+      </article>
+    </section>
+  {% elif section == "inventory" %}
+    <section class="panel">
+      <h2>Slot Inventory</h2>
+      {% set media = section_data.media or [] %}
+      {% if media %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Barcode</th>
+              <th>Type</th>
+              <th>State</th>
+              <th>Partition</th>
+              <th>Slot</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in media %}
+              <tr>
+                <td class="mono">{{ item.barcode or "—" }}</td>
+                <td>{{ item.type or "—" }}</td>
+                <td><span class="status {{ status_class(item.state or 'unknown') }}">{{ status_text(item.state or "unknown") }}</span></td>
+                <td>{{ item.partition or "—" }}</td>
+                <td>{{ item.slot or item.location or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No inventory records available</h2>
+          <p>Run an inventory operation to refresh the media map for this device.</p>
+          <a class="button" href="{{ url_for('devices_manage_section', device_id=device.id, section='operations') }}">Go to Operations</a>
+        </div>
+      {% endif %}
+    </section>
+  {% elif section == "drives" %}
+    <section class="panel">
+      <h2>Drive Status</h2>
+      {% set drives = section_data.drives or [] %}
+      {% if drives %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Serial</th>
+              <th>Type</th>
+              <th>State</th>
+              <th>Loaded Media</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for drive in drives %}
+              <tr>
+                <td class="mono">{{ drive.serialNumber or "—" }}</td>
+                <td>{{ drive.type or "—" }}</td>
+                <td><span class="status {{ status_class(drive.state or drive.status or 'unknown') }}">{{ status_text(drive.state or drive.status or "unknown") }}</span></td>
+                <td>{{ drive.loadedMedia or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No drives reported</h2>
+          <p>This library has not reported drives yet.</p>
+        </div>
+      {% endif %}
+    </section>
+  {% elif section == "partitions" %}
+    <section class="panel">
+      <h2>Partitions</h2>
+      {% set partitions = section_data.partitions or [] %}
+      {% if partitions %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>State</th>
+              <th>Slots</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for partition in partitions %}
+              <tr>
+                <td>{{ partition.name or partition.partitionName or "—" }}</td>
+                <td>{{ partition.type or "—" }}</td>
+                <td><span class="status {{ status_class(partition.state or 'unknown') }}">{{ status_text(partition.state or "unknown") }}</span></td>
+                <td>{{ partition.slotCount or partition.totalSlots or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No partitions configured</h2>
+          <p>This device currently has no partition records.</p>
+        </div>
+      {% endif %}
+    </section>
+  {% elif section == "jobs" %}
+    <section class="panel">
+      <h2>Device Jobs</h2>
+      {% set jobs = section_data.jobs or [] %}
+      {% if jobs %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for job in jobs %}
+              <tr>
+                <td class="mono">{{ (job.id or "—")[:8] }}{% if job.id %}…{% endif %}</td>
+                <td>{{ job_type_label(job.job_type or "unknown") }}</td>
+                <td><span class="status {{ job_state_class(job.state or 'unknown') }}">{{ status_text(job.state or "unknown") }}</span></td>
+                <td>{{ job.updated_at or "—" }}</td>
+                <td>{{ job.error or "" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No jobs for {{ device.name }}</h2>
+          <p>Run an operation to create archive, restore, or inventory jobs for this device.</p>
+          <a class="button" href="{{ url_for('devices_manage_section', device_id=device.id, section='operations') }}">Go to Operations</a>
+        </div>
+      {% endif %}
+    </section>
+  {% elif section == "operations" %}
+    {% set active_ops = section_data.active_ops or [] %}
+    {% set drives = section_data.drives or [] %}
+    {% set media = section_data.media or [] %}
+    {% set partitions = section_data.partitions or [] %}
+    {% set ie_stations = section_data.ie_stations or [] %}
+    {% set mounts = section_data.mounts or [] %}
+    {% set pools = section_data.pools or [] %}
+    {% set shares = section_data.shares or [] %}
+    {% set volume_groups = section_data.volume_groups or [] %}
+    {% set magazines = section_data.magazines or [] %}
+    {% set catalog_files = section_data.catalog_files or [] %}
+    {% set drive_media_index = section_data.drive_media_index or [] %}
+    {% set inventory_status = section_data.inventory_status or {} %}
+    {% set import_status = section_data.import_status or {} %}
+    {% set export_status = section_data.export_status or {} %}
+    {% if active_ops %}
+      <meta http-equiv="refresh" content="10" />
+    {% endif %}
+    <datalist id="barcode-options">
+      {% for item in media %}
+        {% if item.barcode %}
+          <option value="{{ item.barcode }}"></option>
+        {% endif %}
+      {% endfor %}
+      {% for mount in mounts %}
+        {% if mount.barcode %}
+          <option value="{{ mount.barcode }}"></option>
+        {% endif %}
+      {% endfor %}
+    </datalist>
+    <datalist id="drive-options">
+      {% for drive in drives %}
+        <option value="{{ drive.serialNumber or drive.id }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="slot-options">
+      {% for item in media %}
+        {% if item.slot %}
+          <option value="{{ item.slot }}"></option>
+        {% endif %}
+      {% endfor %}
+    </datalist>
+    <datalist id="partition-options">
+      {% for partition in partitions %}
+        {% set partition_name = partition.name or partition.partitionName %}
+        {% if partition_name %}
+          <option value="{{ partition_name }}"></option>
+        {% endif %}
+      {% endfor %}
+    </datalist>
+    <datalist id="ie-station-options">
+      {% for station in ie_stations %}
+        <option value="{{ station.id }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="pool-id-options">
+      {% for pool in pools %}
+        <option value="{{ pool.id }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="catalog-path-options">
+      {% for file in catalog_files %}
+        {% if file.path %}
+          <option value="{{ file.path }}"></option>
+        {% endif %}
+      {% endfor %}
+    </datalist>
+    <section class="panel">
+      <h2>Operations</h2>
+      <div class="alert warning">Operations directly control hardware behavior. Confirm each action before execution.</div>
+      <div class="grid">
+        <article class="card">
+          <h2>Operation Status</h2>
+          <p><strong>Inventory:</strong> <span class="status {{ status_class(inventory_status.state or 'idle') }}">{{ status_text(inventory_status.state or "idle") }}</span></p>
+          <p><strong>Import:</strong> <span class="status {{ status_class(import_status.state or 'idle') }}">{{ status_text(import_status.state or "idle") }}</span></p>
+          <p><strong>Export:</strong> <span class="status {{ status_class(export_status.state or 'idle') }}">{{ status_text(export_status.state or "idle") }}</span></p>
+          <form method="post" action="{{ url_for('devices_trigger_inventory', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit" class="button button-secondary" data-confirm="Run inventory scan for this device?">Run Inventory Scan</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Move Media</h2>
+          <form method="post" action="{{ url_for('devices_move_media', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <label>
+              Source
+              <input type="text" name="source" list="slot-options" placeholder="1,1,4 or 4" required />
+            </label>
+            <label>
+              Destination
+              <input type="text" name="destination" list="drive-options" placeholder="DRV-1 or 1,1,8" required />
+            </label>
+            <label>
+              Barcode (optional)
+              <input type="text" name="barcode" list="barcode-options" placeholder="ABC123L7" />
+            </label>
+            <button type="submit" data-confirm="Queue this media move operation?">Queue Move</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Mount Media</h2>
+          <form method="post" action="{{ url_for('devices_mount_media', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <label>
+              Barcode
+              <input type="text" name="barcode" list="barcode-options" placeholder="ABC123L7" required />
+            </label>
+            <label>
+              Drive
+              <input type="text" name="drive" list="drive-options" placeholder="DRV001" required />
+            </label>
+            <label>
+              Partition (optional)
+              <input type="text" name="partition" list="partition-options" placeholder="p1" />
+            </label>
+            <button type="submit" data-confirm="Mount this tape into the selected drive?">Queue Mount</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Unmount Media</h2>
+          <form method="post" action="{{ url_for('devices_unmount_media', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <label>
+              Barcode
+              <input type="text" name="barcode" list="barcode-options" placeholder="ABC123L7" required />
+            </label>
+            <label>
+              Drive
+              <input type="text" name="drive" list="drive-options" placeholder="DRV001" required />
+            </label>
+            <button type="submit" class="button button-danger" data-confirm="Unmount this tape from the selected drive?">Queue Unmount</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Import from I/E Station</h2>
+          <form method="post" action="{{ url_for('devices_import_media', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <label>
+              Partition
+              <input type="text" name="partition" list="partition-options" placeholder="p1" required />
+            </label>
+            <label>
+              I/E Station
+              <input type="text" name="ie_station" list="ie-station-options" placeholder="IE-1" required />
+            </label>
+            <button type="submit" data-confirm="Start import from the selected I/E station?">Queue Import</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Export to I/E Station</h2>
+          <form method="post" action="{{ url_for('devices_export_media', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <label>
+              Barcodes
+              <textarea name="barcodes" rows="4" placeholder="ABC123L7, DEF456L8" required></textarea>
+            </label>
+            <label>
+              I/E Station
+              <input type="text" name="ie_station" list="ie-station-options" placeholder="IE-1" required />
+            </label>
+            <button type="submit" class="button button-danger" data-confirm="Export the listed barcodes to the selected I/E station?">Queue Export</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Pool Controls</h2>
+          <form method="post" action="{{ url_for('devices_create_pool', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <label>
+              Pool ID
+              <input type="text" name="pool_id" list="pool-id-options" placeholder="pool-primary" required />
+            </label>
+            <label>
+              Pool Name
+              <input type="text" name="pool_name" placeholder="Primary Pool" required />
+            </label>
+            <label>
+              Replication Factor
+              <select name="replication_factor">
+                <option value="1">1 copy</option>
+                <option value="2">2 copies</option>
+                <option value="3">3 copies</option>
+                <option value="4">4 copies</option>
+              </select>
+            </label>
+            <label>
+              Backup Order
+              <select name="backup_order_mode">
+                <option value="sequential">Sequential</option>
+                <option value="parallel">Parallel</option>
+              </select>
+            </label>
+            <label>
+              Volume Group IDs (comma-separated)
+              <input type="text" name="volume_group_ids" placeholder="vg1,vg2" />
+            </label>
+            <label>
+              Mount Path (optional)
+              <input type="text" name="mount_path" placeholder="/openblade/pools/primary" />
+            </label>
+            <label>
+              Restore Target Path
+              <input type="text" name="restore_target_path" value="/openblade/restore" required />
+            </label>
+            <label>
+              Access Mode
+              <select name="access_mode">
+                <option value="read_only">Read Only</option>
+                <option value="read_write">Read/Write</option>
+              </select>
+            </label>
+            <label>
+              Virtual Mount Enabled
+              <select name="virtual_mount_enabled">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </label>
+            <button type="submit" data-confirm="Create or update this pool?">Save Pool</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Map Share to Pool</h2>
+          <form method="post" action="{{ url_for('devices_create_pool_share', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <label>
+              Pool ID
+              <input type="text" name="pool_id" list="pool-id-options" placeholder="pool-primary" required />
+            </label>
+            <label>
+              Share Name
+              <input type="text" name="share_name" placeholder="pool-primary-share" required />
+            </label>
+            <label>
+              Writable
+              <select name="writable">
+                <option value="false">Read-only</option>
+                <option value="true">Read/Write</option>
+              </select>
+            </label>
+            <button type="submit" data-confirm="Create or update share mapping for this pool?">Save Share Mapping</button>
+          </form>
+          {% if volume_groups %}
+            <p class="hint">Available Volume Groups: {% for group in volume_groups %}{{ group.id }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+          {% endif %}
+        </article>
+
+        <article class="card">
+          <h2>Hydrate File from Tape</h2>
+          <form method="post" action="{{ url_for('devices_restore_from_tape', device_id=device.id) }}" class="form-grid" data-confirm-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <label>
+              Catalog Path
+              <input type="text" name="catalog_path" list="catalog-path-options" placeholder="/volume-group/file.ext" required />
+            </label>
+            <label>
+              Destination Path
+              <input type="text" name="dest_path" placeholder="/openblade/restore" required />
+            </label>
+            <button type="submit" data-confirm="Queue restore job and auto-load required tape?">Queue Hydration</button>
+          </form>
+        </article>
+      </div>
+
+      <h3>Pools</h3>
+      {% if pools %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Replication</th>
+              <th>Backup Order</th>
+              <th>Access</th>
+              <th>Volume Groups</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pool in pools %}
+              <tr>
+                <td class="mono">{{ pool.id }}</td>
+                <td>{{ pool.name }}</td>
+                <td>{{ pool.replication_factor or 1 }}</td>
+                <td>{{ status_text(pool.backup_order_mode or "sequential") }}</td>
+                <td>{{ status_text(pool.access_mode or "read_only") }}</td>
+                <td>{{ (pool.volume_group_ids or [])|join(", ") or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No pools configured</h2>
+          <p>Create a pool to control tape sequencing and replication behavior.</p>
+        </div>
+      {% endif %}
+
+      <h3>Pool Shares</h3>
+      {% if shares %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Path</th>
+              <th>Type</th>
+              <th>Writable</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for share in shares %}
+              <tr>
+                <td>{{ share.name }}</td>
+                <td class="mono">{{ share.path }}</td>
+                <td>{{ share_type_label(share.share_type or "pool") }}</td>
+                <td>{{ "Yes" if share.writable else "No" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      <h3>Magazine Control</h3>
+      {% if magazines %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Location</th>
+              <th>Status</th>
+              <th>Slots</th>
+              <th>Mapped Slots</th>
+              <th>Tapes</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for magazine in magazines %}
+              <tr>
+                <td class="mono">{{ magazine.id }}</td>
+                <td>{{ magazine.location or "—" }}</td>
+                <td><span class="status {{ status_class(magazine.status or "unknown") }}">{{ status_text(magazine.status or "unknown") }}</span></td>
+                <td>{{ magazine.slotCount or 0 }}</td>
+                <td>
+                  {{ magazine.mappedSlotCount or 0 }}
+                  {% if not magazine.slotMapAligned %}
+                    <span class="status status-warning">Mismatch</span>
+                  {% endif %}
+                </td>
+                <td>{{ magazine.occupiedSlots or 0 }}</td>
+                <td>
+                  <div class="actions">
+                    <form method="post" action="{{ url_for('devices_eject_magazine', device_id=device.id, magazine_id=magazine.id) }}" data-confirm-form>
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button-danger" data-confirm="Eject magazine {{ magazine.id }}?">Eject</button>
+                    </form>
+                    <form method="post" action="{{ url_for('devices_insert_magazine', device_id=device.id, magazine_id=magazine.id) }}" data-confirm-form>
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button-secondary" data-confirm="Insert magazine {{ magazine.id }}?">Insert</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No magazines reported</h2>
+          <p>Magazine inventory will appear after physical sync and inventory scan.</p>
+        </div>
+      {% endif %}
+
+      <h3>Tape and Content Search</h3>
+      <label class="filter-form">
+        <span>Search barcodes, slots, drives, or file paths</span>
+        <input type="text" id="drive-content-search" data-table-search="drive-content-table" placeholder="ABC123L7, DRV001, /volume-group/path" />
+      </label>
+      {% if drive_media_index %}
+        <table class="data-table" id="drive-content-table">
+          <thead>
+            <tr>
+              <th>Barcode</th>
+              <th>Drive</th>
+              <th>Slot</th>
+              <th>Partition</th>
+              <th>State</th>
+              <th>Catalog Paths</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in drive_media_index %}
+              <tr data-search-row>
+                <td class="mono">{{ item.barcode }}</td>
+                <td>{{ item.drive }}</td>
+                <td>{{ item.slot }}</td>
+                <td>{{ item.partition }}</td>
+                <td><span class="status {{ status_class(item.state or "unknown") }}">{{ status_text(item.state or "unknown") }}</span></td>
+                <td>
+                  {% if item.sample_paths %}
+                    <ul class="plain-list">
+                      {% for path in item.sample_paths %}
+                        <li class="mono">{{ path }}</li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No tape content indexed</h2>
+          <p>Run inventory and archive jobs to populate searchable tape content.</p>
+        </div>
+      {% endif %}
+
+      {% if mounts %}
+        <h3>Current Mounts</h3>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Barcode</th>
+              <th>Drive</th>
+              <th>State</th>
+              <th>Mounted</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for mount in mounts %}
+              <tr>
+                <td class="mono">{{ mount.barcode or "—" }}</td>
+                <td>{{ mount.drive or "—" }}</td>
+                <td><span class="status {{ status_class(mount.state or 'unknown') }}">{{ status_text(mount.state or "unknown") }}</span></td>
+                <td>{{ mount.mountTime or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      {% if active_ops %}
+        <h3>Active Operations</h3>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for job in active_ops %}
+              <tr>
+                <td class="mono">{{ (job.id or "—")[:8] }}{% if job.id %}…{% endif %}</td>
+                <td>{{ job_type_label(job.job_type or "unknown") }}</td>
+                <td><span class="status {{ job_state_class(job.state or 'unknown') }}">{{ status_text(job.state or "unknown") }}</span></td>
+                <td>{{ job.updated_at or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+  {% elif section == "reports" %}
+    <section class="grid">
+      <article class="card">
+        <h2>Event Summary</h2>
+        {% set event_summary = section_data.event_summary or {} %}
+        <p><strong>Total:</strong> {{ event_summary.total or 0 }}</p>
+        <p><strong>Critical:</strong> {{ event_summary.critical or 0 }}</p>
+        <p><strong>Warning:</strong> {{ event_summary.warning or 0 }}</p>
+        <p><strong>Info:</strong> {{ event_summary.info or 0 }}</p>
+      </article>
+      <article class="card">
+        <h2>Alert Summary</h2>
+        {% set alert_summary = section_data.alert_summary or {} %}
+        <p><strong>Critical:</strong> {{ alert_summary.critical or 0 }}</p>
+        <p><strong>Warning:</strong> {{ alert_summary.warning or 0 }}</p>
+        <p><strong>Info:</strong> {{ alert_summary.info or 0 }}</p>
+      </article>
+    </section>
+    <section class="panel">
+      <h2>Recent Events</h2>
+      {% set events = section_data.events or [] %}
+      {% if events %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Severity</th>
+              <th>Component</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for event in events %}
+              <tr>
+                <td>{{ event.timestamp or "—" }}</td>
+                <td><span class="status {{ status_class(event.severity or 'unknown') }}">{{ status_text(event.severity or "unknown") }}</span></td>
+                <td>{{ event.component or "—" }}</td>
+                <td>{{ event.message or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No events recorded</h2>
+          <p>This device has no reportable events yet.</p>
+        </div>
+      {% endif %}
+    </section>
+  {% elif section == "settings" %}
+    <section class="panel">
+      <h2>Device Settings</h2>
+      <form method="post" action="{{ url_for('devices_update_settings', device_id=device.id) }}" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>
+          Device Name
+          <input type="text" name="name" value="{{ device.name }}" maxlength="64" required />
+        </label>
+        <label>
+          Connection URL
+          <input type="url" name="connection_url" value="{{ device.emulator_url }}" required />
+        </label>
+        <label>
+          Device Enabled
+          <select name="enabled">
+            <option value="true" {% if device.enabled %}selected{% endif %}>Enabled</option>
+            <option value="false" {% if not device.enabled %}selected{% endif %}>Disabled</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button type="submit">Save Changes</button>
+        </div>
+      </form>
+    </section>
+  {% endif %}
+{% endblock %}

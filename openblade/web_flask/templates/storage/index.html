@@ -1,0 +1,677 @@
+{% extends "base.html" %}
+{% block title %}Storage · OpenBlade NAS{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Storage</h1>
+      <p>NAS-level archive and restore workflows with device-scoped execution controls.</p>
+    </div>
+    <form method="get" action="{{ url_for('storage', section=section) }}" class="filter-form">
+      <label>
+        Device Scope
+        <select name="library_id">
+          {% for device in devices %}
+            <option value="{{ device.id }}" {% if active_device and active_device.id == device.id %}selected{% endif %}>{{ device.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="button button-secondary">Switch</button>
+    </form>
+  </section>
+
+  <nav class="tab-bar" aria-label="Storage sections">
+    {% for key, label in storage_sections %}
+      <a href="{{ url_for('storage', section=key, library_id=(active_device.id if active_device else None)) }}" class="tab {% if section == key %}tab-active{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if section == "overview" %}
+    <section class="summary">
+      {% set catalog = section_data.catalog_status or {} %}
+      <span class="chip">Catalog files: <strong>{{ catalog.total_file_records or 0 }}</strong></span>
+      <span class="chip">Datasets: <strong>{{ catalog.total_datasets or 0 }}</strong></span>
+      <span class="chip">Cartridges: <strong>{{ catalog.total_cartridges or 0 }}</strong></span>
+      <span class="chip {{ status_class((section_data.library_status or {}).overall or 'unknown') }}">
+        Library: <strong>{{ status_text((section_data.library_status or {}).overall or 'unknown') }}</strong>
+      </span>
+    </section>
+    <section class="grid">
+      <article class="card">
+        <h2>Catalog Health</h2>
+        <p><strong>DB reachable:</strong> {{ "Yes" if (catalog.db_reachable or false) else "No" }}</p>
+        <p><strong>Path mappings:</strong> {{ catalog.total_path_mappings or 0 }}</p>
+        <p><strong>Last rebuild:</strong> {{ catalog.last_rebuild_status or "unknown" }}</p>
+      </article>
+      <article class="card">
+        <h2>Media Pools</h2>
+        {% set pools = section_data.media_pools or [] %}
+        {% if pools %}
+          <ul class="plain-list">
+            {% for pool in pools[:6] %}
+              <li>{{ pool.name or "Unnamed" }} ({{ pool.type or "pool" }})</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p>No media pools reported for this device.</p>
+        {% endif %}
+      </article>
+    </section>
+  {% elif section == "access" %}
+    {% set access = section_data.share_access or [] %}
+    {% set pools = section_data.nas_pools or [] %}
+    {% set gateway_status = section_data.gateway_status or {} %}
+    {% set gateway_config = section_data.gateway_config or {} %}
+    <section class="summary">
+      <span class="chip">Connect host: <strong class="mono">{{ section_data.connect_host or "unknown" }}</strong></span>
+      <span class="chip">NAS shares: <strong>{{ access|length }}</strong></span>
+      <span class="chip">Virtual mounts enabled: <strong>{{ pools|selectattr("virtual_mount_enabled")|list|length }}</strong></span>
+      <span class="chip {{ status_class(gateway_status.status or gateway_config.status or "unknown") }}">
+        SFTP gateway: <strong>{{ status_text(gateway_status.status or gateway_config.status or "unknown") }}</strong>
+      </span>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Windows mapped drive (SMB)</h2>
+        <p class="hint">Use a share UNC path in File Explorer or map a drive letter via command line.</p>
+        <ol class="plain-list">
+          <li>Open File Explorer and choose <strong>Map network drive</strong>.</li>
+          <li>Enter UNC path <span class="mono">\\{{ section_data.connect_host }}\{{ (access[0].name if access else "inbox") }}</span>.</li>
+          <li>Authenticate with your OpenBlade account (or configured gateway credential).</li>
+        </ol>
+        {% if access %}
+          <pre class="command-block mono">{{ access[0].windows_command }}</pre>
+          <button type="button" class="button button-secondary" data-copy-text="{{ access[0].windows_command }}">Copy Windows command</button>
+        {% endif %}
+      </article>
+      <article class="card">
+        <h2>Linux mount (CIFS/NFS)</h2>
+        <p class="hint">Create mountpoint then run CIFS (Windows-compatible) or NFS command.</p>
+        {% if access %}
+          <pre class="command-block mono">{{ access[0].linux_cifs_command }}</pre>
+          <button type="button" class="button button-secondary" data-copy-text="{{ access[0].linux_cifs_command }}">Copy Linux CIFS command</button>
+          <pre class="command-block mono">{{ access[0].linux_nfs_command }}</pre>
+          <button type="button" class="button button-secondary" data-copy-text="{{ access[0].linux_nfs_command }}">Copy Linux NFS command</button>
+        {% else %}
+          <p>No NAS shares are currently configured.</p>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>SFTP fallback connection</h2>
+      {% set username = section_data.example_username or current_user or "admin" %}
+      {% set gateway_port = gateway_config.bind_port or 2222 %}
+      {% set sftp_command = "sftp -P " ~ gateway_port ~ " " ~ username ~ "@" ~ (section_data.connect_host or "127.0.0.1") %}
+      <p class="hint">If SMB/NFS is unavailable, use SFTP for direct transfer into ingest/restore paths.</p>
+      <pre class="command-block mono">{{ sftp_command }}</pre>
+      <button type="button" class="button button-secondary" data-copy-text="{{ sftp_command }}">Copy SFTP command</button>
+    </section>
+
+    <section class="panel">
+      <h2>Per-share quick commands</h2>
+      {% if access %}
+        <table class="data-table">
+          <thead><tr><th>Share</th><th>Purpose</th><th>Mode</th><th>Windows UNC</th><th>Linux CIFS</th></tr></thead>
+          <tbody>
+            {% for item in access %}
+              <tr>
+                <td class="mono">{{ item.name }}</td>
+                <td>{{ share_type_label(item.share_type) }}</td>
+                <td>{{ "Read/Write" if item.writable else "Read-only" }}</td>
+                <td>
+                  <div class="mono">{{ item.windows_unc }}</div>
+                  <button type="button" class="button button-secondary" data-copy-text="{{ item.windows_unc }}">Copy UNC</button>
+                </td>
+                <td>
+                  <div class="mono">{{ item.linux_cifs_command }}</div>
+                  <button type="button" class="button button-secondary" data-copy-text="{{ item.linux_cifs_command }}">Copy CIFS</button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No NAS shares configured</h2>
+          <p>Create share definitions in NAS configuration before mounting from clients.</p>
+        </div>
+      {% endif %}
+    </section>
+  {% elif section == "write-path" %}
+    {% set policies = section_data.policies or [] %}
+    {% set cache_drives = section_data.cache_drives or [] %}
+    {% set pools = section_data.nas_pools or [] %}
+    {% set shares = section_data.nas_shares or [] %}
+    {% set source_stream = section_data.source_stream or {} %}
+    {% set recommendations = section_data.recommendations or [] %}
+    {% set metrics = section_data.metrics or {} %}
+    <section class="summary">
+      <span class="chip">Pools: <strong>{{ pools|length }}</strong></span>
+      <span class="chip">Policies: <strong>{{ policies|length }}</strong></span>
+      <span class="chip">Cache drives: <strong>{{ cache_drives|length }}</strong></span>
+      <span class="chip {{ status_class("running" if source_stream.enabled else "offline") }}">
+        Source stream: <strong>{{ "Enabled" if source_stream.enabled else "Disabled" }}</strong>
+      </span>
+      <span class="chip">Replicated pools: <strong>{{ metrics.replicated_pools or 0 }}</strong></span>
+      <span class="chip">Sharded policies: <strong>{{ metrics.sharded_policies or 0 }}</strong></span>
+      <span class="chip">Folder rules: <strong>{{ metrics.folder_rules or 0 }}</strong></span>
+    </section>
+
+    <datalist id="policy-id-options">
+      {% for policy in policies %}
+        <option value="{{ policy.id }}"></option>
+      {% endfor %}
+    </datalist>
+    <datalist id="pool-id-options">
+      {% for pool in pools %}
+        <option value="{{ pool.id }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Policy for multi-tape writes</h2>
+        <p class="hint">Tune shard size and parallelism here, then map folders to pools below.</p>
+        <form method="post" action="{{ url_for('storage_policy_submit') }}" class="form-grid">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label>
+            Policy ID
+            <input type="text" name="policy_id" placeholder="balanced-fast" required />
+          </label>
+          <label>
+            Name
+            <input type="text" name="name" placeholder="Balanced Fast" required />
+          </label>
+          <label>
+            Policy Type
+            <select name="policy_type">
+              {% for value in policy_type_options %}
+                <option value="{{ value }}">{{ status_text(value) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Default Ingest Mode
+            <select name="default_ingest_mode">
+              {% for value in ingest_mode_options %}
+                <option value="{{ value }}">{{ status_text(value) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Copies Required
+            <input type="number" name="copies_required" min="1" max="4" value="2" required />
+          </label>
+          <label>
+            Max Parallelism
+            <input type="number" name="max_parallelism" min="1" max="16" value="4" required />
+          </label>
+          <label>
+            Shard Size (bytes)
+            <input type="number" name="shard_size_bytes" min="1" placeholder="1073741824" />
+          </label>
+          <label>
+            Shard Strategy
+            <select name="shard_strategy">
+              <option value="">Disabled</option>
+              {% for value in shard_strategy_options %}
+                <option value="{{ value }}">{{ status_text(value) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="allow_sharding" value="true" checked />
+            Allow sharding
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="verify_before_archive" value="true" checked />
+            Verify before archive
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="verify_after_archive" value="true" checked />
+            Verify after archive
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="auto_clean_before_archive" value="true" checked />
+            Auto-clean drives before archive
+          </label>
+          <div class="actions">
+            <button type="submit">Save Policy</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Cache drive staging</h2>
+        <form method="post" action="{{ url_for('storage_cache_drive_submit') }}" class="form-grid">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label>
+            Cache Drive ID
+            <input type="text" name="drive_id" placeholder="cache-primary" required />
+          </label>
+          <label>
+            Name
+            <input type="text" name="name" placeholder="Primary SSD Cache" required />
+          </label>
+          <label>
+            Root Path
+            <input type="text" name="root_path" placeholder="/openblade/cache/primary" required />
+          </label>
+          <label>
+            Max Bytes
+            <input type="number" name="max_bytes" min="1" value="107374182400" required />
+          </label>
+          <label>
+            Min Free Bytes
+            <input type="number" name="min_free_bytes" min="0" value="5368709120" required />
+          </label>
+          <label>
+            Retention Days
+            <input type="number" name="retention_days" min="0" value="14" required />
+          </label>
+          <label>
+            Stabilization Seconds
+            <input type="number" name="stabilization_seconds" min="0" value="5" required />
+          </label>
+          <label>
+            Eviction Policy
+            <select name="eviction_policy">
+              {% for value in cache_eviction_options %}
+                <option value="{{ value }}">{{ status_text(value) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="enabled" value="true" checked />
+            Enabled
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="verify_before_archive" value="true" checked />
+            Verify before archive
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="verify_after_archive" value="true" checked />
+            Verify after archive
+          </label>
+          <div class="actions">
+            <button type="submit">Save Cache Drive</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Streaming direct-to-tape</h2>
+        <form method="post" action="{{ url_for('storage_source_stream_submit') }}" class="form-grid">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label>
+            Checksum Mode
+            <select name="checksum_mode">
+              {% for value in source_checksum_modes %}
+                <option value="{{ value }}" {% if source_stream.checksum_mode == value %}selected{% endif %}>{{ status_text(value) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Max Retries
+            <input type="number" name="max_retries" min="0" max="10" value="{{ source_stream.max_retries or 3 }}" required />
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="enabled" value="true" {% if source_stream.enabled %}checked{% endif %} />
+            Enable source stream
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="require_source_online_for_entire_job" value="true" {% if source_stream.require_source_online_for_entire_job %}checked{% endif %} />
+            Require source online for full job
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="preflight_read_check" value="true" {% if source_stream.preflight_read_check %}checked{% endif %} />
+            Preflight read check
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="fail_on_source_change" value="true" {% if source_stream.fail_on_source_change %}checked{% endif %} />
+            Fail on source change
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="allow_partial_dataset_success" value="true" {% if source_stream.allow_partial_dataset_success %}checked{% endif %} />
+            Allow partial dataset success
+          </label>
+          <div class="actions">
+            <button type="submit">Save Source Stream</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Folder-to-pool access mapping</h2>
+        <form method="post" action="{{ url_for('storage_share_submit') }}" class="form-grid">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label>
+            Share Path
+            <input type="text" name="share_path" placeholder="/openblade/finance" required />
+          </label>
+          <label>
+            Share Name
+            <input type="text" name="share_name" placeholder="finance" required />
+          </label>
+          <label>
+            Share Type
+            <select name="share_type">
+              {% for value in share_type_options %}
+                <option value="{{ value }}">{{ status_text(value) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Default Policy ID (optional)
+            <input type="text" name="default_policy_id" placeholder="balanced" list="policy-id-options" />
+          </label>
+          <label>
+            Pool IDs (comma-separated)
+            <input type="text" name="pool_ids" placeholder="pool-a,pool-b" list="pool-id-options" />
+          </label>
+          <label>
+            Folder Mappings
+            <textarea name="folder_mappings" rows="4" placeholder="/finance/reports|pool-a|read_only&#10;/finance/ops|pool-b|read_write"></textarea>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="writable" value="true" checked />
+            Share writable
+          </label>
+          <div class="actions">
+            <button type="submit">Save Share Mapping</button>
+          </div>
+        </form>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>Optimization guidance</h2>
+      <ul class="plain-list">
+        {% for item in recommendations %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Current policy and tape write profile</h2>
+      {% if policies %}
+        <table class="data-table">
+          <thead><tr><th>Policy</th><th>Type</th><th>Ingest</th><th>Copies</th><th>Sharding</th><th>Shard Size</th><th>Parallelism</th><th>Auto Clean</th></tr></thead>
+          <tbody>
+            {% for policy in policies %}
+              <tr>
+                <td>{{ policy.name or policy.id }}</td>
+                <td>{{ status_text(policy.policy_type or "balanced") }}</td>
+                <td>{{ status_text(policy.default_ingest_mode or "cache_drive") }}</td>
+                <td>{{ policy.copies_required or 1 }}</td>
+                <td>{{ "Enabled" if policy.allow_sharding else "Disabled" }}</td>
+                <td>{{ policy.shard_size_bytes or "—" }}</td>
+                <td>{{ policy.max_parallelism or 1 }}</td>
+                <td>{{ "Enabled" if policy.auto_clean_before_archive else "Disabled" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No storage policies configured yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Pool and cache alignment</h2>
+      <table class="data-table">
+        <thead><tr><th>Pool</th><th>Replication</th><th>Backup Order</th><th>Cache Target</th><th>Restore Path</th></tr></thead>
+        <tbody>
+          {% for pool in pools %}
+            <tr>
+              <td>{{ pool.name or pool.id }}</td>
+              <td>{{ pool.replication_factor or 1 }}</td>
+              <td>{{ status_text(pool.backup_order_mode or "sequential") }}</td>
+              <td>{{ pool.cache_target_id or "—" }}</td>
+              <td class="mono">{{ pool.restore_target_path or "—" }}</td>
+            </tr>
+          {% endfor %}
+          {% if not pools %}
+            <tr><td colspan="5">No pools defined.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+      {% if cache_drives %}
+        <table class="data-table">
+          <thead><tr><th>Cache Drive</th><th>Root</th><th>Capacity</th><th>Min Free</th><th>Eviction</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for drive in cache_drives %}
+              <tr>
+                <td>{{ drive.name or drive.id }}</td>
+                <td class="mono">{{ drive.root_path }}</td>
+                <td>{{ drive.max_bytes }}</td>
+                <td>{{ drive.min_free_bytes }}</td>
+                <td>{{ status_text(drive.eviction_policy or "after_verified") }}</td>
+                <td><span class="status {{ status_class("running" if drive.enabled else "offline") }}">{{ "Enabled" if drive.enabled else "Disabled" }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No cache drives configured yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Current folder access mappings</h2>
+      {% if shares %}
+        <table class="data-table">
+          <thead><tr><th>Share</th><th>Path</th><th>Pools</th><th>Folder Rules</th><th>Access</th></tr></thead>
+          <tbody>
+            {% for share in shares %}
+              {% set pool_ids = share.pool_ids or [] %}
+              {% set folder_rules = share.folder_mappings or [] %}
+              <tr>
+                <td>{{ share.name or "—" }}</td>
+                <td class="mono">{{ share.path or "—" }}</td>
+                <td>{{ (pool_ids|join(", ")) if pool_ids else "—" }}</td>
+                <td>
+                  {% if folder_rules %}
+                    <ul class="plain-list">
+                      {% for rule in folder_rules %}
+                        <li class="mono">{{ rule.folder_path }} → {{ rule.pool_id }} ({{ status_text(rule.access_mode or "read_only") }})</li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ "Read/Write" if share.writable else "Read-only" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No share mappings configured yet.</p>
+      {% endif %}
+    </section>
+  {% elif section == "archive" %}
+    <section class="panel">
+      <h2>Archive Dataset</h2>
+      <p class="hint">Submit archive jobs from NAS scope; execution is routed through the selected device context.</p>
+      <form method="post" action="{{ url_for('storage_archive_submit') }}" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>
+          Source Path
+          <input type="text" name="source_path" placeholder="/data/source" required />
+        </label>
+        <label>
+          Volume Group
+          <input type="text" name="volume_group" placeholder="vg-archive" required />
+        </label>
+        <div class="actions">
+          <button type="submit" data-confirm="Submit archive job?" class="button">Submit Archive Job</button>
+        </div>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>Recent Archive Jobs</h2>
+      {% set jobs = section_data.archive_jobs or [] %}
+      {% if jobs %}
+        <table class="data-table">
+          <thead><tr><th>Job ID</th><th>Status</th><th>Created</th><th>Error</th></tr></thead>
+          <tbody>
+            {% for job in jobs %}
+              <tr>
+                <td class="mono">{{ (job.id or "—")[:8] }}{% if job.id %}…{% endif %}</td>
+                <td><span class="status {{ job_state_class(job.state) }}">{{ status_text(job.state) }}</span></td>
+                <td>{{ job.created_at }}</td>
+                <td>{{ job.error or "" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No archive jobs</h2>
+          <p>No archive jobs have been submitted yet.</p>
+        </div>
+      {% endif %}
+    </section>
+  {% elif section == "catalog" %}
+    {% set catalog = section_data.catalog_status or {} %}
+    {% set datasets = section_data.datasets or [] %}
+    {% set verify_snapshot = section_data.verify_snapshot or {} %}
+    <section class="summary">
+      <span class="chip">Total files: <strong>{{ catalog.total_file_records or 0 }}</strong></span>
+      <span class="chip">Datasets: <strong>{{ catalog.total_datasets or 0 }}</strong></span>
+      <span class="chip">Tape records: <strong>{{ catalog.total_cartridges or 0 }}</strong></span>
+      <span class="chip">Mapped paths: <strong>{{ catalog.total_path_mappings or 0 }}</strong></span>
+    </section>
+    {% if verify_snapshot %}
+      <section class="panel">
+        <h2>Last verify run</h2>
+        <p>
+          Dataset <span class="mono">{{ verify_snapshot.dataset_id }}</span> verified
+          <strong>{{ verify_snapshot.files_verified or 0 }}</strong> files,
+          corrupt <strong>{{ verify_snapshot.files_corrupt or 0 }}</strong>,
+          checksums updated <strong>{{ verify_snapshot.files_updated or 0 }}</strong>.
+        </p>
+      </section>
+    {% endif %}
+    <section class="panel">
+      <div class="card-top">
+        <h2>Dataset verification workbench</h2>
+        <label>
+          Search
+          <input
+            type="text"
+            data-table-search="dataset-verify-table"
+            placeholder="dataset id, pool, source path, status"
+          />
+        </label>
+      </div>
+      <p class="hint">Run tape checksum verification per dataset after archive or import operations.</p>
+      {% if datasets %}
+        <table id="dataset-verify-table" class="data-table">
+          <thead><tr><th>Dataset</th><th>Status</th><th>Pool</th><th>Files</th><th>Bytes</th><th>Source</th><th>Action</th></tr></thead>
+          <tbody>
+            {% for item in datasets %}
+              <tr data-search-row>
+                <td>
+                  <strong>{{ item.name or item.id }}</strong>
+                  <div class="mono">{{ item.id }}</div>
+                </td>
+                <td>{{ status_text(item.status or "pending") }}</td>
+                <td class="mono">{{ item.pool_id or "—" }}</td>
+                <td>{{ item.file_count or 0 }}</td>
+                <td>{{ item.total_bytes or 0 }}</td>
+                <td class="mono">{{ item.source_path or "—" }}</td>
+                <td>
+                  {% if item.id %}
+                    <form method="post" action="{{ url_for('storage_dataset_verify', dataset_id=item.id) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button-secondary" data-confirm="Run checksum verify on this dataset?">
+                        Verify now
+                      </button>
+                    </form>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No datasets available for verification</h2>
+          <p>Archive files first, then verify checksums from this workbench.</p>
+        </div>
+      {% endif %}
+    </section>
+    <section class="panel">
+      <h2>Catalog Files</h2>
+      {% set files = (section_data.catalog or {}).files or [] %}
+      {% if files %}
+        <table class="data-table">
+          <thead><tr><th>Path</th><th>Size</th><th>Barcode</th><th>Shard</th></tr></thead>
+          <tbody>
+            {% for item in files %}
+              <tr>
+                <td class="mono">{{ item.path }}</td>
+                <td>{{ item.size_bytes }}</td>
+                <td>{{ item.primary_barcode or "—" }}</td>
+                <td>{{ item.shard_count or 1 }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>Catalog is empty</h2>
+          <p>Archive datasets to populate catalog records.</p>
+        </div>
+      {% endif %}
+    </section>
+  {% elif section == "restore" %}
+    <section class="panel">
+      <h2>Restore Dataset</h2>
+      <form method="post" action="{{ url_for('storage_restore_submit') }}" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>
+          Catalog Path
+          <input type="text" name="catalog_path" placeholder="/volume-group/file.ext" required />
+        </label>
+        <label>
+          Destination Path
+          <input type="text" name="dest_path" placeholder="/restore/output" required />
+        </label>
+        <div class="actions">
+          <button type="submit" data-confirm="Submit restore job?" class="button">Submit Restore Job</button>
+        </div>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>Recent Restore Jobs</h2>
+      {% set jobs = section_data.restore_jobs or [] %}
+      {% if jobs %}
+        <table class="data-table">
+          <thead><tr><th>Job ID</th><th>Status</th><th>Created</th><th>Error</th></tr></thead>
+          <tbody>
+            {% for job in jobs %}
+              <tr>
+                <td class="mono">{{ (job.id or "—")[:8] }}{% if job.id %}…{% endif %}</td>
+                <td><span class="status {{ job_state_class(job.state) }}">{{ status_text(job.state) }}</span></td>
+                <td>{{ job.created_at }}</td>
+                <td>{{ job.error or "" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2>No restore jobs</h2>
+          <p>Submit a restore request to repopulate this queue.</p>
+        </div>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

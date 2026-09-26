@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Manage {{ device.name }} · OpenBlade NAS{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <div>
+      <p><a href="{{ url_for('devices_index') }}">Devices</a> / Manage</p>
+      <h1>{{ device.name }}</h1>
+      <p>
+        <span class="status {{ status_class(device.status) }}">{{ status_text(device.status) }}</span>
+        · {{ device.model }}
+      </p>
+    </div>
+  </section>
+
+  <section class="grid">
+    {% for section_key, section_label in sections %}
+      <article class="card">
+        <h2>{{ section_label }}</h2>
+        <p>Device-scoped {{ section_label | lower }} controls for {{ device.name }}.</p>
+        <a class="button button-secondary" href="{{ url_for('devices_manage_section', device_id=device.id, section=section_key) }}">Open {{ section_label }}</a>
+      </article>
+    {% endfor %}
+  </section>
+{% endblock %}
