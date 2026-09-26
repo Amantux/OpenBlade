@@ -23,6 +23,20 @@ from dataclasses import dataclass
 from enum import IntFlag
 
 
+def _coerce_int(value: object) -> int:
+    """``int(value)`` for an untyped wire value, with the same failure modes.
+
+    ``from_dict`` parses decoded JSON, so its values are ``object`` and ``int()``
+    has no overload for that. This narrows to the argument types ``int()``
+    actually accepts and raises ``TypeError`` otherwise -- already one of the
+    exceptions ``from_dict`` converts to ``ValueError``, so a bad payload
+    behaves exactly as before.
+    """
+    if isinstance(value, int | float | str):
+        return int(value)
+    raise TypeError(f"expected an int-like value, got {type(value).__name__}")
+
+
 @dataclass(frozen=True)
 class ScalarCoordinate:
     """A physical element coordinate on a Scalar i3.
@@ -54,12 +68,12 @@ class ScalarCoordinate:
         """Parse the full {frame,rack,section,column,row,type} form."""
         try:
             return cls(
-                frame=int(data["frame"]),  # type: ignore[arg-type]
-                rack=int(data["rack"]),  # type: ignore[arg-type]
-                section=int(data["section"]),  # type: ignore[arg-type]
-                column=int(data["column"]),  # type: ignore[arg-type]
-                row=int(data["row"]),  # type: ignore[arg-type]
-                element_type=int(data.get("type", data.get("element_type", 0))),  # type: ignore[arg-type]
+                frame=_coerce_int(data["frame"]),
+                rack=_coerce_int(data["rack"]),
+                section=_coerce_int(data["section"]),
+                column=_coerce_int(data["column"]),
+                row=_coerce_int(data["row"]),
+                element_type=_coerce_int(data.get("type", data.get("element_type", 0))),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"invalid ScalarCoordinate dict: {data!r}") from exc
