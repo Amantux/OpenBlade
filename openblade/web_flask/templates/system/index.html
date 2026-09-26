@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}System · OpenBlade NAS{% endblock %}
+{% block content %}
+  <meta http-equiv="refresh" content="30" />
+  <section class="page-header">
+    <div>
+      <h1>System Health</h1>
+      <p>Control plane health, component readiness, and configuration posture.</p>
+    </div>
+  </section>
+
+  <section class="grid">
+    <article class="card">
+      <h2>Overall</h2>
+      <p>
+        {% set overall = system_status.overall or health.status or 'unknown' %}
+        <span class="status {{ status_class(overall) }}">{{ status_text(overall) }}</span>
+      </p>
+      <p><strong>Version:</strong> {{ config.version or "unknown" }}</p>
+    </article>
+    <article class="card">
+      <h2>Build & Runtime</h2>
+      <p><strong>Backend:</strong> {{ config.backend or "unknown" }}</p>
+      <p><strong>Libraries:</strong> {{ config.library_count or 0 }}</p>
+      <p><strong>Gateway:</strong> {{ "Enabled" if config.gateway_enabled else "Disabled" }}</p>
+    </article>
+    <article class="card">
+      <h2>Catalog</h2>
+      <p><strong>DB reachable:</strong> {{ "Yes" if catalog_status.db_reachable else "No" }}</p>
+      <p><strong>Total files:</strong> {{ catalog_status.total_file_records or 0 }}</p>
+      <p><strong>Total datasets:</strong> {{ catalog_status.total_datasets or 0 }}</p>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Component Status</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>CPU</td>
+          <td><span class="status {{ status_class(system_status.cpu or 'unknown') }}">{{ status_text(system_status.cpu or "unknown") }}</span></td>
+        </tr>
+        <tr>
+          <td>Memory</td>
+          <td><span class="status {{ status_class(system_status.memory or 'unknown') }}">{{ status_text(system_status.memory or "unknown") }}</span></td>
+        </tr>
+        <tr>
+          <td>Disk</td>
+          <td><span class="status {{ status_class(system_status.disk or 'unknown') }}">{{ status_text(system_status.disk or "unknown") }}</span></td>
+        </tr>
+        <tr>
+          <td>Network</td>
+          <td><span class="status {{ status_class(system_status.network or 'unknown') }}">{{ status_text(system_status.network or "unknown") }}</span></td>
+        </tr>
+        <tr>
+          <td>Services</td>
+          <td><span class="status {{ status_class(system_status.services or 'unknown') }}">{{ status_text(system_status.services or "unknown") }}</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="grid">
+    <article class="card">
+      <h2>Multi-user accounts</h2>
+      {% if users %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Password Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              <tr>
+                <td class="mono">{{ user.name }}</td>
+                <td>{{ aml_role_label(user.role) }}</td>
+                <td>{{ "Required" if user.requirePasswordChange else "No" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No user records are visible for this session.</p>
+      {% endif %}
+    </article>
+    <article class="card">
+      <h2>Create user</h2>
+      <form method="post" action="{{ url_for('system_create_user') }}" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>
+          Username
+          <input type="text" name="username" placeholder="operator1" maxlength="64" required />
+        </label>
+        <label>
+          Password
+          <input type="password" name="password" minlength="8" maxlength="64" required />
+        </label>
+        <label>
+          Role
+          <select name="role">
+            {% for value, label in aml_role_options %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="actions">
+          <button type="submit">Create User</button>
+        </div>
+      </form>
+    </article>
+  </section>
+{% endblock %}

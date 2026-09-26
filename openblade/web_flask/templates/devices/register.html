@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Register Device · OpenBlade NAS{% endblock %}
+{% block content %}
+  <section class="panel panel-narrow">
+    <h1>Register Device</h1>
+    <p>Add a connected Quantum library endpoint to the dashboard.</p>
+
+    <form method="post" action="{{ url_for('devices_register') }}" class="form-grid" id="register-device-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+      <label>
+        Device Name
+        <input type="text" name="name" value="{{ values.name }}" maxlength="64" required />
+        {% if errors.name %}<small class="error">{{ errors.name }}</small>{% endif %}
+      </label>
+
+      <label>
+        Connection URL
+        <input type="url" name="connection_url" value="{{ values.connection_url }}" placeholder="https://device-host:port" required />
+        {% if errors.connection_url %}<small class="error">{{ errors.connection_url }}</small>{% endif %}
+      </label>
+
+      <label>
+        Serial Number (optional)
+        <input type="text" name="serial_number" value="{{ values.serial_number }}" maxlength="32" />
+        {% if errors.serial_number %}<small class="error">{{ errors.serial_number }}</small>{% endif %}
+      </label>
+
+      <label>
+        Device Model
+        <select name="model" required>
+          {% for model in model_options %}
+            <option value="{{ model }}" {% if values.model == model %}selected{% endif %}>{{ model }}</option>
+          {% endfor %}
+        </select>
+        {% if errors.model %}<small class="error">{{ errors.model }}</small>{% endif %}
+      </label>
+
+      <label>
+        Device Username (optional)
+        <input type="text" name="device_username" value="{{ values.device_username }}" maxlength="64" />
+        {% if errors.device_username %}<small class="error">{{ errors.device_username }}</small>{% endif %}
+      </label>
+
+      <label>
+        Device Password (optional)
+        <input type="password" name="device_password" value="" autocomplete="new-password" />
+        <small class="hint">Used only for registration probe. Not stored by OpenBlade.</small>
+      </label>
+
+      <div class="actions">
+        <button type="submit">Register Device</button>
+        <a class="button button-secondary" href="{{ url_for('devices_index') }}">Cancel</a>
+      </div>
+
+      <div id="register-probe-status" class="hint" aria-live="polite"></div>
+    </form>
+  </section>
+{% endblock %}

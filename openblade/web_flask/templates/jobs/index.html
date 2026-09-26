@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Jobs · OpenBlade NAS{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Jobs</h1>
+      <p>Track archive, restore, inventory, and system jobs across connected devices.</p>
+    </div>
+    <form method="get" action="{{ url_for('jobs') }}" class="filter-form">
+      <label>
+        Device
+        <select name="library_id">
+          <option value="">All devices</option>
+          {% for device in devices %}
+            <option value="{{ device.id }}" {% if selected_library_id == device.id %}selected{% endif %}>{{ device.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        State
+        <select name="state">
+          <option value="all" {% if selected_state == 'all' %}selected{% endif %}>All states</option>
+          {% for state in job_states %}
+            <option value="{{ state }}" {% if selected_state == state %}selected{% endif %}>{{ status_text(state) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Type
+        <select name="job_type">
+          <option value="all" {% if selected_job_type == 'all' %}selected{% endif %}>All types</option>
+          {% for job_type in job_types %}
+            <option value="{{ job_type }}" {% if selected_job_type == job_type %}selected{% endif %}>{{ job_type_label(job_type) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="button button-secondary">Apply</button>
+    </form>
+  </section>
+
+  <section class="summary" id="jobs-summary">
+    <span class="chip">Total: <strong data-jobs-summary="total">{{ jobs_summary.total }}</strong></span>
+    <span class="chip status-running">Running: <strong data-jobs-summary="running">{{ jobs_summary.running }}</strong></span>
+    <span class="chip status-unknown">Pending: <strong data-jobs-summary="pending">{{ jobs_summary.pending }}</strong></span>
+    <span class="chip status-offline">Failed: <strong data-jobs-summary="failed">{{ jobs_summary.failed }}</strong></span>
+    <span class="chip">Last update: <strong id="jobs-last-update">initial</strong></span>
+  </section>
+
+  {% if jobs %}
+    <section class="panel">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Job ID</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Library</th>
+            <th>Created</th>
+            <th>Updated</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+            <tr>
+              <td class="mono">{{ (job.id or "—")[:8] }}{% if job.id %}…{% endif %}</td>
+              <td>{{ job_type_label(job.job_type) }}</td>
+              <td><span class="status {{ job_state_class(job.state) }}">{{ status_text(job.state) }}</span></td>
+              <td>{{ job.library_id or "—" }}</td>
+              <td>{{ job.created_at }}</td>
+              <td>{{ job.updated_at }}</td>
+              <td>{{ job.error or "" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% else %}
+    <section class="panel empty-state">
+      <h2>No jobs yet</h2>
+      <p>Jobs are created when archive, restore, or inventory operations are triggered.</p>
+      <a class="button" href="{{ url_for('devices_index') }}">Go to Devices</a>
+    </section>
+  {% endif %}
+
+  <div id="jobs-sse-warning" class="alert warning hidden" aria-live="polite">
+    Live job updates paused. Showing last known totals.
+  </div>
+{% endblock %}
