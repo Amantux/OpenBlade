@@ -116,7 +116,11 @@ def _parse_json_report(run_id: str) -> dict:
         return {}
     try:
         return json.loads(path.read_text())
-    except Exception:
+    except (OSError, ValueError):
+        # OSError: the report file vanished or is unreadable between exists() and
+        # read. ValueError: json.JSONDecodeError for a truncated report (pytest
+        # killed mid-write). Both mean "no counts available"; anything else is a
+        # defect here and should surface.
         return {}
 
 

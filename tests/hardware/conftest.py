@@ -81,7 +81,11 @@ def real_library_backend(real_hardware_guard):
             return backend_cls(changer_device=changer)
         except TypeError:
             return backend_cls(changer)
-    except Exception:
+    except (ImportError, AttributeError):
+        # The real hardware module is optional (ImportError) and its class name
+        # has moved before (AttributeError); either way fall back to mtx. A
+        # backend constructor that raises for any other reason is a real failure
+        # and must not be papered over with a different backend.
         return MtxChangerBackend(
             device=changer,
             guard=_real_hardware_guard(),

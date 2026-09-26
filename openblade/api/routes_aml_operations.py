@@ -625,7 +625,7 @@ async def create_move(
             )
             s = int(s_raw)
             d = int(d_raw)
-        except Exception:
+        except (TypeError, ValueError):
             # `from None`, not `from exc`: the ValueError/TypeError text can echo
             # the caller's raw payload, and this detail string is client-facing.
             raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers") from None
@@ -637,7 +637,9 @@ async def create_move(
                     barcode_val = (
                         result.data.get("barcode") if getattr(result, "data", None) else None
                     )
-                except Exception:
+                except (AttributeError, TypeError):
+                    # `result.data` is backend-shaped and only sometimes a mapping;
+                    # a non-mapping payload means "no barcode to name", not an error.
                     barcode_val = None
                 return _ws_result(f"Queued move for {barcode_val or str(s)}")
             else:
@@ -674,7 +676,7 @@ async def create_move(
         try:
             s = int(source_raw)
             d = int(dest_raw)
-        except Exception:
+        except (TypeError, ValueError):
             # `from None`, not `from exc`: the ValueError/TypeError text can echo
             # the caller's raw payload, and this detail string is client-facing.
             raise HTTPException(status_code=422, detail="Invalid slot/drive identifiers") from None
@@ -688,7 +690,9 @@ async def create_move(
                     barcode_val = (
                         result.data.get("barcode") if getattr(result, "data", None) else None
                     )
-                except Exception:
+                except (AttributeError, TypeError):
+                    # `result.data` is backend-shaped and only sometimes a mapping;
+                    # a non-mapping payload means "no barcode to name", not an error.
                     barcode_val = None
                 return _ws_result(f"Queued move for {barcode_val or str(s)}")
             else:

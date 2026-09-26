@@ -2054,7 +2054,14 @@ def hash_password(password: str) -> str:
 def _decode_password_hash(password_hash: str) -> tuple[bytes, bytes] | None:
     try:
         decoded = base64.b64decode(password_hash.encode("ascii"), validate=True)
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
+        # ValueError covers both real failure modes of the expression above:
+        # binascii.Error (non-base64 / bad padding) and UnicodeEncodeError
+        # (non-ASCII hash) are both ValueError subclasses. TypeError/
+        # AttributeError cover a stored hash that is not a str at all (a NULL
+        # password column read back as None). Anything else here is a defect in
+        # this function, not a malformed hash, and must not be reported as
+        # "password does not verify".
         return None
     expected_length = _PASSWORD_SALT_BYTES + _PASSWORD_KEY_BYTES
     if len(decoded) != expected_length:
