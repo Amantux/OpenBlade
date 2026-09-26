@@ -38,6 +38,152 @@ def test_connect_quantum_i3_returns_inventory_report_in_dry_run(tmp_path: Path) 
     assert report.drive_correlation[0] == {"driveId": 0, "device": "/dev/st0", "serial": ""}
 
 
+class TestConnectQuantumI3TransportAwareness:
+    """``connect-i3`` used to hardcode ``RealLibraryBackend`` regardless of
+    ``OPENBLADE_ROBOTICS_TRANSPORT``, so it could not diagnose a Scalar reached
+    only over Web Services -- it built the SCSI (``mtx``) backend and then
+    crashed reading ``library.correlation``/``library.changer``, neither of
+    which ``ScalarHttpLibraryBackend`` has (see its class docstring). These
+    pin: (1) the SCSI path is unchanged, (2) the webservices path builds the
+    real Web Services backend via the same bootstrap builder the app uses, and
+    (3) fields that are genuinely transport-absent degrade to a named
+    "not applicable" report instead of raising ``AttributeError``.
+    """
+
+    @staticmethod
+    def _webservices_config(tmp_path: Path) -> OpenBladeConfig:
+        return OpenBladeConfig(
+            backend=BackendMode.REAL,
+            real_hardware_enabled=True,
+            hardware_dry_run=True,
+            ltfs_mount_root=str(tmp_path / "ltfs"),
+            robotics_transport="webservices",
+            scalar_url="https://library.example/",
+            scalar_user="admin",
+            scalar_password="password",
+        )
+
+    def test_scsi_transport_is_unaffected(self, tmp_path: Path) -> None:
+        """MUTATION ANCHOR (partial): the default/explicit ``scsi`` transport
+        must still build ``RealLibraryBackend`` and report a real correlation
+        summary, not the webservices "not applicable" degrade path."""
+        config = OpenBladeConfig(
+            backend=BackendMode.REAL,
+            real_hardware_enabled=True,
+            hardware_dry_run=True,
+            ltfs_mount_root=str(tmp_path / "ltfs"),
+            robotics_transport="scsi",
+        )
+
+        report = connect_quantum_i3(config, runner=SafeRunner(dry_run=True))
+
+        assert report.changer_device == "/dev/sg0"
+        assert report.drive_correlation_source == "dry_run"
+        assert report.drive_correlation[0] == {"driveId": 0, "device": "/dev/st0", "serial": ""}
+
+    def test_webservices_transport_builds_the_scalar_http_backend(self, tmp_path: Path) -> None:
+        """Verified by reading ``connect_quantum_i3``'s call to the same
+        ``openblade.bootstrap._create_scalar_http_library`` bootstrap uses for
+        a running app -- stubbed here (per ``tests/i3/test_scalar_http_*``'s
+        pattern) with a fake session so no real network call happens."""
+        import openblade.bootstrap as bootstrap_module
+        from openblade.hardware.scalar_http import ScalarHttpLibraryBackend
+
+        built: dict[str, object] = {}
+
+        class _StubSession:
+            def get_json(self, path: str) -> dict[str, object]:
+                if path == "/aml/physicalLibrary/elements":
+                    return {
+                        "elementList": {
+                            "element": [
+                                {"type": "slot", "address": 1, "barcode": "OB0001L8"},
+                                {"type": "slot", "address": 2, "barcode": None},
+                                {"type": "drive", "address": 1, "barcode": None, "state": "Empty"},
+                            ]
+                        }
+                    }
+                raise AssertionError(f"unexpected GET {path}")
+
+        def _fake_create_scalar_http_library(
+            config: OpenBladeConfig, runner: SafeRunner, guard: object
+        ) -> ScalarHttpLibraryBackend:
+            library = ScalarHttpLibraryBackend(
+                _StubSession(),  # type: ignore[arg-type]  # structural stand-in for ScalarHttpSession
+                library_id="stub-i3",
+            )
+            built["library"] = library
+            return library
+
+        original = bootstrap_module._create_scalar_http_library
+        bootstrap_module._create_scalar_http_library = _fake_create_scalar_http_library
+        try:
+            report = connect_quantum_i3(
+                self._webservices_config(tmp_path), runner=SafeRunner(dry_run=True)
+            )
+        finally:
+            bootstrap_module._create_scalar_http_library = original
+
+        assert isinstance(built["library"], ScalarHttpLibraryBackend)
+        assert report.library_id == "stub-i3"
+        assert report.slot_count == 2
+        assert report.drive_count == 1
+        assert report.occupied_slot_count == 1
+
+    def test_webservices_transport_degrades_absent_capabilities_instead_of_crashing(
+        self, tmp_path: Path
+    ) -> None:
+        """MUTATION ANCHOR: remove the ``getattr(library, "correlation", None)``
+        / ``getattr(library, "changer", None)`` guards (go back to
+        ``library.correlation``/``library.changer`` directly) and this test
+        fails with ``AttributeError`` instead of asserting the "not
+        applicable" report."""
+        import openblade.bootstrap as bootstrap_module
+        from openblade.hardware.scalar_http import ScalarHttpLibraryBackend
+
+        class _StubSession:
+            def get_json(self, path: str) -> dict[str, object]:
+                return {
+                    "elementList": {
+                        "element": [
+                            {"type": "drive", "address": 1, "barcode": None, "state": "Empty"},
+                        ]
+                    }
+                }
+
+        def _fake_create_scalar_http_library(
+            config: OpenBladeConfig, runner: SafeRunner, guard: object
+        ) -> ScalarHttpLibraryBackend:
+            # No correlation_factory: drive_device() refuses (typed error) --
+            # exactly the "no OPENBLADE_DRIVE_SERIAL_MAP declared" case, which
+            # must be caught, not propagated, same as the SCSI path.
+            return ScalarHttpLibraryBackend(
+                _StubSession(),  # type: ignore[arg-type]  # structural stand-in for ScalarHttpSession
+                library_id="stub-i3",
+            )
+
+        original = bootstrap_module._create_scalar_http_library
+        bootstrap_module._create_scalar_http_library = _fake_create_scalar_http_library
+        try:
+            report = connect_quantum_i3(
+                self._webservices_config(tmp_path), runner=SafeRunner(dry_run=True)
+            )
+        finally:
+            bootstrap_module._create_scalar_http_library = original
+
+        assert report.changer_device == (
+            "not applicable on webservices transport (the changer is driven over "
+            "AML Web Services; there is no local changer device)"
+        )
+        assert report.drive_correlation_source == "not_applicable"
+        assert report.drive_correlation_serials_verified is False
+        assert report.drive_correlation_warnings
+        assert report.drive_correlation == []
+        # No OPENBLADE_DRIVE_SERIAL_MAP -> drive_device() refuses; the refusal
+        # is swallowed into "" the same way the SCSI backend's is.
+        assert report.drive_devices == [""]
+
+
 def test_validate_ltfs_capabilities_reports_device_list_and_plan(tmp_path: Path) -> None:
     report = validate_ltfs_capabilities(
         _config(tmp_path),
