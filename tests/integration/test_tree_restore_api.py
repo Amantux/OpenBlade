@@ -236,3 +236,17 @@ def test_a_typed_domain_error_keeps_its_own_status(
     # is operator-written and the status is part of its meaning.
     assert response.status_code == 409
     assert "exported" in response.json()["detail"]
+
+
+def test_tree_restore_serializes_with_archive_media_work(monkeypatch) -> None:
+    """Off-loop execution made concurrency real; the worker must hold the
+    same process-wide media lock the archive routes do, or drive loads
+    interleave (plain files always target drive 0). Source-shape assertion:
+    the lock acquisition must wrap run_tree_restore in the worker."""
+    import inspect
+
+    from openblade.api import routes_restore as mod
+
+    src = inspect.getsource(mod)
+    worker = src.split("def _run()")[1].split("await to_thread")[0]
+    assert "_ARCHIVE_REQUEST_LOCK" in worker

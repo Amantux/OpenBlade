@@ -131,11 +131,28 @@ async def preview_mailslot_export(
     "nothing on it" for an unknown barcode, which is true and useless: rendered in
     a UI next to an Export button, a typo reads as "safe to export".
     """
+    # "Known" must cover everywhere a cartridge can BE, not just storage:
+    # one sitting in the mailslot or loaded in a drive with no catalog row
+    # would otherwise 404 as "not in this library's inventory" — false.
+    inventory = context.library.inventory()
+    ie_barcodes: set[str] = set()
+    mailslot_backend = getattr(context.library, "import_export_slots", None)
+    if callable(mailslot_backend):
+        ie_barcodes = {
+            str(slot.barcode)
+            for slot in mailslot_backend()
+            if slot.barcode is not None
+        }
     known = (
         any(
             slot.barcode is not None and str(slot.barcode) == barcode
-            for slot in context.library.inventory().slots
+            for slot in inventory.slots
         )
+        or any(
+            drive.barcode is not None and str(drive.barcode) == barcode
+            for drive in inventory.drives
+        )
+        or barcode in ie_barcodes
         or context.catalog.get_cartridge(barcode) is not None
     )
     if not known:

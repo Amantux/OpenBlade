@@ -8,6 +8,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from anyio import to_thread
+
+from openblade.api.routes_archive import _ARCHIVE_REQUEST_LOCK
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -238,16 +240,22 @@ async def restore_tree(
     )
 
     def _run() -> TreeRestoreResult:
+        # Off-loop execution made concurrency REAL: before this ran on the
+        # event loop, the loop itself serialized media work. Take the same
+        # process-wide media lock the archive routes hold, or a tree restore
+        # interleaves drive loads with POST /archive/ (plain files always
+        # target drive 0) and two callers fight over one drive.
         db_session = get_session()
         try:
-            return run_tree_restore(
-                tree_request,
-                context.library,
-                context.ltfs,
-                CatalogRepository(db_session),
-                scheduler,
-                job.id,
-            )
+            with _ARCHIVE_REQUEST_LOCK:
+                return run_tree_restore(
+                    tree_request,
+                    context.library,
+                    context.ltfs,
+                    CatalogRepository(db_session),
+                    scheduler,
+                    job.id,
+                )
         finally:
             db_session.close()
 

@@ -301,8 +301,7 @@ jobs:
   # branch-protection check (plus operability-gate). It understands a valid
   # `skipped` result from path-filtered jobs and fails on any real failure or
   # cancellation, so branch protection no longer has to reason about skips.
-  # backend-lint and backend-typecheck both block now; nothing here is advisory
-  # except the echo'd backend-lint line below (it blocks via its own job status).
+  # backend-lint and backend-typecheck both block through this gate now.
   ci-gate:
     name: ci-gate
     needs:
@@ -341,7 +340,10 @@ jobs:
           # `strict = true` and the toolchain pinned. A red typecheck means a new
           # annotation is missing, which is cheap to fix at the reported site.
           check backend-typecheck    "${{ needs.backend-typecheck.result }}"
-          echo "advisory (non-blocking): backend-lint=${{ needs.backend-lint.result }}"
+          # Blocking: the pinned-toolchain baseline is zero findings, and a
+          # lint red outside this gate never actually gated when ci-gate is
+          # the only required check (the earlier flip missed this row).
+          check backend-lint         "${{ needs.backend-lint.result }}"
           if [ "$fail" -ne 0 ]; then
             echo "::error::ci-gate: a required job failed or was cancelled"
             exit 1

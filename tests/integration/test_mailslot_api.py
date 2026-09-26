@@ -248,9 +248,12 @@ def test_export_preview_of_an_unknown_barcode_is_a_404_not_a_cheerful_zero(
 def test_a_mistyped_confirm_barcode_is_refused(client: TestClient, tmp_path: Path) -> None:
     """Typed confirmation means EXACT match — a near-miss must not export.
     (This is the API-side twin of the CLI's --confirm-barcode guard.)"""
-    barcode = _archive_one_file(client, tmp_path)
+    barcode = _data_barcodes(limit=1)[0]
+    _format_and_assign(client, "photos", barcode)
+    _archive_one_file(client, tmp_path / "photos-source", "photos", "a.txt")
     wrong = client.post(
         "/mailslot/export", json={"barcode": barcode, "confirmBarcode": barcode.lower()}
     )
     assert wrong.status_code == 409, wrong.text
-    assert barcode in wrong.json()["detail"]
+    # Nothing moved on a near-miss.
+    assert client.get("/mailslot/slots").json()["occupiedCount"] == 0
