@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from openblade.domain.errors import ChecksumMismatchError
+from openblade.domain.errors import ChecksumMismatchError, safe_job_error
 from openblade.nas.restore_planner import RestorePlan
 from openblade.nas.service import NasService
 from openblade.nas.tape_paths import dataset_tape_path
@@ -204,10 +204,21 @@ class HydrationExecutor:
         except _HydrationControlSignal:
             self._set_file_status(record, original_status)
             raise
-        except Exception as exc:
+        # Per-file isolation: one unreadable file must not abandon the rest of the
+        # restore, so this stays broad. safe_job_error() replaced the raw `{exc}`:
+        # these strings are joined into NasRestoreJob.error_message, which
+        # GET /nas/restore-jobs/{id} serves with no auth dependency — the same
+        # surface docs/ and test_job_error_sanitization.py guard on jobs.error.
+        # Typed OpenBlade errors (ChecksumMismatchError) still pass through.
+        except Exception as exc:  # noqa: BLE001 - see above
+            logger.warning(
+                "hydration file restore failed",
+                extra={"relative_path": record.relative_path},
+                exc_info=True,
+            )
             self._persist_file_record(record.model_copy(update={"status": NasFileState.FAILED}))
             hydration_job.files_failed += 1
-            hydration_job.errors.append(f"{record.relative_path}: {exc}")
+            hydration_job.errors.append(f"{record.relative_path}: {safe_job_error(exc)}")
             self._update_status(
                 hydration_job.job_id,
                 RestoreJobStatus.RUNNING,

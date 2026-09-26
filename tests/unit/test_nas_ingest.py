@@ -437,3 +437,80 @@ def test_ingest_with_no_plan_returns_400(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_ingest_run_failure_error_is_sanitized(tmp_path: Path, monkeypatch) -> None:
+    """IngestJob.errors is served by GET /nas/ingest/{job_id}, a route with no auth
+    dependency. run()'s catch-all owns the dataset's terminal state, so it must stay
+    broad — but the text it records goes through safe_job_error(), or a CommandError
+    publishes mkltfs/mtx argv and stderr on an unauthenticated surface."""
+    from openblade.hardware.runner import CommandError
+    from openblade.nas.ingest import CacheDriveIngest
+
+    service, cache_root = _setup_service(tmp_path)
+    plan = register_archive_plan(_make_plan(cache_root))
+    job = start_ingest_job(
+        plan=plan,
+        dataset_name="dataset-a",
+        pool_id="pool-1",
+        nas_service=service,
+        cache_drive_id="cache-1",
+    )
+
+    def leaky(self):
+        raise CommandError(["mkltfs", "-d", "/dev/nst0"], 1, "raw stderr LEAK")
+
+    monkeypatch.setattr(CacheDriveIngest, "_prepare_files", leaky)
+
+    result = _run_job(service, job.job_id)
+
+    assert result.status is DatasetStatus.FAILED
+    joined = " ".join(result.errors)
+    assert "LEAK" not in joined
+    assert "/dev/nst0" not in joined
+    assert "mkltfs" not in joined
+    assert "CommandError" in joined
+
+
+def test_ingest_per_file_error_is_sanitized(tmp_path: Path, monkeypatch) -> None:
+    """The per-file handler records into the same unauthenticated IngestJob.errors,
+    so it goes through safe_job_error() too. The relative path stays: it names which
+    file failed, which the dataset listing already shows."""
+    from openblade.hardware.runner import CommandError
+
+    service, cache_root = _setup_service(tmp_path)
+    plan = register_archive_plan(_make_plan(cache_root))
+    job = start_ingest_job(
+        plan=plan,
+        dataset_name="dataset-a",
+        pool_id="pool-1",
+        nas_service=service,
+        cache_drive_id="cache-1",
+    )
+
+    context = get_context()
+
+    def leaky_write(handle, dest, content, **kwargs):
+        raise CommandError(["mkltfs", "-d", "/dev/nst0"], 1, "raw stderr LEAK")
+
+    monkeypatch.setattr(context.ltfs, "write_bytes", leaky_write)
+
+    result = _run_job(service, job.job_id)
+
+    joined = " ".join(result.errors)
+    assert result.files_failed == 2
+    assert "LEAK" not in joined
+    assert "/dev/nst0" not in joined
+    assert "a.txt" in joined
+    assert "CommandError" in joined
+
+
+def test_preflight_refusals_keep_their_curated_text(tmp_path: Path) -> None:
+    """IngestRefusedError is typed so safe_job_error passes it through: sanitizing
+    the run() boundary must not degrade the messages an operator acts on."""
+    from openblade.domain.errors import safe_job_error
+    from openblade.nas.ingest import IngestRefusedError
+
+    exc = IngestRefusedError("Cache drive cache-1 cannot reserve 10 bytes")
+    assert safe_job_error(exc) == "Cache drive cache-1 cannot reserve 10 bytes"
+    assert isinstance(exc, RuntimeError)
