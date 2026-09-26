@@ -27,6 +27,7 @@ from openblade.domain.errors import (
     ImportExportSlotError,
     MailslotUnsupportedError,
 )
+from openblade.jobs.inventory import InventoryService
 from openblade.nas.mailslot import MailslotMoveResult, MailslotService
 from openblade.nas.tape_orchestrator import TapeOperationFailedError
 
@@ -134,7 +135,7 @@ async def preview_mailslot_export(
     # "Known" must cover everywhere a cartridge can BE, not just storage:
     # one sitting in the mailslot or loaded in a drive with no catalog row
     # would otherwise 404 as "not in this library's inventory" — false.
-    inventory = context.library.inventory()
+    inventory = InventoryService(context.library).snapshot()
     ie_barcodes: set[str] = set()
     mailslot_backend = getattr(context.library, "import_export_slots", None)
     if callable(mailslot_backend):
