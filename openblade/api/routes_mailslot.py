@@ -138,16 +138,9 @@ async def preview_mailslot_export(
     ie_barcodes: set[str] = set()
     mailslot_backend = getattr(context.library, "import_export_slots", None)
     if callable(mailslot_backend):
-        ie_barcodes = {
-            str(slot.barcode)
-            for slot in mailslot_backend()
-            if slot.barcode is not None
-        }
+        ie_barcodes = {str(slot.barcode) for slot in mailslot_backend() if slot.barcode is not None}
     known = (
-        any(
-            slot.barcode is not None and str(slot.barcode) == barcode
-            for slot in inventory.slots
-        )
+        any(slot.barcode is not None and str(slot.barcode) == barcode for slot in inventory.slots)
         or any(
             drive.barcode is not None and str(drive.barcode) == barcode
             for drive in inventory.drives

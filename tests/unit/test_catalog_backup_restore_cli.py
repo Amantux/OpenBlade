@@ -122,7 +122,7 @@ class TestBackupRoundTrip:
                     committed_ids.append(job_id)
                     i += 1
                     time.sleep(0.05)
-            except BaseException as exc:  # pragma: no cover - failure path
+            except BaseException as exc:  # noqa: BLE001 — worker thread's ONLY channel back to the asserting test; anything narrower hides the failure  # pragma: no cover - failure path
                 errors.append(exc)
             finally:
                 conn.close()

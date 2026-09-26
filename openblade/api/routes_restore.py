@@ -8,12 +8,11 @@ from pathlib import Path
 from uuid import uuid4
 
 from anyio import to_thread
-
-from openblade.api.routes_archive import _ARCHIVE_REQUEST_LOCK
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from openblade.api import aml_state
+from openblade.api.routes_archive import _ARCHIVE_REQUEST_LOCK
 from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.db import get_session
 from openblade.catalog.repository import CatalogRepository
