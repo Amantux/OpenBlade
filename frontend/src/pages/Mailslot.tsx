@@ -133,7 +133,12 @@ export default function Mailslot() {
     supported: false,
   };
   const occupiedSlots = listing.importExportSlots.filter((slot) => slot.occupied);
-  const assessment = previewMutation.data ?? null;
+  // An assessment is only an answer about the barcode it was fetched for: once the
+  // field changes, a stale panel would describe a different cartridge.
+  const assessment =
+    previewMutation.data && previewMutation.data.barcode === exportBarcode.trim()
+      ? previewMutation.data
+      : null;
   const exportError = exportMutation.error;
   const exportRefused = exportError instanceof ApiError && exportError.status === 409;
 

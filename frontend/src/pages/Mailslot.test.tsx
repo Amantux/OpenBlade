@@ -185,6 +185,27 @@ describe('Mailslot', () => {
     expect(mailslotModule.exportThroughMailslot).not.toHaveBeenCalled();
   });
 
+  it('drops the assessment when the barcode field changes', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Cartridge barcode')).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText('Cartridge barcode'), {
+      target: { value: 'ARC001L8' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Check what would leave' }));
+    await waitFor(() => {
+      expect(screen.getByText(/still carries archived data/)).toBeTruthy();
+    });
+
+    // A panel describing a different cartridge is worse than no panel.
+    fireEvent.change(screen.getByLabelText('Cartridge barcode'), {
+      target: { value: 'SCR001L8' },
+    });
+    expect(screen.queryByText(/still carries archived data/)).toBeNull();
+  });
+
   it('exports a cartridge that carries nothing without asking for confirmation', async () => {
     mailslotModule.previewMailslotExport.mockResolvedValue(EMPTY_CARTRIDGE);
     renderPage();
