@@ -215,7 +215,10 @@ def test_the_tapealert_reason_never_carries_the_tools_stderr(
             flags=(),
             reason=(
                 "no TapeAlert page in sg_logs output "
-                "(sg_logs exited 5: log_sense: field in cdb illegal, /dev/sg1 dsn=secret)"
+                # The closing parenthesis inside the tool's own message is the
+                # point: a `[^)]*` sanitizer passes the whole stderr through here.
+                "(sg_logs exited 5: log_sense: field in cdb illegal (rc=5), "
+                "/dev/sg1 dsn=secret)"
             ),
         ),
     )

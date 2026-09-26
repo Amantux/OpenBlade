@@ -72,7 +72,12 @@ class DriveHealthListResponse(BaseModel):
 #: on the wire: it is raw tool output at an untrusted boundary (see
 #: ``safe_job_error``'s docstring for the rule). The exit code survives, because
 #: "sg_logs exited 5" is the part an operator can act on.
-_SG_TOOL_DETAIL = re.compile(r"\(sg_logs exited (-?\d+):[^)]*\)")
+#:
+#: Anchored to the end of the string and matching ANY character after the colon --
+#: the suffix is appended last by `read_tape_alerts`, and a `[^)]*` version would
+#: silently pass the whole stderr through whenever the tool's own message happened
+#: to contain a closing parenthesis.
+_SG_TOOL_DETAIL = re.compile(r"\(sg_logs exited (-?\d+):.*\Z", re.DOTALL)
 
 
 def _curated_reason(reason: str | None) -> str | None:
