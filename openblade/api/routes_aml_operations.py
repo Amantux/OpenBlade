@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -17,6 +18,7 @@ from openblade.catalog.models import AmlUser
 from openblade.domain.errors import safe_job_error
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _normalize_move_address(address: str) -> str:
@@ -743,11 +745,18 @@ async def create_move(
                         ):
                             barcode_raw = str(media.get("barcode"))
                             break
-                except Exception:
-                    pass
-        except Exception:
-            # If inventory lookup fails, continue and let validation handle it
-            barcode_raw = barcode_raw
+                except (AttributeError, TypeError, ValueError) as exc:
+                    # A malformed aml_state media entry only costs us the
+                    # barcode hint; validation below still rejects the move.
+                    logger.warning("aml media slot scan failed: %s", type(exc).__name__)
+        # Best-effort inventory probe: any failure degrades to "no barcode hint"
+        # and the _is_missing() validation below answers 422. Logged (class name
+        # only, never the client-facing detail) because the original swallow —
+        # `barcode_raw = barcode_raw` — lost the cause entirely.
+        except Exception as exc:  # noqa: BLE001 - see above
+            logger.warning(
+                "move-medium barcode inference failed: %s", type(exc).__name__, exc_info=True
+            )
 
     # If any core move fields are missing, return 422 (validation error) so clients see a clear validation response
     def _is_missing(val: object) -> bool:

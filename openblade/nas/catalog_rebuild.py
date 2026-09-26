@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from uuid import uuid4
 
@@ -25,6 +26,8 @@ from openblade.nas.types import (
     RebuildPlanResult,
     RebuildRunStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow_iso() -> str:
@@ -191,7 +194,17 @@ class CatalogRebuildPlanner:
                 path_mappings_recovered += self._recover_path_mappings(shard)
                 self._recover_manifest_versions(barcode)
                 completed.append(barcode)
-            except Exception:
+            # Per-barcode isolation: one unreadable tape must not abandon the
+            # rebuild of the others, so this stays broad and the barcode is named
+            # in error_summary (curated text — the summary is operator-facing).
+            # The log is the point of this change: disaster recovery previously
+            # discarded the only evidence of why a tape could not be recovered.
+            except Exception:  # noqa: BLE001 - see above
+                logger.warning(
+                    "catalog rebuild failed for cartridge",
+                    extra={"barcode": barcode},
+                    exc_info=True,
+                )
                 failed.append(barcode)
                 error_summary.append(f"failed to recover catalog data for {barcode}")
 

@@ -140,5 +140,9 @@ async def ltfs_status(context: AppContext = Depends(get_context)) -> dict:
     # Return LTFS backend status if available
     try:
         return context.ltfs.to_json()
-    except Exception:
+    # Status endpoints report, they do not fail: any backend shape that cannot
+    # serialise itself becomes "unknown" rather than a 500. Logged because the
+    # original swallow left no trace of why the backend went dark.
+    except Exception:  # noqa: BLE001 - see above
+        logger.warning("ltfs status unavailable", exc_info=True)
         return {"status": "unknown"}
