@@ -16,6 +16,7 @@ its volume group and sample paths. ``force`` is the only way past it, exactly as
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import Path as PathParam
 from pydantic import BaseModel, Field
 
 from openblade.bootstrap import AppContext, get_context
@@ -116,10 +117,30 @@ async def list_mailslot_slots(
 
 @router.get("/export-preview/{barcode}", response_model=ExportAssessmentResponse)
 async def preview_mailslot_export(
-    barcode: str,
+    barcode: str = PathParam(min_length=1, max_length=64),
     context: AppContext = Depends(get_context),
 ) -> ExportAssessmentResponse:
-    """What would leave with ``barcode``. Moves nothing."""
+    """What would leave with ``barcode``. Moves nothing.
+
+    404s for a barcode this library has never heard of. ``assess_export`` answers
+    "nothing on it" for an unknown barcode, which is true and useless: rendered in
+    a UI next to an Export button, a typo reads as "safe to export".
+    """
+    known = (
+        any(
+            slot.barcode is not None and str(slot.barcode) == barcode
+            for slot in context.library.inventory().slots
+        )
+        or context.catalog.get_cartridge(barcode) is not None
+    )
+    if not known:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Cartridge {barcode} is not in this library's inventory or catalog; "
+                "there is nothing to assess."
+            ),
+        )
     assessment = _service(context).preview_export(barcode)
     return ExportAssessmentResponse.model_validate(assessment.to_dict())
 

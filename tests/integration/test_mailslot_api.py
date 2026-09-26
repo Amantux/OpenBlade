@@ -232,3 +232,14 @@ def test_export_refuses_once_every_element_is_full(client: TestClient) -> None:
     response = client.post("/mailslot/export", json={"barcode": barcodes[slot_count]})
     assert response.status_code == 409
     assert "empty the mailslot" in response.json()["detail"]
+
+
+def test_export_preview_of_an_unknown_barcode_is_a_404_not_a_cheerful_zero(
+    client: TestClient,
+) -> None:
+    # `assess_export` answers "nothing on it" for a barcode that does not exist,
+    # which is true and useless: next to an Export button a typo would read as
+    # "safe to export".
+    response = client.get("/mailslot/export-preview/NOSUCH1L8")
+    assert response.status_code == 404
+    assert "NOSUCH1L8" in response.json()["detail"]
