@@ -40,5 +40,31 @@ services:
       api:
         condition: service_healthy
 
+  # Nightly catalog backup sidecar (off by default -- uncomment to enable).
+  # Mirrors `openblade catalog backup --dest /backups --keep 14` on a loop;
+  # gzip snapshots land on the `openblade-backups` volume, pruned to the 14
+  # most recent. See docs/wiki/guides/the-catalog.md#openblade-catalog-backup--restore-backup.
+  # backup:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     OPENBLADE_BACKEND: mock
+  #     OPENBLADE_DB_URL: sqlite:////data/openblade.db
+  #   volumes:
+  #     - openblade-data:/data
+  #     - openblade-backups:/backups
+  #   entrypoint: ["/bin/sh", "-c"]
+  #   command:
+  #     - |
+  #       while true; do
+  #         openblade catalog backup --dest /backups --keep 14
+  #         sleep 86400
+  #       done
+  #   depends_on:
+  #     api:
+  #       condition: service_healthy
+
 volumes:
   openblade-data:
+  # openblade-backups:

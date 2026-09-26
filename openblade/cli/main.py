@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import json
+import os
+import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -24,6 +28,7 @@ from openblade.domain.errors import (
     safe_job_error,
 )
 from openblade.domain.models import Barcode, DriveState, MountState
+from openblade.dr import backup_sqlite, restore_and_verify, sqlite_path
 from openblade.fuse.filesystem import CatalogFilesystem
 from openblade.hardware.validation import connect_quantum_i3, validate_ltfs_capabilities
 from openblade.jobs.restore import RestoreRequest, run_restore_job
@@ -59,6 +64,27 @@ archive_app = typer.Typer(help="Archive commands", invoke_without_command=True)
 app.add_typer(archive_app, name="archive")
 mailslot_app = typer.Typer(help="Import/export (mailslot) commands")
 app.add_typer(mailslot_app, name="mailslot")
+
+
+# `catalog` predates `backup`/`restore-backup`: `openblade catalog [path]` lists
+# a catalog directory, with PATH positional -- unlike `restore`/`archive`
+# above, which only ever took --options and so never collided with their own
+# subcommand names. A positional Argument on a Click Group callback binds
+# greedily to the first token, so `openblade catalog backup --dest X` would
+# otherwise bind "backup" to `path` and then fail to resolve "--dest" as a
+# subcommand. `_CatalogGroup` rewrites the arg list so an unrecognised first
+# token (i.e. not `backup`/`restore-backup`/...) is routed to the `ls`
+# subcommand instead of being swallowed by the group parser, keeping the old
+# bare-path invocation working unchanged.
+class _CatalogGroup(typer.core.TyperGroup):
+    def parse_args(self, ctx: typer._click.core.Context, args: list[str]) -> list[str]:
+        if not args or (not args[0].startswith("-") and args[0] not in self.commands):
+            args = ["ls", *args]
+        return super().parse_args(ctx, args)
+
+
+catalog_app = typer.Typer(help="Catalog browsing and backup/restore commands", cls=_CatalogGroup)
+app.add_typer(catalog_app, name="catalog")
 
 # Operator assistant. Registered from its own module so the assistant's
 # dependencies stay out of this file. It reads and proposes; the only things it
@@ -940,9 +966,14 @@ def jobs(job_id: str | None = typer.Argument(None)) -> None:
     console.print(table)
 
 
-@app.command("catalog")
+@catalog_app.command("ls")
 def catalog_ls(path: str = typer.Argument("/")) -> None:
-    """List files in the catalog."""
+    """List files in the catalog.
+
+    This is what `_CatalogGroup.parse_args` routes bare `openblade catalog
+    [path]` invocations to -- see the comment above `catalog_app`'s
+    definition. It is also directly callable as `openblade catalog ls`.
+    """
     context = _get_context()
     filesystem = CatalogFilesystem(context.catalog, cache_dir=context.config.cache_dir)
     entries = filesystem.listdir(path)
@@ -956,6 +987,171 @@ def catalog_ls(path: str = typer.Argument("/")) -> None:
             entry.name, "dir" if entry.is_dir else "file", str(entry.size_bytes), str(entry.path)
         )
     console.print(table)
+
+
+def _backup_glob(dest: Path) -> list[Path]:
+    # Filenames are `openblade-<YYYYmmddTHHMMSSZ>.db.gz` -- the timestamp
+    # format sorts lexicographically in chronological order, so a plain name
+    # sort is a correct newest-first ordering without parsing anything back
+    # out of the filename.
+    return sorted(dest.glob("openblade-*.db.gz"), reverse=True)
+
+
+@catalog_app.command("backup")
+def catalog_backup(
+    dest: Path = typer.Option(
+        ..., "--dest", help="Destination directory for the compressed backup"
+    ),
+    keep: int = typer.Option(
+        14,
+        "--keep",
+        help="Number of most-recent backups to retain in --dest; older ones are deleted",
+    ),
+) -> None:
+    """Take an online backup of the catalog database and gzip it.
+
+    Safe to run against a LIVE catalog with a writer in progress: this goes
+    through Python's ``sqlite3.Connection.backup()`` (the SQLite online-backup
+    API, wrapped by ``openblade.dr.backup_sqlite``), which takes a consistent
+    page-level snapshot without blocking or being corrupted by a concurrent
+    writer. A plain file copy (``cp openblade.db ...``) is NOT safe for this --
+    it can capture a torn, mid-write page.
+    """
+    context = _get_context()
+    dest.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    gz_path = dest / f"openblade-{timestamp}.db.gz"
+    workdir = Path(tempfile.mkdtemp(prefix="openblade-backup-"))
+    try:
+        raw_path = workdir / "backup.db"
+        meta = backup_sqlite(context.config.db_url, raw_path)
+        with open(raw_path, "rb") as src, gzip.open(gz_path, "wb") as gz_dst:
+            shutil.copyfileobj(src, gz_dst)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+    # Snapshot the size before pruning: `--keep 0` (or any --keep small enough
+    # to include this run) must still report the backup that was just made,
+    # not blow up on a stat() of a file it just deleted.
+    compressed_bytes = gz_path.stat().st_size
+
+    # The backup just written is never a prune candidate -- only *older*
+    # backups are, regardless of --keep. `--keep 0` therefore means "keep no
+    # OTHER backups", not "delete the one I just took".
+    other_backups = [p for p in _backup_glob(dest) if p != gz_path]
+    to_prune = other_backups[max(keep - 1, 0) :] if keep >= 0 else []
+    for stale in to_prune:
+        stale.unlink()
+
+    emit_json(
+        {
+            "backupFile": str(gz_path),
+            "compressedBytes": compressed_bytes,
+            "uncompressedBytes": meta["bytes"],
+            "sha256Uncompressed": meta["sha256"],
+            "pruned": [str(p) for p in to_prune],
+            "retained": len(other_backups) - len(to_prune) + 1,
+        }
+    )
+
+
+@catalog_app.command("restore-backup")
+def catalog_restore_backup(
+    backup_file: Path = typer.Argument(
+        ..., help="Path to a gzip-compressed catalog backup produced by `catalog backup`"
+    ),
+    confirm_db_path: str = typer.Option(
+        ...,
+        "--confirm-db-path",
+        help="Type the exact live catalog DB path to confirm. THIS OVERWRITES THE CATALOG.",
+    ),
+) -> None:
+    """Restore the catalog database from a backup, OVERWRITING the live catalog.
+
+    Destructive: this replaces the entire file->tape mapping and every measured
+    tape capacity with whatever the backup contains. Refuses unless
+    --confirm-db-path is typed out equal to the live DB path (a typo-safe
+    confirmation, not a --yes flag), and refuses while any job is pending or
+    running. Both refusals fire BEFORE the backup file is even opened, so a
+    mistaken invocation costs nothing.
+    """
+    context = _get_context()
+    live_db_path = Path(sqlite_path(context.config.db_url)).expanduser().resolve()
+    typed_path = Path(confirm_db_path).expanduser().resolve()
+    if typed_path != live_db_path:
+        err_console.print(
+            "[red]Refusing restore[/red]: --confirm-db-path must equal the live "
+            f"catalog path exactly ({live_db_path}); got {typed_path}."
+        )
+        raise typer.Exit(code=1)
+
+    active_jobs = [
+        job for job in context.catalog.list_jobs() if job.state in ("pending", "running")
+    ]
+    if active_jobs:
+        err_console.print(
+            f"[red]Refusing restore[/red]: {len(active_jobs)} job(s) are pending or "
+            "running (e.g. job "
+            f"{active_jobs[0].id}). Wait for them to finish, or cancel them, before restoring."
+        )
+        raise typer.Exit(code=1)
+
+    if not backup_file.exists():
+        err_console.print(f"[red]Backup file not found[/red]: {backup_file}")
+        raise typer.Exit(code=1)
+
+    # The decompressed candidate is staged in a temp dir INSIDE the live DB's
+    # own directory, not the system temp dir (which is frequently a different
+    # mount -- e.g. the container's writable layer vs. a `/data` volume).
+    # `os.replace()` below is only atomic (and only guaranteed to work at all)
+    # when both paths are on the same filesystem; across filesystems it
+    # raises EXDEV, and there is deliberately no cross-device fallback here --
+    # a fallback would mean a window where the live DB is half-copied.
+    live_db_path.parent.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix=".openblade-restore-", dir=str(live_db_path.parent)))
+    try:
+        decompressed = workdir / "restored.db"
+        try:
+            with gzip.open(backup_file, "rb") as gz_src, open(decompressed, "wb") as dst:
+                shutil.copyfileobj(gz_src, dst)
+        except (gzip.BadGzipFile, OSError, EOFError) as exc:
+            err_console.print(f"[red]Corrupt backup file[/red]: {exc}")
+            raise typer.Exit(code=1) from None
+
+        report = restore_and_verify(decompressed)
+        if not report.ok:
+            err_console.print(
+                "[red]Backup failed integrity verification[/red]; catalog left untouched:"
+            )
+            for check in report.checks:
+                status = "OK" if check.ok else "FAIL"
+                err_console.print(f"  [{status}] {check.name}: {check.detail}")
+            raise typer.Exit(code=1)
+
+        try:
+            os.replace(decompressed, live_db_path)
+        except OSError as exc:
+            # Deliberately not `str(exc)` verbatim to a bare except -- but this
+            # IS the curated message: OSError's own text here is just errno +
+            # the two paths we already printed above, not an upstream secret.
+            err_console.print(
+                f"[red]Restore failed while replacing the live catalog[/red]: {exc}. "
+                "The live catalog was NOT modified (the failed operation is the "
+                "atomic rename itself, which either fully succeeds or leaves the "
+                "original file in place)."
+            )
+            raise typer.Exit(code=1) from None
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+    emit_json(
+        {
+            "restored": True,
+            "dbPath": str(live_db_path),
+            "backupFile": str(backup_file),
+            "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in report.checks],
+        }
+    )
 
 
 @hardware_app.command("connect-i3")

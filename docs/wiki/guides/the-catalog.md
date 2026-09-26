@@ -150,6 +150,31 @@ python scripts/restore_verify.py                          # verify a backup
 
 Procedure in `docs/disaster-recovery.md`.
 
+### `openblade catalog backup` / `restore-backup`
+
+The operator-facing CLI wraps the same `openblade.dr` online-backup code as
+`scripts/backup_db.py`, adds gzip compression and retention pruning, and pairs
+it with a guarded restore:
+
+```bash
+# Nightly (or whenever): gzip snapshot in --dest, oldest pruned beyond --keep.
+openblade catalog backup --dest /data/backups --keep 14
+
+# Disaster recovery: OVERWRITES the live catalog. Refuses unless
+# --confirm-db-path is typed out equal to the live DB path, and refuses while
+# any job is pending or running. A corrupt or incomplete backup file is
+# rejected before the live catalog is touched.
+openblade catalog restore-backup /data/backups/openblade-20260926T000000Z.db.gz \
+    --confirm-db-path /data/openblade.db
+```
+
+`catalog backup` is safe to run against a live catalog with a writer in
+progress: it goes through `sqlite3.Connection.backup()` (the SQLite
+online-backup API), which takes a consistent page-level snapshot without
+blocking or being corrupted by a concurrent writer. **Do not substitute a
+plain file copy** (`cp openblade.db ...`) — it can capture a torn, mid-write
+page.
+
 Practical advice:
 
 - Back up the catalog on the **same schedule as your archives**, not less often.
