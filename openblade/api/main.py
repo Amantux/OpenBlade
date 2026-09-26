@@ -38,6 +38,7 @@ from openblade.api import (
     routes_assist,
     routes_catalog,
     routes_dashboard,
+    routes_drive_health,
     routes_health,
     routes_iblade,
     routes_inventory,
@@ -228,6 +229,7 @@ app.include_router(routes_dashboard.router, prefix="/dashboard", tags=["dashboar
 app.include_router(routes_ltfs.router, prefix="/ltfs", tags=["ltfs"])
 app.include_router(routes_restore.router, prefix="/restore", tags=["restore"])
 app.include_router(routes_mailslot.router)
+app.include_router(routes_drive_health.router)
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(routes_libraries.router)
 app.include_router(routes_assist.router, tags=["assist"])
