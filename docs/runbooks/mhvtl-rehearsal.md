@@ -589,10 +589,15 @@ health, catalog integrity) rather than going red on a third-party build. The
 does not emulate, 4 opt-in fault-injection tests, 1 opt-in dirty unmount, 1
 absent higher-level locking backend.
 
-Cold runs build LTFS from source inside the 20-minute step budget; the
+Measured over three consecutive dispatches: whole job **2m41s cold / 2m14s
+cached**, against a 45-minute timeout. The cold LTFS build is **40 s** — not the
+"slowest thing here by far" the workflow header assumed, so its 20-minute step
+budget is enormously generous. `setup.sh` is now the longest step at 55 s (it
+downloads a 51 MB `linux-modules-extra`), and the suite itself takes ~22 s. The
 `actions/cache` entry is keyed on `LTFS_REF` + runner image identity, and
 **Actions cache scoping means a branch's cache is not visible to the default
-branch**, so the first scheduled run after any image bump pays the cold cost.
+branch**, so the first scheduled run after any image bump pays the cold cost —
+which, at 40 s, does not matter.
 
 ### 7.6 Where this would block on a different runner image
 
