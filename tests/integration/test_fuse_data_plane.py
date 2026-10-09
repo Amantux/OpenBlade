@@ -12,6 +12,7 @@ import pytest
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.errors import CartridgeOfflineError
 from openblade.fuse.cache import CacheEntryInUseError, HydrationCache
 from openblade.fuse.filesystem import CatalogFilesystem
 from openblade.fuse.hydration import HydrationFailedError, Hydrator, JobRestoreEngine
@@ -188,3 +189,39 @@ def test_gateway_close_of_unpinned_open_does_not_unpin_other_handle(catalog, tmp
     gw.on_open("/c.bin", timeout=5)  # budget pressure
 
     assert hyd.cache.is_cached(checksum)
+
+
+class _RaisingEngine(FakeEngine):
+    def __init__(self, staging: Path, exc: Exception) -> None:
+        super().__init__(staging)
+        self.exc = exc
+
+    def restore_batch(self, tape_key: str, catalog_paths: list[str]) -> dict[str, Path]:
+        raise self.exc
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (CartridgeOfflineError("cartridge TAPE01 is offline"), "cartridge TAPE01 is offline"),
+        (RuntimeError("dsn=postgres://u:secret@db"), "restore failed unexpectedly"),
+    ],
+)
+def test_untyped_engine_error_fails_ticket_and_file_goes_offline(catalog, tmp_path, exc, expected):  # type: ignore[no-untyped-def]
+    fs = CatalogFilesystem(catalog, cache_dir=str(tmp_path / "cache"))
+    hyd = Hydrator(catalog, fs.cache, _RaisingEngine(tmp_path / "s", exc), batch_window_s=0.01)
+    ticket = hyd.request("/a.bin")
+    assert ticket.done.wait(3), "worker died without completing the ticket"
+    assert ticket.error == expected
+    assert "secret" not in (hyd.last_error("/a.bin") or "")
+    assert hyd.status("/a.bin").value == "offline"
+
+
+def test_request_unregisters_ticket_when_job_lookup_raises(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    fs = CatalogFilesystem(catalog, cache_dir=str(tmp_path / "cache"))
+    engine = FakeEngine(tmp_path / "s")
+    engine.find_active_job = lambda p: (_ for _ in ()).throw(RuntimeError("db down"))  # type: ignore[method-assign]
+    hyd = Hydrator(catalog, fs.cache, engine, batch_window_s=0.01)
+    with pytest.raises(RuntimeError):
+        hyd.request("/a.bin")
+    assert hyd.status("/a.bin").value == "offline"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -11,7 +12,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
+from openblade.domain.errors import OpenBladeError
 from openblade.fuse.cache import CacheChecksumError, HydrationCache
+
+logger = logging.getLogger(__name__)
+
+_UNEXPECTED = "restore failed unexpectedly"
 
 
 @dataclass
@@ -197,12 +203,20 @@ class Hydrator:
             self._tickets[catalog_path] = ticket
         # Restart-safety: a job already in flight for this path is re-attached,
         # not duplicated.
-        job_id = self.engine.find_active_job(catalog_path)
+        try:
+            job_id = self.engine.find_active_job(catalog_path)
+            if job_id is None:
+                ticket.tape_key = self._tape_key(catalog_path, record)
+        except BaseException:
+            # Never leave a registered ticket that no worker will complete.
+            with self._lock:
+                if self._tickets.get(catalog_path) is ticket:
+                    del self._tickets[catalog_path]
+            raise
         if job_id is not None:
             ticket.job_id = job_id
             self._spawn(self._resume, ticket)
             return ticket
-        ticket.tape_key = self._tape_key(catalog_path, record)
         with self._lock:
             self._pending.setdefault(ticket.tape_key, []).append(ticket)
             if ticket.tape_key not in self._timers:
@@ -251,20 +265,29 @@ class Hydrator:
             self._workers.append(threading.current_thread())
         try:
             staged = self.engine.restore_batch(tape_key, [t.catalog_path for t in batch])
-        except (HydrationFailedError, OSError) as exc:
-            reason = str(exc) if isinstance(exc, HydrationFailedError) else "restore I/O error"
+        except (HydrationFailedError, OpenBladeError) as exc:
+            reason = str(exc)  # typed errors carry a curated message
+        except OSError:
+            reason = "restore I/O error"
+        except Exception:
+            logger.exception("fuse: unexpected restore failure for tape %s", tape_key)
+            reason = _UNEXPECTED
+        else:
             for ticket in batch:
-                self._fail(ticket, reason)
+                self._commit(ticket, staged.get(ticket.catalog_path))
             return
         for ticket in batch:
-            self._commit(ticket, staged.get(ticket.catalog_path))
+            self._fail(ticket, reason)
 
     def _resume(self, ticket: HydrationTicket) -> None:
         assert ticket.job_id is not None
         try:
             self._commit(ticket, self.engine.resume(ticket.job_id))
-        except (HydrationFailedError, OSError, KeyError):
+        except (HydrationFailedError, OpenBladeError, OSError, KeyError):
             self._fail(ticket, f"restore job {ticket.job_id} did not complete")
+        except Exception:
+            logger.exception("fuse: unexpected failure resuming job %s", ticket.job_id)
+            self._fail(ticket, _UNEXPECTED)
 
     def _commit(self, ticket: HydrationTicket, staged: Path | None) -> None:
         if staged is None:
