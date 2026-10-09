@@ -1,0 +1,185 @@
+name: Hardware destructive
+
+# Destructive lane against the physical Scalar i3 (docs/runbooks/hardware-lanes.md).
+# Rehearsed first on mhvtl (mhvtl-weekly.yml runs the same allowlist + snapshot steps).
+#
+# Guard rails, in order:
+#   1. environment `hardware-destructive` — required reviewers approve every run
+#      (configured in repo settings; a scheduled run waits for approval too);
+#   2. rig guard — without HARDWARE_RIG_AVAILABLE only a NOT RUN summary job
+#      runs, so the run concludes *success*; this lane must never be a required
+#      check or a badge (docs/runbooks/hardware-lanes.md);
+#   3. allowlist — exits non-zero before ANY hardware step if a barcode is
+#      outside vars.SACRIFICIAL_BARCODES, or the list is empty;
+#   4. before/after inventory + drive snapshot, diffed and uploaded;
+#   5. /jobs/recovery must be clean at the end.
+# LTFS format only ever goes through the two-phase dry-run + safety-token flow.
+
+on:
+  schedule:
+    # 05:43 UTC every Saturday. Odd minute on purpose.
+    - cron: "43 5 * * 6"
+  workflow_dispatch:
+    inputs:
+      barcodes:
+        description: "Comma-separated cartridges to use; must be a subset of vars.SACRIFICIAL_BARCODES (default: all of them)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  no-rig-notice:
+    name: no-rig-notice
+    if: vars.HARDWARE_RIG_AVAILABLE != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record that the lane did not run
+        run: |
+          {
+            echo "## Hardware destructive: NOT RUN (neutral)"
+            echo
+            echo "HARDWARE_RIG_AVAILABLE is not 'true', so the destructive sequence was skipped."
+            echo "This is not a pass. See docs/runbooks/hardware-lanes.md."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  destructive:
+    name: hardware-destructive
+    if: vars.HARDWARE_RIG_AVAILABLE == 'true'
+    runs-on: [self-hosted, i3]
+    environment: hardware-destructive
+    # Job-level (after the environment gate): a run waiting for approval must
+    # not hold the rig slot. One rig, one lock — never two rig jobs at once, and
+    # never cancel one mid-sequence (that can strand a cartridge in a drive).
+    concurrency:
+      group: hardware-rig-i3
+      cancel-in-progress: false
+    timeout-minutes: 240
+    env:
+      OPENBLADE_BACKEND: real
+      OPENBLADE_REAL_HARDWARE_ENABLED: "true"
+      # Pinned: a runner-host dry-run setting would turn every step into a no-op
+      # that still reports success.
+      OPENBLADE_HARDWARE_DRY_RUN: "false"
+      OPENBLADE_APPLIANCE_URL: ${{ vars.OPENBLADE_APPLIANCE_URL }}
+      OPENBLADE_APPLIANCE_USER: ${{ vars.OPENBLADE_APPLIANCE_USER }}
+      OPENBLADE_APPLIANCE_PASSWORD: ${{ secrets.OPENBLADE_APPLIANCE_PASSWORD }}
+      OPENBLADE_APPLIANCE_INSECURE: ${{ vars.OPENBLADE_APPLIANCE_INSECURE }}
+      SACRIFICIAL_BARCODES: ${{ vars.SACRIFICIAL_BARCODES }}
+      # Never interpolated into a script: read from the environment only.
+      BARCODES: ${{ inputs.barcodes || vars.SACRIFICIAL_BARCODES }}
+      I3_AML_USER: ${{ secrets.QUANTUM_AML_USER }}
+      I3_AML_PASSWORD: ${{ secrets.QUANTUM_AML_PASSWORD }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e '.[dev]'
+
+      # A rig lane must never go green by skipping: the rig tests skip when
+      # these are unset, so refuse to run without them. OPENBLADE_CHANGER_DEVICE
+      # and OPENBLADE_DRIVE_DEVICES come from the runner host's environment.
+      - name: Preflight — rig configuration present
+        run: |
+          set -euo pipefail
+          missing=()
+          for v in OPENBLADE_APPLIANCE_URL OPENBLADE_APPLIANCE_USER OPENBLADE_APPLIANCE_PASSWORD OPENBLADE_CHANGER_DEVICE OPENBLADE_DRIVE_DEVICES; do
+            if [ -z "${!v:-}" ]; then missing+=("$v"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::rig lane misconfigured, missing: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Allowlist — refuse any cartridge outside the sacrificial set
+        id: allowlist
+        run: |
+          set -euo pipefail
+          # Export the tool's normalized list, never the raw input.
+          normalized="$(python -m tools.hardware.allowlist --barcodes "$BARCODES")"
+          echo "OPENBLADE_SCRATCH_BARCODES=$normalized" >> "$GITHUB_ENV"
+
+      - name: Snapshot inventory + drive state (before)
+        run: |
+          set -euo pipefail
+          mkdir -p snapshots reports
+          python -m tools.hardware.snapshot capture --out snapshots/before.json
+
+      - name: Load / unload
+        run: python -m pytest tests/hardware/test_changer_operations.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_changer_operations.xml
+
+      # Every LTFS test formats via FormatService.dry_run -> confirm(token), the
+      # two-phase dry-run + safety-token flow; none invokes mkltfs directly.
+      - name: LTFS write / read / checksum
+        run: python -m pytest tests/hardware/test_ltfs_operations.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_ltfs_operations.xml
+
+      - name: Archive + restore
+        run: python -m pytest tests/hardware/test_archive_restore.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_archive_restore.xml
+
+      - name: Sharded write + restore
+        run: python -m pytest tests/hardware/test_sharded_operations.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_sharded_operations.xml
+
+      - name: Safe failure injection
+        env:
+          OPENBLADE_FAULT_TESTS: enabled
+        run: python -m pytest tests/hardware/test_fault_recovery.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_fault_recovery.xml
+
+      # Runs only if every test step succeeded (no `if: always()`): a red test
+      # step already fails the job; this catches the green-by-skipping case.
+      - name: Gate — fail on any skip or zero passes
+        run: python -m tools.hardware.junit_gate reports/*.xml
+
+      # Reboot persistence is a MANUAL step (the runner cannot power-cycle the
+      # appliance): see docs/runbooks/hardware-lanes.md "Reboot persistence".
+
+      - name: Recovery report must be clean
+        # Only once the allowlist passed: before that, nothing was touched.
+        if: always() && steps.allowlist.outcome == 'success'
+        run: |
+          set -euo pipefail
+          # Starting the app runs startup recovery against the same catalog the
+          # suite used; /jobs/recovery then reports what it had to repair.
+          python - <<'PY'
+          import json
+          import sys
+
+          from fastapi.testclient import TestClient
+
+          from openblade.api.main import app
+
+          with TestClient(app) as client:
+              response = client.get("/jobs/recovery")
+          response.raise_for_status()
+          report = response.json()
+          print(json.dumps(report, indent=2))
+          dirty = {k: v for k, v in report.items() if v}
+          if dirty:
+              print("::error::Recovery report is not clean: " + ", ".join(sorted(dirty)))
+              sys.exit(1)
+          PY
+
+      - name: Snapshot inventory + drive state (after) and diff
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f snapshots/before.json ]; then
+            echo "::warning::No before-snapshot was captured; nothing to diff."
+            exit 0
+          fi
+          python -m tools.hardware.snapshot capture --out snapshots/after.json
+          python -m tools.hardware.snapshot diff snapshots/before.json snapshots/after.json --out snapshots/diff.json
+
+      - name: Upload snapshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: hardware-destructive-${{ github.run_id }}
+          path: |
+            snapshots/
+            reports/
+          if-no-files-found: warn

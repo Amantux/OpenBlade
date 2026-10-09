@@ -61,6 +61,7 @@ serial sits in which element.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -445,3 +446,33 @@ def _refuse_on_mismatch(
 
 def _format_serials(live: Mapping[str, str]) -> str:
     return ", ".join(f"{device}={serial or '<none>'}" for device, serial in sorted(live.items()))
+
+
+TAPE_BY_ID_DIR = "/dev/tape/by-id"
+"""udev's stable per-serial tape symlink directory."""
+
+
+def resolve_tape_by_id(serial: str, by_id_dir: str = TAPE_BY_ID_DIR) -> str | None:
+    """Return the ``/dev/tape/by-id`` entry whose name carries ``serial``, or ``None``.
+
+    Read-only: lists one directory and never opens a device. Prefers the
+    non-rewinding ``-nst`` link when udev publishes both. The match is on the
+    normalized serial as a whole ``-``/``_``-delimited token, so serial ``123``
+    cannot match ``...-1234-nst``.
+    """
+    wanted = _normalize_serial(serial)
+    if not wanted:
+        return None
+    try:
+        names = sorted(os.listdir(by_id_dir))
+    except OSError:
+        return None
+    matches = [
+        name
+        for name in names
+        if wanted in {_normalize_serial(t) for t in name.replace("_", "-").split("-")}
+    ]
+    if not matches:
+        return None
+    preferred = [m for m in matches if m.endswith("-nst")] or matches
+    return os.path.join(by_id_dir, preferred[0])

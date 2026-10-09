@@ -62,6 +62,11 @@ def test_three_jobs_run_on_three_drives_with_disjoint_ownership(
     jobs = [queue.create_job(JobType.ARCHIVE, {"barcode": barcode}) for barcode in BARCODES]
 
     started = threading.Barrier(len(jobs))
+    # Rendezvous reached by each job only while it HOLDS its drive lease. Without
+    # it, a fast job can finish and release drive 0 before a descheduled job even
+    # acquires, and the scheduler then (correctly) hands drive 0 out again — so
+    # "three jobs, three drives" is only asserted when all three overlap.
+    all_holding = threading.Barrier(len(jobs))
     ownership: list[tuple[str, int]] = []
     errors: list[BaseException] = []
     ownership_lock = threading.Lock()
@@ -75,6 +80,7 @@ def test_three_jobs_run_on_three_drives_with_disjoint_ownership(
             with ownership_lock:
                 ownership.append((job_id, handle.drive_id))
             try:
+                all_holding.wait(timeout=10)
                 # One robot, three drives: the changer serializes, the I/O does not.
                 _load_with_retry(library, slot_id, handle.drive_id)
                 mount = ltfs.mount(barcode, MountMode.READ_WRITE)
@@ -97,6 +103,7 @@ def test_three_jobs_run_on_three_drives_with_disjoint_ownership(
     for thread in threads:
         thread.join(timeout=15)
 
+    assert not any(thread.is_alive() for thread in threads)
     assert errors == []
     assert len(ownership) == 3
     # Every job got its own drive, and all three drives were used.
