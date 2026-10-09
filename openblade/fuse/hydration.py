@@ -251,11 +251,18 @@ class Hydrator:
         return ticket
 
     def wait(self, ticket: HydrationTicket, timeout: float | None = None) -> bytes:
-        if not ticket.done.wait(timeout):
-            raise HydrationTimeoutError(f"{ticket.catalog_path} still hydrating")
-        if ticket.error is not None:
-            raise HydrationFailedError(ticket.error)
-        return self.cache.retrieve(ticket.checksum)
+        # Each waiter pins the entry before the restore commits, so the budget
+        # cannot evict it (e.g. while a later file of the same batch is stored)
+        # before this waiter has read it. Released on every exit path.
+        self.cache.acquire(ticket.checksum)
+        try:
+            if not ticket.done.wait(timeout):
+                raise HydrationTimeoutError(f"{ticket.catalog_path} still hydrating")
+            if ticket.error is not None:
+                raise HydrationFailedError(ticket.error)
+            return self.cache.retrieve(ticket.checksum)
+        finally:
+            self.cache.release(ticket.checksum)
 
     def shutdown(self, timeout: float = 30.0) -> None:
         """Cancel batches not yet started and wait for in-flight restores."""

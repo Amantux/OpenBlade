@@ -246,14 +246,21 @@ class CatalogFuseOperations:
         entry = self._entry(path)
         if entry.is_dir:
             raise OSError(errno.EISDIR, os.strerror(errno.EISDIR), path)
-        data = self._materialise(str(entry.path))
+        # Pin before materialising so the entry cannot be evicted in between.
+        record = self.filesystem.catalog.get_file_record(str(entry.path))
+        if record is not None:
+            self.filesystem.cache.acquire(record.checksum_sha256)
+        try:
+            data = self._materialise(str(entry.path))
+        except BaseException:
+            if record is not None:
+                self.filesystem.cache.release(record.checksum_sha256)
+            raise
         with self._lock:
             handle = self._next_handle
             self._next_handle += 1
             self._open_files[handle] = data
-        record = self.filesystem.catalog.get_file_record(str(entry.path))
         if record is not None:
-            self.filesystem.cache.acquire(record.checksum_sha256)
             with self._lock:
                 self._handle_checksums[handle] = record.checksum_sha256
         return handle

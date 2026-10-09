@@ -254,3 +254,34 @@ def test_resume_gives_up_at_deadline_with_typed_error(catalog, tmp_path):  # typ
     )
     with pytest.raises(HydrationTimeoutError):
         engine.resume(str(job.id))
+
+
+def test_batch_member_is_not_evicted_before_its_waiter_reads_it(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    class SlowReader(HydrationCache):
+        def retrieve(self, checksum: str) -> bytes:
+            threading.Event().wait(0.3)  # let the rest of the batch commit first
+            return super().retrieve(checksum)
+
+    cache = SlowReader(str(tmp_path / "cache"), max_bytes=600)  # a (500) + b (250) > 600
+    engine = FakeEngine(tmp_path / "s")
+    engine.gate.clear()
+    hyd = Hydrator(catalog, cache, engine, batch_window_s=0.05)
+    tickets = [hyd.request("/a.bin"), hyd.request("/b.bin")]
+    results: dict[str, object] = {}
+
+    def waiter(t):  # type: ignore[no-untyped-def]
+        try:
+            results[t.catalog_path] = hyd.wait(t, 5)
+        except Exception as exc:  # noqa: BLE001 - the test records whatever the waiter saw
+            results[t.catalog_path] = exc
+
+    threads = [threading.Thread(target=waiter, args=(t,)) for t in tickets]
+    for th in threads:
+        th.start()
+    threading.Event().wait(0.2)
+    engine.gate.set()
+    for th in threads:
+        th.join(10)
+    assert results == {"/a.bin": FILES["/a.bin"][0], "/b.bin": FILES["/b.bin"][0]}
+    assert cache.open_count(tickets[0].checksum) == 0  # waiter pins are released
+    assert cache.open_count(tickets[1].checksum) == 0
