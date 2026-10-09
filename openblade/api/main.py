@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any
@@ -370,8 +371,19 @@ async def handle_http_exception(request: Request, exc: HTTPException) -> Respons
     if not _is_aml_compatible_path(request.url.path):
         return await http_exception_handler(request, exc)
     return JSONResponse(
-        status_code=exc.status_code, content=_aml_error_payload(exc.status_code, exc.detail)
+        status_code=exc.status_code,
+        content=_aml_error_payload(exc.status_code, exc.detail),
+        headers=exc.headers,
     )
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_exception(request: Request, exc: Exception) -> Response:
+    """Last-resort handler: AML paths get the error envelope, never the exception text."""
+    if not _is_aml_compatible_path(request.url.path):
+        raise exc
+    logging.getLogger(__name__).exception("Unhandled error on %s", request.url.path)
+    return JSONResponse(status_code=500, content=_aml_error_payload(500, "Internal server error"))
 
 
 @app.exception_handler(RequestValidationError)

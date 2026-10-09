@@ -177,7 +177,6 @@ def test_expired_cookie_is_401(client: TestClient) -> None:
     assert client.get("/aml/users").status_code == 401
 
 
-@pytest.mark.xfail(strict=True, reason=_HEADERS_DROPPED)
 def test_expired_cookie_is_cleared(client: TestClient) -> None:
     _login(client)
     _expire_all_sessions()
@@ -206,7 +205,6 @@ def test_eleventh_login_attempt_is_429_with_retry_after(
     assert response.status_code == 429
 
 
-@pytest.mark.xfail(strict=True, reason=_HEADERS_DROPPED)
 def test_rate_limited_login_carries_retry_after(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -285,7 +283,7 @@ def test_unhandled_error_is_500_without_leak(
         404,
         412,
         429,
-        pytest.param(500, marks=pytest.mark.xfail(strict=True, reason=_NO_500_ENVELOPE)),
+        500,
         503,
     ],
 )
