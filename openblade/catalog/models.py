@@ -449,3 +449,25 @@ class NasRestoreJob(Base):
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DriveLeaseRecord(Base):
+    """Catalog-persisted drive lease (docs/decisions/2026-10-09-persistent-drive-leases.md).
+
+    Live = ``released_at IS NULL AND expires_at > now``. "One live lease per
+    drive" is enforced in the repository under ``BEGIN IMMEDIATE``, not by a
+    partial unique index. Timestamps are naive UTC, like the rest of the catalog.
+    """
+
+    __tablename__ = "drive_leases"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    drive_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    job_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    barcode: Mapped[str] = mapped_column(String(8), nullable=False)
+    physical_drive_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fencing_token: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -6,7 +6,7 @@ import json
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 from openblade.catalog.models import (
     Cartridge,
     CatalogRebuildRun,
+    DriveLeaseRecord,
     FileInstance,
     FileRecord,
     Job,
@@ -40,7 +41,7 @@ from openblade.catalog.models import (
     VolumeGroup,
 )
 from openblade.domain.errors import FileNotFoundError
-from openblade.domain.models import FileInstanceState
+from openblade.domain.models import DriveLease, FileInstanceState
 from openblade.domain.policies import SafetyToken
 from openblade.nas.types import (
     CacheDriveConfig,
@@ -1771,3 +1772,150 @@ class CatalogRepository:
         if row is not None:
             self.session.delete(row)
             self.session.commit()
+
+    # ── Drive leases (docs/decisions/2026-10-09-persistent-drive-leases.md) ──
+
+    def _begin_immediate(self) -> None:
+        """Take SQLite's write lock up front so check-then-insert is atomic.
+
+        Verified against installed SQLAlchemy 2.1.4 / pysqlite: with the default
+        isolation handling an explicit ``BEGIN IMMEDIATE`` on the session's
+        connection is honoured and ``session.commit()`` commits it. Any pending
+        session transaction is committed first (every repository write commits
+        anyway) because SQLite rejects a nested BEGIN.
+        """
+        self.session.commit()
+        self.session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+    def acquire_drive_leases(
+        self, *, job_id: str, barcodes: list[str], num_drives: int, ttl: timedelta
+    ) -> list[DriveLease] | None:
+        """All-or-nothing: one live lease per barcode, or None if not enough free drives."""
+        with self._lock:
+            self._begin_immediate()
+            try:
+                now = _lease_now()
+                busy = set(
+                    self.session.scalars(
+                        select(DriveLeaseRecord.drive_id).where(
+                            DriveLeaseRecord.released_at.is_(None),
+                            DriveLeaseRecord.expires_at > now,
+                        )
+                    )
+                )
+                free = [d for d in range(num_drives) if d not in busy]
+                if len(free) < len(barcodes):
+                    self.session.rollback()
+                    return None
+                token = int(
+                    self.session.scalar(
+                        select(func.coalesce(func.max(DriveLeaseRecord.fencing_token), 0))
+                    )
+                    or 0
+                )
+                rows: list[DriveLeaseRecord] = []
+                for drive_id, barcode in zip(free, barcodes, strict=False):
+                    token += 1
+                    row = DriveLeaseRecord(
+                        id=str(uuid4()),
+                        drive_id=drive_id,
+                        job_id=job_id,
+                        barcode=barcode,
+                        fencing_token=token,
+                        acquired_at=now,
+                        heartbeat_at=now,
+                        expires_at=now + ttl,
+                    )
+                    self.session.add(row)
+                    rows.append(row)
+                self.session.commit()
+            except BaseException:
+                self.session.rollback()
+                raise
+            return [_lease_from_row(row) for row in rows]
+
+    def heartbeat_leases(self, lease_ids: list[str], ttl: timedelta) -> None:
+        with self._lock:
+            now = _lease_now()
+            for row in self._live_lease_rows(lease_ids, now):
+                row.heartbeat_at = now
+                row.expires_at = now + ttl
+            self.session.commit()
+
+    def release_leases(self, lease_ids: list[str]) -> None:
+        with self._lock:
+            now = _lease_now()
+            for row in self.session.scalars(
+                select(DriveLeaseRecord).where(
+                    DriveLeaseRecord.id.in_(lease_ids), DriveLeaseRecord.released_at.is_(None)
+                )
+            ):
+                row.released_at = now
+            self.session.commit()
+
+    def lease_is_live(self, lease_id: str, fencing_token: int) -> bool:
+        with self._lock:
+            row = self.session.get(DriveLeaseRecord, lease_id, populate_existing=True)
+            return (
+                row is not None
+                and row.fencing_token == fencing_token
+                and row.released_at is None
+                and row.expires_at > _lease_now()
+            )
+
+    def live_leases(self) -> list[DriveLease]:
+        with self._lock:
+            now = _lease_now()
+            rows = self.session.scalars(
+                select(DriveLeaseRecord)
+                .where(DriveLeaseRecord.released_at.is_(None), DriveLeaseRecord.expires_at > now)
+                .order_by(DriveLeaseRecord.fencing_token)
+                .execution_options(populate_existing=True)
+            )
+            return [_lease_from_row(row) for row in rows]
+
+    def release_leases_for_job(self, job_id: str) -> int:
+        with self._lock:
+            now = _lease_now()
+            rows = list(
+                self.session.scalars(
+                    select(DriveLeaseRecord).where(
+                        DriveLeaseRecord.job_id == job_id, DriveLeaseRecord.released_at.is_(None)
+                    )
+                )
+            )
+            for row in rows:
+                row.released_at = now
+            self.session.commit()
+            return len(rows)
+
+    def _live_lease_rows(self, lease_ids: list[str], now: datetime) -> list[DriveLeaseRecord]:
+        return list(
+            self.session.scalars(
+                select(DriveLeaseRecord).where(
+                    DriveLeaseRecord.id.in_(lease_ids),
+                    DriveLeaseRecord.released_at.is_(None),
+                    DriveLeaseRecord.expires_at > now,
+                )
+            )
+        )
+
+
+def _lease_now() -> datetime:
+    """Naive UTC, matching how the catalog's DateTime columns store values."""
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _lease_from_row(row: DriveLeaseRecord) -> DriveLease:
+    return DriveLease(
+        id=row.id,
+        drive_id=row.drive_id,
+        job_id=row.job_id,
+        barcode=row.barcode,
+        physical_drive_id=row.physical_drive_id,
+        fencing_token=row.fencing_token,
+        acquired_at=row.acquired_at,
+        heartbeat_at=row.heartbeat_at,
+        expires_at=row.expires_at,
+        released_at=row.released_at,
+    )
