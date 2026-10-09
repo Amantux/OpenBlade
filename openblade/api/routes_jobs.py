@@ -53,10 +53,20 @@ class DriveMismatchResponse(BaseModel):
     observed_barcode: str | None
 
 
+class StagedInstanceResponse(BaseModel):
+    instance_id: str
+    barcode: str
+    tape_path: str
+    shard_index: int | None
+    state: str
+
+
 class RecoveryReportResponse(BaseModel):
     interrupted_job_ids: list[str]
     released_lease_ids: list[str]
     mismatches: list[DriveMismatchResponse]
+    staged_instances: dict[str, list[StagedInstanceResponse]]
+    stale_pending_job_ids: list[str]
 
 
 # Declared before /{job_id} so the literal path wins route matching.
@@ -64,7 +74,8 @@ class RecoveryReportResponse(BaseModel):
 async def get_recovery_report(
     context: AppContext = Depends(get_context),
 ) -> RecoveryReportResponse:
-    """What startup recovery did: interrupted jobs, released leases, drive mismatches."""
+    """What startup recovery did: interrupted jobs, released leases, drive mismatches,
+    uncommitted staged instances per recoverable job, and stale pending jobs."""
     report = context.recovery_report
     return RecoveryReportResponse(
         interrupted_job_ids=list(report.interrupted_job_ids),
@@ -79,6 +90,20 @@ async def get_recovery_report(
             )
             for m in report.mismatches
         ],
+        staged_instances={
+            job_id: [
+                StagedInstanceResponse(
+                    instance_id=i.instance_id,
+                    barcode=i.barcode,
+                    tape_path=i.tape_path,
+                    shard_index=i.shard_index,
+                    state=i.state,
+                )
+                for i in instances
+            ]
+            for job_id, instances in report.staged_instances.items()
+        },
+        stale_pending_job_ids=list(report.stale_pending_job_ids),
     )
 
 

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from openblade.bootstrap import create_context
 from openblade.catalog.repository import CatalogRepository
 from openblade.config import OpenBladeConfig
 from openblade.jobs.recovery import INTERRUPTED_ERROR, recover_after_restart
+from openblade.jobs.scheduler import DEFAULT_LEASE_TTL
 from openblade.simulator.library import MockLibraryBackend
 
 
@@ -82,8 +83,60 @@ def test_restart_runs_recovery_and_exposes_it_read_only(tmp_path: Path) -> None:
 
     response = TestClient(app).get("/jobs/recovery")
     assert response.status_code == 200
-    assert response.json()["interrupted_job_ids"] == [job.id]
+    body = response.json()
+    assert body["interrupted_job_ids"] == [job.id]
+    assert body["staged_instances"] == {job.id: []}
+    assert body["stale_pending_job_ids"] == []
 
     strict = create_context(OpenBladeConfig(db_url=db_url, scalar_api_only=True))
     reset_context(strict)
     assert TestClient(app).get("/jobs/recovery").status_code == 404
+
+
+def test_recovery_lists_staged_instances_of_an_interrupted_job(tmp_path: Path) -> None:
+    # A sharded archive died after staging shards but before the commit marker:
+    # the operator needs to know exactly which tape paths are uncommitted.
+    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    catalog = context.catalog
+    job = catalog.create_job("archive", {})
+    catalog.update_job_state(job.id, "running")
+    _lease(catalog, job.id, "AAA001L9", ttl=timedelta(seconds=-1))
+    vg = catalog.create_volume_group("vg-staged")
+    record = catalog.create_file_record("/data/big.bin.shard0", 10, "0" * 64, vg.id, shard_index=0)
+    staged = catalog.create_staged_instance(job.id, record.id, "AAA001L9", "/big.bin.shard0")
+    library = MockLibraryBackend(num_slots=4, num_drives=2, num_import_export_slots=1)
+
+    report = recover_after_restart(catalog, library)
+
+    assert report.interrupted_job_ids == [job.id]
+    [listed] = report.staged_instances[job.id]
+    assert (listed.instance_id, listed.barcode, listed.tape_path, listed.shard_index) == (
+        staged.id,
+        "AAA001L9",
+        "/big.bin.shard0",
+        0,
+    )
+    assert listed.state == "staging"
+    assert "recovered" in [entry.event for entry in catalog.job_journal(job.id)]
+
+
+def test_recovery_reports_stale_pending_jobs_without_touching_them(tmp_path: Path) -> None:
+    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    catalog = context.catalog
+    stale = catalog.create_job("archive", {})
+    fresh = catalog.create_job("archive", {})
+    old_but_leased = catalog.create_job("archive", {})
+    long_ago = datetime.now(UTC).replace(tzinfo=None) - DEFAULT_LEASE_TTL - timedelta(minutes=1)
+    for job in (stale, old_but_leased):
+        job.created_at = long_ago
+    catalog.session.commit()
+    _lease(catalog, old_but_leased.id, "MCK00001", ttl=timedelta(minutes=15))
+    library = MockLibraryBackend(num_slots=4, num_drives=2, num_import_export_slots=1)
+
+    report = recover_after_restart(catalog, library)
+
+    assert report.stale_pending_job_ids == [stale.id]
+    for job_id in (stale.id, fresh.id):
+        refreshed = catalog.get_job(job_id)
+        assert refreshed is not None
+        assert refreshed.state == "pending"
