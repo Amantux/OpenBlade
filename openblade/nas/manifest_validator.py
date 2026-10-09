@@ -6,7 +6,13 @@ from datetime import datetime
 from pydantic import BaseModel, Field, ValidationError
 
 from openblade.nas.catalog_shard import CatalogShard, CatalogShardWriter
-from openblade.nas.ltfs_manifest import ManifestJson, TapeMetadataWriter
+from openblade.nas.ltfs_manifest import (
+    MANIFEST_SCHEMA,
+    ManifestJson,
+    TapeMetadataWriter,
+    UnsupportedManifestSchemaError,
+    parse_manifest,
+)
 
 
 class ManifestValidationResult(BaseModel):
@@ -60,7 +66,7 @@ class ManifestValidator:
     MANIFEST_CHECKSUM_PATH = "/.openblade/manifest.sha256"
     CATALOG_SHARD_PATH = "/.openblade/catalog-shard.json"
     CATALOG_SHARD_CHECKSUM_PATH = "/.openblade/catalog-shard.sha256"
-    MANIFEST_SCHEMA = "openblade.manifest.v1"
+    MANIFEST_SCHEMA = MANIFEST_SCHEMA
     CATALOG_SHARD_SCHEMA = "openblade.catalog_shard.v1"
 
     def __init__(
@@ -83,15 +89,16 @@ class ManifestValidator:
 
         result.schema_version = str(payload.get("schema", ""))
         try:
-            manifest = ManifestJson.model_validate(payload)
+            manifest = parse_manifest(payload)
+        except UnsupportedManifestSchemaError:
+            result.errors.append(f"manifest schema mismatch: {result.schema_version}")
+            return result
         except ValidationError:
             result.errors.append("manifest.json failed schema validation")
             return result
 
         result.file_count = manifest.file_count
         result.total_bytes = manifest.total_logical_bytes
-        if result.schema_version != self.MANIFEST_SCHEMA:
-            result.errors.append(f"manifest schema mismatch: {result.schema_version}")
 
         raw_files = payload.get("files", [])
         if not isinstance(raw_files, list):

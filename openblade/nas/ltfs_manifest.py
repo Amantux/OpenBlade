@@ -8,6 +8,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+MANIFEST_SCHEMA_V1 = "openblade.manifest.v1"
+MANIFEST_SCHEMA_V2 = "openblade.manifest.v2"
+MANIFEST_SCHEMA = MANIFEST_SCHEMA_V2
+SUPPORTED_MANIFEST_SCHEMAS = frozenset({MANIFEST_SCHEMA_V1, MANIFEST_SCHEMA_V2})
+COMMIT_MARKER_SCHEMA = "openblade.commit.v1"
+
+
+class UnsupportedManifestSchemaError(ValueError):
+    """manifest.json declares a schema this build does not understand (e.g. a newer one)."""
+
 
 class TapeJson(BaseModel):
     schema_: str = Field(default="openblade.tape.v1", alias="schema")
@@ -23,6 +33,9 @@ class TapeJson(BaseModel):
     state: str = "active"
     generation: str = "LTO-8"
     notes: str = ""
+    # `generation` above is the LTO media generation; the write-generation chain is below.
+    current_generation: str | None = None
+    previous_generation: str | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -41,7 +54,7 @@ class ManifestFileEntry(BaseModel):
 
 
 class ManifestJson(BaseModel):
-    schema_: str = Field(default="openblade.manifest.v1", alias="schema")
+    schema_: str = Field(default=MANIFEST_SCHEMA, alias="schema")
     barcode: str
     openblade_tape_id: str
     volume_group: str = ""
@@ -52,6 +65,11 @@ class ManifestJson(BaseModel):
     file_count: int = 0
     total_logical_bytes: int = 0
     files: list[ManifestFileEntry] = Field(default_factory=list)
+    # v2 fields; a v1 manifest parses with these defaults.
+    generation_id: str = ""
+    sibling_tapes: list[str] = Field(default_factory=list)
+    placement: str = ""
+    protection: dict[str, Any] | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -86,6 +104,30 @@ class ShardSetManifest(BaseModel):
     global_manifest_checksum: str = ""
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class CommitMarker(BaseModel):
+    """/.openblade/commit-<generation>.json — written LAST; its absence means uncommitted."""
+
+    schema_: str = Field(default=COMMIT_MARKER_SCHEMA, alias="schema")
+    generation_id: str
+    manifest_sha256: str
+    catalog_shard_sha256: str
+    written_at: str
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+def parse_manifest(payload: dict[str, Any]) -> ManifestJson:
+    """Validate a manifest payload, rejecting schemas newer than this build understands.
+
+    Raises UnsupportedManifestSchemaError for an unknown schema and pydantic's
+    ValidationError for a malformed supported one.
+    """
+    schema = str(payload.get("schema", MANIFEST_SCHEMA_V1))
+    if schema not in SUPPORTED_MANIFEST_SCHEMAS:
+        raise UnsupportedManifestSchemaError(f"unsupported manifest schema: {schema}")
+    return ManifestJson.model_validate(payload)
 
 
 class ChecksumEntry(BaseModel):
@@ -166,6 +208,23 @@ class TapeMetadataWriter:
             shard_set.model_dump(by_alias=True),
         )
 
+    def write_commit_marker(self, barcode: str, marker: CommitMarker) -> None:
+        """Write /.openblade/commit-<generation>.json. Callers must write it last."""
+        self.ensure_openblade_dirs(barcode)
+        name = f"commit-{self._safe_name(marker.generation_id)}.json"
+        self._write_json(barcode, self._metadata_path(name), marker.model_dump(by_alias=True))
+
+    def read_commit_marker(self, barcode: str, generation_id: str) -> CommitMarker | None:
+        """Read a generation's commit marker; None when missing or corrupt."""
+        name = f"commit-{self._safe_name(generation_id)}.json"
+        try:
+            payload = self._read_json(barcode, self._metadata_path(name))
+            if payload is None:
+                return None
+            return CommitMarker.model_validate(payload)
+        except (json.JSONDecodeError, ValidationError):
+            return None
+
     def ensure_openblade_dirs(self, barcode: str) -> None:
         """Ensure all reserved /.openblade/ subdirectories exist in the backend."""
         for directory in self.RESERVED_DIRS:
@@ -193,8 +252,8 @@ class TapeMetadataWriter:
             payload = self._read_json(barcode, self._metadata_path("manifest.json"))
             if payload is None:
                 return None
-            return ManifestJson.model_validate(payload)
-        except (json.JSONDecodeError, ValidationError):
+            return parse_manifest(payload)
+        except (json.JSONDecodeError, ValidationError, UnsupportedManifestSchemaError):
             return None
 
     def initialize_tape(

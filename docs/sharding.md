@@ -129,3 +129,23 @@ POST /archive/sharded
 - Restore always uses `READ_ONLY` mounts, even on shard tapes
 - DriveScheduler never grants the same drive to two jobs
 - All drives are released (even on error) via try/finally
+
+## Protection is a separate axis
+
+Sharding/striping spreads data across tapes for throughput. It does **not** make
+data durable: losing any one tape of a STRIPE set loses data. Durability comes only
+from redundant copies. `openblade/domain/protection.py` models the axes
+independently (`Placement`, `Striping`, `Protection`, `FailureDomain`, `RestoreQuorum`)
+and `ProtectionPolicy.durability_class` reports the result:
+
+| Striping | Protection | `is_protected` | `durability_class` |
+|---|---|---|---|
+| NONE | NONE / REPLICATION(1) | false | `unprotected` |
+| STRIPE / BLOCK_STRIPE | NONE / REPLICATION(1) | false | `performance-only` |
+| any | REPLICATION(copies >= 2) | true | `protected` |
+| any | ERASURE_CODE(k, m) | true (modelled only) | planner raises `UnsupportedProtectionError` |
+
+Legacy `NasPool.replication_factor` maps via `protection_from_pool()`. The policy is
+recorded in `manifest.json` (`protection`, `placement`) and per dataset in
+`catalog-shard.json`, so a rebuild can recover it. Pinned by
+`test_striping_never_implies_protection`.

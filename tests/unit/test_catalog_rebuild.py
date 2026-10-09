@@ -406,3 +406,63 @@ def test_api_get_run_returns_record(rebuild_env: dict[str, object]) -> None:
     assert response.status_code == 200
     assert response.json()["id"] == run_id
     assert response.json()["status"] == RebuildRunStatus.PLANNED.value
+
+
+def _stamp_generation(
+    rebuild_env: dict[str, object], barcode: str, *, marker: str, siblings: list[str] | None = None
+) -> None:
+    from openblade.nas.ltfs_manifest import CommitMarker
+
+    planner = rebuild_env["planner"]
+    writer = planner.metadata_writer
+    manifest = writer.read_manifest(barcode).model_copy(
+        update={"generation_id": "gen-7", "sibling_tapes": siblings or []}
+    )
+    manifest_sha = writer.write_manifest(barcode, manifest)
+    writer.write_manifest_checksum(barcode, manifest_sha)
+    shard_sha = writer._read_text(barcode, planner.shard_writer.SHARD_CHECKSUM_METADATA_PATH)
+    if marker == "missing":
+        return
+    writer.write_commit_marker(
+        barcode,
+        CommitMarker(
+            generation_id="gen-7",
+            manifest_sha256=manifest_sha if marker == "ok" else "0" * 64,
+            catalog_shard_sha256=shard_sha.strip(),
+            written_at="2026-10-09T00:00:00Z",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("marker", "reason"),
+    [("missing", "commit marker missing"), ("bad", "commit marker manifest hash mismatch")],
+)
+def test_plan_rebuild_uncommitted_generation_not_scanned(
+    rebuild_env: dict[str, object], marker: str, reason: str
+) -> None:
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode)
+    _stamp_generation(rebuild_env, barcode, marker=marker)
+
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
+
+    assert result.barcodes_to_scan == []
+    assert f"{barcode}: uncommitted generation gen-7: {reason}" in result.warnings
+
+
+def test_plan_rebuild_committed_generation_reports_missing_sibling(
+    rebuild_env: dict[str, object],
+) -> None:
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode)
+    _stamp_generation(rebuild_env, barcode, marker="ok", siblings=["ZZ9999L8"])
+
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
+
+    assert result.barcodes_to_scan == [barcode]
+    assert f"{barcode}: missing sibling tape ZZ9999L8" in result.warnings
