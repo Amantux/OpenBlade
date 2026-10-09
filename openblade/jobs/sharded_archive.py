@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.capacity import has_room_for
-from openblade.domain.errors import TapeFullError, safe_job_error
+from openblade.domain.errors import StaleLeaseError, TapeFullError, safe_job_error
 from openblade.domain.models import MountHandle, MountMode
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
@@ -352,6 +352,7 @@ def _archive_stripe(
             for handle in handles:
                 drive_id, slot_id = _load_barcode(catalog, library, ltfs, handle, job_id)
                 loaded_slots[drive_id] = slot_id
+                scheduler.verify(handle)  # fencing: never mount RW on a stale lease
                 mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_WRITE)
 
             def _write_one(
@@ -368,6 +369,8 @@ def _archive_stripe(
                     raise ValueError(f"Checksum mismatch: {source_file.name}")
                 return source_file, barcode, tape_path, checksum, source_file.stat().st_size
 
+            for handle in handles:
+                scheduler.verify(handle)  # fencing: before the shard write batch
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(batch)) as pool:
                 futures = [
                     pool.submit(_write_one, source_file, barcode, mounts[barcode])
@@ -413,6 +416,9 @@ def _archive_stripe(
 
             # Every shard in the batch wrote and checksum-verified. Cleanly unmount and
             # unload BEFORE commit; a failed unmount raises and blocks the commit.
+            scheduler.heartbeat(handles)
+            for handle in handles:
+                scheduler.verify(handle)  # fencing: before unmount/unload + commit
             _clean_unmount_and_unload(catalog, library, ltfs, mounts, handles, loaded_slots, job_id)
 
             # COMMIT: only now is the batch durable.
@@ -421,6 +427,9 @@ def _archive_stripe(
                 catalog.mark_instance_archived(shard_instance_id)
                 files_archived += 1
                 bytes_archived += size_bytes
+        except StaleLeaseError:
+            # Fenced out: abort the whole job. `finally` still unmounts/unloads.
+            raise
         except Exception as exc:  # noqa: BLE001
             # Staged instances remain PENDING -> not exposed as archived; resumable.
             # This branch had no logging at all, so a batch that failed left no
@@ -488,6 +497,7 @@ def _archive_block_stripe(
         for handle in handles:
             drive_id, slot_id = _load_barcode(catalog, library, ltfs, handle, job_id)
             loaded_slots[drive_id] = slot_id
+            scheduler.verify(handle)  # fencing: never mount RW on a stale lease
             mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_WRITE)
 
         shard_tmp_files: list[Path] = [Path()] * len(plan.shards)
