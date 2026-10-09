@@ -19,6 +19,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from openblade.fuse.cache import CacheEntryInUseError
+from openblade.fuse.hydration import HydrationFailedError, HydrationState, Hydrator
+
 
 class GatewayStatus(str, Enum):
     RUNNING = "running"
@@ -366,6 +369,52 @@ class ProtocolGateway:
             if session.session_id == session_id:
                 return session
         return None
+
+    # -- hydration entry points (single path for the SMB/NFS rig) ------------
+    def attach_hydrator(self, hydrator: Hydrator | None) -> None:
+        self._hydrator = hydrator
+
+    def _require_hydrator(self) -> Hydrator:
+        hydrator: Hydrator | None = getattr(self, "_hydrator", None)
+        if hydrator is None:
+            raise HydrationFailedError("no hydrator attached to the protocol gateway")
+        return hydrator
+
+    def on_open(self, catalog_path: str, *, timeout: float | None = 0.0) -> HydrationState:
+        """Pin the file and start hydration; optionally wait ``timeout`` seconds."""
+        hydrator = self._require_hydrator()
+        ticket = hydrator.request(catalog_path)
+        if timeout:
+            hydrator.wait(ticket, timeout)
+        state = hydrator.status(catalog_path)
+        if state is HydrationState.ONLINE:
+            hydrator.cache.acquire(ticket.checksum)
+        return state
+
+    def on_read_range(
+        self, catalog_path: str, offset: int, length: int, *, timeout: float | None = None
+    ) -> bytes:
+        hydrator = self._require_hydrator()
+        data = hydrator.wait(hydrator.request(catalog_path), timeout)
+        return data[offset : offset + length]
+
+    def on_close(self, catalog_path: str) -> None:
+        hydrator = self._require_hydrator()
+        record = hydrator.catalog.get_file_record(catalog_path)
+        if record is not None:
+            hydrator.cache.release(record.checksum_sha256)
+
+    def on_evict(self, catalog_path: str) -> bool:
+        """Drop the cached copy; False when the file still has open handles."""
+        hydrator = self._require_hydrator()
+        record = hydrator.catalog.get_file_record(catalog_path)
+        if record is None:
+            return False
+        try:
+            hydrator.cache.evict(record.checksum_sha256)
+        except CacheEntryInUseError:
+            return False
+        return True
 
 
 _gateway = ProtocolGateway()
