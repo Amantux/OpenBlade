@@ -186,12 +186,15 @@ def test_gateway_close_of_unpinned_open_does_not_unpin_other_handle(catalog, tmp
     gw.attach_hydrator(hyd)
     checksum = catalog.get_file_record("/a.bin").checksum_sha256  # type: ignore[union-attr]
     engine.gate.clear()
-    assert gw.on_open("/a.bin").value == "hydrating"  # client B opens mid-hydration
+    handle_b = gw.on_open("/a.bin")  # client B opens mid-hydration
+    assert handle_b.state.value == "hydrating"
     engine.gate.set()
     hyd.wait(hyd.request("/a.bin"), 5)
-    assert gw.on_open("/a.bin").value == "online"  # client A opens the online file
+    assert gw.on_open("/a.bin").state.value == "online"  # client A opens the online file
 
-    gw.on_close("/a.bin")  # client B closes; A still holds the file open
+    gw.on_close(handle_b.token)  # client B closes; A still holds the file open
+    gw.on_close(handle_b.token)  # double close (rig retry) must not drop A's pin
+    gw.on_close("never-opened")  # close of a failed open is a no-op
     hyd.cache.max_bytes = 1
     gw.on_open("/c.bin", timeout=5)  # budget pressure
 
