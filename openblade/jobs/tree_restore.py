@@ -304,6 +304,7 @@ def run_tree_restore(
                     ltfs,
                     catalog,
                     child.id,
+                    scheduler=scheduler,
                 )
                 verified = plain_result.checksum_verified
                 barcodes = [plain_result.source_barcode]

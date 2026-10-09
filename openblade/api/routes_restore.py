@@ -184,14 +184,14 @@ async def enqueue_restore(
                 ),
             )
     except Exception as exc:
-        context.catalog.update_job_state(job.id, "failed", str(exc))
+        context.catalog.update_job_state(job.id, "failed", safe_job_error(exc))
         _bridge_to_aml(
             context,
             job_id=job.id,
             status="failed",
             catalog_path=catalog_path,
             dest_path=request.dest_path,
-            error=str(exc),
+            error=safe_job_error(exc),
         )
         raise
     refreshed = context.catalog.get_job(job.id)

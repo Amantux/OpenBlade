@@ -168,6 +168,7 @@ def _restore_single(
     slot_id: int | None = None
 
     cleanup_failed = False
+    still_mounted = False
     try:
         drive_id, slot_id = _ensure_loaded(catalog, library, ltfs, handle, job_id)
         mount = ltfs.mount(instance.barcode, MountMode.READ_ONLY)
@@ -186,9 +187,16 @@ def _restore_single(
                 raise ChecksumMismatchError(error)
             shutil.copy2(tmp_dest, request.dest_path)
         finally:
-            ltfs.unmount(mount)
+            try:
+                ltfs.unmount(mount)
+            except Exception:  # noqa: BLE001 - recorded as physical_state_unknown
+                cleanup_failed = True
+                still_mounted = True
+                _cleanup_failed(catalog, job_id, "unmount", instance.barcode, drive_id)
     finally:
-        if slot_id is not None:
+        # Never unload while LTFS is mounted or dirty: a failed unmount is
+        # journaled above and the drive is left for reconciliation.
+        if slot_id is not None and not still_mounted:
             try:
                 execute_tape_request(
                     catalog,
@@ -281,15 +289,18 @@ def _restore_sharded(
             raise ChecksumMismatchError(error)
     finally:
         drive_by_barcode = {handle.barcode: handle.physical for handle in handles}
+        still_mounted_barcodes: set[str] = set()
         for barcode, mount in mounts.items():
             try:
                 ltfs.unmount(mount)
             except Exception:  # noqa: BLE001 - recorded as physical_state_unknown
                 cleanup_failed = True
+                still_mounted_barcodes.add(barcode)
                 _cleanup_failed(catalog, job_id, "unmount", barcode, drive_by_barcode.get(barcode))
         for handle in handles:
             slot_id = loaded_slots.get(handle.physical)
-            if slot_id is not None:
+            # Never unload while LTFS is mounted or dirty (failed unmount above).
+            if slot_id is not None and handle.barcode not in still_mounted_barcodes:
                 try:
                     execute_tape_request(
                         catalog,

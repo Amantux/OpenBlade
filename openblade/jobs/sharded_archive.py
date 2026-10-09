@@ -274,15 +274,22 @@ def _clean_unmount_and_unload(
     caller does NOT mark the batch archived.
     """
     failures: list[str] = []
+    still_mounted: set[str] = set()
     for barcode, mount in list(mounts.items()):
         try:
             ltfs.unmount(mount)
             mounts.pop(barcode, None)
         except Exception as exc:  # noqa: BLE001 - aggregated and re-raised below
             failures.append(f"unmount {barcode}: {exc}")
+            still_mounted.add(barcode)
     for handle in handles:
         slot_id = loaded_slots.get(handle.physical)
         if slot_id is None:
+            continue
+        if handle.barcode in still_mounted:
+            # Never unload while LTFS is mounted or dirty: a failed unmount leaves
+            # the drive in an unknown state, which is reported, not forced.
+            failures.append(f"unload {handle.barcode}: skipped, unmount failed")
             continue
         try:
             # raise_on_failed=True is essential: execute_tape_request otherwise
@@ -372,17 +379,23 @@ def _best_effort_unmount_and_unload(
     """
     drive_by_barcode = {handle.barcode: handle.physical for handle in handles}
     failed = False
+    still_mounted: set[str] = set()
     for barcode, mount in mounts.items():
         try:
             ltfs.unmount(mount)
         except Exception:  # noqa: BLE001 - recorded as physical_state_unknown, cleanup continues
             failed = True
+            still_mounted.add(barcode)
             record_physical_state_unknown(
                 catalog, job_id, "unmount", barcode, drive_by_barcode.get(barcode)
             )
     for handle in handles:
         slot_id = loaded_slots.get(handle.physical)
         if slot_id is None:
+            continue
+        if handle.barcode in still_mounted:
+            # Never unload while LTFS is mounted or dirty; the unmount failure above
+            # is already journaled as physical_state_unknown for this drive.
             continue
         try:
             execute_tape_request(
