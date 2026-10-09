@@ -1,29 +1,26 @@
-name: Quantum hardware smoke
+name: Hardware nightly read-only
 
-# Dispatchable subset of hardware-nightly-readonly.yml: the same read-only
-# suite (tests/hardware/readonly/), on demand, on the same rig.
+# Read-only lane against the physical Scalar i3 (docs/runbooks/hardware-lanes.md).
+# Every test in tests/hardware/readonly/ is read-only by construction (an AST
+# safety test in that directory rejects load/unload/move/format/mount calls).
+# The before/after snapshot diff is the runtime proof that nothing moved.
 #
-# Why kept rather than deleted: the workflow name and the job id
-# `register-and-validate` are kept so any branch-protection rule or status
-# check that references them keeps resolving. The old ubuntu-latest job could
-# not reach a physical library anyway; the real check needs the [self-hosted, i3]
-# runner (docs/runbooks/hardware-lanes.md). Motion/control-plane inputs were
-# removed on purpose: motion belongs to hardware-destructive.yml, behind the
-# environment approval and the cartridge allowlist.
+# Without a rig (HARDWARE_RIG_AVAILABLE != 'true') the hardware job is SKIPPED,
+# and the no-rig job says so in the run summary. A skipped lane is neutral,
+# never green: it proves nothing about the appliance.
 
 on:
+  schedule:
+    # 02:17 UTC nightly. Odd minute: top-of-hour schedules queue behind everyone.
+    - cron: "17 2 * * *"
   workflow_dispatch:
-    inputs:
-      test_filter:
-        description: "Optional pytest -k expression to narrow the read-only suite"
-        required: false
-        default: ""
-        type: string
 
 permissions:
   contents: read
 
 concurrency:
+  # Shares the rig lock with the destructive lane and the smoke subset: a
+  # read-only pass must never observe a destructive run mid-sequence.
   group: hardware-rig-i3
   cancel-in-progress: false
 
@@ -33,20 +30,21 @@ jobs:
     if: vars.HARDWARE_RIG_AVAILABLE != 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Record that the smoke did not run
+      - name: Record that the lane did not run
         run: |
           {
-            echo "## Quantum hardware smoke: NOT RUN (neutral)"
+            echo "## Hardware nightly read-only: NOT RUN (neutral)"
             echo
-            echo "HARDWARE_RIG_AVAILABLE is not 'true', so register-and-validate was skipped."
-            echo "This is not a pass. See docs/runbooks/hardware-lanes.md."
+            echo "No i3 rig is registered for this repository (repo variable HARDWARE_RIG_AVAILABLE is not 'true'),"
+            echo "so the read-only hardware job was skipped. This is not a pass: nothing was verified against the appliance."
+            echo "See docs/runbooks/hardware-lanes.md to register the self-hosted runner."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  register-and-validate:
-    name: register-and-validate
+  readonly:
+    name: hardware-readonly
     if: vars.HARDWARE_RIG_AVAILABLE == 'true'
     runs-on: [self-hosted, i3]
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       OPENBLADE_BACKEND: real
       OPENBLADE_REAL_HARDWARE_ENABLED: "true"
@@ -62,6 +60,8 @@ jobs:
 
       - run: pip install -e '.[dev]'
 
+      # No allowlist step: this lane names no cartridges and performs no
+      # motion. The snapshot diff below is what would catch a violation.
       - name: Snapshot inventory + drive state (before)
         run: |
           set -euo pipefail
@@ -69,15 +69,10 @@ jobs:
           python -m tools.hardware.snapshot capture --out snapshots/before.json
 
       - name: Run the read-only suite
-        env:
-          TEST_FILTER: ${{ inputs.test_filter }}
         run: |
           set -euo pipefail
-          args=(tests/hardware/readonly/ -m real_hardware -v --tb=short -rs --junitxml=readonly-results.xml)
-          if [ -n "$TEST_FILTER" ]; then
-            args+=(-k "$TEST_FILTER")
-          fi
-          python -m pytest "${args[@]}"
+          python -m pytest tests/hardware/readonly/ -m real_hardware -v --tb=short -rs \
+            --junitxml=readonly-results.xml
 
       - name: Snapshot inventory + drive state (after) and diff
         if: always()
@@ -94,7 +89,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
-          name: hardware-smoke-${{ github.run_id }}
+          name: hardware-readonly-${{ github.run_id }}
           path: |
             readonly-results.xml
             differential-report.json

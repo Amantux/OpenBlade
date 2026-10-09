@@ -98,9 +98,9 @@ jobs:
     # ever trips, look at the per-step durations before raising it.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -160,7 +160,7 @@ jobs:
       - name: Restore cached LTFS build
         id: ltfs-cache
         if: ${{ inputs.skip_ltfs != true }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: /tmp/ltfs-stage.tar
           key: ${{ steps.ltfs-key.outputs.key }}
@@ -276,7 +276,7 @@ jobs:
           lsscsi -g || true
           ls -l /dev/sg* /dev/nst* /dev/st* /dev/sch* 2>&1 || true
           lsmod | grep mhvtl || true
-          ps ax | grep -E 'vtltape|vtllibrary' | grep -v grep || true
+          pgrep -af 'vtltape|vtllibrary' || true
           systemctl status 'vtltape@*' 'vtllibrary@*' --no-pager 2>&1 | head -60 || true
           sudo dmesg | tail -80 || true
           cat /etc/mhvtl/device.conf || true
@@ -306,6 +306,29 @@ jobs:
           printf '%s\n' "$block" \
             | sed -n 's/^export \([A-Z_][A-Z0-9_]*\)=\(.*\)$/\1=\2/p' >> "$GITHUB_ENV"
 
+      # Rehearsal of the destructive lane's guard rails (hardware-destructive.yml):
+      # the same allowlist gate and before/after snapshot, so a broken guard is
+      # found here on a disposable VM before it matters on the real i3.
+      # Without the repo variable, the sacrificial set defaults to the scratch
+      # cartridges mhvtl loads for formatting (scripts/mhvtl/env.sh).
+      - name: Allowlist — refuse any cartridge outside the sacrificial set
+        env:
+          SACRIFICIAL_BARCODES: ${{ vars.SACRIFICIAL_BARCODES || 'OB0007L8,OB0008L8' }}
+        run: |
+          set -euo pipefail
+          python -m tools.hardware.allowlist --barcodes "$OPENBLADE_SCRATCH_BARCODES"
+
+      - name: Snapshot inventory + drive state (before)
+        run: |
+          set -euo pipefail
+          mkdir -p snapshots
+          sudo env \
+            OPENBLADE_BACKEND="$OPENBLADE_BACKEND" \
+            OPENBLADE_REAL_HARDWARE_ENABLED="$OPENBLADE_REAL_HARDWARE_ENABLED" \
+            OPENBLADE_CHANGER_DEVICE="$OPENBLADE_CHANGER_DEVICE" \
+            OPENBLADE_DRIVE_DEVICES="$OPENBLADE_DRIVE_DEVICES" \
+            "$(command -v python)" -m tools.hardware.snapshot capture --out snapshots/before.json
+
       - name: Run the hardware suite against the rig
         timeout-minutes: 20
         env:
@@ -325,16 +348,16 @@ jobs:
           env | grep '^OPENBLADE_' | sort
 
           if [ "${{ steps.ltfs.outputs.available }}" = "true" ]; then
-            suites="tests/hardware/"
+            suites=(tests/hardware/)
           else
             # Documented cut: everything below needs mkltfs to have formatted
             # the scratch cartridges. Without it those suites fail on mount
             # rather than skip, which would make the canary permanently red for
             # a reason that is not a product defect.
-            suites="tests/hardware/test_device_discovery.py \
-                    tests/hardware/test_changer_operations.py \
-                    tests/hardware/test_drive_health.py \
-                    tests/hardware/test_catalog_integrity.py"
+            suites=(tests/hardware/test_device_discovery.py
+                    tests/hardware/test_changer_operations.py
+                    tests/hardware/test_drive_health.py
+                    tests/hardware/test_catalog_integrity.py)
           fi
 
           # `sudo env VAR=...` rather than `sudo -E`: -E depends on the host's
@@ -349,16 +372,40 @@ jobs:
             OPENBLADE_DRIVE_DEVICES="$OPENBLADE_DRIVE_DEVICES" \
             OPENBLADE_SCRATCH_BARCODES="$OPENBLADE_SCRATCH_BARCODES" \
             OPENBLADE_FAULT_TESTS="${OPENBLADE_FAULT_TESTS:-}" \
-            "$(command -v python)" -m pytest $suites \
+            "$(command -v python)" -m pytest "${suites[@]}" \
               -m real_hardware -v --tb=short -rs \
               --junitxml=/tmp/mhvtl-hardware-results.xml
 
       - name: Upload hardware results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: mhvtl-hardware-results
           path: /tmp/mhvtl-hardware-results.xml
+          if-no-files-found: warn
+
+      - name: Snapshot inventory + drive state (after) and diff
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f snapshots/before.json ]; then
+            echo "::warning::No before-snapshot was captured; nothing to diff."
+            exit 0
+          fi
+          sudo env \
+            OPENBLADE_BACKEND="$OPENBLADE_BACKEND" \
+            OPENBLADE_REAL_HARDWARE_ENABLED="$OPENBLADE_REAL_HARDWARE_ENABLED" \
+            OPENBLADE_CHANGER_DEVICE="$OPENBLADE_CHANGER_DEVICE" \
+            OPENBLADE_DRIVE_DEVICES="$OPENBLADE_DRIVE_DEVICES" \
+            "$(command -v python)" -m tools.hardware.snapshot capture --out snapshots/after.json
+          python -m tools.hardware.snapshot diff snapshots/before.json snapshots/after.json --out snapshots/diff.json
+
+      - name: Upload snapshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: mhvtl-snapshots
+          path: snapshots/
           if-no-files-found: warn
 
       - name: Tear the rig down
