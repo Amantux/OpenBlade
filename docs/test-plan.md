@@ -20,3 +20,26 @@ Verify injected mount, write, and capacity faults surface as typed errors.
 
 ## Safety regressions
 Prove the default config blocks real hardware, formatting requires confirmation, and unload-while-mounted is rejected.
+
+## CI lanes
+Lane definitions live in the README section "Layered CI/CD". This section lists which tests each lane runs.
+
+- **PR (`ci.yml`, required through `ci-gate`).**
+  - `backend-lint`: `ruff check .` and `ruff format --check .`.
+  - `backend-typecheck`: `mypy openblade` under strict mode. It blocks merge.
+  - `backend-tests`: unit and integration tests.
+  - `api-aml-integration`.
+  - `i3-smoke`.
+  - `frontend-build-test`.
+  - `web-flask-smoke`.
+  - The ownership check `tools/ci_ownership.py --base origin/master`. It maps every changed path, through `tools/ci_ownership.toml`, to `unit`, `integration`, `safety`, `i3`, `compat`, `frontend`, `docs-only` or `ci-only`. It fails on any changed `openblade/**` or `tests/**` path that has no owner. If you add a new test directory or package, add its glob to the TOML table.
+- **Emulator.** `emulator-change-gates.yml` and `i3-emulator-compliance.yml` both run `tests/i3` through the reusable `_emulator-boot-test.yml`, with an `I3_TIMING_PROFILE` input.
+  - The timing profiles are `instant`, `realistic`, `hardware`, `normal`, `slow-robotics`, `busy-library`, `intermittent-drive`, `session-expiry`, `rebooting` and `degraded-media`.
+  - `tests/i3/test_timing_profiles.py` checks each profile's effect under `VirtualClock`, with no real sleeping.
+- **Nightly (`nightly.yml`, not a PR check).** Run the same selections locally with pytest.
+  - `slow`: `-m slow`.
+  - `stress`: `tests/fault` plus `-m stress`.
+  - `fuzz`: `tests/property`.
+  - `rebuild`: `tests/unit/test_catalog_rebuild*`.
+  - `mutation`: `make mutation` / `tools/mutation_run.sh`. It runs mutmut against the safety-critical modules using `tests/safety` plus the scheduler, drive-lease, recovery and scalar-coordinate unit tests. Surviving mutants are compared with `mutation/baseline.txt`, and any new survivor fails the lane.
+  - The pytest markers `stress`, `fuzz`, `rebuild` and `mutation` are registered in `pyproject.toml`.
