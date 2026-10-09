@@ -50,6 +50,10 @@ class DriveBusyError(OpenBladeError):
     """Drive is busy."""
 
 
+class StaleLeaseError(OpenBladeError):
+    """A drive lease expired, was released, or was superseded (fencing token mismatch)."""
+
+
 class ChangerBusyError(OpenBladeError):
     """Changer is busy with another operation."""
 
