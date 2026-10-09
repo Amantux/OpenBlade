@@ -471,3 +471,25 @@ class DriveLeaseRecord(Base):
     heartbeat_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class JobJournalEntry(Base):
+    """Append-only per-job event journal (lease acquired, shard staged, commit, failure...).
+
+    Created by ``Base.metadata.create_all`` like ``drive_leases`` -- a new table
+    needs no ``_migrate_schema`` step. ``detail_json`` is a JSON object; a
+    ``shard_staged`` row carries ``instance_id`` and is how staged instances are
+    linked back to their job (``file_instances`` has no job column).
+    """
+
+    __tablename__ = "job_journal"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    detail_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    @property
+    def detail(self) -> dict[str, Any]:
+        return cast("dict[str, Any]", json.loads(self.detail_json or "{}"))
