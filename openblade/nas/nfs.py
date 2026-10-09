@@ -31,7 +31,9 @@ class NfsExport:
             f"  Access_Type = {access};\n"
             "  Squash = No_Root_Squash;\n"
             "  SecType = sys;\n"
-            f'  CLIENT {{ Clients = "{self.client}"; Access_Type = {access}; }}\n'
+            # Ganesha parses Clients as a bare client-list token; a quoted
+            # "*" is rejected ("Expected a client") and drops the whole EXPORT.
+            f"  CLIENT {{ Clients = {self.client}; Access_Type = {access}; }}\n"
             "  FSAL { Name = VFS; }\n"
             "}\n"
         )
