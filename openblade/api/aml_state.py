@@ -2462,8 +2462,33 @@ def purge_expired_sessions() -> None:
         _STATE.sessions.pop(token, None)
 
 
+_DEFAULT_MAX_SESSIONS_PER_USER = 5
+
+
+def max_sessions_per_user() -> int:
+    """Concurrent-session cap per user (inferred; the Rev D manual documents no limit).
+
+    Read from ``OPENBLADE_AML_MAX_SESSIONS`` at call time; unparseable or < 1 falls
+    back to the default.
+    """
+    raw = os.environ.get("OPENBLADE_AML_MAX_SESSIONS", "")
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_SESSIONS_PER_USER
+    return value if value >= 1 else _DEFAULT_MAX_SESSIONS_PER_USER
+
+
 def create_session(user: AmlUser) -> SessionRecord:
     purge_expired_sessions()
+    # Evict the user's oldest sessions so the new login always succeeds: refusing
+    # would let abandoned sessions lock an operator (incl. admin) out until expiry.
+    own = sorted(
+        (record for record in _STATE.sessions.values() if record.user_name == user.name),
+        key=lambda record: record.created_at,
+    )
+    for stale in own[: max(0, len(own) - max_sessions_per_user() + 1)]:
+        _STATE.sessions.pop(stale.token, None)
     now = _utcnow()
     record = SessionRecord(
         token=str(uuid4()),

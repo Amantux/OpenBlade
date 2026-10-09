@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import collections
 import os
+import re
 import string
 import time
 from collections.abc import Callable
 from typing import Any, TypeVar
+from xml.etree import ElementTree
 
 import pyotp
 from fastapi import (
@@ -58,6 +60,7 @@ def _check_rate_limit(remote_ip: str) -> None:
         raise HTTPException(
             status_code=429,
             detail=f"Too many login attempts. Try again in {_LOGIN_WINDOW_SECONDS // 60} minutes.",
+            headers={"Retry-After": str(max(1, int(deque[0] - window_start) + 1) if deque else 1)},
         )
     deque.append(now)
 
@@ -345,18 +348,86 @@ async def require_auth(request: Request, context: AppContext = Depends(get_conte
             token = auth.split(" ", 1)[1]
             user = aml_state.get_session_user(token)
     if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        headers = None
+        if session_id:
+            # Expired/unknown cookie: tell the browser to drop it.
+            headers = {"Set-Cookie": 'sessionID=""; Max-Age=0; Path=/; HttpOnly; SameSite=lax'}
+        raise HTTPException(status_code=401, detail="Authentication required", headers=headers)
     return user
 
 
+_XML_MEDIA_TYPES = frozenset({"application/xml", "text/xml"})
+_FORM_MEDIA_TYPES = frozenset({"application/x-www-form-urlencoded", "multipart/form-data"})
+_ACCEPTABLE_MEDIA_TYPES = frozenset({"*/*", "application/*", "text/*", "application/json"})
+_XML_FORBIDDEN_MARKUP = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
+
+
+class _LoginNegotiationError(Exception):
+    """Typed content-negotiation failure carrying a curated AML status/summary."""
+
+    def __init__(self, status_code: int, summary: str) -> None:
+        super().__init__(summary)
+        self.status_code = status_code
+        self.summary = summary
+
+
+def _media_type(header_value: str) -> str:
+    return header_value.split(";", 1)[0].strip().lower()
+
+
+def _wants_xml(request: Request) -> bool:
+    """True when Accept names an XML type and not JSON (inferred; manual is JSON-only)."""
+    accepted = {_media_type(part) for part in request.headers.get("accept", "").split(",")}
+    return bool(accepted & _XML_MEDIA_TYPES) and "application/json" not in accepted
+
+
+def _check_acceptable(request: Request) -> None:
+    raw = request.headers.get("accept", "").strip()
+    if not raw:
+        return
+    accepted = {_media_type(part) for part in raw.split(",")}
+    if not accepted & (_ACCEPTABLE_MEDIA_TYPES | _XML_MEDIA_TYPES):
+        raise _LoginNegotiationError(406, "Unsupported Accept media type")
+
+
+def _parse_login_xml(body: bytes) -> dict[str, Any]:
+    # defusedxml is not installed; refuse any DTD/entity declaration outright so
+    # neither external entities (XXE) nor entity expansion can reach the parser.
+    if _XML_FORBIDDEN_MARKUP.search(body):
+        raise _LoginNegotiationError(400, "XML DTD/entity declarations are not allowed")
+    try:
+        root = ElementTree.fromstring(body)
+    except ElementTree.ParseError as exc:
+        raise _LoginNegotiationError(400, "Malformed XML login payload") from exc
+    return {child.tag: (child.text or "") for child in root}
+
+
+def _negotiated(request: Request, status_code: int, body: dict[str, Any]) -> Response:
+    if not _wants_xml(request):
+        return JSONResponse(status_code=status_code, content=body)
+    root = ElementTree.Element("WSResultCode")
+    for key, value in body.items():
+        if value is not None:
+            ElementTree.SubElement(root, key).text = str(value)
+    return Response(
+        content=ElementTree.tostring(root, encoding="unicode"),
+        status_code=status_code,
+        media_type="application/xml",
+    )
+
+
 async def _parse_login_request(request: Request) -> LoginRequest:
-    content_type = request.headers.get("content-type", "")
+    media_type = _media_type(request.headers.get("content-type", ""))
     payload: dict[str, Any]
-    if "json" in content_type:
+    if media_type == "application/json":
         payload = await request.json()
-    else:
+    elif media_type in _XML_MEDIA_TYPES:
+        payload = _parse_login_xml(await request.body())
+    elif media_type in _FORM_MEDIA_TYPES:
         form = await request.form()
         payload = dict(form)
+    else:
+        raise _LoginNegotiationError(415, "Unsupported or missing Content-Type")
 
     # Backwards compatible: accept 'username' as an alias for 'name'
     if isinstance(payload, dict) and "username" in payload and "name" not in payload:
@@ -505,7 +576,11 @@ async def test_ldap(
 @no_auth
 async def login(request: Request, context: AppContext = Depends(get_context)) -> Response:
     _ensure_state(context)
-    payload = await _parse_login_request(request)
+    try:
+        _check_acceptable(request)
+        payload = await _parse_login_request(request)
+    except _LoginNegotiationError as exc:
+        return _ws_error(exc.status_code, exc.summary)
     user_name = _validate_user_name(payload.name)
     remote_address = _remote_address(request) or "unknown"
 
@@ -533,7 +608,14 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     body = _ws_result("Login successful").model_dump()
     # Provide session token in response body for API clients/tests that expect it
     body["token"] = session_record.token
-    response = JSONResponse(content=body)
+    # Inferred: Rev D signals a default password only via the Warning header. With
+    # OPENBLADE_AML_STRICT_PRECONDITIONS=true the same login answers 412 instead of
+    # 200; the session is still issued so the client can change the password.
+    strict = os.environ.get("OPENBLADE_AML_STRICT_PRECONDITIONS", "false").lower() == "true"
+    precondition_failed = strict and user.require_password_change
+    if precondition_failed:
+        body.update(code=412, description="Error", summary="Default password must be changed")
+    response = _negotiated(request, 412 if precondition_failed else 200, body)
     _is_production = os.environ.get("OPENBLADE_ENV", "development").lower() == "production"
     response.set_cookie(
         "sessionID",
@@ -562,8 +644,12 @@ async def logout(
     context: AppContext = Depends(get_context),
 ) -> Response:
     _ensure_state(context)
+    try:
+        _check_acceptable(request)
+    except _LoginNegotiationError as exc:
+        return _ws_error(exc.status_code, exc.summary)
     aml_state.clear_session(request.cookies.get("sessionID", ""))
-    response = JSONResponse(content=_ws_result(f"Logged out {current_user.name}").model_dump())
+    response = _negotiated(request, 200, _ws_result(f"Logged out {current_user.name}").model_dump())
     response.delete_cookie("sessionID")
     return response
 
