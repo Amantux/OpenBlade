@@ -92,6 +92,9 @@ def prepare() -> None:
     (deep / "leaf.txt").write_text("deep")
     (rw / "offline").mkdir(parents=True)
     (rw / ".ob-tape" / "offline").mkdir(parents=True)
+    # Clients drop recall requests here; must exist and be guest-writable before
+    # the shim starts (it only creates .ob-control itself, root-owned 0755).
+    (rw / ".ob-control" / "offline").mkdir(parents=True)
     (ro / "readme.txt").write_text("hello openblade\n")
     (ro / "data.bin").write_bytes(PAYLOAD)
     (ro / UNICODE_NAME).write_text("unicode")
