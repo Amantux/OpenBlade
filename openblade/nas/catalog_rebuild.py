@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import cast
@@ -44,6 +45,10 @@ def _utcnow_iso() -> str:
 # same pydantic models that are rebuilt from them), so every column read needs a
 # type. These are `cast` only -- no runtime narrowing, no new failure mode:
 # validation stays exactly where it was, in the model construction one line down.
+def _sha256_text(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 def _text_column(value: object) -> str | None:
     return cast("str | None", value)
 
@@ -217,15 +222,17 @@ class CatalogRebuildPlanner:
         marker = self.metadata_writer.read_commit_marker(barcode, manifest.generation_id)
         if marker is None:
             return "commit marker missing"
-        manifest_sha = self.metadata_writer.compute_json_checksum(
-            manifest.model_dump(by_alias=True)
+        # Hash the raw on-tape bytes, never a re-dump of the parsed model: a re-dump
+        # changes whenever the model gains a defaulted field, which would silently mark
+        # every older generation uncommitted. Markers written by the current writer hash
+        # these same bytes, so no compatibility shim is needed.
+        manifest_raw = self.metadata_writer._read_text(
+            barcode, self.metadata_writer._metadata_path("manifest.json")
         )
-        shard_sha = self.metadata_writer._read_text(
-            barcode, self.shard_writer.SHARD_CHECKSUM_METADATA_PATH
-        )
-        if marker.manifest_sha256 != manifest_sha:
+        shard_raw = self.metadata_writer._read_text(barcode, self.shard_writer.SHARD_METADATA_PATH)
+        if manifest_raw is None or marker.manifest_sha256 != _sha256_text(manifest_raw):
             return "commit marker manifest hash mismatch"
-        if shard_sha is None or marker.catalog_shard_sha256 != shard_sha.strip():
+        if shard_raw is None or marker.catalog_shard_sha256 != _sha256_text(shard_raw):
             return "commit marker catalog-shard hash mismatch"
         return None
 

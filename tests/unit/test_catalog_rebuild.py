@@ -541,3 +541,33 @@ def test_execute_rebuild_skips_malformed_protection_policy(
 
     assert result.datasets_recovered == 1
     assert _dataset_protection_json(rebuild_env, f"dataset-{barcode}") is None
+
+
+def test_commit_marker_survives_new_defaulted_manifest_field(
+    rebuild_env: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the marker hashes on-tape bytes, so a newer ManifestJson with an extra
+    defaulted field (which changes model_dump()) still sees older generations as committed."""
+    from openblade.nas.ltfs_manifest import ManifestJson
+
+    class FutureManifestJson(ManifestJson):
+        future_field: str = "added-later"
+
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode)
+    _stamp_generation(rebuild_env, barcode, marker="ok")
+    writer = rebuild_env["planner"].metadata_writer
+    original_read = writer.read_manifest
+
+    def read_future(bc: str) -> ManifestJson | None:
+        parsed = original_read(bc)
+        return None if parsed is None else FutureManifestJson.model_validate(parsed.model_dump())
+
+    monkeypatch.setattr(writer, "read_manifest", read_future)
+
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
+
+    assert result.uncommitted_generations == []
+    assert result.barcodes_to_scan == [barcode]
