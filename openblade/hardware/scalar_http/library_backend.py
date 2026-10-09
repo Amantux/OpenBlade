@@ -69,7 +69,7 @@ from typing import Any
 
 import httpx
 
-from openblade.domain.errors import DriveCorrelationError, OpenBladeError
+from openblade.domain.errors import DriveCorrelationError, OpenBladeError, TapeMountedError
 from openblade.domain.models import (
     Barcode,
     CartridgeState,
@@ -184,7 +184,7 @@ class ScalarHttpLibraryBackend:
                         drive_id=int(address),
                         barcode=_barcode_or_none(element.get("barcode")),
                         drive_state=_drive_state(element.get("state")),
-                        mount_state=MountState.UNMOUNTED,
+                        mount_state=self._mount_states.get(int(address), MountState.UNMOUNTED),
                     )
                 )
         return LibraryInventory(
@@ -258,6 +258,12 @@ class ScalarHttpLibraryBackend:
         )
 
     def unload(self, drive_id: int, target_slot: int) -> OperationResult:
+        # Safety gate: the Web Services API has no notion of LTFS mount state, so
+        # the host-side record is the only thing standing between a mounted (or
+        # dirty) volume and a moveMedium that ejects it.
+        mount_state = self._mount_states.get(drive_id, MountState.UNMOUNTED)
+        if mount_state is not MountState.UNMOUNTED:
+            raise TapeMountedError(f"Drive {drive_id} cannot be unloaded while {mount_state.value}")
         # Real i3 unload uses moveClass=8 (bit field) with the drive source; the
         # target slot is sent as a hint (Web Services manual). See
         # docs/reference/i3-contract-notes.md.

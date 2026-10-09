@@ -50,19 +50,7 @@ def test_mount_rw_write_then_ro_read_round_trips_checksum(
     assert backend_pair.library.unload(drive_id, slot).success
 
 
-def test_unload_while_mounted_is_refused(
-    backend_pair: BackendPair, request: pytest.FixtureRequest
-) -> None:
-    if backend_pair.name == "emulator+sim-ltfs":
-        request.applymarker(
-            pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "openblade/hardware/scalar_http/library_backend.py:260 unload() has no "
-                    "LTFS mount-state gate; the AML emulator moves a mounted cartridge"
-                ),
-            )
-        )
+def test_unload_while_mounted_is_refused(backend_pair: BackendPair) -> None:
     backend_pair.format_all()
     barcode, slot, drive_id = _load_first(backend_pair)
     handle = backend_pair.ltfs.mount(barcode, MountMode.READ_WRITE)
