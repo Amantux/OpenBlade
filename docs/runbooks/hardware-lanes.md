@@ -14,7 +14,11 @@ self-hosted runner described below.
 All three physical lanes share the concurrency group `hardware-rig-i3` with
 `cancel-in-progress: false`: only one lane holds the rig at a time, and a
 running destructive sequence is never cancelled halfway (that can strand a
-cartridge in a drive).
+cartridge in a drive). The group is declared on the **rig job**, not the
+workflow, so a destructive run waiting on environment approval does not hold
+the rig slot, and a no-rig run never takes it. Every rig job also pins
+`OPENBLADE_HARDWARE_DRY_RUN=false`, and `tools.hardware.snapshot capture`
+refuses (exit 2) if the backend is in hardware dry-run mode.
 
 `hardware-library-smoke.yml` was kept rather than deleted so its workflow name
 and job id (`register-and-validate`) keep resolving for any branch-protection
@@ -51,7 +55,10 @@ Repo → **Settings → Secrets and variables → Actions → Variables**:
   `OPENBLADE_DRIVE_DEVICES` are set in the runner host's environment (`.env` of
   the runner service). Every rig job has a **Preflight** step that fails if any
   of these is empty — otherwise the rig tests would skip and the lane would go
-  green without testing anything.
+  green without testing anything. As a second layer, every rig pytest step
+  writes JUnit XML and a final **Gate** step (`python -m tools.hardware.junit_gate`)
+  fails the job if any test skipped or nothing passed. An expected skip must be
+  passed explicitly (`--expected-skip classname::name`) with a comment saying why.
 
 ## 3. Environment approval (settings-only — cannot be committed)
 
@@ -104,6 +111,12 @@ the pre-reboot `after.json` shows the same cartridges in the same slots.
 
 Without `HARDWARE_RIG_AVAILABLE=true`, the hardware job shows as **Skipped**
 and a small `no-rig-notice` job writes "NOT RUN (neutral)" to the run summary.
+Because `no-rig-notice` succeeds, **the workflow run concludes `success`** —
+GitHub shows it with a green check even though nothing touched the appliance.
+That is why these lanes must **never be required status checks or README
+badges**: a no-rig run would satisfy the check and colour the badge green. Read
+the run summary (`NOT RUN`) or the rig job's own result, never the run
+conclusion.
 
 **No lane may be reported or treated as green because it skipped.** A skipped
 hardware job proves nothing about the appliance. Do not add it as a required

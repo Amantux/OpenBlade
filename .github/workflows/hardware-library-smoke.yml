@@ -23,10 +23,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: hardware-rig-i3
-  cancel-in-progress: false
-
 jobs:
   no-rig-notice:
     name: no-rig-notice
@@ -46,10 +42,16 @@ jobs:
     name: register-and-validate
     if: vars.HARDWARE_RIG_AVAILABLE == 'true'
     runs-on: [self-hosted, i3]
+    # Job-level, so only a job that actually holds the rig takes the lock.
+    concurrency:
+      group: hardware-rig-i3
+      cancel-in-progress: false
     timeout-minutes: 30
     env:
       OPENBLADE_BACKEND: real
       OPENBLADE_REAL_HARDWARE_ENABLED: "true"
+      # Pinned: a runner-host dry-run setting would make the lane a no-op.
+      OPENBLADE_HARDWARE_DRY_RUN: "false"
       OPENBLADE_APPLIANCE_URL: ${{ vars.OPENBLADE_APPLIANCE_URL }}
       OPENBLADE_APPLIANCE_USER: ${{ vars.OPENBLADE_APPLIANCE_USER }}
       OPENBLADE_APPLIANCE_PASSWORD: ${{ secrets.OPENBLADE_APPLIANCE_PASSWORD }}
@@ -97,6 +99,12 @@ jobs:
             args+=(-k "$TEST_FILTER")
           fi
           python -m pytest "${args[@]}"
+
+      # Runs only after the suite succeeded (no `if: always()`): catches a
+      # green-by-skipping run. A -k filter deselects (absent from the XML),
+      # it does not skip, so it cannot trip this gate.
+      - name: Gate — fail on any skip or zero passes
+        run: python -m tools.hardware.junit_gate readonly-results.xml
 
       - name: Snapshot inventory + drive state (after) and diff
         if: always()

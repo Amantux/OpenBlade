@@ -6,7 +6,9 @@ name: Hardware destructive
 # Guard rails, in order:
 #   1. environment `hardware-destructive` — required reviewers approve every run
 #      (configured in repo settings; a scheduled run waits for approval too);
-#   2. rig guard — skipped (neutral, never green) without HARDWARE_RIG_AVAILABLE;
+#   2. rig guard — without HARDWARE_RIG_AVAILABLE only a NOT RUN summary job
+#      runs, so the run concludes *success*; this lane must never be a required
+#      check or a badge (docs/runbooks/hardware-lanes.md);
 #   3. allowlist — exits non-zero before ANY hardware step if a barcode is
 #      outside vars.SACRIFICIAL_BARCODES, or the list is empty;
 #   4. before/after inventory + drive snapshot, diffed and uploaded;
@@ -28,12 +30,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  # One rig, one lock: never two destructive runs (or a read-only run) at once,
-  # and never cancel one mid-sequence — that can strand a cartridge in a drive.
-  group: hardware-rig-i3
-  cancel-in-progress: false
-
 jobs:
   no-rig-notice:
     name: no-rig-notice
@@ -54,10 +50,19 @@ jobs:
     if: vars.HARDWARE_RIG_AVAILABLE == 'true'
     runs-on: [self-hosted, i3]
     environment: hardware-destructive
+    # Job-level (after the environment gate): a run waiting for approval must
+    # not hold the rig slot. One rig, one lock — never two rig jobs at once, and
+    # never cancel one mid-sequence (that can strand a cartridge in a drive).
+    concurrency:
+      group: hardware-rig-i3
+      cancel-in-progress: false
     timeout-minutes: 240
     env:
       OPENBLADE_BACKEND: real
       OPENBLADE_REAL_HARDWARE_ENABLED: "true"
+      # Pinned: a runner-host dry-run setting would turn every step into a no-op
+      # that still reports success.
+      OPENBLADE_HARDWARE_DRY_RUN: "false"
       OPENBLADE_APPLIANCE_URL: ${{ vars.OPENBLADE_APPLIANCE_URL }}
       OPENBLADE_APPLIANCE_USER: ${{ vars.OPENBLADE_APPLIANCE_USER }}
       OPENBLADE_APPLIANCE_PASSWORD: ${{ secrets.OPENBLADE_APPLIANCE_PASSWORD }}
@@ -95,36 +100,39 @@ jobs:
         id: allowlist
         run: |
           set -euo pipefail
-          python -m tools.hardware.allowlist --barcodes "$BARCODES"
-          echo "OPENBLADE_SCRATCH_BARCODES=$BARCODES" >> "$GITHUB_ENV"
+          # Export the tool's normalized list, never the raw input.
+          normalized="$(python -m tools.hardware.allowlist --barcodes "$BARCODES")"
+          echo "OPENBLADE_SCRATCH_BARCODES=$normalized" >> "$GITHUB_ENV"
 
       - name: Snapshot inventory + drive state (before)
         run: |
           set -euo pipefail
-          mkdir -p snapshots
+          mkdir -p snapshots reports
           python -m tools.hardware.snapshot capture --out snapshots/before.json
 
       - name: Load / unload
-        run: python -m pytest tests/hardware/test_changer_operations.py -m real_hardware -v --tb=short -rs
+        run: python -m pytest tests/hardware/test_changer_operations.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_changer_operations.xml
 
-      # test_mkltfs_formats_tape is deselected: it calls mkltfs directly, which
-      # bypasses the two-phase dry-run + token flow this lane requires. The
-      # remaining LTFS tests need a cartridge already formatted via that flow.
+      # Every LTFS test formats via FormatService.dry_run -> confirm(token), the
+      # two-phase dry-run + safety-token flow; none invokes mkltfs directly.
       - name: LTFS write / read / checksum
-        run: |
-          python -m pytest tests/hardware/test_ltfs_operations.py -m real_hardware -v --tb=short -rs \
-            --deselect tests/hardware/test_ltfs_operations.py::test_mkltfs_formats_tape
+        run: python -m pytest tests/hardware/test_ltfs_operations.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_ltfs_operations.xml
 
       - name: Archive + restore
-        run: python -m pytest tests/hardware/test_archive_restore.py -m real_hardware -v --tb=short -rs
+        run: python -m pytest tests/hardware/test_archive_restore.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_archive_restore.xml
 
       - name: Sharded write + restore
-        run: python -m pytest tests/hardware/test_sharded_operations.py -m real_hardware -v --tb=short -rs
+        run: python -m pytest tests/hardware/test_sharded_operations.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_sharded_operations.xml
 
       - name: Safe failure injection
         env:
           OPENBLADE_FAULT_TESTS: enabled
-        run: python -m pytest tests/hardware/test_fault_recovery.py -m real_hardware -v --tb=short -rs
+        run: python -m pytest tests/hardware/test_fault_recovery.py -m real_hardware -v --tb=short -rs --junitxml=reports/test_fault_recovery.xml
+
+      # Runs only if every test step succeeded (no `if: always()`): a red test
+      # step already fails the job; this catches the green-by-skipping case.
+      - name: Gate — fail on any skip or zero passes
+        run: python -m tools.hardware.junit_gate reports/*.xml
 
       # Reboot persistence is a MANUAL step (the runner cannot power-cycle the
       # appliance): see docs/runbooks/hardware-lanes.md "Reboot persistence".
@@ -171,5 +179,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: hardware-destructive-${{ github.run_id }}
-          path: snapshots/
+          path: |
+            snapshots/
+            reports/
           if-no-files-found: warn

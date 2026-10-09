@@ -316,7 +316,9 @@ jobs:
           SACRIFICIAL_BARCODES: ${{ vars.SACRIFICIAL_BARCODES || 'OB0007L8,OB0008L8' }}
         run: |
           set -euo pipefail
-          python -m tools.hardware.allowlist --barcodes "$OPENBLADE_SCRATCH_BARCODES"
+          # Same contract as the i3 lane: export the tool's normalized list.
+          normalized="$(python -m tools.hardware.allowlist --barcodes "$OPENBLADE_SCRATCH_BARCODES")"
+          echo "OPENBLADE_SCRATCH_BARCODES=$normalized" >> "$GITHUB_ENV"
 
       - name: Snapshot inventory + drive state (before)
         run: |

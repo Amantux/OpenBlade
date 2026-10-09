@@ -5,9 +5,10 @@ name: Hardware nightly read-only
 # safety test in that directory rejects load/unload/move/format/mount calls).
 # The before/after snapshot diff is the runtime proof that nothing moved.
 #
-# Without a rig (HARDWARE_RIG_AVAILABLE != 'true') the hardware job is SKIPPED,
-# and the no-rig job says so in the run summary. A skipped lane is neutral,
-# never green: it proves nothing about the appliance.
+# Without a rig (HARDWARE_RIG_AVAILABLE != 'true') the hardware job is SKIPPED
+# and the no-rig job writes a NOT RUN summary. The run then concludes
+# *success* even though nothing was verified, so this lane must never be a
+# required check or a badge (docs/runbooks/hardware-lanes.md).
 
 on:
   schedule:
@@ -17,12 +18,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  # Shares the rig lock with the destructive lane and the smoke subset: a
-  # read-only pass must never observe a destructive run mid-sequence.
-  group: hardware-rig-i3
-  cancel-in-progress: false
 
 jobs:
   no-rig-notice:
@@ -44,10 +39,18 @@ jobs:
     name: hardware-readonly
     if: vars.HARDWARE_RIG_AVAILABLE == 'true'
     runs-on: [self-hosted, i3]
+    # Job-level, so only a job that actually holds the rig takes the lock.
+    # Shared with the destructive lane and the smoke subset: a read-only pass
+    # must never observe a destructive run mid-sequence.
+    concurrency:
+      group: hardware-rig-i3
+      cancel-in-progress: false
     timeout-minutes: 60
     env:
       OPENBLADE_BACKEND: real
       OPENBLADE_REAL_HARDWARE_ENABLED: "true"
+      # Pinned: a runner-host dry-run setting would make the lane a no-op.
+      OPENBLADE_HARDWARE_DRY_RUN: "false"
       OPENBLADE_APPLIANCE_URL: ${{ vars.OPENBLADE_APPLIANCE_URL }}
       OPENBLADE_APPLIANCE_USER: ${{ vars.OPENBLADE_APPLIANCE_USER }}
       OPENBLADE_APPLIANCE_PASSWORD: ${{ secrets.OPENBLADE_APPLIANCE_PASSWORD }}
@@ -92,6 +95,12 @@ jobs:
           set -euo pipefail
           python -m pytest tests/hardware/readonly/ -m real_hardware -v --tb=short -rs \
             --junitxml=readonly-results.xml
+
+      # Runs only after the suite succeeded (no `if: always()`): catches a
+      # green-by-skipping run. Add `--expected-skip classname::name` only with
+      # a comment saying why that skip is legitimate on the rig.
+      - name: Gate — fail on any skip or zero passes
+        run: python -m tools.hardware.junit_gate readonly-results.xml
 
       - name: Snapshot inventory + drive state (after) and diff
         if: always()
