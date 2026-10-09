@@ -16,6 +16,8 @@ from openblade.jobs.scheduler import DEFAULT_LEASE_TTL
 
 logger = logging.getLogger(__name__)
 
+_NON_TERMINAL_JOB_STATES = frozenset({"pending", "running"})
+
 INTERRUPTED_ERROR = (
     "interrupted: drive lease expired without a heartbeat; physical state unknown — "
     "reconcile before retry"
@@ -74,7 +76,9 @@ def recover_after_restart(catalog: CatalogRepository, library: LibraryBackend) -
     leased_job_ids = {lease.job_id for lease in live}
     for lease in live:
         owner = catalog.get_job(lease.job_id)
-        if owner is None or owner.state != "running":
+        # A pending or running owner may belong to another live process; its
+        # lease is only reclaimed once it expires (handled above).
+        if owner is None or owner.state not in _NON_TERMINAL_JOB_STATES:
             orphaned.append(lease)
     catalog.release_leases([lease.id for lease in orphaned])
 
