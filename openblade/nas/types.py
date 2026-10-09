@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from openblade.domain.protection import ProtectionPolicy
 from openblade.nas.media import Cartridge, MediaGeneration
 
 
@@ -530,6 +531,8 @@ class NasPool(BaseModel):
     virtual_mount_enabled: bool = True
     hydration_behavior: HydrationBehavior = HydrationBehavior.QUEUE
     replication_factor: int = Field(default=1, ge=1, le=4)
+    # Explicit protection/placement policy; None means derive from replication_factor.
+    protection: ProtectionPolicy | None = None
     backup_order_mode: Literal["sequential", "parallel"] = "sequential"
     cache_target_id: str | None = None
     restore_target_path: str = "/openblade/restore"

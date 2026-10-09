@@ -194,8 +194,12 @@ def protection_from_pool(pool: Any) -> ProtectionPolicy:
 
     ``replication_factor`` stays the source of truth for existing pools; this only
     expresses it as ``Protection.REPLICATION(copies=n)``. Placement is single-tape:
-    the legacy field says nothing about striping.
+    the legacy field says nothing about striping. An explicit ``pool.protection``
+    policy, when set, wins over the legacy field.
     """
+    explicit = getattr(pool, "protection", None)
+    if isinstance(explicit, ProtectionPolicy):
+        return explicit
     copies = max(1, int(getattr(pool, "replication_factor", 1) or 1))
     protection = Protection.replication(copies) if copies >= 2 else Protection.none()
     return ProtectionPolicy(protection=protection)
