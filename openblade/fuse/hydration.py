@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from openblade.domain.errors import OpenBladeError
 from openblade.fuse.cache import CacheChecksumError, HydrationCache
+from openblade.jobs.restore import RestoreRequest
 
 logger = logging.getLogger(__name__)
 
@@ -103,11 +104,11 @@ class RestoreEngine(Protocol):
 
 
 class JobRestoreEngine:
-    """Production engine: one restore job per file via ``RestoreService``.
+    """Production engine: one restore job per tape batch via ``RestoreService``.
 
-    Files in one batch share a tape and are restored back to back, so the
-    library loads that cartridge once (scheduler/lease policy is the jobs
-    layer's concern, not ours).
+    Files in one batch share a tape; ``RestoreService.enqueue_batch`` takes one
+    lease and loads, mounts, unmounts and unloads that cartridge once
+    (scheduler/lease policy is the jobs layer's concern, not ours).
     """
 
     def __init__(
@@ -172,10 +173,16 @@ class JobRestoreEngine:
                 raise HydrationFailedError(f"{path} is not in the catalog")
             dest = self.staging_root / record.id
             dest.parent.mkdir(parents=True, exist_ok=True)
-            job = service.enqueue(path, dest)
-            if job.state != "completed":
-                raise HydrationFailedError(f"restore job {job.id} for {path} ended {job.state}")
             staged[path] = dest
+        # ONE job for the whole tape group: the jobs layer loads/mounts once.
+        job, result = service.enqueue_batch(
+            [RestoreRequest(catalog_path=path, dest_path=dest) for path, dest in staged.items()]
+        )
+        if job.state != "completed":
+            failed = [item.catalog_path for item in result.items if not item.ok]
+            raise HydrationFailedError(
+                f"restore job {job.id} ended {job.state}; failed: {', '.join(failed) or 'tape'}"
+            )
         return staged
 
     def find_active_job(self, catalog_path: str) -> str | None:
