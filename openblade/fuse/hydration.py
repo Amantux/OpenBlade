@@ -7,12 +7,15 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
 from sqlalchemy.exc import InvalidRequestError
+from sqlalchemy.orm import Session
 
 from openblade.domain.errors import OpenBladeError
 from openblade.fuse.cache import CacheChecksumError, HydrationCache
@@ -115,6 +118,8 @@ class JobRestoreEngine:
         *,
         poll_interval_s: float = 0.5,
         resume_timeout_s: float | None = None,
+        catalog_factory: Callable[[], Any] | None = None,
+        restore_service_factory: Callable[[Any], Any] | None = None,
     ) -> None:
         self.poll_interval_s = poll_interval_s
         self.resume_timeout_s = (
@@ -123,17 +128,51 @@ class JobRestoreEngine:
         self.restore_service = restore_service
         self.catalog = catalog
         self.staging_root = staging_root
+        self.catalog_factory = catalog_factory
+        # Builds a RestoreService over the worker's own catalog so the restore
+        # job's writes never go through the caller's (other-thread) Session.
+        self.restore_service_factory = restore_service_factory
+
+    @contextmanager
+    def _worker_catalog(self) -> Iterator[Any]:
+        """A catalog over a Session private to the calling (worker) thread.
+
+        ``restore_batch``/``resume`` run on Hydrator worker threads; SQLAlchemy
+        Sessions are not thread-safe, so the caller's session is never used here.
+        """
+        if self.catalog_factory is not None:
+            repo = self.catalog_factory()
+        else:
+            from openblade.catalog.repository import CatalogRepository  # local: avoid import cycle
+
+            bind = self.catalog.session.get_bind()
+            repo = CatalogRepository(Session(bind=bind, expire_on_commit=False))
+        try:
+            yield repo
+        finally:
+            repo.session.close()
 
     def restore_batch(self, tape_key: str, catalog_paths: list[str]) -> dict[str, Path]:
+        with self._worker_catalog() as catalog:
+            return self._restore_batch(catalog, tape_key, catalog_paths)
+
+    def _restore_batch(
+        self, catalog: Any, tape_key: str, catalog_paths: list[str]
+    ) -> dict[str, Path]:
         del tape_key
+        service = (
+            self.restore_service
+            if self.restore_service_factory is None
+            else self.restore_service_factory(catalog)
+        )
         staged: dict[str, Path] = {}
         for path in catalog_paths:
-            record = self.catalog.get_file_record(path)
+            record = catalog.get_file_record(path)
             if record is None:
                 raise HydrationFailedError(f"{path} is not in the catalog")
             dest = self.staging_root / record.id
             dest.parent.mkdir(parents=True, exist_ok=True)
-            job = self.restore_service.enqueue(path, dest)
+            job = service.enqueue(path, dest)
             if job.state != "completed":
                 raise HydrationFailedError(f"restore job {job.id} for {path} ended {job.state}")
             staged[path] = dest
@@ -148,14 +187,18 @@ class JobRestoreEngine:
         return None
 
     def resume(self, job_id: str) -> Path:
+        with self._worker_catalog() as catalog:
+            return self._resume(catalog, job_id)
+
+    def _resume(self, catalog: Any, job_id: str) -> Path:
         deadline = time.monotonic() + self.resume_timeout_s
         while True:
-            job = self.catalog.get_job(job_id)
+            job = catalog.get_job(job_id)
             if job is not None:
                 # The job is advanced by another session; re-read the row instead
                 # of trusting this session's identity-map copy.
                 try:
-                    self.catalog.session.refresh(job)
+                    catalog.session.refresh(job)
                 except InvalidRequestError:
                     job = None
             if job is None:
