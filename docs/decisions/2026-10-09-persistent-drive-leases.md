@@ -176,6 +176,37 @@ VERIFYING instance states from item 4) — say so in the PR, do not stub it.
 - Explicit heartbeats run once per write batch; the scheduler's background
   heartbeat thread covers the gaps.
 
+## Follow-up landed 2026-10-09 (phase 2: staged commits, journal, recovery report)
+
+Item 4's states and the job journal — listed under Non-goals above for phase 1 —
+landed as a foundation plus three parallel workstreams:
+
+- **States.** `FileInstanceState.STAGING` / `VERIFYING` mark a sharded-archive
+  instance that is written but not committed. Instances are created STAGING
+  before their first write (`create_staged_instance`), moved to VERIFYING after
+  every lane wrote and read back its shard, and moved to ARCHIVED in ONE
+  all-or-nothing `mark_instances_archived` call only after the manifest/commit
+  marker (`finalize_tape_generation`, marker written last), clean unmount and
+  inventory reconcile. Staged instances are never listed as archived or
+  restorable.
+- **Journal.** `job_journal` rows (`CatalogRepository.journal` /
+  `job_journal`) record lease_acquired/released, shard_staged, verify_started,
+  verify_finished, committed, failed, fenced_out, physical_state_unknown (a
+  cleanup step that raised; the original lane error is kept), and `recovered`
+  (written by startup recovery for each job it fails).
+- **Non-sharded leases.** `run_archive_job` / `run_restore_job` take a
+  `DriveScheduler` and acquire, verify and release their drive through it like
+  the sharded path, so non-sharded and sharded jobs exclude each other across
+  processes; a stale lease aborts without touching hardware.
+- **Recovery report fields.** `RecoveryReport` / `GET /jobs/recovery` gain
+  `staged_instances` — `{job_id: [{instance_id, barcode, tape_path,
+  shard_index, state}]}` for every `failed_recoverable` job, i.e. what to
+  reconcile on tape before retry — and `stale_pending_job_ids`: `pending` jobs
+  created more than one `DEFAULT_LEASE_TTL` ago with no live lease (judged from
+  the leases observed before recovery released any). Both are report-only:
+  no state change, no media movement. Resuming from staged shards remains
+  deferred.
+
 ## Non-goals
 
 Item 4's STAGING/VERIFYING states, job resume, replacing `JobQueue`, any
