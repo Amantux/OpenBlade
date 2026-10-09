@@ -15,6 +15,7 @@ from openblade.bootstrap import AppContext, get_context
 from openblade.domain.errors import FileNotFoundError
 from openblade.jobs.archive import ArchiveRequest as ArchiveJobRequest
 from openblade.jobs.archive import run_archive_job
+from openblade.jobs.inventory import InventoryService
 from openblade.jobs.scheduler import DriveScheduler
 from openblade.jobs.shard import ShardMode
 from openblade.jobs.sharded_archive import ShardedArchiveRequest, run_sharded_archive
@@ -140,6 +141,11 @@ async def enqueue_archive(
                 context.ltfs,
                 context.catalog,
                 job.id,
+                scheduler=DriveScheduler(
+                    num_drives=len(InventoryService(context.library).snapshot().drives),
+                    store=context.lease_store,
+                    job_id=job.id,
+                ),
             )
         except Exception as exc:
             _cleanup_failed_archive(context, source_path, request.volume_group)

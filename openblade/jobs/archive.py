@@ -12,9 +12,16 @@ from openblade.catalog.models import Job
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.capacity import has_room_for
-from openblade.domain.errors import ChecksumMismatchError, NoScratchMediaError, safe_job_error
+from openblade.domain.errors import (
+    ChecksumMismatchError,
+    NoScratchMediaError,
+    StaleLeaseError,
+    safe_job_error,
+)
 from openblade.domain.models import JobType, MountMode
+from openblade.jobs.inventory import InventoryService
 from openblade.jobs.queue import JobQueue
+from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.verify import sha256sum
 from openblade.nas.tape_orchestrator import TapeOperationFailedError, execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
@@ -158,37 +165,40 @@ def _load_if_needed(
     catalog: CatalogRepository,
     library: LibraryBackend,
     ltfs: LTFSBackend,
-    barcode: str,
+    handle: DriveHandle,
     job_id: str,
 ) -> tuple[int, int | None]:
+    barcode = handle.barcode
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
+        # Already in a drive: record it as the PHYSICAL drive; the lease key
+        # (handle.drive_id) stays what the scheduler reserved.
+        if drive_id != handle.drive_id:
+            handle.physical_drive_id = drive_id
         return drive_id, None
     slot_id = library.find_slot_by_barcode(barcode)
     if slot_id is None:
         raise NoScratchMediaError(f"Barcode {barcode} not found in inventory")
-    for drive in library.inventory().drives:
-        if drive.barcode is not None:
-            continue
-        try:
-            execute_tape_request(
-                catalog,
-                library,
-                ltfs,
-                TapeOpRequest(
-                    op_type=TapeOpType.LOAD,
-                    barcode=barcode,
-                    drive_id=drive.drive_id,
-                    slot_id=slot_id,
-                    requested_by="archive-job",
-                    job_id=job_id,
-                ),
-                raise_on_failed=True,
-            )
-            return drive.drive_id, slot_id
-        except TapeOperationFailedError:
-            continue
-    raise NoScratchMediaError("No available drives for archive load")
+    try:
+        execute_tape_request(
+            catalog,
+            library,
+            ltfs,
+            TapeOpRequest(
+                op_type=TapeOpType.LOAD,
+                barcode=barcode,
+                drive_id=handle.drive_id,
+                slot_id=slot_id,
+                requested_by="archive-job",
+                job_id=job_id,
+            ),
+            raise_on_failed=True,
+        )
+    except TapeOperationFailedError as exc:
+        raise NoScratchMediaError(
+            f"Leased drive {handle.drive_id} could not load {barcode}"
+        ) from exc
+    return handle.drive_id, slot_id
 
 
 def run_archive_job(
@@ -197,8 +207,16 @@ def run_archive_job(
     ltfs: LTFSBackend,
     catalog: CatalogRepository,
     job_id: str,
+    *,
+    scheduler: DriveScheduler | None = None,
 ) -> ArchiveResult:
-    """Archive source files onto LTFS media and record them in the catalog."""
+    """Archive source files onto LTFS media and record them in the catalog.
+
+    Each tape's drive is taken through ``scheduler`` (a lease shared with every
+    other job on the same store). ``None`` falls back to a job-local in-memory
+    scheduler, which serialises nothing across jobs -- callers that can reach the
+    app's lease store must pass one.
+    """
     catalog.update_job_state(job_id, "running")
     files = _iter_source_files(request.source_path)
     volume_group = catalog.get_volume_group(request.volume_group_name)
@@ -215,6 +233,12 @@ def run_archive_job(
         catalog.update_job_state(job_id, "completed")
         return result
 
+    if scheduler is None:
+        scheduler = DriveScheduler(
+            num_drives=len(InventoryService(library).snapshot().drives), job_id=job_id
+        )
+    leases = scheduler
+    current_lease: DriveHandle | None = None
     current_barcode: str | None = None
     current_handle = None
     current_slot_id: int | None = None
@@ -233,10 +257,13 @@ def run_archive_job(
             pending_instance_ids
         if current_handle is None or current_barcode is None or current_drive_id is None:
             return
+        assert current_lease is not None
+        leases.verify(current_lease)  # fencing: before unmount
         ltfs.unmount(current_handle)
         for instance_id in pending_instance_ids:
             catalog.mark_instance_archived(instance_id, checksum_verified=True)
         pending_instance_ids = []
+        leases.verify(current_lease)  # fencing: before unload
         if current_slot_id is not None:
             execute_tape_request(
                 catalog,
@@ -263,6 +290,18 @@ def run_archive_job(
         current_handle = None
         current_slot_id = None
         current_drive_id = None
+        release_current_lease()
+
+    def release_current_lease() -> None:
+        nonlocal current_lease
+        if current_lease is None:
+            return
+        lease = current_lease
+        current_lease = None
+        leases.release_drives([lease])
+        catalog.journal(
+            job_id, "lease_released", {"drive_id": lease.drive_id, "barcode": lease.barcode}
+        )
 
     try:
         for file_path in files:
@@ -278,14 +317,22 @@ def run_archive_job(
             selected_barcode = _choose_tape(catalog, library, ltfs, volume_group.id, size_bytes)
             if selected_barcode != current_barcode:
                 finalize_current_mount()
+                current_lease = leases.acquire_drives([selected_barcode])[0]
+                catalog.journal(
+                    job_id,
+                    "lease_acquired",
+                    {"drive_id": current_lease.drive_id, "barcode": current_lease.barcode},
+                )
                 current_drive_id, current_slot_id = _load_if_needed(
                     catalog,
                     library,
                     ltfs,
-                    selected_barcode,
+                    current_lease,
                     job_id,
                 )
+                leases.record_physical_drives([current_lease])
                 _mark_aml_drive_busy(selected_barcode, current_drive_id)
+                leases.verify(current_lease)  # fencing: never mount RW on a stale lease
                 current_handle = ltfs.mount(selected_barcode, MountMode.READ_WRITE)
                 current_barcode = selected_barcode
                 tapes_used.append(selected_barcode)
@@ -310,6 +357,19 @@ def run_archive_job(
             bytes_archived += size_bytes
             files_archived += 1
         finalize_current_mount()
+    except StaleLeaseError as exc:
+        # Fenced out: leave the hardware ALONE -- whoever holds the lease now may
+        # have their own tape in that drive. Pending instances stay unarchived.
+        lost = current_lease
+        logger.error(
+            "job %s lost its lease on drive %s (%s); leaving the drive untouched -- "
+            "physical state unknown, reconcile before reuse",
+            job_id,
+            lost.physical if lost is not None else "?",
+            current_barcode,
+        )
+        catalog.update_job_state(job_id, "failed", safe_job_error(exc))
+        raise
     except Exception as exc:
         if current_handle is not None:
             try:
@@ -340,6 +400,8 @@ def run_archive_job(
                 logger.exception("failed to reset archive AML drive state for job %s", job_id)
         catalog.update_job_state(job_id, "failed", safe_job_error(exc))
         raise
+    finally:
+        release_current_lease()
 
     result = ArchiveResult(
         job_id=job_id,

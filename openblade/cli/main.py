@@ -663,6 +663,7 @@ def restore_file(
                 context.ltfs,
                 context.catalog,
                 job.id,
+                scheduler=scheduler,
             )
             payload = {
                 "jobId": job.id,
