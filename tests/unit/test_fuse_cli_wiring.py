@@ -66,6 +66,9 @@ def test_worker_restore_never_uses_the_callers_session(
         def enqueue(self, path: str, dest: Path) -> Any:
             return SimpleNamespace(id="j1", state="completed")
 
+        def enqueue_batch(self, requests: list[Any]) -> Any:
+            return SimpleNamespace(id="j1", state="completed"), SimpleNamespace(items=[])
+
     monkeypatch.setattr(fuse_and_health, "RestoreService", StubService)
     worker = threading.Thread(target=plane.engine.restore_batch, args=("T1", ["/a.bin"]))
     worker.start()

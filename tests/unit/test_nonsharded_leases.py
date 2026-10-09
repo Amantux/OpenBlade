@@ -170,3 +170,30 @@ def test_archive_service_holds_a_catalog_lease_while_writing(
     assert job.state == "completed"
     assert seen and all(owners == [job.id] for owners in seen)  # seen from "another process"
     assert repo_b.live_leases() == []
+
+
+def test_restore_service_holds_a_catalog_lease_while_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openblade.jobs.archive import ArchiveService
+    from openblade.jobs.queue import JobQueue
+    from openblade.jobs.restore import RestoreService
+
+    repo_a, repo_b, library, ltfs = _stack(tmp_path)
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "a.bin").write_bytes(b"y" * 64)
+    ArchiveService(library, ltfs, repo_a, JobQueue()).enqueue("photos", source)
+    service = RestoreService(library, ltfs, repo_a, JobQueue())
+    seen: list[list[str]] = []
+    real_read = ltfs.read_file
+
+    def read(*args: Any, **kwargs: Any) -> Any:
+        seen.append([lease.job_id for lease in repo_b.live_leases()])
+        return real_read(*args, **kwargs)
+
+    monkeypatch.setattr(ltfs, "read_file", read)
+    job = service.enqueue("/photos/a.bin", tmp_path / "out.bin")
+    assert job.state == "completed"
+    assert seen and all(owners == [job.id] for owners in seen)
+    assert repo_b.live_leases() == []
