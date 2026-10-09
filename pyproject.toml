@@ -126,7 +126,7 @@ plugins = []
 warn_unused_configs = true
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = "-ra --strict-markers"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
@@ -134,4 +134,8 @@ markers = [
   "slow: long-running simulator stress tests",
   "i3: Quantum i3 emulator and protocol tests",
   "real_i3: tests requiring a physical Quantum Scalar i3",
+  "stress: fault-injection / stress tests (nightly stress lane)",
+  "fuzz: property-based / fuzz tests (nightly fuzz lane)",
+  "rebuild: catalog rebuild tests (nightly rebuild lane)",
+  "mutation: tests used as the kill-set for the mutation lane",
 ]
