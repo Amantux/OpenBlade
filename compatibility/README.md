@@ -65,3 +65,14 @@ exact body match (use for `captured` cases where the full body is authoritative)
 `iblade-rev-a/` is a scaffold profile for the Rev A (2017) iBlade surface. All its
 cases are `inferred`; see `iblade-rev-a/README.md`. The harness discovers it
 automatically (it globs `compatibility/**/*.json`).
+
+## Request/expectation keys beyond `json`
+
+- `request.body` — raw request body string, sent verbatim (use for XML or malformed
+  payloads). When present, `request.json` is ignored.
+- `request.content_type` — sets the `Content-Type` header (overrides `request.headers`).
+  Omit it entirely to test a missing Content-Type.
+- `request.repeat` — send the request this many extra times before the asserted one
+  (e.g. to trip the login rate limiter). The harness clears the limiter around each case.
+- `expected.headers` — `{name: substring}`; each header must be present and contain the
+  substring (`""` asserts presence only).

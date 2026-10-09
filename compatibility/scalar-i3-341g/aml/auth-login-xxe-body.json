@@ -1,0 +1,5 @@
+{ "id": "aml-auth-login-xxe-body", "profile": "scalar-i3-341g", "source": "inferred", "firmware": "341G", "manual_ref": "Not in Rev D manual (inferred)",
+  "fidelity_notes": "XML login body with a DOCTYPE/external entity is rejected with 400. Inferred; unverified against an appliance.",
+  "request": { "method": "POST", "path": "/aml/users/login", "content_type": "application/xml",
+    "body": "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><user><name>&x;</name><password>p</password></user>" },
+  "expected": { "status": 400 } }
