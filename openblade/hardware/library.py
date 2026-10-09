@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from openblade.config import OpenBladeConfig
+from openblade.domain.errors import TapeMountedError
 from openblade.domain.models import (
     Barcode,
     CartridgeState,
@@ -103,6 +104,11 @@ class RealLibraryBackend:
         return result
 
     def unload(self, drive_id: int, target_slot: int) -> OperationResult:
+        # Never unload while LTFS is mounted or dirty. The changer cannot see
+        # host-side mount state, so this in-process record is the gate.
+        mount_state = self._mount_states.get(drive_id, MountState.UNMOUNTED)
+        if mount_state is not MountState.UNMOUNTED:
+            raise TapeMountedError(f"Drive {drive_id} cannot be unloaded while {mount_state.value}")
         result = self.changer.unload(drive_id, target_slot)
         if result.success:
             self._mount_states[drive_id] = MountState.UNMOUNTED

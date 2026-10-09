@@ -14,6 +14,7 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.domain.clock import naive_utcnow
 from openblade.domain.errors import (
     ChecksumMismatchError,
+    DriveLeasedError,
     ExportRefusedError,
     ImportExportSlotError,
     MailslotUnsupportedError,
@@ -237,10 +238,30 @@ class TapeOperationOrchestrator:
         if drive_id is None:
             raise ValueError(f"Barcode {request.barcode} is not loaded in a drive")
         slot_id = request.slot_id if request.slot_id is not None else self._find_empty_slot()
+        self._refuse_if_leased_by_another_job(drive_id, request.job_id)
         result = self.library.unload(drive_id, slot_id)
         return self._operation_result(
             result, {"barcode": request.barcode, "drive_id": drive_id, "slot_id": slot_id}
         )
+
+    def _refuse_if_leased_by_another_job(self, drive_id: int, job_id: str | None) -> None:
+        """Cross-process half of "never unload while mounted".
+
+        Mount state is tracked per process, so a drive another job (possibly in
+        another process) still holds a live lease on may have LTFS mounted there.
+        The lease is the only shared evidence; an unload waits for it to be
+        released or to expire (recovery then reports the drive for reconciliation).
+        """
+        if self.repo is None:
+            return
+        for lease in self.repo.live_leases():
+            physical = (
+                lease.physical_drive_id if lease.physical_drive_id is not None else lease.drive_id
+            )
+            if physical == drive_id and lease.job_id != job_id:
+                raise DriveLeasedError(
+                    f"Drive {drive_id} is leased by job {lease.job_id}; refusing to unload"
+                )
 
     def _format(self, request: TapeOpRequest) -> dict[str, Any]:
         confirmation = request.extras.get("format_confirmation")

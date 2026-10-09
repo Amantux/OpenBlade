@@ -46,6 +46,10 @@ class TapeMountedError(SafetyViolationError):
     """Cannot unload a mounted tape."""
 
 
+class DriveLeasedError(SafetyViolationError):
+    """Another job holds a live lease on this drive; it may have LTFS mounted."""
+
+
 class DriveBusyError(OpenBladeError):
     """Drive is busy."""
 
