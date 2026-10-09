@@ -55,3 +55,18 @@ against a freshly-seeded DB — this is what CI runs, with no production data.
 - A restore drill against a **real production backup** artifact. CI only exercises
   the mechanism on seeded data; never restore production data in a test path.
 - Scheduled backup rotation + off-host replication.
+
+## Commit markers and uncommitted generations
+
+Each tape write generation ends with `/.openblade/commit-<generation>.json`
+(schema, generation id, sha256 of `manifest.json` and `catalog-shard.json`,
+written_at). `finalize_tape_generation()` is the only writer and enforces the order:
+data -> `manifest.json` (+`.sha256`) -> `catalog-shard.json` (+`.sha256`) ->
+`tape.json` (`current_generation`/`previous_generation` chain) -> commit marker.
+
+On rebuild, a v2 manifest whose marker is **missing** or whose hashes **do not
+match** is an uncommitted generation (an interrupted write): its files are not
+restored as archived and the plan warns `uncommitted generation <id>: <reason>`.
+Pre-v2 manifests carry no generation id and are treated as committed. Each
+manifest lists `sibling_tapes`; a sibling not included in the rebuild request is
+reported as `missing sibling tape <barcode>` — restore needs every sibling.
