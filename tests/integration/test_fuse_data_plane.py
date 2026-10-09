@@ -316,3 +316,14 @@ def test_shutdown_waits_on_one_overall_deadline(catalog, tmp_path):  # type: ign
     elapsed = time.monotonic() - started
     engine.gate.set()
     assert elapsed < 0.6, f"shutdown took {elapsed:.2f}s for a 0.4s budget"
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_staging_copy_is_removed_after_verified_store(catalog, tmp_path, corrupt):  # type: ignore[no-untyped-def]
+    fs = CatalogFilesystem(catalog, cache_dir=str(tmp_path / "cache"))
+    engine = FakeEngine(tmp_path / "s", corrupt=corrupt)
+    hyd = Hydrator(catalog, fs.cache, engine, batch_window_s=0.01)
+    ticket = hyd.request("/c.bin")
+    assert ticket.done.wait(3)
+    assert (ticket.error is not None) is corrupt
+    assert not (tmp_path / "s" / "c.bin").exists(), "staging copy leaked"

@@ -344,14 +344,24 @@ class Hydrator:
         try:
             self.cache.store_verified(ticket.checksum, staged)
         except CacheChecksumError:
+            self._discard_staged(staged)
             self._fail(ticket, "restored bytes failed checksum verification")
             return
         except OSError:
             self._fail(ticket, "restore I/O error")
             return
+        self._discard_staged(staged)
         with self._lock:
             self._errors.pop(ticket.catalog_path, None)
         ticket.done.set()
+
+    @staticmethod
+    def _discard_staged(staged: Path) -> None:
+        """Remove the staging copy once the cache holds (or rejected) its bytes."""
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("fuse: could not remove staging file %s", staged)
 
     def _fail(self, ticket: HydrationTicket, reason: str) -> None:
         ticket.error = reason
