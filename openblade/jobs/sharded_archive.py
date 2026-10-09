@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -280,7 +281,8 @@ def _clean_unmount_and_unload(
             ltfs.unmount(mount)
             mounts.pop(barcode, None)
         except Exception as exc:  # noqa: BLE001 - aggregated and re-raised below
-            failures.append(f"unmount {barcode}: {exc}")
+            logger.exception("job %s: unmount of %s failed", job_id, barcode)
+            failures.append(f"unmount {barcode}: {type(exc).__name__}")
             still_mounted.add(barcode)
     for handle in handles:
         slot_id = loaded_slots.get(handle.physical)
@@ -311,7 +313,8 @@ def _clean_unmount_and_unload(
             )
             loaded_slots.pop(handle.physical, None)
         except Exception as exc:  # noqa: BLE001 - aggregated and re-raised below
-            failures.append(f"unload {handle.barcode}: {exc}")
+            logger.exception("job %s: unload of %s failed", job_id, handle.barcode)
+            failures.append(f"unload {handle.barcode}: {type(exc).__name__}")
     if failures:
         raise TapePhysicalStateError(
             "shards written but physical state is unknown (reconcile required): "
@@ -338,6 +341,18 @@ def _job_error(exc: Exception) -> str:
     if isinstance(exc, TapePhysicalStateError):
         return PHYSICAL_STATE_UNKNOWN
     return safe_job_error(exc)
+
+
+def _journal_failure(
+    catalog: CatalogRepository, job_id: str, event: str, detail: dict[str, object]
+) -> None:
+    """Journal on an error path without letting a broken session mask the real error."""
+    try:
+        catalog.journal(job_id, event, detail)
+    except Exception:  # noqa: BLE001 - evidence only; the original exception is what the caller reports
+        logger.exception("job %s: could not journal %s; rolling the session back", job_id, event)
+        with suppress(Exception):
+            catalog.session.rollback()
 
 
 def record_physical_state_unknown(
@@ -574,7 +589,7 @@ def _archive_stripe(
             # so unmount/unload here could eject their tape mid-write. Physical
             # state is unknown -> reconcile (recovery report / inventory).
             fenced_out = True
-            catalog.journal(job_id, "fenced_out", {"barcodes": batch_barcodes})
+            _journal_failure(catalog, job_id, "fenced_out", {"barcodes": batch_barcodes})
             raise
         except Exception as exc:  # noqa: BLE001
             # Staged instances remain PENDING -> not exposed as archived; resumable.
@@ -587,7 +602,7 @@ def _archive_stripe(
                 exc,
                 exc_info=True,
             )
-            catalog.journal(job_id, "failed", {"error": type(exc).__name__})
+            _journal_failure(catalog, job_id, "failed", {"error": type(exc).__name__})
             errors.append(_job_error(exc))
         finally:
             if fenced_out:
@@ -721,10 +736,10 @@ def _archive_block_stripe(
     except StaleLeaseError:
         # Fenced out: abort and leave the hardware alone (see _archive_stripe).
         fenced_out = True
-        catalog.journal(job_id, "fenced_out", {"barcodes": list(request.lane_barcodes)})
+        _journal_failure(catalog, job_id, "fenced_out", {"barcodes": list(request.lane_barcodes)})
         raise
     except Exception as exc:
-        catalog.journal(job_id, "failed", {"error": type(exc).__name__})
+        _journal_failure(catalog, job_id, "failed", {"error": type(exc).__name__})
         raise
     finally:
         if fenced_out:
