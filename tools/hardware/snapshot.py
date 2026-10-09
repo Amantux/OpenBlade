@@ -6,8 +6,12 @@
 ``capture`` reads inventory + drive state through ``InventoryService`` on the
 library the configured backend builds (``OPENBLADE_BACKEND``; the simulator by
 default, real only when ``OPENBLADE_REAL_HARDWARE_ENABLED=true`` too). It is
-read-only. ``diff`` compares two captures and writes the diff file, then exits
-0 when identical, 1 when they differ, 2 on unreadable input.
+read-only, and refuses (exit 2, ``snapshot: REFUSED:`` on stderr, no file
+written) when the configured backend is real but ``OPENBLADE_HARDWARE_DRY_RUN``
+is true: dry-run never touches the changer, so the capture would not describe
+the library the lane is about to change. ``diff`` compares two captures and writes the diff file, then exits
+0 when identical (library_id included), 1 when they differ, 2 on unreadable
+input.
 """
 
 from __future__ import annotations
@@ -22,11 +26,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from openblade.config import BackendMode, OpenBladeConfig
 from openblade.domain.backends import LibraryBackend
 
 EXIT_OK = 0
 EXIT_CHANGED = 1
 EXIT_BAD_INPUT = 2
+EXIT_REFUSED = 2
 
 
 class SnapshotError(Exception):
@@ -80,6 +86,7 @@ def diff_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str, A
     """Compare two captures element-by-element (slots by slot_id, drives by drive_id)."""
     slots = _diff_section(before.get("slots", []), after.get("slots", []), "slot_id")
     drives = _diff_section(before.get("drives", []), after.get("drives", []), "drive_id")
+    library_changed = before.get("library_id") != after.get("library_id")
     changer = (
         []
         if before.get("changer_state") == after.get("changer_state")
@@ -90,7 +97,7 @@ def diff_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str, A
         "slots": slots,
         "drives": drives,
         "changer_state": changer,
-        "changed": bool(slots or drives or changer),
+        "changed": bool(library_changed or slots or drives or changer),
     }
 
 
@@ -104,11 +111,20 @@ def _load(path: Path) -> dict[str, Any]:
     return data
 
 
-def _build_library() -> LibraryBackend:
-    from openblade.bootstrap import create_context
-    from openblade.config import load_config
+def dry_run_refusal(config: OpenBladeConfig) -> str | None:
+    """Return why ``capture`` must refuse under ``config``, or None when it may run."""
+    if config.backend is BackendMode.REAL and config.hardware_dry_run:
+        return (
+            "OPENBLADE_HARDWARE_DRY_RUN=true with OPENBLADE_BACKEND=real: a dry-run "
+            "capture does not reflect the physical library."
+        )
+    return None
 
-    return create_context(load_config()).library
+
+def _build_library(config: OpenBladeConfig) -> LibraryBackend:
+    from openblade.bootstrap import create_context
+
+    return create_context(config).library
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -123,7 +139,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "capture":
-        snap = capture_snapshot(_build_library())
+        from openblade.config import load_config
+
+        config = load_config()
+        reason = dry_run_refusal(config)
+        if reason is not None:
+            print(f"snapshot: REFUSED: {reason}", file=sys.stderr)
+            return EXIT_REFUSED
+        snap = capture_snapshot(_build_library(config))
         args.out.write_text(json.dumps(snap, indent=2, sort_keys=True))
         print(f"snapshot: captured {len(snap['slots'])} slots, {len(snap['drives'])} drives")
         return EXIT_OK

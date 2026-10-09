@@ -6,12 +6,14 @@ import json
 from pathlib import Path
 
 from openblade.bootstrap import create_context
-from openblade.config import OpenBladeConfig
+from openblade.config import BackendMode, OpenBladeConfig
 from tools.hardware.snapshot import (
     EXIT_BAD_INPUT,
     EXIT_CHANGED,
+    EXIT_REFUSED,
     capture_snapshot,
     diff_snapshots,
+    dry_run_refusal,
     main,
 )
 
@@ -58,3 +60,33 @@ def test_diff_cli_changed_snapshots_exit_1_after_writing(tmp_path: Path) -> None
     b.write_text(json.dumps(_snap([{"slot_id": 1, "barcode": None}], [])))
     assert main(["diff", str(a), str(b), "--out", str(out)]) == EXIT_CHANGED
     assert json.loads(out.read_text())["changed"] is True
+
+
+def test_diff_detects_library_id_change_alone() -> None:
+    before = _snap([{"slot_id": 1, "barcode": "A"}], [])
+    after = dict(before, library_id="OTHER")
+    result = diff_snapshots(before, after)
+    assert result["changed"] is True
+    assert result["library_id"] == {"before": "L", "after": "OTHER"}
+
+
+def test_dry_run_refusal_only_for_real_backend_in_dry_run() -> None:
+    assert dry_run_refusal(OpenBladeConfig(backend=BackendMode.REAL, hardware_dry_run=True))
+    assert dry_run_refusal(OpenBladeConfig(backend=BackendMode.REAL)) is None
+    assert dry_run_refusal(OpenBladeConfig(hardware_dry_run=True)) is None
+
+
+def test_capture_cli_refuses_real_dry_run_with_exit_2(monkeypatch, tmp_path: Path, capsys) -> None:
+    import tools.hardware.snapshot as snapshot
+
+    def _must_not_build(_config):
+        raise AssertionError("capture touched the backend despite dry-run")
+
+    monkeypatch.setattr(snapshot, "_build_library", _must_not_build)
+    monkeypatch.setenv("OPENBLADE_BACKEND", "real")
+    monkeypatch.setenv("OPENBLADE_HARDWARE_DRY_RUN", "true")
+    out = tmp_path / "before.json"
+    assert main(["capture", "--out", str(out)]) == EXIT_REFUSED == 2
+    assert not out.exists()
+    captured = capsys.readouterr()
+    assert "snapshot: REFUSED:" in captured.err and captured.out == ""

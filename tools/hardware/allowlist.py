@@ -6,9 +6,12 @@ Run BEFORE any hardware is touched::
 
 The allowlist comes from env ``SACRIFICIAL_BARCODES``; the request comes from
 ``--barcodes`` or, when the flag is absent, env ``BARCODES``. Both accept
-comma- and/or whitespace-separated lists. Exit 0 when the request is a
-non-empty subset of a non-empty allowlist; exit 2 otherwise (fail closed),
-naming every offending barcode.
+comma- and/or whitespace-separated lists (case-insensitive). Exit 0 when the
+request is a non-empty subset of a non-empty allowlist and print exactly one
+stdout line: the normalized request (upper-cased, de-duplicated, request order,
+comma-joined, e.g. ``TST001L8,TST002L8``), suitable for
+``OPENBLADE_SCRATCH_BARCODES``. Exit 2 otherwise (fail closed), naming every
+offending barcode on stderr with nothing on stdout. All diagnostics go to stderr.
 """
 
 from __future__ import annotations
@@ -36,6 +39,11 @@ def parse_barcodes(raw: str | None) -> list[str]:
         if token:
             seen.setdefault(token.strip().upper(), None)
     return list(seen)
+
+
+def format_barcodes(barcodes: Sequence[str]) -> str:
+    """The normalized stdout form: comma-joined, no spaces."""
+    return ",".join(barcodes)
 
 
 def check_subset(requested: Sequence[str], allowlist: Sequence[str]) -> list[str]:
@@ -77,7 +85,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except AllowlistError as exc:
         print(f"allowlist: REFUSED: {exc}", file=sys.stderr)
         return EXIT_VIOLATION
-    print("allowlist: OK: " + " ".join(approved))
+    print(f"allowlist: OK: {len(approved)} barcode(s) approved", file=sys.stderr)
+    print(format_barcodes(approved))
     return EXIT_OK
 
 
