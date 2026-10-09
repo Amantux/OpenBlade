@@ -139,3 +139,27 @@ markers = [
   "rebuild: catalog rebuild tests (nightly rebuild lane)",
   "mutation: tests used as the kill-set for the mutation lane",
 ]
+
+[tool.mutmut]
+# mutmut 3.x (verified against installed 3.8.0 configuration.py). Scope: the
+# safety-critical modules; tools/mutation_run.sh selects a subset per run.
+source_paths = ["openblade"]
+only_mutate = [
+  "openblade/domain/policies.py",
+  "openblade/safety/*",
+  "openblade/jobs/scheduler.py",
+  "openblade/jobs/recovery.py",
+  "openblade/domain/scalar_coordinate.py",
+  "openblade/nas/manifest_validator.py",
+]
+pytest_add_cli_args = ["-p", "no:cacheprovider", "-q"]
+# tests/safety/test_assistant_read_only.py is excluded: it does not exercise the
+# mutated modules and stalled >60s locally (2026-10-09), which blocks mutmut stats.
+pytest_add_cli_args_test_selection = [
+  "tests/safety/test_import_guard.py",
+  "tests/safety/test_safety_regression.py",
+  "tests/unit/test_scheduler.py",
+  "tests/unit/test_drive_leases.py",
+  "tests/unit/test_recovery.py",
+  "tests/unit/test_scalar_coordinate.py",
+]
