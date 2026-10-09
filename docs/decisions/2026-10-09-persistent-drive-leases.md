@@ -6,7 +6,7 @@ Status: accepted 2026-10-09. Roadmap items 7 and 8 (Phase 2), first slice.
 
 | checkout | branch | relation to `origin/master` |
 |---|---|---|
-| `/root/ob2-final` | `feat/persistent-drive-leases` (was `integrate/gap-closure`) | branched from master (`1863348`, PR #45) for this work |
+| `/root/ob2-final` | `feat/persistent-drive-leases` | integration branch for this work and the 2026-10-09 fleet (per-item status table in `docs/production-readiness-roadmap.md`) |
 | `/root/ob-final` | `integrate/eight-items` | tree-identical to PR #44 squash, already on master |
 | `/root/ob-int2` | `integrate/campaign-wiki-assistant` | fully contained in `ob-final` |
 | `/root/OpenBlade` | `chore/py312-baseline-and-quantum-refs` | stale (37 behind); its 3 stray commits are already on master by content |
