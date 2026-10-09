@@ -12,7 +12,7 @@ from openblade.nas.catalog_shard import (
     CatalogShard,
     CatalogShardWriter,
 )
-from openblade.nas.ltfs_manifest import TapeMetadataWriter
+from openblade.nas.ltfs_manifest import ManifestJson, TapeMetadataWriter
 from openblade.nas.manifest_validator import ManifestValidator
 from openblade.nas.path_mapping import PathMappingService
 from openblade.nas.types import (
@@ -116,6 +116,18 @@ class CatalogRebuildPlanner:
                 warnings.append(f"{barcode}: catalog-shard.json missing")
                 continue
 
+            uncommitted = self._uncommitted_reason(barcode, manifest)
+            if uncommitted is not None:
+                # Never restore an uncommitted generation's files as archived.
+                warnings.append(
+                    f"{barcode}: uncommitted generation {manifest.generation_id}: {uncommitted}"
+                )
+                continue
+            requested = set(request.barcodes)
+            for sibling in manifest.sibling_tapes:
+                if sibling not in requested:
+                    warnings.append(f"{barcode}: missing sibling tape {sibling}")
+
             barcodes_to_scan.append(barcode)
             estimated_files += len(shard.files)
             estimated_datasets += len(shard.datasets)
@@ -158,6 +170,29 @@ class CatalogRebuildPlanner:
             warnings=warnings,
             safe_to_enqueue=safe_to_enqueue,
         )
+
+    def _uncommitted_reason(self, barcode: str, manifest: ManifestJson) -> str | None:
+        """Why this tape's generation is uncommitted, or None when its commit marker checks out.
+
+        Pre-v2 manifests carry no generation_id and predate commit markers; they are
+        accepted as committed so existing tapes stay rebuildable.
+        """
+        if not manifest.generation_id:
+            return None
+        marker = self.metadata_writer.read_commit_marker(barcode, manifest.generation_id)
+        if marker is None:
+            return "commit marker missing"
+        manifest_sha = self.metadata_writer.compute_json_checksum(
+            manifest.model_dump(by_alias=True)
+        )
+        shard_sha = self.metadata_writer._read_text(
+            barcode, self.shard_writer.SHARD_CHECKSUM_METADATA_PATH
+        )
+        if marker.manifest_sha256 != manifest_sha:
+            return "commit marker manifest hash mismatch"
+        if shard_sha is None or marker.catalog_shard_sha256 != shard_sha.strip():
+            return "commit marker catalog-shard hash mismatch"
+        return None
 
     def execute_rebuild_run(self, run_id: str) -> CatalogRebuildRunRecord:
         """
