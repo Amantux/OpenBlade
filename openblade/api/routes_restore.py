@@ -17,6 +17,7 @@ from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.db import get_session
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import OpenBladeError, safe_job_error
+from openblade.jobs.inventory import InventoryService
 from openblade.jobs.restore import RestoreRequest as RestoreJobRequest
 from openblade.jobs.restore import run_restore_job
 from openblade.jobs.scheduler import CatalogLeaseStore, DriveScheduler
@@ -176,6 +177,11 @@ async def enqueue_restore(
                 context.ltfs,
                 context.catalog,
                 job.id,
+                scheduler=DriveScheduler(
+                    num_drives=len(InventoryService(context.library).snapshot().drives),
+                    store=context.lease_store,
+                    job_id=job.id,
+                ),
             )
     except Exception as exc:
         context.catalog.update_job_state(job.id, "failed", str(exc))
