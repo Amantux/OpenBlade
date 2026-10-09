@@ -1,0 +1,112 @@
+# Reusable: boot the mock-backend emulator API on 127.0.0.1:8000, wait for
+# /health, then run pytest against it. Callers: emulator-change-gates.yml,
+# i3-emulator-compliance.yml. Check names become "<caller job> / boot-test".
+name: _emulator-boot-test
+
+on:
+  workflow_call:
+    inputs:
+      timing_profile:
+        description: I3_TIMING_PROFILE for both the server and pytest.
+        type: string
+        default: instant
+      pytest_args:
+        description: >-
+          Space-separated pytest arguments (paths, -m, -q ...). Word-split by
+          the shell on purpose; must not contain quotes.
+        type: string
+        required: true
+      followup_pytest_args:
+        description: Optional second pytest run against the same booted API.
+        type: string
+        default: ""
+      python_version:
+        type: string
+        default: "3.12"
+      emulator_profile:
+        description: EMULATOR_PROFILE for the booted server and pytest ("" = default shape).
+        type: string
+        default: ""
+      validate_contract:
+        description: Run tools/emulator_spec/validate_cross_repo_contract.py first.
+        type: boolean
+        default: true
+      db_name:
+        description: Basename of the throwaway sqlite DB under /tmp.
+        type: string
+        default: openblade-emulator
+      artifact_name:
+        description: Upload test-results/ + the API log under this name ("" = no upload).
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  boot-test:
+    name: boot-test
+    runs-on: ubuntu-latest
+    env:
+      I3_TEST_MODE: emulator
+      I3_TIMING_PROFILE: ${{ inputs.timing_profile }}
+      I3_AML_URL: http://127.0.0.1:8000
+      PYTEST_ARGS: ${{ inputs.pytest_args }}
+      FOLLOWUP_PYTEST_ARGS: ${{ inputs.followup_pytest_args }}
+      DB_PATH: /tmp/${{ inputs.db_name }}.db
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      # Job-wide EMULATOR_PROFILE only when one was given: an empty value must
+      # mean "unset" (default shape) for every later step, not "profile named ''".
+      - name: Export EMULATOR_PROFILE
+        env:
+          PROFILE: ${{ inputs.emulator_profile }}
+        run: |
+          if [ -n "$PROFILE" ]; then echo "EMULATOR_PROFILE=$PROFILE" >> "$GITHUB_ENV"; fi
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: "pip"
+      - run: pip install -e '.[dev]'
+      - if: ${{ inputs.validate_contract }}
+        run: python3 tools/emulator_spec/validate_cross_repo_contract.py
+      - run: python3 tools/emulator_spec/generate_matrix_endpoint_catalog.py
+      - name: Boot emulator API
+        run: |
+          rm -f "$DB_PATH"
+          OPENBLADE_BACKEND=mock OPENBLADE_DB_URL="sqlite:///$DB_PATH" \
+            nohup uvicorn openblade.api.main:app --host 127.0.0.1 --port 8000 >/tmp/openblade-api.log 2>&1 &
+      - name: Wait for API health
+        run: |
+          python - <<'PY'
+          import time
+          import urllib.request
+          for _ in range(60):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2) as response:
+                      if response.status == 200:
+                          raise SystemExit(0)
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("API did not become healthy in time")
+          PY
+      - run: mkdir -p test-results
+      - name: Run pytest against the booted emulator
+        run: |
+          # shellcheck disable=SC2086 # PYTEST_ARGS is a word list by contract
+          python -m pytest $PYTEST_ARGS
+      - name: Follow-up pytest run
+        if: ${{ inputs.followup_pytest_args != '' }}
+        run: |
+          # shellcheck disable=SC2086 # word list by contract
+          python -m pytest $FOLLOWUP_PYTEST_ARGS
+      - name: Upload artifacts
+        if: ${{ always() && inputs.artifact_name != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            test-results/
+            /tmp/openblade-api.log
