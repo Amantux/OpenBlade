@@ -17,7 +17,10 @@ pytestmark = pytest.mark.protocols
 POLL = """
 import sys, time
 p, deadline = sys.argv[1], time.time() + float(sys.argv[2])
-open(p.replace('/offline/', '/.ob-control/offline/') + '.req', 'w').close()
+try:
+    open(p.replace('/offline/', '/.ob-control/offline/') + '.req', 'w').close()
+except FileNotFoundError:
+    pass  # SMB: shim unlinked a concurrent client's .req mid-create; recall already queued
 while time.time() < deadline:
     data = open(p, 'rb').read()
     if not data.startswith(b'OPENBLADE-OFFLINE-STUB'):
