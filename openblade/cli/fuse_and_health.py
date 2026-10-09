@@ -48,6 +48,8 @@ def build_data_plane(context: Any, filesystem: CatalogFilesystem) -> Hydrator:
     """
     config = context.config
     bind = context.catalog.session.get_bind()
+    if config.fuse_cache_max_bytes is not None:
+        filesystem.cache.max_bytes = config.fuse_cache_max_bytes
 
     def _catalog() -> CatalogRepository:
         return CatalogRepository(Session(bind=bind, expire_on_commit=False))

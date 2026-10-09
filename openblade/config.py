@@ -41,6 +41,7 @@ class OpenBladeConfig:
     fuse_mount_point: str = str(_DEFAULT_HOME / "mount")
     fuse_hydrate_timeout_s: float = 300.0
     fuse_batch_window_ms: int = 250
+    fuse_cache_max_bytes: int | None = None  # None = unbounded
     ltfs_mount_root: str = str(_DEFAULT_HOME / "ltfs")
     job_timeout_seconds: int = 3600
     changer_timeout_seconds: int = 60
@@ -191,6 +192,11 @@ def load_config() -> OpenBladeConfig:
         ),
         fuse_batch_window_ms=int(
             os.environ.get("OPENBLADE_FUSE_BATCH_WINDOW_MS", "").strip() or 250
+        ),
+        fuse_cache_max_bytes=(
+            int(os.environ["OPENBLADE_FUSE_CACHE_MAX_BYTES"])
+            if os.environ.get("OPENBLADE_FUSE_CACHE_MAX_BYTES", "").strip()
+            else None
         ),
         hardware_dry_run=os.environ.get("OPENBLADE_HARDWARE_DRY_RUN", "false").lower() == "true",
         changer_device=os.environ.get("OPENBLADE_CHANGER_DEVICE") or None,
