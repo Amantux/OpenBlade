@@ -450,7 +450,13 @@ def test_plan_rebuild_uncommitted_generation_not_scanned(
     )
 
     assert result.barcodes_to_scan == []
-    assert f"{barcode}: uncommitted generation gen-7: {reason}" in result.warnings
+    assert [u.model_dump() for u in result.uncommitted_generations] == [
+        {"barcode": barcode, "generation_id": "gen-7", "reason": reason}
+    ]
+    assert result.missing_siblings == []
+    assert len(result.warnings) == 1
+    assert barcode in result.warnings[0]
+    assert reason in result.warnings[0]
 
 
 def test_plan_rebuild_committed_generation_reports_missing_sibling(
@@ -465,4 +471,9 @@ def test_plan_rebuild_committed_generation_reports_missing_sibling(
     )
 
     assert result.barcodes_to_scan == [barcode]
-    assert f"{barcode}: missing sibling tape ZZ9999L8" in result.warnings
+    assert [m.model_dump() for m in result.missing_siblings] == [
+        {"barcode": "ZZ9999L8", "required_by_barcode": barcode, "generation_id": "gen-7"}
+    ]
+    assert result.uncommitted_generations == []
+    assert len(result.warnings) == 1
+    assert "ZZ9999L8" in result.warnings[0]
