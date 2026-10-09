@@ -1,0 +1,4 @@
+{ "id": "aml-auth-expired-cookie", "profile": "scalar-i3-341g", "source": "inferred", "firmware": "341G", "manual_ref": "Not in Rev D manual (inferred)",
+  "fidelity_notes": "An unknown/expired sessionID cookie returns 401 and a Set-Cookie that clears it. Inferred; unverified against an appliance.",
+  "request": { "method": "GET", "path": "/aml/physicalLibrary/elements", "headers": { "Cookie": "sessionID=expired-session" } },
+  "expected": { "status": 401, "headers": { "Set-Cookie": "Max-Age=0" } } }

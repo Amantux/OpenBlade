@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from openblade.domain.protection import ProtectionPolicy
 from openblade.nas.media import Cartridge, MediaGeneration
 
 
@@ -530,6 +531,8 @@ class NasPool(BaseModel):
     virtual_mount_enabled: bool = True
     hydration_behavior: HydrationBehavior = HydrationBehavior.QUEUE
     replication_factor: int = Field(default=1, ge=1, le=4)
+    # Explicit protection/placement policy; None means derive from replication_factor.
+    protection: ProtectionPolicy | None = None
     backup_order_mode: Literal["sequential", "parallel"] = "sequential"
     cache_target_id: str | None = None
     restore_target_path: str = "/openblade/restore"
@@ -689,6 +692,22 @@ class RebuildPlanRequest(BaseModel):
     dry_run: bool = False
 
 
+class UncommittedGeneration(BaseModel):
+    """A tape whose generation has no valid commit marker; it is never rebuilt."""
+
+    barcode: str
+    generation_id: str
+    reason: str
+
+
+class MissingSibling(BaseModel):
+    """A sibling tape a planned tape's generation needs but the request omitted."""
+
+    barcode: str
+    required_by_barcode: str
+    generation_id: str | None = None
+
+
 class RebuildPlanResult(BaseModel):
     run_id: str
     dry_run: bool
@@ -699,6 +718,8 @@ class RebuildPlanResult(BaseModel):
     estimated_files: int = 0
     estimated_datasets: int = 0
     estimated_path_mappings: int = 0
+    uncommitted_generations: list[UncommittedGeneration] = Field(default_factory=list)
+    missing_siblings: list[MissingSibling] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     safe_to_enqueue: bool
 

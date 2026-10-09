@@ -90,6 +90,16 @@ def test_protection_from_pool(factor: int, copies: int, protected: bool) -> None
     assert policy.is_protected is protected
 
 
+def test_protection_from_pool_prefers_explicit_policy() -> None:
+    from openblade.nas.types import NasPool
+
+    explicit = ProtectionPolicy(protection=Protection.replication(3))
+    pool = NasPool(name="p", replication_factor=1, protection=explicit)
+    assert protection_from_pool(pool) == explicit
+    # Unset field falls back to the legacy replication_factor.
+    assert protection_from_pool(NasPool(name="q", replication_factor=2)).protection.copies == 2
+
+
 def test_policy_dict_round_trip() -> None:
     policy = ProtectionPolicy(
         placement=Placement.STRIPED,

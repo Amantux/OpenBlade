@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import cast
 from uuid import uuid4
 
+from openblade.catalog.models import NasDataset as NasDatasetRow
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.protection import ProtectionPolicy
 from openblade.nas.catalog_shard import (
     CatalogShard,
     CatalogShardWriter,
@@ -20,12 +23,14 @@ from openblade.nas.types import (
     DatasetStatus,
     IngestMode,
     ManifestVersionRecord,
+    MissingSibling,
     NasDataset,
     NasFileRecord,
     NasFileState,
     RebuildPlanRequest,
     RebuildPlanResult,
     RebuildRunStatus,
+    UncommittedGeneration,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +87,8 @@ class CatalogRebuildPlanner:
         barcodes_missing_shard: list[str] = []
         barcodes_invalid: list[str] = []
         warnings: list[str] = []
+        uncommitted_generations: list[UncommittedGeneration] = []
+        missing_siblings: list[MissingSibling] = []
         estimated_files = 0
         estimated_datasets = 0
         estimated_path_mappings = 0
@@ -119,20 +126,46 @@ class CatalogRebuildPlanner:
             uncommitted = self._uncommitted_reason(barcode, manifest)
             if uncommitted is not None:
                 # Never restore an uncommitted generation's files as archived.
-                warnings.append(
-                    f"{barcode}: uncommitted generation {manifest.generation_id}: {uncommitted}"
+                # _uncommitted_reason only returns a reason when generation_id is set.
+                uncommitted_generations.append(
+                    UncommittedGeneration(
+                        barcode=barcode,
+                        generation_id=manifest.generation_id or "",
+                        reason=uncommitted,
+                    )
                 )
                 continue
             requested = set(request.barcodes)
             for sibling in manifest.sibling_tapes:
                 if sibling not in requested:
-                    warnings.append(f"{barcode}: missing sibling tape {sibling}")
+                    missing_siblings.append(
+                        MissingSibling(
+                            barcode=sibling,
+                            required_by_barcode=barcode,
+                            generation_id=manifest.generation_id or None,
+                        )
+                    )
 
             barcodes_to_scan.append(barcode)
             estimated_files += len(shard.files)
             estimated_datasets += len(shard.datasets)
             estimated_path_mappings += len(self.shard_writer.shard_to_path_mappings(shard))
 
+        # One operator-facing line per category; the structured lists carry the detail.
+        if uncommitted_generations:
+            warnings.append(
+                f"{len(uncommitted_generations)} uncommitted generation(s) skipped: "
+                + ", ".join(
+                    f"{u.barcode} ({u.generation_id}: {u.reason})" for u in uncommitted_generations
+                )
+            )
+        if missing_siblings:
+            warnings.append(
+                f"{len(missing_siblings)} sibling tape(s) missing from request: "
+                + ", ".join(
+                    f"{m.barcode} (required by {m.required_by_barcode})" for m in missing_siblings
+                )
+            )
         safe_to_enqueue = len(barcodes_invalid) == 0 and len(barcodes_to_scan) > 0
         run_id = ""
         if not request.dry_run:
@@ -167,6 +200,8 @@ class CatalogRebuildPlanner:
             estimated_files=estimated_files,
             estimated_datasets=estimated_datasets,
             estimated_path_mappings=estimated_path_mappings,
+            uncommitted_generations=uncommitted_generations,
+            missing_siblings=missing_siblings,
             warnings=warnings,
             safe_to_enqueue=safe_to_enqueue,
         )
@@ -311,9 +346,33 @@ class CatalogRebuildPlanner:
                 updated_at=_utcnow_iso(),
             )
             self.repo.upsert_nas_dataset(dataset.model_dump(mode="json"))
+            self._recover_dataset_protection(barcode, entry.dataset_id, entry.protection)
             if is_new:
                 count += 1
         return count
+
+    def _recover_dataset_protection(
+        self, barcode: str, dataset_id: str, protection: dict[str, object] | None
+    ) -> None:
+        """Write the shard's protection/placement policy back onto the dataset row.
+
+        Pre-v2 shards carry no policy; the existing row value is kept. A malformed
+        policy is logged and skipped so one bad shard entry cannot abort the rebuild.
+        """
+        if protection is None:
+            return
+        try:
+            policy = ProtectionPolicy.from_dict(dict(protection))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            logger.warning(
+                "Skipping malformed protection policy for dataset %s on %s", dataset_id, barcode
+            )
+            return
+        row = self.repo.session.get(NasDatasetRow, dataset_id)
+        if row is None:
+            return
+        row.protection_json = json.dumps(policy.to_dict(), sort_keys=True)
+        self.repo.session.commit()
 
     def _recover_files(self, barcode: str, shard: CatalogShard) -> int:
         """Upsert file records from shard; count only files not already in the catalog."""
