@@ -168,3 +168,23 @@ def test_unmount_cancels_pending_batches(catalog, tmp_path):  # type: ignore[no-
     ops.destroy("/")
     assert ticket.done.is_set() and ticket.error == "hydration cancelled by unmount"
     assert engine.batches == []
+
+
+def test_gateway_close_of_unpinned_open_does_not_unpin_other_handle(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    from openblade.nas.protocol_gateway import ProtocolGateway
+
+    _, hyd, engine = _plane(catalog, tmp_path)
+    gw = ProtocolGateway()
+    gw.attach_hydrator(hyd)
+    checksum = catalog.get_file_record("/a.bin").checksum_sha256  # type: ignore[union-attr]
+    engine.gate.clear()
+    assert gw.on_open("/a.bin").value == "hydrating"  # client B opens mid-hydration
+    engine.gate.set()
+    hyd.wait(hyd.request("/a.bin"), 5)
+    assert gw.on_open("/a.bin").value == "online"  # client A opens the online file
+
+    gw.on_close("/a.bin")  # client B closes; A still holds the file open
+    hyd.cache.max_bytes = 1
+    gw.on_open("/c.bin", timeout=5)  # budget pressure
+
+    assert hyd.cache.is_cached(checksum)

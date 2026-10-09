@@ -381,15 +381,22 @@ class ProtocolGateway:
         return hydrator
 
     def on_open(self, catalog_path: str, *, timeout: float | None = 0.0) -> HydrationState:
-        """Pin the file and start hydration; optionally wait ``timeout`` seconds."""
+        """Pin the file and start hydration; optionally wait ``timeout`` seconds.
+
+        Every successful ``on_open`` takes exactly one pin, whatever the state,
+        so it pairs with exactly one ``on_close`` release. Pinning only online
+        files let a close of a mid-hydration open drop another handle's pin.
+        """
         hydrator = self._require_hydrator()
         ticket = hydrator.request(catalog_path)
-        if timeout:
-            hydrator.wait(ticket, timeout)
-        state = hydrator.status(catalog_path)
-        if state is HydrationState.ONLINE:
-            hydrator.cache.acquire(ticket.checksum)
-        return state
+        hydrator.cache.acquire(ticket.checksum)
+        try:
+            if timeout:
+                hydrator.wait(ticket, timeout)
+            return hydrator.status(catalog_path)
+        except BaseException:
+            hydrator.cache.release(ticket.checksum)
+            raise
 
     def on_read_range(
         self, catalog_path: str, offset: int, length: int, *, timeout: float | None = None
