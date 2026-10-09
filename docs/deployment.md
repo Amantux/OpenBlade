@@ -65,9 +65,20 @@ Exit 0 only when the deploy is **promoted** (all three pass).
 OPENBLADE_ENV=production \
 OPENBLADE_ADMIN_PASSWORD=... OPENBLADE_SERVICE_PASSWORD=... \
 OPENBLADE_SERVICE_TOKEN=... OPENBLADE_DB_URL=sqlite:////data/openblade.db \
+OPENBLADE_IMAGE=ghcr.io/amantux/openblade@sha256:<64-hex digest from the release> \
   python3 scripts/deploy.py \
-    --deploy-cmd "docker compose up -d" \
+    --deploy-cmd "docker compose -f deploy/production/docker-compose.yml up -d --wait" \
     --base-url https://openblade.internal
+
+# Then the read-only appliance postcheck (GET /inventory/ + GET /jobs/recovery on
+# top of the live topology; no non-GET request is ever sent):
+python3 scripts/deploy.py postcheck --base-url https://openblade.internal \
+    --read-only-appliance-checks
+
+# Roll back APPLICATION CODE ONLY to the previous digest (tags are refused).
+# Physical tape state is never rolled back -- review GET /jobs/recovery after.
+python3 scripts/deploy.py rollback --to sha256:<previous digest> \
+    --deploy-cmd "docker compose -f deploy/production/docker-compose.yml up -d --wait"
 
 # Re-run pre/post checks only (no deploy), e.g. as a post-deploy smoke:
 python3 scripts/deploy.py --skip-deploy
@@ -88,7 +99,10 @@ deploy fails the build. No production data or credentials are used.
 - `--base-url` postcheck probes endpoint reachability only (it cannot introspect
   the remote process's in-process wiring); the in-process postcheck additionally
   asserts the AppContext is fully wired.
-- Rollback orchestration and blue/green promotion are out of scope here; pair this
-  gate with your container platform's rollout. On a failed postcheck, do not
-  promote — roll back to the last verified image and restore the catalog per
-  docs/disaster-recovery.md if needed.
+- Images are always deployed by digest (`deploy/staging/` and
+  `deploy/production/` compose files refuse to start without `OPENBLADE_IMAGE`).
+  The tag-triggered release pipeline (build once, scan, sign, staging, approval,
+  production, rollback) is described in docs/runbooks/release.md; it has **not
+  yet been exercised on a real tag**.
+- `rollback` redeploys application code only. It never touches tape state; if
+  the catalog needs restoring, follow docs/disaster-recovery.md.
