@@ -50,3 +50,11 @@ def test_smb_conf_maps_share_flags() -> None:
     ro, rw = conf.split("[ro]", 1)[1].split("[rw]", 1)
     assert "writeable = no" in ro and "case sensitive = no" in ro
     assert "writeable = yes" in rw and "case sensitive = yes" in rw
+
+
+def test_smb_conf_disables_client_caching_of_hydrating_files() -> None:
+    conf = render_smb_conf([SambaShare("rw", Path("/e/rw"), read_only=False)])
+    globals_ = conf.split("[rw]", 1)[0]
+
+    for option in ("oplocks = no", "level2 oplocks = no", "smb2 leases = no"):
+        assert option in globals_

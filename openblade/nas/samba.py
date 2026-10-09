@@ -31,6 +31,11 @@ def render_smb_conf(shares: Iterable[SambaShare], *, force_user: str = "root") -
 
     The global section serves guest SMB2/3 only (no SMB1) with POSIX locking on
     so byte-range locks are visible across protocols.
+
+    Oplocks and SMB2 leases are off: the hydrator replaces offline stubs with
+    recalled bytes behind smbd's back, and smbd cannot break a client lease
+    for a change it did not make. A client holding a handle lease keeps its
+    (deferred-close) handle on the stub's old inode and never sees the recall.
     """
     header = (
         "[global]\n"
@@ -42,6 +47,9 @@ def render_smb_conf(shares: Iterable[SambaShare], *, force_user: str = "root") -
         "  load printers = no\n"
         "  disable spoolss = yes\n"
         "  posix locking = yes\n"
+        "  oplocks = no\n"
+        "  level2 oplocks = no\n"
+        "  smb2 leases = no\n"
         "  unix extensions = no\n"
         "  log file = /var/log/samba/%m.log\n"
     )
