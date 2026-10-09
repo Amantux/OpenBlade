@@ -6,7 +6,7 @@ Status: accepted 2026-10-09. Roadmap items 7 and 8 (Phase 2), first slice.
 
 | checkout | branch | relation to `origin/master` |
 |---|---|---|
-| `/root/ob2-final` | `integrate/gap-closure` | tree-identical to master (`1863348`, PR #45) |
+| `/root/ob2-final` | `feat/persistent-drive-leases` (was `integrate/gap-closure`) | branched from master (`1863348`, PR #45) for this work |
 | `/root/ob-final` | `integrate/eight-items` | tree-identical to PR #44 squash, already on master |
 | `/root/ob-int2` | `integrate/campaign-wiki-assistant` | fully contained in `ob-final` |
 | `/root/OpenBlade` | `chore/py312-baseline-and-quantum-refs` | stale (37 behind); its 3 stray commits are already on master by content |
@@ -138,9 +138,9 @@ VERIFYING instance states from item 4) — say so in the PR, do not stub it.
 - `tests/unit/test_drive_leases.py`: two schedulers over the same catalog
   store cannot both acquire drive 0; second waits then `DriveBusyError`.
   Fencing tokens strictly increase; a released lease's token is never reissued.
-- `tests/unit/test_lease_fencing.py`: expire/release a lease behind a running
-  sharded archive (monkeypatch the store) → `StaleLeaseError`, no
-  `mark_instance_archived`, unmount/unload still attempted.
+- Lease fencing (landed in `tests/integration/test_sharded_archive_atomicity.py`
+  to reuse its helpers): release a lease behind a running sharded archive →
+  `StaleLeaseError`, no `mark_instance_archived`, unmount/unload still attempted.
 - `tests/unit/test_recovery.py`: seed a `running` job + live lease, restart →
   job `failed_recoverable`, lease released, mismatch reported when the
   simulator's drive is empty.
@@ -149,6 +149,20 @@ VERIFYING instance states from item 4) — say so in the PR, do not stub it.
 - `tests/integration/test_api.py` (or the nearest native route suite): two
   overlapping archive requests against one catalog serialise on the lease, and
   `GET /jobs/recovery` is bearer-gated and 404 in scalar-api-only mode.
+
+## Deviations recorded at implementation time
+
+- `DriveScheduler(store=...)` stays optional (defaults to `InMemoryLeaseStore`)
+  because ~40 existing tests construct it bare; every production call site
+  passes the catalog store.
+- `archive.py` / `restore.py` (`run_archive_job` / `run_restore_job`) take no
+  scheduler and hold no lease today, so there is nothing to fence; giving them
+  leases is a follow-up. `tree_restore.py` only forwards the scheduler to the
+  sharded restore, which is fenced.
+- The tree-restore route builds its scheduler in the worker thread over a
+  `CatalogLeaseStore(worker_catalog)` rather than `context.lease_store`: the
+  context's session is not thread-safe. Same table, same exclusion.
+- Heartbeat runs once per write batch, not per shard.
 
 ## Non-goals
 

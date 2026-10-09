@@ -51,5 +51,8 @@ The catalog uses SQLite tables for volume groups, barcode assignments, file reco
 ## Job system
 Jobs are stored in-process with explicit state transitions. The queue additionally tracks changer and drive ownership so concurrent operations cannot claim the same hardware resources.
 
+## Drive leases and recovery
+Drive exclusion for tape I/O is a catalog row, not process memory. `DriveScheduler` is a façade over a `LeaseStore`: `CatalogLeaseStore` in production (one per `AppContext`, shared by the API and the CLI through the same `drive_leases` table) and `InMemoryLeaseStore` for unit tests. Each lease carries a monotonic `fencing_token`; job modules call `scheduler.verify(handle)` before a read-write mount, a write batch, and unmount/unload, and `heartbeat` after writes, so a lease that expired or was released behind a running job aborts it with `StaleLeaseError` instead of writing to a drive it no longer owns. On startup `recover_after_restart` fails any job the previous process left `running`, releases its leases, and reports expected-vs-observed drive contents — it never moves media. The report is read-only at `GET /jobs/recovery`. Spec and rationale: `docs/decisions/2026-10-09-persistent-drive-leases.md`.
+
 ## FUSE namespace
 The FUSE-oriented layer is intentionally thin: catalog entries define the namespace, and hydration delegates to restore workflows. This keeps the namespace authoritative and avoids bypassing safety or verification logic.
