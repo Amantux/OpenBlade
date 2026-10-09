@@ -77,6 +77,14 @@ def test_unmount_raise_in_cleanup_is_journaled_and_other_drive_unloaded(
         return real_unmount(mount)
 
     monkeypatch.setattr(ltfs, "unmount", unmount)
+    real_unload = library.unload
+    unload_requests: list[int] = []
+
+    def unload(drive_id: int, target_slot: int) -> Any:
+        unload_requests.append(drive_id)
+        return real_unload(drive_id, target_slot)
+
+    monkeypatch.setattr(library, "unload", unload)
     job = catalog.create_job("archive", {})
     run_sharded_archive(
         _request(_source(tmp_path)), library, ltfs, catalog, DriveScheduler(num_drives=2), job.id
@@ -86,6 +94,10 @@ def test_unmount_raise_in_cleanup_is_journaled_and_other_drive_unloaded(
     assert stored is not None and PHYSICAL_STATE_UNKNOWN in str(stored.error)
     rows = [e for e in catalog.job_journal(job.id) if e.event == "physical_state_unknown"]
     assert rows and rows[0].detail["barcode"] == BARCODES[0]
-    in_drives = {str(d.barcode) for d in library.inventory().drives if d.barcode is not None}
+    drives = {str(d.barcode): d.drive_id for d in library.inventory().drives if d.barcode}
+    in_drives = set(drives)
     assert BARCODES[1] not in in_drives  # the OTHER drive was still unloaded
+    # Never unload while LTFS is mounted: the stuck drive must not even be asked.
+    assert BARCODES[0] in in_drives
+    assert drives[BARCODES[0]] not in unload_requests
     assert "archived" not in _states(catalog)
