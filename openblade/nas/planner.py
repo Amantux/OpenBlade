@@ -5,6 +5,7 @@ from __future__ import annotations
 import posixpath
 from datetime import datetime, timezone
 
+from openblade.nas.media import ForeignMediaError, is_foreign, require_writable
 from openblade.nas.types import (
     ArchivePlan,
     ArchivePlanRequest,
@@ -42,6 +43,7 @@ class ArchivePlanner:
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 
+        self._check_media(request)
         self._apply_common_checks(request, plan)
         if not plan.is_safe_to_enqueue:
             return plan
@@ -362,7 +364,23 @@ class ArchivePlanner:
         return self.DEFAULT_TAPE_CAPACITY
 
     def _tape_capacity(self, request: ArchivePlanRequest, barcode: str) -> int:
-        return request.tape_capacities.get(barcode, self.DEFAULT_TAPE_CAPACITY)
+        capacity = request.tape_capacities.get(barcode, self.DEFAULT_TAPE_CAPACITY)
+        return max(0, capacity - request.reserved_bytes.get(barcode, 0))
+
+    def _check_media(self, request: ArchivePlanRequest) -> None:
+        """Refuse foreign (un-adopted) or drive-incompatible target cartridges.
+
+        Raises ForeignMediaError / IncompatibleMediaError; foreign media is never
+        auto-formatted.
+        """
+        for barcode in request.available_tapes:
+            cartridge = request.cartridges.get(barcode)
+            if cartridge is None:
+                continue
+            if is_foreign(cartridge):
+                raise ForeignMediaError(barcode)
+            if request.drive_generation is not None:
+                require_writable(cartridge, request.drive_generation)
 
     def _file_size(self, request: ArchivePlanRequest, path: str) -> int:
         return request.file_sizes.get(path, 0)
