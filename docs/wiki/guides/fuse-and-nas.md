@@ -212,8 +212,9 @@ stack so the protocol exports can be exercised by real clients. Services:
 
 - `samba` — serves shares from an `smb.conf` rendered by `openblade/nas/samba.py`.
 - `nfs-ganesha` — serves exports from a config rendered by `openblade/nas/nfs.py`.
-- `client` — a privileged container that mounts the NFS export internally
-  (mounting needs privileges the CI runner's test process does not have).
+- `client` — a privileged container that kernel-mounts both protocols
+  internally (SMB via `cifs vers=3.0,cache=none,actimeo=0`, NFS via `nfs4`);
+  mounting needs privileges the CI runner's test process does not have.
 
 Both config files are rendered from `NasShare` records, so the rig tests the
 renderers' output rather than hand-written configs.
@@ -226,7 +227,9 @@ make protocols-up && make test-protocols && make protocols-down
 
 `protocols-up` builds, starts and waits for healthy; `test-protocols` runs
 `python -m pytest -m protocols tests/e2e/protocols -q`; `protocols-down` tears
-down with `-v`. Host ports come from `OB_SMB_PORT` and `OB_NFS_PORT`. Tests
+down with `-v`. Host ports come from `OB_SMB_PORT` and `OB_NFS_PORT`
+(Makefile defaults 14450 and 20490); the pytest fixture instead picks free
+ports when those variables are unset. Tests
 carry the `protocols` marker and skip, with a reason naming the missing
 capability, when the rig is not available.
 
@@ -235,7 +238,19 @@ hydrator. The shim models a tape recall: a stub file becomes real content after
 a delay, or never does for an offline cartridge. It exists to check how SMB and
 NFS clients behave while a read blocks or times out. The real hydrator is the
 FUSE path described above, and it is not exercised by the rig, so rig results
-say nothing about actual recall from tape.
+say nothing about actual recall from tape. The offline stub file is a rig-only
+format: the catalog has no on-disk OFFLINE_ON_TAPE representation.
+
+**SMB caching semantics.** The shim (like an evictor) swaps files outside
+smbd, so smbd cannot break client leases. The rendered `smb.conf` therefore
+sets `oplocks = no`, `level2 oplocks = no` and `smb2 leases = no`; with leases
+on, the Linux cifs client's deferred close (`closetimeo=1`) kept a cached
+handle on the stub's old inode while a poller reopened it more often than once
+a second, and the recall was never seen. Observed with leases off: a handle
+opened before an eviction keeps reading the old bytes, and while that handle
+stays open a reopen by path also returns the old bytes; after it closes, the
+next open sees the new file. A Samba restart mid-recall is survived (the soft
+mount reconnects and the poll completes).
 
 **CI.** `.github/workflows/nas-protocols.yml` runs the rig nightly and on manual
 dispatch. It is not triggered by pull requests or pushes and is not a required
