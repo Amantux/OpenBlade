@@ -232,6 +232,8 @@ def _restore_sharded(
         for handle in handles:
             drive_id, slot_id = _ensure_loaded(catalog, library, ltfs, handle, job_id)
             loaded_slots[drive_id] = slot_id
+        scheduler.record_physical_drives(handles)
+        for handle in handles:
             mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_ONLY)
 
         def _read_shard(index: int, instance: Any) -> Path:

@@ -312,6 +312,49 @@ def _clean_unmount_and_unload(
         )
 
 
+def _log_fenced_out(handles: list[DriveHandle], job_id: str) -> None:
+    for handle in handles:
+        logger.error(
+            "job %s lost its lease on drive %d (%s); leaving the drive untouched — "
+            "physical state unknown, reconcile before reuse",
+            job_id,
+            handle.physical,
+            handle.barcode,
+        )
+
+
+def _best_effort_unmount_and_unload(
+    catalog: CatalogRepository,
+    library: LibraryBackend,
+    ltfs: LTFSBackend,
+    mounts: dict[str, MountHandle],
+    handles: list[DriveHandle],
+    loaded_slots: dict[int, int | None],
+    job_id: str,
+) -> None:
+    """Error-path cleanup for a job that still owns its drives: unmount, then unload."""
+    for mount in mounts.values():
+        with suppress(Exception):
+            ltfs.unmount(mount)
+    for handle in handles:
+        slot_id = loaded_slots.get(handle.physical)
+        if slot_id is not None:
+            with suppress(Exception):
+                execute_tape_request(
+                    catalog,
+                    library,
+                    ltfs,
+                    TapeOpRequest(
+                        op_type=TapeOpType.UNLOAD,
+                        barcode=handle.barcode,
+                        drive_id=handle.physical,
+                        slot_id=slot_id,
+                        requested_by="sharded-archive",
+                        job_id=job_id,
+                    ),
+                )
+
+
 def _archive_stripe(
     files: list[Path],
     request: ShardedArchiveRequest,
@@ -348,10 +391,13 @@ def _archive_stripe(
         # this batch. Nothing here is marked archived until the WHOLE batch has verified
         # and every tape has cleanly unmounted — the atomic commit boundary.
         staged: list[tuple[str, str, int]] = []
+        fenced_out = False
         try:
             for handle in handles:
                 drive_id, slot_id = _load_barcode(catalog, library, ltfs, handle, job_id)
                 loaded_slots[drive_id] = slot_id
+            scheduler.record_physical_drives(handles)
+            for handle in handles:
                 scheduler.verify(handle)  # fencing: never mount RW on a stale lease
                 mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_WRITE)
 
@@ -428,7 +474,11 @@ def _archive_stripe(
                 files_archived += 1
                 bytes_archived += size_bytes
         except StaleLeaseError:
-            # Fenced out: abort the whole job. `finally` still unmounts/unloads.
+            # Fenced out: abort the whole job and leave the hardware ALONE. The
+            # drive may already be loaded + mounted by whoever holds the lease now,
+            # so unmount/unload here could eject their tape mid-write. Physical
+            # state is unknown -> reconcile (recovery report / inventory).
+            fenced_out = True
             raise
         except Exception as exc:  # noqa: BLE001
             # Staged instances remain PENDING -> not exposed as archived; resumable.
@@ -443,26 +493,12 @@ def _archive_stripe(
             )
             errors.append(safe_job_error(exc))
         finally:
-            for mount in mounts.values():
-                with suppress(Exception):
-                    ltfs.unmount(mount)
-            for handle in handles:
-                slot_id = loaded_slots.get(handle.physical)
-                if slot_id is not None:
-                    with suppress(Exception):
-                        execute_tape_request(
-                            catalog,
-                            library,
-                            ltfs,
-                            TapeOpRequest(
-                                op_type=TapeOpType.UNLOAD,
-                                barcode=handle.barcode,
-                                drive_id=handle.physical,
-                                slot_id=slot_id,
-                                requested_by="sharded-archive",
-                                job_id=job_id,
-                            ),
-                        )
+            if fenced_out:
+                _log_fenced_out(handles, job_id)
+            else:
+                _best_effort_unmount_and_unload(
+                    catalog, library, ltfs, mounts, handles, loaded_slots, job_id
+                )
             scheduler.release_drives(handles)
 
     return files_archived, bytes_archived
@@ -492,11 +528,14 @@ def _archive_block_stripe(
     loaded_slots: dict[int, int | None] = {}
     shard_dir = scratch_dir / plan.shard_group_id
     shard_dir.mkdir(parents=True, exist_ok=True)
+    fenced_out = False
 
     try:
         for handle in handles:
             drive_id, slot_id = _load_barcode(catalog, library, ltfs, handle, job_id)
             loaded_slots[drive_id] = slot_id
+        scheduler.record_physical_drives(handles)
+        for handle in handles:
             scheduler.verify(handle)  # fencing: never mount RW on a stale lease
             mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_WRITE)
 
@@ -588,27 +627,17 @@ def _archive_block_stripe(
         # COMMIT: block-striped file is durable only when all shards are down.
         for instance_id in staged:
             catalog.mark_instance_archived(instance_id)
+    except StaleLeaseError:
+        # Fenced out: abort and leave the hardware alone (see _archive_stripe).
+        fenced_out = True
+        raise
     finally:
-        for mount in mounts.values():
-            with suppress(Exception):
-                ltfs.unmount(mount)
-        for handle in handles:
-            slot_id = loaded_slots.get(handle.physical)
-            if slot_id is not None:
-                with suppress(Exception):
-                    execute_tape_request(
-                        catalog,
-                        library,
-                        ltfs,
-                        TapeOpRequest(
-                            op_type=TapeOpType.UNLOAD,
-                            barcode=handle.barcode,
-                            drive_id=handle.physical,
-                            slot_id=slot_id,
-                            requested_by="sharded-archive",
-                            job_id=job_id,
-                        ),
-                    )
+        if fenced_out:
+            _log_fenced_out(handles, job_id)
+        else:
+            _best_effort_unmount_and_unload(
+                catalog, library, ltfs, mounts, handles, loaded_slots, job_id
+            )
         scheduler.release_drives(handles)
         shutil.rmtree(shard_dir, ignore_errors=True)
 

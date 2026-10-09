@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import DriveBusyError, StaleLeaseError
-from openblade.jobs.scheduler import CatalogLeaseStore, DriveScheduler
+from openblade.jobs.scheduler import CatalogLeaseStore, DriveScheduler, InMemoryLeaseStore
 
 
 def _two_repos(tmp_path: Path) -> tuple[CatalogRepository, CatalogRepository]:
@@ -70,3 +71,16 @@ def test_verify_raises_stale_lease_after_release_or_expiry(tmp_path: Path) -> No
     (dead,) = expired.acquire_drives(["AAA002L9"], timeout=1.0)
     with pytest.raises(StaleLeaseError):
         expired.verify(dead)
+
+
+def test_held_leases_are_kept_alive_without_explicit_heartbeats() -> None:
+    # A single long tape write must not outlive its own lease: the scheduler
+    # heartbeats in the background for as long as a handle is held.
+    store = InMemoryLeaseStore()
+    scheduler = DriveScheduler(num_drives=1, store=store, ttl=timedelta(seconds=0.3))
+    handles = scheduler.acquire_drives(["MCK00001"])
+    time.sleep(0.8)  # > 2 TTLs, with no heartbeat() call from the "job"
+    scheduler.verify(handles[0])  # still live
+    scheduler.release_drives(handles)
+    time.sleep(0.4)
+    assert store.live_leases() == []  # released, and the thread did not revive it

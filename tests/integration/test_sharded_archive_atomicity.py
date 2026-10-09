@@ -172,11 +172,13 @@ def test_unload_failure_blocks_commit(tmp_path: Path, monkeypatch) -> None:
     assert _archived_count(catalog) == 0  # tape stuck in drive -> batch must not be durable
 
 
-def test_stale_lease_aborts_archive_commits_nothing_and_still_unmounts(
+def test_stale_lease_aborts_archive_commits_nothing_and_leaves_the_drive_alone(
     tmp_path: Path, monkeypatch
 ) -> None:
     # Spec docs/decisions/2026-10-09-persistent-drive-leases.md §3: a lease
-    # released behind a running job fences it out before unmount + commit.
+    # released behind a running job fences it out before unmount + commit, and
+    # the job must NOT touch the drive afterwards — whoever holds the lease now
+    # may already have their own tape loaded and mounted there.
     library, ltfs = _setup()
     catalog = _catalog()
     store = InMemoryLeaseStore()
@@ -201,4 +203,6 @@ def test_stale_lease_aborts_archive_commits_nothing_and_still_unmounts(
         run_sharded_archive(_request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id)
 
     assert _archived_count(catalog) == 0  # no mark_instance_archived
-    assert unmounted  # clean unmount still attempted on the error path
+    assert unmounted == []  # fenced out: no unmount
+    loaded = {str(drive.barcode) for drive in library.inventory().drives if drive.barcode}
+    assert loaded == set(BARCODES)  # ...and no unload: the drives are left as they were

@@ -54,6 +54,8 @@ class LeaseStore(Protocol):
 
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None: ...
 
+    def set_physical_drive(self, lease_id: str, physical_drive_id: int) -> None: ...
+
     def release(self, lease_ids: list[str]) -> None: ...
 
     def is_live(self, lease_id: str, fencing_token: int) -> bool: ...
@@ -106,6 +108,12 @@ class InMemoryLeaseStore:
                 if lease is not None and _live(lease, now):
                     self._leases[lease_id] = replace(lease, heartbeat_at=now, expires_at=now + ttl)
 
+    def set_physical_drive(self, lease_id: str, physical_drive_id: int) -> None:
+        with self._lock:
+            lease = self._leases.get(lease_id)
+            if lease is not None:
+                self._leases[lease_id] = replace(lease, physical_drive_id=physical_drive_id)
+
     def release(self, lease_ids: list[str]) -> None:
         with self._lock:
             now = _now()
@@ -145,6 +153,9 @@ class CatalogLeaseStore:
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None:
         self._repo.heartbeat_leases(lease_ids, ttl)
 
+    def set_physical_drive(self, lease_id: str, physical_drive_id: int) -> None:
+        self._repo.set_lease_physical_drive(lease_id, physical_drive_id)
+
     def release(self, lease_ids: list[str]) -> None:
         self._repo.release_leases(lease_ids)
 
@@ -180,6 +191,12 @@ class DriveScheduler:
         self._job_id = job_id
         self._ttl = ttl
         self._lock = threading.Condition(threading.Lock())
+        # Leases are kept alive by a daemon thread for as long as any handle is
+        # held, so a single long tape write (real LTO: minutes to hours per file)
+        # cannot outlive its own TTL and be fenced out after the data is down.
+        self._held: list[DriveHandle] = []
+        self._stop_heartbeat = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
 
     @property
     def num_drives(self) -> int:
@@ -242,7 +259,32 @@ class DriveScheduler:
                 lease.barcode,
                 lease.fencing_token,
             )
+        with self._lock:
+            self._held.extend(handles)
+            self._ensure_heartbeat_thread()
         return handles
+
+    def _ensure_heartbeat_thread(self) -> None:
+        # Caller holds self._lock.
+        if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+            return
+        self._stop_heartbeat.clear()
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop, name="drive-lease-heartbeat", daemon=True
+        )
+        self._heartbeat_thread.start()
+
+    def _heartbeat_loop(self) -> None:
+        interval = max(self._ttl.total_seconds() / 3.0, 0.05)
+        while not self._stop_heartbeat.wait(interval):
+            with self._lock:
+                handles = [handle for handle in self._held if not handle._released]
+            if not handles:
+                return
+            try:
+                self.heartbeat(handles)
+            except Exception:  # noqa: BLE001 - a missed beat is logged; the next verify() fences
+                logger.warning("drive lease heartbeat failed", exc_info=True)
 
     def release_drives(self, handles: list[DriveHandle]) -> None:
         """Release drives and notify waiting jobs."""
@@ -252,6 +294,9 @@ class DriveScheduler:
             for handle in pending:
                 handle._released = True
                 logger.info("Released drive %d (was %s)", handle.drive_id, handle.barcode)
+            self._held = [handle for handle in self._held if not handle._released]
+            if not self._held:
+                self._stop_heartbeat.set()
             self._lock.notify_all()
 
     def verify(self, handle: DriveHandle) -> None:
@@ -264,6 +309,13 @@ class DriveScheduler:
     def heartbeat(self, handles: list[DriveHandle]) -> None:
         """Extend the leases behind these handles by the scheduler's ttl."""
         self._store.heartbeat([handle.lease_id for handle in handles], self._ttl)
+
+    def record_physical_drives(self, handles: list[DriveHandle]) -> None:
+        """Persist where each cartridge actually ended up (when it differs from the
+        reserved drive) so restart recovery reconciles the right drive."""
+        for handle in handles:
+            if handle.physical_drive_id is not None:
+                self._store.set_physical_drive(handle.lease_id, handle.physical_drive_id)
 
     def status(self) -> dict[int, str | None]:
         """Return copy of drive allocation status."""
