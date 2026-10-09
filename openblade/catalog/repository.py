@@ -22,6 +22,7 @@ from openblade.catalog.models import (
     FileInstance,
     FileRecord,
     Job,
+    JobJournalEntry,
     LibraryInstance,
     ManifestVersion,
     NasCacheDrive,
@@ -124,6 +125,24 @@ class CatalogBrowseEntry:
     tape_barcode: str
     archived_at: datetime | None
     shard_count: int
+
+
+@dataclass(frozen=True)
+class StagedInstance:
+    """A sharded-archive instance not yet committed (STAGING or VERIFYING)."""
+
+    instance_id: str
+    file_record_id: str
+    barcode: str
+    tape_path: str
+    shard_index: int | None
+    state: str
+
+
+_STAGED_INSTANCE_STATES = frozenset(
+    {FileInstanceState.STAGING.value, FileInstanceState.VERIFYING.value}
+)
+_SHARD_STAGED_EVENT = "shard_staged"
 
 
 class CatalogRepository:
@@ -662,6 +681,151 @@ class CatalogRepository:
         instance.state = FileInstanceState.FAILED.value
         self.session.commit()
 
+    # -- Sharded-archive staging + job journal ---------------------------------
+    # Lifecycle: create_staged_instance (STAGING) -> mark_instances_verifying ->
+    # mark_instances_archived, the last being the job's ONE commit. Each bulk
+    # call validates every id before mutating anything, so it is all-or-nothing.
+
+    def journal(
+        self, job_id: str, event: str, detail: Mapping[str, object] | None = None
+    ) -> JobJournalEntry:
+        """Append one event to ``job_id``'s journal and commit."""
+        entry = JobJournalEntry(
+            job_id=job_id,
+            at=datetime.utcnow(),
+            event=event,
+            detail_json=json.dumps(dict(detail or {}), sort_keys=True, default=str),
+        )
+        self.session.add(entry)
+        self.session.commit()
+        return entry
+
+    def job_journal(self, job_id: str) -> list[JobJournalEntry]:
+        """Every journal entry for ``job_id``, oldest first (ties broken by id)."""
+        stmt = (
+            select(JobJournalEntry)
+            .where(JobJournalEntry.job_id == job_id)
+            .order_by(JobJournalEntry.at, JobJournalEntry.id)
+        )
+        return list(self.session.scalars(stmt))
+
+    def create_staged_instance(
+        self,
+        job_id: str,
+        file_record_id: str,
+        barcode: str,
+        tape_path: str,
+        *,
+        state: FileInstanceState = FileInstanceState.STAGING,
+    ) -> FileInstance:
+        """Create an uncommitted shard instance and its ``shard_staged`` journal row.
+
+        Both rows land in one transaction; the journal row is the job linkage
+        that ``list_staged_instances`` reads.
+        """
+        if state.value not in _STAGED_INSTANCE_STATES:
+            raise ValueError(f"staged instance state must be staging/verifying, not {state.value}")
+        record = self.session.get(FileRecord, file_record_id)
+        if record is None:
+            raise FileNotFoundError(f"File record {file_record_id} not found")
+        instance = FileInstance(
+            file_record_id=file_record_id,
+            barcode=barcode,
+            tape_path=str(PurePosixPath(tape_path)),
+            state=state.value,
+        )
+        self.session.add(instance)
+        self.session.flush()
+        self.session.add(
+            JobJournalEntry(
+                job_id=job_id,
+                at=datetime.utcnow(),
+                event=_SHARD_STAGED_EVENT,
+                detail_json=json.dumps(
+                    {
+                        "instance_id": instance.id,
+                        "barcode": barcode,
+                        "tape_path": instance.tape_path,
+                        "shard_index": record.shard_index,
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
+        self.session.commit()
+        self.session.refresh(instance)
+        return instance
+
+    def list_staged_instances(self, job_id: str) -> list[StagedInstance]:
+        """Instances staged by ``job_id`` that are still STAGING or VERIFYING."""
+        instance_ids = [
+            str(entry.detail.get("instance_id"))
+            for entry in self.job_journal(job_id)
+            if entry.event == _SHARD_STAGED_EVENT
+        ]
+        if not instance_ids:
+            return []
+        stmt = (
+            select(FileInstance, FileRecord.shard_index)
+            .join(FileRecord, FileInstance.file_record_id == FileRecord.id)
+            .where(
+                FileInstance.id.in_(instance_ids),
+                FileInstance.state.in_(_STAGED_INSTANCE_STATES),
+            )
+        )
+        staged = [
+            StagedInstance(
+                instance_id=instance.id,
+                file_record_id=instance.file_record_id,
+                barcode=instance.barcode,
+                tape_path=instance.tape_path,
+                shard_index=shard_index,
+                state=instance.state,
+            )
+            for instance, shard_index in self.session.execute(stmt)
+        ]
+        staged.sort(key=lambda s: (s.shard_index is None, s.shard_index or 0, s.barcode))
+        return staged
+
+    def _load_instances_in(
+        self, instance_ids: Sequence[str], allowed_states: frozenset[str]
+    ) -> list[FileInstance]:
+        instances: list[FileInstance] = []
+        for instance_id in dict.fromkeys(instance_ids):
+            instance = self.session.get(FileInstance, instance_id)
+            if instance is None:
+                raise FileNotFoundError(f"File instance {instance_id} not found")
+            if instance.state not in allowed_states:
+                raise ValueError(
+                    f"File instance {instance_id} is {instance.state}, "
+                    f"expected one of {sorted(allowed_states)}"
+                )
+            instances.append(instance)
+        return instances
+
+    def mark_instances_verifying(self, instance_ids: Sequence[str]) -> None:
+        """Move STAGING (or already VERIFYING) instances to VERIFYING in one commit."""
+        instances = self._load_instances_in(instance_ids, _STAGED_INSTANCE_STATES)
+        for instance in instances:
+            instance.state = FileInstanceState.VERIFYING.value
+        self.session.commit()
+
+    def mark_instances_archived(
+        self, instance_ids: Sequence[str], *, checksum_verified: bool = True
+    ) -> None:
+        """The job's single commit: every VERIFYING instance becomes ARCHIVED together.
+
+        Raises (changing nothing) if any id is missing or not VERIFYING.
+        """
+        verifying = frozenset({FileInstanceState.VERIFYING.value})
+        instances = self._load_instances_in(instance_ids, verifying)
+        now = datetime.utcnow()
+        for instance in instances:
+            instance.state = FileInstanceState.ARCHIVED.value
+            instance.archived_at = now
+            instance.checksum_verified = checksum_verified
+        self.session.commit()
+
     def create_job(self, job_type: str, metadata: dict[str, object]) -> Job:
         job = Job(job_type=job_type, state="pending", metadata_json=json.dumps(metadata))
         self.session.add(job)
@@ -756,6 +920,8 @@ class CatalogRepository:
             return
         if any(
             instance.state in {FileInstanceState.ARCHIVED.value, FileInstanceState.VERIFIED.value}
+            # Staged shards must stay discoverable for resume / reconcile.
+            or instance.state in _STAGED_INSTANCE_STATES
             for instance in record.instances
         ):
             return
