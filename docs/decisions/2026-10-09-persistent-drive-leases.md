@@ -1,0 +1,163 @@
+# Persistent drive leases with fencing, and job recovery on restart
+
+Status: accepted 2026-10-09. Roadmap items 7 and 8 (Phase 2), first slice.
+
+## Where the four working copies stand (so nobody re-merges them)
+
+| checkout | branch | relation to `origin/master` |
+|---|---|---|
+| `/root/ob2-final` | `integrate/gap-closure` | tree-identical to master (`1863348`, PR #45) |
+| `/root/ob-final` | `integrate/eight-items` | tree-identical to PR #44 squash, already on master |
+| `/root/ob-int2` | `integrate/campaign-wiki-assistant` | fully contained in `ob-final` |
+| `/root/OpenBlade` | `chore/py312-baseline-and-quantum-refs` | stale (37 behind); its 3 stray commits are already on master by content |
+
+Nothing is left to merge. All new work starts from `origin/master`.
+
+## Problem
+
+`DriveScheduler` is the only thing that stops two tape jobs from driving the
+same physical drive, and it is constructed **per request** and held **in
+memory**:
+
+- `openblade/api/routes_archive.py:196`, `routes_restore.py:159` and `:234`,
+  `openblade/cli/main.py:624`, `:698`, `:838` each do
+  `DriveScheduler(num_drives=len(context.library.inventory().drives))`.
+- Two API requests (only the archive route has a process-wide lock), or the
+  CLI and the API against the same catalog, each get a scheduler that believes
+  every drive is free.
+- After a crash or restart, nothing knows which drives a dead job held, and
+  catalog jobs stay `running` forever.
+
+The roadmap (items 7, 8) asks for DB-backed leases with a monotonic fencing
+token and restart recovery. This note is the spec for that slice.
+
+## Decision
+
+### 1. Lease store in the catalog
+
+New table `drive_leases` (SQLAlchemy model in `openblade/catalog/models.py`,
+created by `Base.metadata.create_all`; nothing to add to `_migrate_schema`
+because it is a new table):
+
+| column | type | notes |
+|---|---|---|
+| `id` | str pk (uuid4) | lease id |
+| `drive_id` | int, not null | scheduler lock key; `UNIQUE` while the lease is live (see below) |
+| `job_id` | str, not null, indexed | owning catalog job |
+| `barcode` | str(8), not null | cartridge the lease was taken for |
+| `physical_drive_id` | int, nullable | mirrors `DriveHandle.physical_drive_id` |
+| `fencing_token` | int, not null, unique | monotonic across the catalog |
+| `acquired_at` | datetime utc | |
+| `heartbeat_at` | datetime utc | updated by `heartbeat()` |
+| `expires_at` | datetime utc | `heartbeat_at + ttl`; default ttl 15 min |
+| `released_at` | datetime utc, nullable | null = live |
+
+Live-ness is `released_at IS NULL AND expires_at > now`. Enforce "one live
+lease per drive" in code under a write transaction (SQLite `BEGIN IMMEDIATE`
+via `connection.exec_driver_sql`, Postgres not a target here) — do **not** rely
+on a partial unique index, SQLite support for those in SQLAlchemy is uneven.
+
+`fencing_token` = `COALESCE(MAX(fencing_token), 0) + 1` inside the same
+transaction. It is never reused, even after release.
+
+Repository API (`CatalogRepository`, keep it small):
+
+```python
+def acquire_drive_leases(self, *, job_id, barcodes: list[str], num_drives: int, ttl: timedelta) -> list[DriveLease] | None  # None = not all free, caller waits
+def heartbeat_leases(self, lease_ids: list[str], ttl: timedelta) -> None
+def release_leases(self, lease_ids: list[str]) -> None
+def lease_is_live(self, lease_id: str, fencing_token: int) -> bool
+def live_leases(self) -> list[DriveLease]
+def release_leases_for_job(self, job_id: str) -> int
+```
+
+`DriveLease` is a frozen dataclass in `openblade/domain/models.py`.
+
+### 2. `DriveScheduler` becomes a façade over a lease store
+
+Keep the public shape every caller and ~all tests already use:
+`acquire_drives(barcodes, timeout)`, `release_drives(handles)`, `status()`,
+`available_count()`, `num_drives`. Add:
+
+- `DriveScheduler(num_drives, *, store: LeaseStore, job_id: str, ttl=...)`.
+- `LeaseStore` is a `Protocol` with two implementations:
+  `InMemoryLeaseStore` (existing behaviour, used by unit tests that build a
+  scheduler directly) and `CatalogLeaseStore` (wraps the repository calls
+  above). This is the one new abstraction and it exists because tests and
+  production genuinely differ.
+- `acquire_drives` keeps the all-or-nothing + timeout semantics; the wait loop
+  polls the store (0.25 s) instead of `Condition.wait` when the store is the
+  catalog one.
+- `DriveHandle` gains `lease_id: str` and `fencing_token: int`. `drive_id`
+  stays immutable (existing test pins this).
+- New `verify(handle)` → raises `StaleLeaseError` (new typed error in
+  `openblade/domain/errors.py`, subclass of the existing domain error base so
+  the jobs error sanitizer treats it as typed) when the lease is not live or
+  the token differs.
+- New `heartbeat(handles)`.
+
+### 3. Fencing at the destructive edges
+
+In `openblade/jobs/sharded_archive.py`, `archive.py`, `restore.py`,
+`tree_restore.py`: call `scheduler.verify(handle)` immediately before
+`ltfs.mount(..., READ_WRITE)`, before each shard/file write batch, and before
+unmount/unload. A stale lease aborts the job with `StaleLeaseError`; the error
+path must still attempt the clean unmount/unload **and must not suppress its
+errors** (existing rule). Call `heartbeat` after each file/shard write.
+
+### 4. One scheduler per process, bound to the catalog
+
+- `AppContext` (`openblade/bootstrap.py`) gets a `lease_store: LeaseStore`
+  built from the catalog repository. The six call sites above construct
+  `DriveScheduler(num_drives=..., store=context.lease_store, job_id=job.id)`.
+  The CLI paths that have no catalog job yet must create one first (they
+  already have `context.catalog`).
+- Delete nothing else; `JobQueue` (in-memory, `bootstrap.py:607`) is not in
+  scope — note it in the PR as follow-up.
+
+### 5. Recovery on startup (item 8, recovery half only)
+
+New `openblade/jobs/recovery.py::recover_after_restart(catalog, library) -> RecoveryReport`,
+called from bootstrap after `init_db` and before the API/CLI serves anything:
+
+1. Every catalog job in state `running` → `failed_recoverable` with error
+   `"interrupted by process restart; physical state unknown — reconcile before retry"`.
+2. Every live lease whose job is not `running` → released (`released_at = now`).
+3. For each lease released in step 2, compare expected (`barcode` in
+   `physical`) with `library.inventory()`; log one line per mismatch at WARNING
+   and include it in the report. **Never** move media here — report only.
+4. Report is logged at INFO and returned; expose it read-only as
+   `GET /jobs/recovery` (native surface, bearer-gated like the other native
+   routes; 404 under `OPENBLADE_SCALAR_API_ONLY`).
+
+Resuming a job from staged shards is **deferred** (needs the STAGING /
+VERIFYING instance states from item 4) — say so in the PR, do not stub it.
+
+## Tests (each must fail with the guard removed — mutation-check the first two)
+
+- `tests/unit/test_drive_leases.py`: two schedulers over the same catalog
+  store cannot both acquire drive 0; second waits then `DriveBusyError`.
+  Fencing tokens strictly increase; a released lease's token is never reissued.
+- `tests/unit/test_lease_fencing.py`: expire/release a lease behind a running
+  sharded archive (monkeypatch the store) → `StaleLeaseError`, no
+  `mark_instance_archived`, unmount/unload still attempted.
+- `tests/unit/test_recovery.py`: seed a `running` job + live lease, restart →
+  job `failed_recoverable`, lease released, mismatch reported when the
+  simulator's drive is empty.
+- Existing `tests/unit/test_scheduler*.py` / `test_sharded_archive_atomicity.py`
+  stay green with `InMemoryLeaseStore`.
+- `tests/integration/test_api.py` (or the nearest native route suite): two
+  overlapping archive requests against one catalog serialise on the lease, and
+  `GET /jobs/recovery` is bearer-gated and 404 in scalar-api-only mode.
+
+## Non-goals
+
+Item 4's STAGING/VERIFYING states, job resume, replacing `JobQueue`, any
+`/aml/*` or `/iblade/*` route, the emulator contract, Postgres.
+
+## Definition of done
+
+`make lint` clean, `.venv/bin/mypy` strict clean (CI blocks on both),
+`tests/unit tests/integration tests/safety` green, frontend untouched, reviewer
+subagent pass, one commit per logical change (models+repo, scheduler, fencing
+at call sites, recovery+route, docs).
