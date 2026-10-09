@@ -1,0 +1,10 @@
+{
+  "id": "iblade-login-success",
+  "profile": "iblade-rev-a",
+  "source": "inferred",
+  "firmware": "RevA",
+  "manual_ref": "iBlade Rev A (Sep 2017), scaffold",
+  "fidelity_notes": "Scaffold: assumes the iBlade surface shares the AML login contract at /aml/users/login. Unverified.",
+  "request": { "method": "POST", "path": "/aml/users/login", "json": { "name": "admin", "password": "password" } },
+  "expected": { "status": 200, "json_contains": { "code": 0, "description": "OK" } }
+}

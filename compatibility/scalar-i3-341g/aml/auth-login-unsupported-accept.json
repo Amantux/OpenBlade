@@ -1,0 +1,10 @@
+{
+  "id": "aml-auth-login-unsupported-accept",
+  "profile": "scalar-i3-341g",
+  "source": "inferred",
+  "firmware": "341G",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "fidelity_notes": "Unsupported Accept on login returns 406. Inferred; unverified against an appliance.",
+  "request": { "method": "POST", "path": "/aml/users/login", "json": { "name": "admin", "password": "password" }, "headers": { "Accept": "image/png" } },
+  "expected": { "status": 406, "json_contains": { "code": 406, "summary": "Unsupported Accept media type" } }
+}
