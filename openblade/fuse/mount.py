@@ -35,6 +35,15 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from openblade.fuse.filesystem import CatalogFilesystem, VirtualDirEntry
+from openblade.fuse.hydration import (
+    HydrationFailedError,
+    HydrationState,
+    HydrationTimeoutError,
+    Hydrator,
+    hydrate_timeout_from_env,
+)
+
+STATE_XATTR = "user.openblade.state"
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +109,20 @@ class CatalogFuseOperations:
         filesystem: CatalogFilesystem,
         *,
         hydrator: Callable[[str], bytes] | None = None,
+        data_plane: Hydrator | None = None,
+        blocking: bool = True,
+        hydrate_timeout: float | None = None,
         uid: int | None = None,
         gid: int | None = None,
     ) -> None:
         self.filesystem = filesystem
         self.hydrator = hydrator
+        self.data_plane = data_plane
+        self.blocking = blocking
+        self.hydrate_timeout = (
+            hydrate_timeout_from_env() if hydrate_timeout is None else hydrate_timeout
+        )
+        self._handle_checksums: dict[int, str] = {}
         self.uid = os.getuid() if uid is None else uid
         self.gid = os.getgid() if gid is None else gid
         self._lock = threading.Lock()
@@ -146,6 +164,9 @@ class CatalogFuseOperations:
 
     def destroy(self, path: str) -> None:
         del path
+        if self.data_plane is not None:
+            # Unmount: cancel batches not yet started, wait for in-flight restores.
+            self.data_plane.shutdown()
         with self._lock:
             self._open_files.clear()
 
@@ -201,12 +222,22 @@ class CatalogFuseOperations:
         return 0
 
     def getxattr(self, path: str, name: str, position: int = 0) -> bytes:
-        del path, name, position
-        raise OSError(errno.ENODATA, os.strerror(errno.ENODATA))
+        del position
+        entry = self._entry(path)
+        if entry.is_dir or name != STATE_XATTR:
+            raise OSError(errno.ENODATA, os.strerror(errno.ENODATA))
+        return self._state(str(entry.path)).value.encode()
 
     def listxattr(self, path: str) -> list[str]:
-        del path
-        return []
+        entry = self._entry(path)
+        return [] if entry.is_dir else [STATE_XATTR]
+
+    def _state(self, catalog_path: str) -> HydrationState:
+        if self.data_plane is not None:
+            return self.data_plane.status(catalog_path)
+        if self.filesystem.is_hydrated(catalog_path):
+            return HydrationState.ONLINE
+        return HydrationState.OFFLINE
 
     # -- reads --------------------------------------------------------------
     def open(self, path: str, flags: int) -> int:
@@ -220,6 +251,11 @@ class CatalogFuseOperations:
             handle = self._next_handle
             self._next_handle += 1
             self._open_files[handle] = data
+        record = self.filesystem.catalog.get_file_record(str(entry.path))
+        if record is not None:
+            self.filesystem.cache.acquire(record.checksum_sha256)
+            with self._lock:
+                self._handle_checksums[handle] = record.checksum_sha256
         return handle
 
     def read(self, path: str, size: int, offset: int, fh: int) -> bytes:
@@ -243,6 +279,9 @@ class CatalogFuseOperations:
         del path
         with self._lock:
             self._open_files.pop(fh, None)
+            checksum = self._handle_checksums.pop(fh, None)
+        if checksum is not None:
+            self.filesystem.cache.release(checksum)
         return 0
 
     def _materialise(self, catalog_path: str) -> bytes:
@@ -261,6 +300,8 @@ class CatalogFuseOperations:
             except (OSError, ValueError) as exc:
                 logger.warning("fuse: cache read failed for %s: %s", catalog_path, exc)
                 raise OSError(errno.EIO, os.strerror(errno.EIO), catalog_path) from None
+        if self.data_plane is not None:
+            return self._hydrate(catalog_path)
         if self.hydrator is None:
             logger.warning(
                 "fuse: %s is not in the staging cache; returning EIO. "
@@ -274,6 +315,18 @@ class CatalogFuseOperations:
             return self.hydrator(catalog_path)
         except Exception as exc:  # noqa: BLE001 - any restore failure is EIO to the kernel
             logger.warning("fuse: hydration failed for %s: %s", catalog_path, exc)
+            raise OSError(errno.EIO, os.strerror(errno.EIO), catalog_path) from None
+
+    def _hydrate(self, catalog_path: str) -> bytes:
+        assert self.data_plane is not None
+        ticket = self.data_plane.request(catalog_path)
+        timeout = self.hydrate_timeout if self.blocking else 0.0
+        try:
+            return self.data_plane.wait(ticket, timeout)
+        except HydrationTimeoutError:
+            raise OSError(errno.EAGAIN, os.strerror(errno.EAGAIN), catalog_path) from None
+        except (HydrationFailedError, OSError, ValueError):
+            logger.warning("fuse: hydration failed for %s", catalog_path)
             raise OSError(errno.EIO, os.strerror(errno.EIO), catalog_path) from None
 
 
@@ -290,6 +343,8 @@ def mount_catalog(
     mountpoint: str,
     *,
     hydrator: Callable[[str], bytes] | None = None,
+    data_plane: Hydrator | None = None,
+    blocking: bool = True,
     allow_other: bool = False,
     foreground: bool = True,
 ) -> None:
@@ -301,7 +356,9 @@ def mount_catalog(
     fuse = load_fuse()
     if not os.path.isdir(mountpoint):
         raise NotADirectoryError(f"Mount point is not a directory: {mountpoint}")
-    operations = CatalogFuseOperations(filesystem, hydrator=hydrator)
+    operations = CatalogFuseOperations(
+        filesystem, hydrator=hydrator, data_plane=data_plane, blocking=blocking
+    )
     fuse.FUSE(
         operations,
         mountpoint,
