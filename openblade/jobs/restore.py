@@ -24,6 +24,7 @@ from openblade.domain.models import JobType, MountHandle, MountMode
 from openblade.jobs.inventory import InventoryService
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.scheduler import CatalogLeaseStore, DriveHandle, DriveScheduler, LeaseStore
+from openblade.jobs.sharded_archive import record_physical_state_unknown
 from openblade.jobs.verify import sha256sum
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
@@ -329,16 +330,13 @@ def _restore_tape_group(
                 scheduler.verify(handle)  # fencing: before unmount
                 try:
                     ltfs.unmount(mount_handle)
-                except Exception:
+                except Exception:  # noqa: BLE001 - logged+journaled by record_physical_state_unknown
                     # Still (maybe) mounted: unloading now could strand a dirty
                     # index. Leave the cartridge in the drive for reconcile.
                     unmount_failed = True
-                    logger.exception("batch restore unmount failed for %s", barcode)
-                    catalog.journal(
-                        job_id,
-                        "physical_state_unknown",
-                        {"barcode": barcode, "drive_id": drive_id, "reason": "unmount_failed"},
-                    )
+                    # One payload shape ({op, barcode, drive}) for every producer; the
+                    # helper swallows a journal failure so it cannot replace this one.
+                    record_physical_state_unknown(catalog, job_id, "unmount", barcode, drive_id)
                     tape_error = f"Unmount of {barcode} failed; left in drive for reconcile"
         except StaleLeaseError:
             fenced_out = True
