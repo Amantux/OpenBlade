@@ -7,7 +7,6 @@ import logging
 import os
 import shutil
 import uuid
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -16,6 +15,7 @@ from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.capacity import has_room_for
 from openblade.domain.errors import StaleLeaseError, TapeFullError, safe_job_error
 from openblade.domain.models import MountHandle, MountMode
+from openblade.jobs.inventory import InventoryService
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
     DEFAULT_BLOCK_SIZE,
@@ -214,7 +214,7 @@ def run_sharded_archive(
                     files_archived += 1
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Shard archive failed for %s", source_file)
-                    errors.append(safe_job_error(exc))
+                    errors.append(_job_error(exc))
         else:
             files_archived, bytes_archived = _archive_stripe(
                 files,
@@ -323,6 +323,36 @@ def _log_fenced_out(handles: list[DriveHandle], job_id: str) -> None:
         )
 
 
+PHYSICAL_STATE_UNKNOWN = "physical state unknown — reconcile before reuse"
+
+
+def _job_error(exc: Exception) -> str:
+    """jobs.error text: the typed physical-state message, else safe_job_error."""
+    if isinstance(exc, TapePhysicalStateError):
+        return PHYSICAL_STATE_UNKNOWN
+    return safe_job_error(exc)
+
+
+def record_physical_state_unknown(
+    catalog: CatalogRepository, job_id: str, op: str, barcode: str, drive: int | None
+) -> None:
+    """Log + journal a cleanup op that raised; the drive must be reconciled before reuse."""
+    logger.exception(
+        "job %s: %s of %s (drive %s) failed during cleanup; %s",
+        job_id,
+        op,
+        barcode,
+        drive,
+        PHYSICAL_STATE_UNKNOWN,
+    )
+    try:
+        catalog.journal(
+            job_id, "physical_state_unknown", {"op": op, "barcode": barcode, "drive": drive}
+        )
+    except Exception:  # noqa: BLE001 - journal is evidence, must not stop cleanup of other drives
+        logger.exception("job %s: could not journal physical_state_unknown", job_id)
+
+
 def _best_effort_unmount_and_unload(
     catalog: CatalogRepository,
     library: LibraryBackend,
@@ -331,28 +361,75 @@ def _best_effort_unmount_and_unload(
     handles: list[DriveHandle],
     loaded_slots: dict[int, int | None],
     job_id: str,
+    errors: list[str] | None,
 ) -> None:
-    """Error-path cleanup for a job that still owns its drives: unmount, then unload."""
-    for mount in mounts.values():
-        with suppress(Exception):
+    """Error-path cleanup for a job that still owns its drives: unmount, then unload.
+
+    Every op is attempted even if an earlier one raised. A failure is logged and
+    journaled as ``physical_state_unknown``; it becomes the job error only when
+    ``errors`` is empty (the original lane error wins). ``errors=None`` means an
+    exception is already propagating and will become the job error.
+    """
+    drive_by_barcode = {handle.barcode: handle.physical for handle in handles}
+    failed = False
+    for barcode, mount in mounts.items():
+        try:
             ltfs.unmount(mount)
+        except Exception:  # noqa: BLE001 - recorded as physical_state_unknown, cleanup continues
+            failed = True
+            record_physical_state_unknown(
+                catalog, job_id, "unmount", barcode, drive_by_barcode.get(barcode)
+            )
     for handle in handles:
         slot_id = loaded_slots.get(handle.physical)
-        if slot_id is not None:
-            with suppress(Exception):
-                execute_tape_request(
-                    catalog,
-                    library,
-                    ltfs,
-                    TapeOpRequest(
-                        op_type=TapeOpType.UNLOAD,
-                        barcode=handle.barcode,
-                        drive_id=handle.physical,
-                        slot_id=slot_id,
-                        requested_by="sharded-archive",
-                        job_id=job_id,
-                    ),
-                )
+        if slot_id is None:
+            continue
+        try:
+            execute_tape_request(
+                catalog,
+                library,
+                ltfs,
+                TapeOpRequest(
+                    op_type=TapeOpType.UNLOAD,
+                    barcode=handle.barcode,
+                    drive_id=handle.physical,
+                    slot_id=slot_id,
+                    requested_by="sharded-archive",
+                    job_id=job_id,
+                ),
+            )
+        except Exception:  # noqa: BLE001 - recorded as physical_state_unknown, cleanup continues
+            failed = True
+            record_physical_state_unknown(
+                catalog, job_id, "unload", handle.barcode, handle.physical
+            )
+    if failed and errors is not None and not errors:
+        errors.append(PHYSICAL_STATE_UNKNOWN)
+
+
+def _mark_verifying(catalog: CatalogRepository, job_id: str, staged_ids: list[str]) -> None:
+    catalog.journal(job_id, "verify_started", {"instances": len(staged_ids)})
+    catalog.mark_instances_verifying(staged_ids)
+    catalog.journal(job_id, "verify_finished", {"instances": len(staged_ids)})
+
+
+def _commit_staged(
+    catalog: CatalogRepository,
+    library: LibraryBackend,
+    job_id: str,
+    handles: list[DriveHandle],
+    staged_ids: list[str],
+) -> None:
+    """The atomic commit: inventory reconciled, then ONE mark_instances_archived."""
+    inventory = InventoryService(library).snapshot()  # SAFETY_003: via service
+    seen = {str(slot.barcode) for slot in inventory.slots if slot.barcode is not None}
+    seen |= {str(drive.barcode) for drive in inventory.drives if drive.barcode is not None}
+    missing = sorted({handle.barcode for handle in handles} - seen)
+    if missing:
+        logger.error("job %s: barcodes %s not in any slot or drive after unload", job_id, missing)
+        raise TapePhysicalStateError(f"inventory does not show {', '.join(missing)}")
+    catalog.mark_instances_archived(staged_ids)
+    catalog.journal(job_id, "committed", {"instances": len(staged_ids)})
 
 
 def _archive_stripe(
@@ -385,12 +462,14 @@ def _archive_stripe(
     for batch in batches:
         batch_barcodes = list(dict.fromkeys(barcode for _, barcode in batch))
         handles = scheduler.acquire_drives(batch_barcodes)
+        catalog.journal(job_id, "lease_acquired", {"barcodes": batch_barcodes})
         mounts: dict[str, MountHandle] = {}
         loaded_slots: dict[int, int | None] = {}
-        # (main_instance_id, shard_instance_id, size_bytes) for shards written+verified
-        # this batch. Nothing here is marked archived until the WHOLE batch has verified
-        # and every tape has cleanly unmounted — the atomic commit boundary.
-        staged: list[tuple[str, str, int]] = []
+        # Instances are created STAGING before their first write and stay invisible
+        # until the WHOLE batch has verified, every tape cleanly unmounted and the
+        # inventory reconciled — then ONE mark_instances_archived (atomic commit).
+        staged_ids: list[str] = []
+        batch_bytes = 0
         fenced_out = False
         try:
             for handle in handles:
@@ -405,60 +484,67 @@ def _archive_stripe(
                 source_file: Path,
                 barcode: str,
                 mount: MountHandle,
-            ) -> tuple[Path, str, str, str, int]:
-                tape_path = _stripe_tape_path(source_file, request.source_path)
+                tape_path: str,
+                checksum: str,
+            ) -> None:
                 _require_lane_room(ltfs, barcode, source_file.stat().st_size)
-                checksum = compute_checksum(source_file)
                 ltfs.write_file(mount, source_file, PurePosixPath(tape_path))
                 stat = ltfs.stat(mount, PurePosixPath(tape_path))
                 if stat.checksum_sha256 != checksum:
                     raise ValueError(f"Checksum mismatch: {source_file.name}")
-                return source_file, barcode, tape_path, checksum, source_file.stat().st_size
+
+            # Stage every instance (main thread: the catalog session is not
+            # thread-safe) BEFORE the first write, so a crash mid-write leaves
+            # STAGING rows that recovery can find, never ARCHIVED ones.
+            planned: list[tuple[Path, str, str, str]] = []
+            for source_file, barcode in batch:
+                tape_path = _stripe_tape_path(source_file, request.source_path)
+                checksum = compute_checksum(source_file)
+                size_bytes = source_file.stat().st_size
+                file_record = catalog.create_file_record(
+                    path=str(source_file),
+                    size_bytes=size_bytes,
+                    checksum=checksum,
+                    vg_id=vg_id,
+                    shard_count=1,
+                    shard_index=None,
+                    block_size=None,
+                    shard_profile=_archive_profile(request.mode),
+                    parent_id=None,
+                )
+                instance = catalog.create_staged_instance(
+                    job_id, file_record.id, barcode, tape_path
+                )
+                shard_record = catalog.create_file_record(
+                    path=_shard_record_path(source_file, 0),
+                    size_bytes=size_bytes,
+                    checksum=checksum,
+                    vg_id=vg_id,
+                    shard_count=1,
+                    shard_index=0,
+                    block_size=None,
+                    shard_profile=_archive_profile(request.mode),
+                    parent_id=file_record.id,
+                )
+                shard_instance = catalog.create_staged_instance(
+                    job_id, shard_record.id, barcode, tape_path
+                )
+                staged_ids.extend((instance.id, shard_instance.id))
+                batch_bytes += size_bytes
+                planned.append((source_file, barcode, tape_path, checksum))
+                shard_group_ids.append(str(uuid.uuid4()))
 
             for handle in handles:
                 scheduler.verify(handle)  # fencing: before the shard write batch
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(batch)) as pool:
                 futures = [
-                    pool.submit(_write_one, source_file, barcode, mounts[barcode])
-                    for source_file, barcode in batch
+                    pool.submit(_write_one, source_file, barcode, mounts[barcode], path, csum)
+                    for source_file, barcode, path, csum in planned
                 ]
                 for future in concurrent.futures.as_completed(futures):
-                    source_file, barcode, tape_path, checksum, size_bytes = future.result()
-                    file_record = catalog.create_file_record(
-                        path=str(source_file),
-                        size_bytes=size_bytes,
-                        checksum=checksum,
-                        vg_id=vg_id,
-                        shard_count=1,
-                        shard_index=None,
-                        block_size=None,
-                        shard_profile=_archive_profile(request.mode),
-                        parent_id=None,
-                    )
-                    instance = catalog.create_file_instance(
-                        file_record_id=file_record.id,
-                        barcode=barcode,
-                        tape_path=tape_path,
-                    )
-                    shard_record = catalog.create_file_record(
-                        path=_shard_record_path(source_file, 0),
-                        size_bytes=size_bytes,
-                        checksum=checksum,
-                        vg_id=vg_id,
-                        shard_count=1,
-                        shard_index=0,
-                        block_size=None,
-                        shard_profile=_archive_profile(request.mode),
-                        parent_id=file_record.id,
-                    )
-                    shard_instance = catalog.create_file_instance(
-                        file_record_id=shard_record.id,
-                        barcode=barcode,
-                        tape_path=tape_path,
-                    )
-                    # Created PENDING; not archived yet.
-                    staged.append((instance.id, shard_instance.id, size_bytes))
-                    shard_group_ids.append(str(uuid.uuid4()))
+                    future.result()
+            # Every lane wrote and read back (stat checksum) its shard.
+            _mark_verifying(catalog, job_id, staged_ids)
 
             # Every shard in the batch wrote and checksum-verified. Cleanly unmount and
             # unload BEFORE commit; a failed unmount raises and blocks the commit.
@@ -466,19 +552,16 @@ def _archive_stripe(
             for handle in handles:
                 scheduler.verify(handle)  # fencing: before unmount/unload + commit
             _clean_unmount_and_unload(catalog, library, ltfs, mounts, handles, loaded_slots, job_id)
-
-            # COMMIT: only now is the batch durable.
-            for instance_id, shard_instance_id, size_bytes in staged:
-                catalog.mark_instance_archived(instance_id)
-                catalog.mark_instance_archived(shard_instance_id)
-                files_archived += 1
-                bytes_archived += size_bytes
+            _commit_staged(catalog, library, job_id, handles, staged_ids)
+            files_archived += len(planned)
+            bytes_archived += batch_bytes
         except StaleLeaseError:
             # Fenced out: abort the whole job and leave the hardware ALONE. The
             # drive may already be loaded + mounted by whoever holds the lease now,
             # so unmount/unload here could eject their tape mid-write. Physical
             # state is unknown -> reconcile (recovery report / inventory).
             fenced_out = True
+            catalog.journal(job_id, "fenced_out", {"barcodes": batch_barcodes})
             raise
         except Exception as exc:  # noqa: BLE001
             # Staged instances remain PENDING -> not exposed as archived; resumable.
@@ -491,13 +574,14 @@ def _archive_stripe(
                 exc,
                 exc_info=True,
             )
-            errors.append(safe_job_error(exc))
+            catalog.journal(job_id, "failed", {"error": type(exc).__name__})
+            errors.append(_job_error(exc))
         finally:
             if fenced_out:
                 _log_fenced_out(handles, job_id)
             else:
                 _best_effort_unmount_and_unload(
-                    catalog, library, ltfs, mounts, handles, loaded_slots, job_id
+                    catalog, library, ltfs, mounts, handles, loaded_slots, job_id, errors
                 )
             scheduler.release_drives(handles)
 
@@ -524,6 +608,7 @@ def _archive_block_stripe(
     )
     shard_group_ids.append(plan.shard_group_id)
     handles = scheduler.acquire_drives(request.lane_barcodes)
+    catalog.journal(job_id, "lease_acquired", {"barcodes": list(request.lane_barcodes)})
     mounts: dict[str, MountHandle] = {}
     loaded_slots: dict[int, int | None] = {}
     shard_dir = scratch_dir / plan.shard_group_id
@@ -556,30 +641,7 @@ def _archive_block_stripe(
                 shard_index = future_map[future]
                 shard_tmp_files[shard_index] = future.result()
 
-        def _write_shard(spec: ShardSpec, shard_tmp: Path) -> tuple[int, str, int]:
-            _require_lane_room(ltfs, spec.barcode, shard_tmp.stat().st_size)
-            checksum = compute_checksum(shard_tmp)
-            mount = mounts[spec.barcode]
-            ltfs.write_file(mount, shard_tmp, PurePosixPath(spec.tape_path))
-            stat = ltfs.stat(mount, PurePosixPath(spec.tape_path))
-            if stat.checksum_sha256 != checksum:
-                raise ValueError(f"Shard {spec.shard_index} checksum mismatch")
-            return spec.shard_index, checksum, shard_tmp.stat().st_size
-
-        for handle in handles:
-            scheduler.verify(handle)  # fencing: before the shard write batch
-        shard_checksums: list[str] = [""] * len(plan.shards)
-        shard_sizes: list[int] = [0] * len(plan.shards)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(plan.shards)) as pool:
-            futures = [
-                pool.submit(_write_shard, spec, shard_tmp_files[spec.shard_index])
-                for spec in plan.shards
-            ]
-            for shard_future in concurrent.futures.as_completed(futures):
-                shard_index, checksum, shard_size = shard_future.result()
-                shard_checksums[shard_index] = checksum
-                shard_sizes[shard_index] = shard_size
-
+        shard_checksums = [compute_checksum(path) for path in shard_tmp_files]
         file_record = catalog.create_file_record(
             path=str(source_file),
             size_bytes=plan.file_size,
@@ -591,18 +653,17 @@ def _archive_block_stripe(
             shard_profile=_archive_profile(request.mode),
             parent_id=None,
         )
-        # All shards verified above. Create records/instances PENDING; do not mark
-        # archived until every tape has cleanly unmounted (atomic commit boundary).
+        # Stage records/instances STAGING before the first shard write (main thread:
+        # the catalog session is not thread-safe). Nothing is ARCHIVED until every
+        # lane verified, every tape cleanly unmounted and inventory reconciled.
         staged: list[str] = []
         for spec in plan.shards:
-            instance = catalog.create_file_instance(
-                file_record_id=file_record.id,
-                barcode=spec.barcode,
-                tape_path=spec.tape_path,
+            instance = catalog.create_staged_instance(
+                job_id, file_record.id, spec.barcode, spec.tape_path
             )
             shard_record = catalog.create_file_record(
                 path=_shard_record_path(source_file, spec.shard_index),
-                size_bytes=shard_sizes[spec.shard_index],
+                size_bytes=shard_tmp_files[spec.shard_index].stat().st_size,
                 checksum=shard_checksums[spec.shard_index],
                 vg_id=vg_id,
                 shard_count=len(plan.shards),
@@ -611,32 +672,53 @@ def _archive_block_stripe(
                 shard_profile=_archive_profile(request.mode),
                 parent_id=file_record.id,
             )
-            shard_instance = catalog.create_file_instance(
-                file_record_id=shard_record.id,
-                barcode=spec.barcode,
-                tape_path=spec.tape_path,
+            shard_instance = catalog.create_staged_instance(
+                job_id, shard_record.id, spec.barcode, spec.tape_path
             )
             staged.extend((instance.id, shard_instance.id))
+
+        def _write_shard(spec: ShardSpec, shard_tmp: Path) -> tuple[int, str, int]:
+            _require_lane_room(ltfs, spec.barcode, shard_tmp.stat().st_size)
+            checksum = shard_checksums[spec.shard_index]
+            mount = mounts[spec.barcode]
+            ltfs.write_file(mount, shard_tmp, PurePosixPath(spec.tape_path))
+            stat = ltfs.stat(mount, PurePosixPath(spec.tape_path))
+            if stat.checksum_sha256 != checksum:
+                raise ValueError(f"Shard {spec.shard_index} checksum mismatch")
+            return spec.shard_index, checksum, shard_tmp.stat().st_size
+
+        for handle in handles:
+            scheduler.verify(handle)  # fencing: before the shard write batch
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(plan.shards)) as pool:
+            futures = [
+                pool.submit(_write_shard, spec, shard_tmp_files[spec.shard_index])
+                for spec in plan.shards
+            ]
+            for shard_future in concurrent.futures.as_completed(futures):
+                shard_future.result()
+        # Every lane wrote and read back (stat checksum) its shard.
+        _mark_verifying(catalog, job_id, staged)
 
         scheduler.heartbeat(handles)
         for handle in handles:
             scheduler.verify(handle)  # fencing: before unmount/unload + commit
         # Clean unmount/unload BEFORE commit; a failed unmount raises and blocks it.
         _clean_unmount_and_unload(catalog, library, ltfs, mounts, handles, loaded_slots, job_id)
-
-        # COMMIT: block-striped file is durable only when all shards are down.
-        for instance_id in staged:
-            catalog.mark_instance_archived(instance_id)
+        _commit_staged(catalog, library, job_id, handles, staged)
     except StaleLeaseError:
         # Fenced out: abort and leave the hardware alone (see _archive_stripe).
         fenced_out = True
+        catalog.journal(job_id, "fenced_out", {"barcodes": list(request.lane_barcodes)})
+        raise
+    except Exception as exc:
+        catalog.journal(job_id, "failed", {"error": type(exc).__name__})
         raise
     finally:
         if fenced_out:
             _log_fenced_out(handles, job_id)
         else:
             _best_effort_unmount_and_unload(
-                catalog, library, ltfs, mounts, handles, loaded_slots, job_id
+                catalog, library, ltfs, mounts, handles, loaded_slots, job_id, None
             )
         scheduler.release_drives(handles)
         shutil.rmtree(shard_dir, ignore_errors=True)
