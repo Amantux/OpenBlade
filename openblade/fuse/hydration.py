@@ -337,6 +337,19 @@ class Hydrator:
         return ticket
 
     def wait(self, ticket: HydrationTicket, timeout: float | None = None) -> bytes:
+        return self._pinned_read(ticket, timeout, lambda: self.cache.retrieve(ticket.checksum))
+
+    def wait_range(
+        self, ticket: HydrationTicket, offset: int, length: int, timeout: float | None = None
+    ) -> bytes:
+        """Like ``wait`` but read only ``[offset, offset+length)``: O(length), no re-hash."""
+        return self._pinned_read(
+            ticket, timeout, lambda: self.cache.read_range(ticket.checksum, offset, length)
+        )
+
+    def _pinned_read(
+        self, ticket: HydrationTicket, timeout: float | None, read: Callable[[], bytes]
+    ) -> bytes:
         # Each waiter pins the entry before the restore commits, so the budget
         # cannot evict it (e.g. while a later file of the same batch is stored)
         # before this waiter has read it. Released on every exit path.
@@ -346,7 +359,7 @@ class Hydrator:
                 raise HydrationTimeoutError(f"{ticket.catalog_path} still hydrating")
             if ticket.error is not None:
                 raise HydrationFailedError(ticket.error)
-            return self.cache.retrieve(ticket.checksum)
+            return read()
         finally:
             self.cache.release(ticket.checksum)
 

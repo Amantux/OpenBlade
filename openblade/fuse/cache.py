@@ -8,12 +8,18 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 
+from openblade.domain.errors import OpenBladeError
+
 
 class CacheEntryInUseError(RuntimeError):
     """Raised when eviction is asked to drop a file that still has open handles."""
 
 
-class CacheChecksumError(ValueError):
+class CacheError(OpenBladeError, ValueError):
+    """Typed cache failure for the protocol boundary (ValueError kept for old callers)."""
+
+
+class CacheChecksumError(CacheError):
     """Raised when staged bytes do not match the catalog checksum."""
 
 
@@ -121,8 +127,26 @@ class HydrationCache:
         actual = hashlib.sha256(data).hexdigest()
         if actual != checksum:
             path.unlink()
-            raise ValueError(f"Cache integrity failure: expected {checksum}, got {actual}")
+            raise CacheChecksumError(f"Cache integrity failure: expected {checksum}, got {actual}")
         return data
+
+    def read_range(self, checksum: str, offset: int, length: int) -> bytes:
+        """``pread`` ``[offset, offset+length)`` of a cached file without re-hashing it.
+
+        The whole file was hashed once by ``store_verified``/``store`` callers; per-range
+        reads must stay O(length), so integrity is not re-checked here (``retrieve`` does).
+        """
+        if offset < 0 or length < 0:
+            raise CacheError(f"invalid range offset={offset} length={length}")
+        path = self.cache_key(checksum)
+        try:
+            fd = os.open(path, os.O_RDONLY)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Not in cache: {checksum}") from None
+        try:
+            return os.pread(fd, length, offset)
+        finally:
+            os.close(fd)
 
     def evict(self, checksum: str) -> None:
         with self._lock:

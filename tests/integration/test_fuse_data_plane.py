@@ -369,3 +369,29 @@ def test_resume_job_without_destination_raises_typed_error(catalog, tmp_path):  
     )
     with pytest.raises(HydrationFailedError):
         engine.resume(str(job.id), "/a.bin")
+
+
+def test_read_range_is_o_length_and_never_rehashes(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
+    """Regression: range reads used to re-read and re-hash the whole file per call."""
+    import openblade.fuse.cache as cache_mod
+    from openblade.fuse.cache import CacheError
+
+    data = os.urandom(4 * 1024 * 1024)
+    checksum = hashlib.sha256(data).hexdigest()
+    cache = HydrationCache(str(tmp_path / "cache"))
+    cache.store(checksum, data)
+    calls: list[int] = []
+    real = cache_mod.hashlib.sha256
+
+    def counting(*a, **k):  # type: ignore[no-untyped-def]
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(cache_mod.hashlib, "sha256", counting)
+    chunk = 64 * 1024
+    out = b"".join(cache.read_range(checksum, off, chunk) for off in range(0, len(data), chunk))
+
+    assert out == data
+    assert calls == []
+    with pytest.raises(CacheError):
+        cache.read_range(checksum, -1, 10)

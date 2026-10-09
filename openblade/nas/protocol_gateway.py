@@ -418,8 +418,7 @@ class ProtocolGateway:
         self, catalog_path: str, offset: int, length: int, *, timeout: float | None = None
     ) -> bytes:
         hydrator = self._require_hydrator()
-        data = hydrator.wait(hydrator.request(catalog_path), timeout)
-        return data[offset : offset + length]
+        return hydrator.wait_range(hydrator.request(catalog_path), offset, length, timeout)
 
     def on_close(self, token: str) -> None:
         """Release the pin taken by the ``on_open`` that returned ``token``.
