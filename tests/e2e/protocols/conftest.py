@@ -11,7 +11,10 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.e2e.protocols import rig
+# Before any test module imports scenarios, so its bare asserts show values.
+pytest.register_assert_rewrite("tests.e2e.protocols.scenarios")
+
+from tests.e2e.protocols import rig  # noqa: E402 -- must follow register_assert_rewrite
 
 MOUNTS = {
     "smb": "mount -t cifs //samba/{s} /mnt/smb/{s} -o guest,vers=3.0,cache=none,actimeo=0",
