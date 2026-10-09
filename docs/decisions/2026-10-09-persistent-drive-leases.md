@@ -98,6 +98,12 @@ Keep the public shape every caller and ~all tests already use:
 
 ### 3. Fencing at the destructive edges
 
+A fenced-out job (`StaleLeaseError`) must **not** unmount or unload: the drive
+may already hold the new lease-holder's mounted tape. It logs the drive as
+"physical state unknown" and leaves it for reconciliation. Held leases are
+kept alive by a daemon heartbeat thread in the scheduler (every `ttl/3`), so a
+single long write cannot expire its own lease.
+
 In `openblade/jobs/sharded_archive.py`, `archive.py`, `restore.py`,
 `tree_restore.py`: call `scheduler.verify(handle)` immediately before
 `ltfs.mount(..., READ_WRITE)`, before each shard/file write batch, and before
@@ -120,8 +126,12 @@ errors** (existing rule). Call `heartbeat` after each file/shard write.
 New `openblade/jobs/recovery.py::recover_after_restart(catalog, library) -> RecoveryReport`,
 called from bootstrap after `init_db` and before the API/CLI serves anything:
 
-1. Every catalog job in state `running` → `failed_recoverable` with error
-   `"interrupted by process restart; physical state unknown — reconcile before retry"`.
+1. **Only jobs whose lease has EXPIRED** (no heartbeat within the TTL) →
+   `failed_recoverable`. The catalog is shared by the API and the CLI, so a
+   `running` row is not evidence that a job is dead — it may be running in
+   another process. A running job with no lease at all is left alone.
+   (Adversarial review 2026-10-09 caught the original "fail every running
+   job" wording as a cross-process regression; it never shipped.)
 2. Every live lease whose job is not `running` → released (`released_at = now`).
 3. For each lease released in step 2, compare expected (`barcode` in
    `physical`) with `library.inventory()`; log one line per mismatch at WARNING
@@ -140,7 +150,8 @@ VERIFYING instance states from item 4) — say so in the PR, do not stub it.
   Fencing tokens strictly increase; a released lease's token is never reissued.
 - Lease fencing (landed in `tests/integration/test_sharded_archive_atomicity.py`
   to reuse its helpers): release a lease behind a running sharded archive →
-  `StaleLeaseError`, no `mark_instance_archived`, unmount/unload still attempted.
+  `StaleLeaseError`, no `mark_instance_archived`, and the drive is left
+  untouched (no unmount, no unload).
 - `tests/unit/test_recovery.py`: seed a `running` job + live lease, restart →
   job `failed_recoverable`, lease released, mismatch reported when the
   simulator's drive is empty.
@@ -162,7 +173,8 @@ VERIFYING instance states from item 4) — say so in the PR, do not stub it.
 - The tree-restore route builds its scheduler in the worker thread over a
   `CatalogLeaseStore(worker_catalog)` rather than `context.lease_store`: the
   context's session is not thread-safe. Same table, same exclusion.
-- Heartbeat runs once per write batch, not per shard.
+- Explicit heartbeats run once per write batch; the scheduler's background
+  heartbeat thread covers the gaps.
 
 ## Non-goals
 
