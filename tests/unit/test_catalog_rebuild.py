@@ -82,6 +82,7 @@ def _seed_tape(
     include_shard: bool = True,
     files_per_tape: int = 2,
     create_versions: int = 0,
+    protection: dict[str, object] | None = None,
 ) -> dict[str, object]:
     metadata_writer: TapeMetadataWriter = rebuild_env["metadata_writer"]
     shard_writer: CatalogShardWriter = rebuild_env["shard_writer"]
@@ -165,6 +166,7 @@ def _seed_tape(
                 total_bytes=sum(item.size for item in shard_files),
                 tape_set=[barcode],
                 shard_set=[],
+                protection=protection,
             )
         ],
         files=shard_files,
@@ -477,3 +479,63 @@ def test_plan_rebuild_committed_generation_reports_missing_sibling(
     assert result.uncommitted_generations == []
     assert len(result.warnings) == 1
     assert "ZZ9999L8" in result.warnings[0]
+
+
+def _dataset_protection_json(rebuild_env: dict[str, object], dataset_id: str) -> str | None:
+    from openblade.catalog.models import NasDataset as NasDatasetRow
+
+    repo = rebuild_env["planner"].repo
+    repo.session.expire_all()
+    row = repo.session.get(NasDatasetRow, dataset_id)
+    assert row is not None
+    return row.protection_json
+
+
+def test_execute_rebuild_recovers_dataset_protection_policy(
+    rebuild_env: dict[str, object],
+) -> None:
+    import json
+
+    from openblade.domain.protection import Protection, ProtectionPolicy
+
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    policy = ProtectionPolicy(protection=Protection.replication(3))
+    _seed_tape(rebuild_env, barcode, protection=policy.to_dict())
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
+
+    rebuild_env["planner"].execute_rebuild_run(plan.run_id)
+
+    stored = _dataset_protection_json(rebuild_env, f"dataset-{barcode}")
+    assert stored is not None
+    assert ProtectionPolicy.from_dict(json.loads(stored)) == policy
+
+
+def test_execute_rebuild_pre_v2_shard_leaves_protection_unset(
+    rebuild_env: dict[str, object],
+) -> None:
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode)
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
+
+    rebuild_env["planner"].execute_rebuild_run(plan.run_id)
+
+    assert _dataset_protection_json(rebuild_env, f"dataset-{barcode}") is None
+
+
+def test_execute_rebuild_skips_malformed_protection_policy(
+    rebuild_env: dict[str, object],
+) -> None:
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode, protection={"placement": "bogus"})
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
+
+    result = rebuild_env["planner"].execute_rebuild_run(plan.run_id)
+
+    assert result.datasets_recovered == 1
+    assert _dataset_protection_json(rebuild_env, f"dataset-{barcode}") is None

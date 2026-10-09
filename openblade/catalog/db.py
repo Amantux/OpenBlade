@@ -113,6 +113,10 @@ def _migrate_schema(engine: Engine) -> None:
             library_columns = {
                 column["name"] for column in inspector.get_columns("library_instances")
             }
+        if "nas_datasets" in inspector.get_table_names():
+            dataset_columns = {column["name"] for column in inspector.get_columns("nas_datasets")}
+            if "protection_json" not in dataset_columns:
+                connection.execute(text("ALTER TABLE nas_datasets ADD COLUMN protection_json TEXT"))
         if library_columns and "role" not in library_columns:
             with suppress(Exception):
                 connection.execute(

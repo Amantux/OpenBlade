@@ -327,6 +327,8 @@ class NasDataset(Base):
     status: Mapped[str] = mapped_column(String, default="pending")
     copies_completed: Mapped[int] = mapped_column(Integer, default=0)
     manifest_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Serialized ProtectionPolicy.to_dict(); written by catalog rebuild, None if unknown.
+    protection_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 

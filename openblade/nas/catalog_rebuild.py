@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import cast
 from uuid import uuid4
 
+from openblade.catalog.models import NasDataset as NasDatasetRow
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.protection import ProtectionPolicy
 from openblade.nas.catalog_shard import (
     CatalogShard,
     CatalogShardWriter,
@@ -343,9 +346,33 @@ class CatalogRebuildPlanner:
                 updated_at=_utcnow_iso(),
             )
             self.repo.upsert_nas_dataset(dataset.model_dump(mode="json"))
+            self._recover_dataset_protection(barcode, entry.dataset_id, entry.protection)
             if is_new:
                 count += 1
         return count
+
+    def _recover_dataset_protection(
+        self, barcode: str, dataset_id: str, protection: dict[str, object] | None
+    ) -> None:
+        """Write the shard's protection/placement policy back onto the dataset row.
+
+        Pre-v2 shards carry no policy; the existing row value is kept. A malformed
+        policy is logged and skipped so one bad shard entry cannot abort the rebuild.
+        """
+        if protection is None:
+            return
+        try:
+            policy = ProtectionPolicy.from_dict(dict(protection))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            logger.warning(
+                "Skipping malformed protection policy for dataset %s on %s", dataset_id, barcode
+            )
+            return
+        row = self.repo.session.get(NasDatasetRow, dataset_id)
+        if row is None:
+            return
+        row.protection_json = json.dumps(policy.to_dict(), sort_keys=True)
+        self.repo.session.commit()
 
     def _recover_files(self, barcode: str, shard: CatalogShard) -> int:
         """Upsert file records from shard; count only files not already in the catalog."""
