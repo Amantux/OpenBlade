@@ -6,7 +6,7 @@
 
 Introspected from the OpenAPI schema of `openblade.api.main:app`.
 
-**1178 operations** total: 198 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
+**1179 operations** total: 199 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
 
 The application serves two surfaces from one ASGI app. Setting
 `OPENBLADE_SCALAR_API_ONLY=true` puts it in emulator-only mode, where the
@@ -83,11 +83,12 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `POST` | `/restore/` | Enqueue Restore | - | `openblade__api__routes_restore__RestoreRequest` | `EnqueuedJobResponse` |
 | `POST` | `/restore/tree` | Restore Tree | - | `TreeRestoreApiRequest` | `TreeRestoreResponse` |
 
-### `jobs` (2 operations)
+### `jobs` (3 operations)
 
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/jobs/` | List Jobs | `library_id`? (query) | - | `openblade__api__routes_jobs__JobResponse[]` |
+| `GET` | `/jobs/recovery` | Get Recovery Report | - | - | `RecoveryReportResponse` |
 | `GET` | `/jobs/{job_id}` | Get Job | `job_id` (path) | - | `openblade__api__routes_jobs__JobResponse` |
 
 ### `catalog` (6 operations)

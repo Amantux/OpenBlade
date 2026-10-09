@@ -25,6 +25,7 @@ from openblade.jobs.archive import ArchiveService
 from openblade.jobs.format import FormatService
 from openblade.jobs.inventory import InventoryService, run_inventory_job
 from openblade.jobs.queue import JobQueue
+from openblade.jobs.recovery import RecoveryReport, recover_after_restart
 from openblade.jobs.restore import RestoreService
 from openblade.jobs.scheduler import CatalogLeaseStore, LeaseStore
 from openblade.jobs.worker import Worker
@@ -405,6 +406,7 @@ class AppContext:
     ltfs: LTFSBackend
     catalog: CatalogRepository
     lease_store: LeaseStore
+    recovery_report: RecoveryReport
     queue: JobQueue
     worker: Worker
     inventory_service: InventoryService
@@ -595,6 +597,9 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     else:
         library, ltfs = _create_real_backends(active_config)
     catalog = CatalogRepository(get_session())
+    # Before anything can claim a drive: fail jobs the previous process left
+    # running, release their leases, and report (never fix) drive mismatches.
+    recovery_report = recover_after_restart(catalog, library)
     _seed_nas_defaults(catalog)
     if active_config.backend == BackendMode.MOCK:
         _seed_library_defaults(catalog, active_config)
@@ -614,6 +619,7 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
         ltfs=ltfs,
         catalog=catalog,
         lease_store=CatalogLeaseStore(catalog),
+        recovery_report=recovery_report,
         queue=queue,
         worker=worker,
         inventory_service=InventoryService(library),

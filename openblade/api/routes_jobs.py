@@ -45,6 +45,43 @@ async def list_jobs(
     return [job for job in jobs if job.library_id is None or job.library_id == library_id]
 
 
+class DriveMismatchResponse(BaseModel):
+    lease_id: str
+    job_id: str
+    drive_id: int
+    expected_barcode: str
+    observed_barcode: str | None
+
+
+class RecoveryReportResponse(BaseModel):
+    interrupted_job_ids: list[str]
+    released_lease_ids: list[str]
+    mismatches: list[DriveMismatchResponse]
+
+
+# Declared before /{job_id} so the literal path wins route matching.
+@router.get("/recovery", response_model=RecoveryReportResponse)
+async def get_recovery_report(
+    context: AppContext = Depends(get_context),
+) -> RecoveryReportResponse:
+    """What startup recovery did: interrupted jobs, released leases, drive mismatches."""
+    report = context.recovery_report
+    return RecoveryReportResponse(
+        interrupted_job_ids=list(report.interrupted_job_ids),
+        released_lease_ids=list(report.released_lease_ids),
+        mismatches=[
+            DriveMismatchResponse(
+                lease_id=m.lease_id,
+                job_id=m.job_id,
+                drive_id=m.drive_id,
+                expected_barcode=m.expected_barcode,
+                observed_barcode=m.observed_barcode,
+            )
+            for m in report.mismatches
+        ],
+    )
+
+
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str, context: AppContext = Depends(get_context)) -> JobResponse:
     job = context.catalog.get_job(job_id)
