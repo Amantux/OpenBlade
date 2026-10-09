@@ -527,6 +527,8 @@ def _archive_block_stripe(
                 raise ValueError(f"Shard {spec.shard_index} checksum mismatch")
             return spec.shard_index, checksum, shard_tmp.stat().st_size
 
+        for handle in handles:
+            scheduler.verify(handle)  # fencing: before the shard write batch
         shard_checksums: list[str] = [""] * len(plan.shards)
         shard_sizes: list[int] = [0] * len(plan.shards)
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(plan.shards)) as pool:
@@ -577,6 +579,9 @@ def _archive_block_stripe(
             )
             staged.extend((instance.id, shard_instance.id))
 
+        scheduler.heartbeat(handles)
+        for handle in handles:
+            scheduler.verify(handle)  # fencing: before unmount/unload + commit
         # Clean unmount/unload BEFORE commit; a failed unmount raises and blocks it.
         _clean_unmount_and_unload(catalog, library, ltfs, mounts, handles, loaded_slots, job_id)
 

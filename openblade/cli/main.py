@@ -621,12 +621,16 @@ def restore_file(
         # Checked BEFORE the job row is created, so a typo does not leave an
         # orphaned `queued` restore job behind.
         raise typer.BadParameter(f"{catalog_path} is not in the catalog")
-    scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
     treat_as_dir = into_dir or dest.is_dir()
     dest_path = dest / PurePosixPath(catalog_path).name if treat_as_dir else dest
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     job = context.catalog.create_job(
         "restore", {"catalog_path": catalog_path, "dest_path": str(dest_path)}
+    )
+    scheduler = DriveScheduler(
+        num_drives=len(context.library.inventory().drives),
+        store=context.lease_store,
+        job_id=job.id,
     )
     sharded = bool(context.catalog.list_shard_records(record.id)) or (record.shard_count or 1) > 1
     err_console.print(
@@ -695,10 +699,14 @@ def restore_tree(
     to stdout, and any failure exits non-zero with the curated error.
     """
     context = _get_context()
-    scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
     job = context.catalog.create_job(
         "restore",
         {"catalog_prefix": catalog_prefix, "dest_dir": str(dest), "bulk": True},
+    )
+    scheduler = DriveScheduler(
+        num_drives=len(context.library.inventory().drives),
+        store=context.lease_store,
+        job_id=job.id,
     )
 
     def _progress(tick: TreeRestoreProgress) -> None:
@@ -835,7 +843,11 @@ def archive_sharded(
             "block_size_mb": block_size_mb,
         },
     )
-    scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+    scheduler = DriveScheduler(
+        num_drives=len(context.library.inventory().drives),
+        store=context.lease_store,
+        job_id=job.id,
+    )
     err_console.print(
         f"Sharded archive {source} -> {volume_group} "
         f"mode={shard_mode.value} lanes={','.join(lane_barcodes)}"

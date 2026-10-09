@@ -193,7 +193,11 @@ async def enqueue_sharded_archive(
                 "block_size_mb": request.block_size_mb,
             },
         )
-        scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+        scheduler = DriveScheduler(
+            num_drives=len(context.library.inventory().drives),
+            store=context.lease_store,
+            job_id=job.id,
+        )
         try:
             run_sharded_archive(
                 ShardedArchiveRequest(

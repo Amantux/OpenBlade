@@ -26,6 +26,7 @@ from openblade.jobs.format import FormatService
 from openblade.jobs.inventory import InventoryService, run_inventory_job
 from openblade.jobs.queue import JobQueue
 from openblade.jobs.restore import RestoreService
+from openblade.jobs.scheduler import CatalogLeaseStore, LeaseStore
 from openblade.jobs.worker import Worker
 from openblade.nas.service import NasService
 from openblade.nas.types import (
@@ -403,6 +404,7 @@ class AppContext:
     library: LibraryBackend
     ltfs: LTFSBackend
     catalog: CatalogRepository
+    lease_store: LeaseStore
     queue: JobQueue
     worker: Worker
     inventory_service: InventoryService
@@ -611,6 +613,7 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
         library=library,
         ltfs=ltfs,
         catalog=catalog,
+        lease_store=CatalogLeaseStore(catalog),
         queue=queue,
         worker=worker,
         inventory_service=InventoryService(library),
