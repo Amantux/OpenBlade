@@ -14,8 +14,8 @@ import pytest
 
 from openblade.domain.scalar_coordinate import ScalarCoordinate
 from openblade.hardware.correlation import resolve_tape_by_id
-from openblade.hardware.runner import SafeRunner
 from openblade.hardware.sg import sg_inq
+from tests.hardware.readonly.conftest import ReadOnlyRunner
 
 from .conftest import ApplianceClient
 
@@ -45,13 +45,15 @@ def test_drive_coordinate_resolves_to_matching_by_id_device(
         for e in _drive_elements(resp.body)
         if ScalarCoordinate.from_dict(e["coordinate"]).element_type == _DRIVE_ELEMENT_TYPE
     ]
+    # On the rig (real_hardware_guard already skipped us off-rig) a library with
+    # no resolvable drive is a failure, not a pass-by-skip: the bridge is unproven.
     if not drives:
-        pytest.skip("Appliance reported no drive elements with coordinate + serialNumber")
+        pytest.fail("Appliance reported no drive elements with coordinate + serialNumber")
     for element in drives:
         serial = str(element["serialNumber"])
         by_id = resolve_tape_by_id(serial)
         assert by_id is not None, f"no /dev/tape/by-id entry for drive serial {serial}"
         assert os.path.exists(by_id)
-        inquiry = sg_inq(os.path.realpath(by_id), SafeRunner(dry_run=False), hardware_guard)
+        inquiry = sg_inq(os.path.realpath(by_id), ReadOnlyRunner(dry_run=False), hardware_guard)
         assert inquiry.serial.strip().casefold() == serial.strip().casefold()
         # DRY: the LTFS mount target is resolved; no mount is performed.

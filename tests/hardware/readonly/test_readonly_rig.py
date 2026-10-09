@@ -17,12 +17,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from openblade.domain.scalar_coordinate import ScalarCoordinate
-from openblade.hardware.runner import SafeRunner
 from openblade.hardware.sg import sg_inq
 from openblade.hardware.tapealert import read_tape_alerts
 from openblade.jobs.inventory import InventoryService
 
-from .conftest import ApplianceClient, read_corpus
+from .conftest import CORPUS_DIR, ApplianceClient, ReadOnlyRunner, read_corpus
 
 pytestmark = [pytest.mark.real_hardware, pytest.mark.usefixtures("real_hardware_guard")]
 
@@ -33,7 +32,7 @@ def test_appliance_login_then_logout_succeeds(appliance: ApplianceClient) -> Non
 
 
 def test_changer_firmware_and_identity_are_discoverable(changer_device, hardware_guard) -> None:
-    inquiry = sg_inq(changer_device, SafeRunner(dry_run=False), hardware_guard)
+    inquiry = sg_inq(changer_device, ReadOnlyRunner(dry_run=False), hardware_guard)
     assert inquiry.vendor and inquiry.product and inquiry.revision
 
 
@@ -58,7 +57,7 @@ def test_partitions_are_visible(authed_appliance: ApplianceClient) -> None:
 
 def test_tapealert_health_reads_on_every_drive(drive_devices, hardware_guard) -> None:
     for device in drive_devices:
-        report = read_tape_alerts(device, SafeRunner(dry_run=False), hardware_guard)
+        report = read_tape_alerts(device, ReadOnlyRunner(dry_run=False), hardware_guard)
         assert report.device
 
 
@@ -80,6 +79,11 @@ def _report_path() -> Path:
     return Path(os.environ.get("OPENBLADE_DIFFERENTIAL_REPORT", str(default)))
 
 
+# The differential must compare SOMETHING: an empty/mis-filtered corpus would
+# otherwise produce zero divergences and pass vacuously.
+MIN_DIFFERENTIAL_CASES = 1
+
+
 def _is_read_only(case: dict[str, Any]) -> bool:
     req = case["request"]
     return req["method"] == "GET" or req["path"] in {"/aml/users/login", "/aml/auth/logout"}
@@ -95,7 +99,12 @@ def test_emulator_matches_appliance_on_compatibility_corpus(
     reset_context(create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'diff.db'}")))
     emulator = TestClient(app)
     divergences: list[dict[str, Any]] = []
-    for case in filter(_is_read_only, read_corpus()):
+    cases = [c for c in read_corpus() if _is_read_only(c)]
+    assert len(cases) >= MIN_DIFFERENTIAL_CASES, (
+        f"differential ran {len(cases)} read-only corpus case(s) from {CORPUS_DIR}; "
+        f"need >= {MIN_DIFFERENTIAL_CASES} (refusing to pass vacuously)"
+    )
+    for case in cases:
         req = case["request"]
         if case.get("auth") == "admin":
             emulator.post("/aml/users/login", json={"name": "admin", "password": "password"})

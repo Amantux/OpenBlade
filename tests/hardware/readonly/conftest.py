@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 import urllib.error
 import urllib.request
@@ -23,6 +24,7 @@ import pytest
 
 from openblade.config import load_config
 from openblade.domain.policies import RealHardwareGuard
+from openblade.hardware.runner import CommandResult, SafeRunner
 from openblade.hardware.safety import require_real_hardware
 
 CORPUS_DIR = Path(__file__).resolve().parents[3] / "compatibility"
@@ -30,6 +32,72 @@ CORPUS_DIR = Path(__file__).resolve().parents[3] / "compatibility"
 
 def read_corpus() -> list[dict[str, Any]]:
     return [json.loads(p.read_text()) for p in sorted(CORPUS_DIR.rglob("*.json"))]
+
+
+class ReadOnlyViolation(RuntimeError):
+    """A read-only-lane test attempted an HTTP request or command that could mutate the rig."""
+
+
+# The only non-GET requests the read-only lane may send: the session handshake.
+AUTH_REQUESTS = frozenset({("POST", "/aml/users/login"), ("POST", "/aml/auth/logout")})
+
+
+def check_appliance_request(method: str, path: str) -> None:
+    """Raise ReadOnlyViolation unless ``method path`` is a GET or the login/logout call.
+
+    The method is matched exactly (HTTP methods are case-sensitive), so ``"get"``
+    is refused rather than normalised.
+    """
+    verb = method
+    if not path.startswith("/"):
+        raise ReadOnlyViolation(f"appliance path must be absolute, got {path!r}")
+    if verb == "GET" or (verb, path) in AUTH_REQUESTS:
+        return
+    raise ReadOnlyViolation(f"read-only lane refuses {verb} {path}")
+
+
+_DEVICE = re.compile(r"/dev/[A-Za-z0-9_./:+-]+")
+_LOG_PAGE = re.compile(r"(0x)?[0-9A-Fa-f]{1,2}")
+
+
+def _is_device(arg: str) -> bool:
+    return _DEVICE.fullmatch(arg) is not None and ".." not in arg
+
+
+def _is_path(arg: str) -> bool:
+    return arg.startswith("/") and ".." not in arg
+
+
+def is_allowed_argv(argv: list[str]) -> bool:
+    """Exact argv shapes the read-only lane may execute; anything else is refused.
+
+    Positions are fixed so a flag can't be smuggled in (``sg_logs -R`` resets log
+    pages; ``mtx -f dev load`` moves a cartridge).
+    """
+    match argv:
+        case ["sg_inq", dev]:
+            return _is_device(dev)
+        case ["sg_logs", "-p", page, dev]:
+            return _LOG_PAGE.fullmatch(page) is not None and _is_device(dev)
+        case ["mtx", "-f", dev, "status"]:
+            return _is_device(dev)
+        case ["ls", *paths] if paths:
+            return all(_is_path(p) for p in paths)
+    return False
+
+
+class ReadOnlyRunner(SafeRunner):
+    """SafeRunner that only executes the read-only argv shapes in ``is_allowed_argv``."""
+
+    def run(
+        self,
+        args: list[str],
+        timeout: int | None = None,
+        redact_args: list[int] | None = None,
+    ) -> CommandResult:
+        if isinstance(args, str) or not is_allowed_argv(list(args)):
+            raise ReadOnlyViolation(f"read-only lane refuses command {args!r}")
+        return super().run(args, timeout=timeout, redact_args=redact_args)
 
 
 @dataclass
@@ -61,6 +129,7 @@ class ApplianceClient:
         )
 
     def request(self, method: str, path: str, json_body: Any = None) -> ApplianceResponse:
+        check_appliance_request(method, path)
         data = None if json_body is None else json.dumps(json_body).encode()
         req = urllib.request.Request(  # noqa: S310 - base URL is operator-set rig config, scheme checked in fixture
             self.base_url.rstrip("/") + path,
@@ -110,6 +179,11 @@ def authed_appliance(appliance: ApplianceClient):
     assert resp.status == 200, f"appliance login failed: HTTP {resp.status}"
     yield appliance
     appliance.logout()
+
+
+@pytest.fixture
+def readonly_runner() -> ReadOnlyRunner:
+    return ReadOnlyRunner(dry_run=False)
 
 
 @pytest.fixture
