@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -38,6 +39,8 @@ class CatalogShardDatasetEntry(BaseModel):
     total_bytes: int = 0
     tape_set: list[str] = Field(default_factory=list)
     shard_set: list[str] = Field(default_factory=list)
+    # Serialized openblade.domain.protection.ProtectionPolicy; None on pre-v2 shards.
+    protection: dict[str, Any] | None = None
 
 
 class CatalogShard(BaseModel):

@@ -15,6 +15,7 @@ from openblade.nas.catalog_shard import (
     CatalogShardWriter,
 )
 from openblade.nas.ltfs_manifest import (
+    CommitMarker,
     ManifestFileEntry,
     ManifestJson,
     TapeJson,
@@ -490,6 +491,58 @@ class ArchiveLifecycleManager:
                 if entry.file_record_id == file_record_id:
                     return entry.tape_path
         return ""
+
+
+def sibling_tapes_from_shard(shard: CatalogShard) -> list[str]:
+    """Other barcodes needed to restore every file of this generation (from shard records)."""
+    barcodes: list[str | None] = []
+    for dataset in shard.datasets:
+        barcodes.extend(dataset.tape_set)
+        barcodes.extend(dataset.shard_set)
+    return sorted(set(_ordered_unique(barcodes)) - {shard.barcode})
+
+
+def finalize_tape_generation(
+    writer: TapeMetadataWriter,
+    shard_writer: CatalogShardWriter,
+    barcode: str,
+    *,
+    generation_id: str,
+    manifest: ManifestJson,
+    shard: CatalogShard,
+    tape_json: TapeJson,
+) -> CommitMarker:
+    """Write a generation's metadata in the one durable order, commit marker LAST.
+
+    Precondition: all file data for this generation is already on tape. Order:
+    manifest.json (+.sha256) -> catalog-shard.json (+.sha256) -> tape.json -> commit marker.
+    A crash before the marker leaves the generation uncommitted; rebuild ignores it.
+    """
+    manifest = manifest.model_copy(
+        update={"generation_id": generation_id, "sibling_tapes": sibling_tapes_from_shard(shard)}
+    )
+    manifest_sha = writer.write_manifest(barcode, manifest)
+    writer.write_manifest_checksum(barcode, manifest_sha)
+    shard_sha = shard_writer.write_shard(barcode, shard)
+    previous = tape_json.current_generation
+    writer.write_tape_json(
+        barcode,
+        tape_json.model_copy(
+            update={
+                "current_generation": generation_id,
+                "previous_generation": previous if previous != generation_id else None,
+                "last_openblade_write_at": _utcnow_iso(),
+            }
+        ),
+    )
+    marker = CommitMarker(
+        generation_id=generation_id,
+        manifest_sha256=manifest_sha,
+        catalog_shard_sha256=shard_sha,
+        written_at=_utcnow_iso(),
+    )
+    writer.write_commit_marker(barcode, marker)
+    return marker
 
 
 def _ordered_unique(values: list[str | None]) -> list[str]:
