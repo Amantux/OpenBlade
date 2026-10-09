@@ -56,3 +56,12 @@ Drive exclusion for tape I/O is a catalog row, not process memory. `DriveSchedul
 
 ## FUSE namespace
 The FUSE-oriented layer is intentionally thin: catalog entries define the namespace, and hydration delegates to restore workflows. This keeps the namespace authoritative and avoids bypassing safety or verification logic.
+
+## NAS tape-native planning models
+
+Cartridge lifecycle (`openblade/nas/state_machine.py`), LTO media/drive
+compatibility and foreign-media detection (`openblade/nas/media.py`), and pure
+capacity/replication/export/spanning planners (`openblade/nas/capacity.py`)
+sit beside the existing archive and restore planners. They hold no I/O and no
+persistence yet; see the "Tape-native domain models" section of
+`docs/wiki/guides/fuse-and-nas.md` for the model list and tests.

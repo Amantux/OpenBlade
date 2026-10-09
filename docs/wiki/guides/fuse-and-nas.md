@@ -229,6 +229,26 @@ policy-resolution helper for ingest and has nothing to do with mounting.
 
 ---
 
+## Tape-native domain models
+
+Pure planning models (no I/O). Each is validated and covered by unit tests.
+
+| Model / function | Module | Tests |
+|---|---|---|
+| `TapeState` / `TapeEvent` / `transition()` -> `InvalidTransitionError`; `file_state_for_tape()` maps onto the existing `NasFileState` | `openblade/nas/state_machine.py` | `tests/unit/test_nas_tape_states.py` (every allowed edge, every forbidden edge) |
+| `MediaGeneration`, `can_read` / `can_write` (LTO-8/9 break the N-2 read rule), `Cartridge`, `is_foreign`, `require_writable` | `openblade/nas/media.py` | `tests/unit/test_nas_media_compat.py` |
+| `ArchivePlanRequest.cartridges` / `drive_generation` / `reserved_bytes`: the archive planner raises `ForeignMediaError` for un-adopted media without `tape.json` (never auto-formatted) and `IncompatibleMediaError` for an unwritable drive/media pairing; reserved bytes reduce per-tape capacity | `openblade/nas/planner.py` | `tests/unit/test_nas_media_compat.py` |
+| `ScratchThresholds` + `evaluate_scratch` (OK/WARN/CRITICAL) | `openblade/nas/capacity.py` | `tests/unit/test_nas_domain_models.py` |
+| `TapeFragmentation.needs_consolidation` (`live_bytes / written_bytes`) | same | same |
+| `ReservationLedger.reserve/release` (TTL; expired ignored; over-reserve -> `ReservationError`) | same | same |
+| `VolumeGroupReplication` (IN_SYNC/LAGGING/BROKEN), `merge_volume_groups`, `require_export_ready` | same | same |
+| `FileSpan` / `SpanSegment`, `required_tapes`, `span_state` (missing tape -> `MISSING_TAPE`) | same | same |
+| `ExportSet` (PREPARING/READY/EXPORTED/IMPORTED), `mark_export_ready`, `Vault`, `planning_available` (vaulted = offline) | same | same |
+| `plan_drives` -> `required_drives`, `estimated_swaps` | same | same |
+| `AggregationPolicy.aggregate_below_bytes` + `group_for_write` (grouping only, no container format) | same | same |
+
+No read-only HTTP view is exposed yet: there is no per-pool health hook to attach to.
+
 ## Related
 
 - [The catalog](the-catalog.md) — the two independent catalogs

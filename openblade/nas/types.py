@@ -10,6 +10,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from openblade.nas.media import Cartridge, MediaGeneration
+
 
 class EffectivePolicySource(str, Enum):
     SYSTEM_DEFAULT = "system_default"
@@ -448,6 +450,10 @@ class ArchivePlanRequest(BaseModel):
     shard_size_bytes: int | None = Field(default=None, ge=1)
     shard_strategy: ShardStrategy | None = None
     max_parallelism: int = Field(default=1, ge=1, le=16)
+    # Tape-native planning inputs (all optional; empty = previous behaviour).
+    cartridges: dict[str, Cartridge] = Field(default_factory=dict)
+    drive_generation: MediaGeneration | None = None
+    reserved_bytes: dict[str, int] = Field(default_factory=dict)
 
 
 class CacheDriveConfig(BaseModel):
