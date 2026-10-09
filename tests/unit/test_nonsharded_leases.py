@@ -144,3 +144,29 @@ def test_stale_lease_aborts_archive_without_unmount_or_unload(tmp_path: Path) ->
     assert calls == []
     refreshed = repo_a.get_job(job.id)
     assert refreshed is not None and refreshed.state == "failed"
+
+
+def test_archive_service_holds_a_catalog_lease_while_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The service path (assistant, API) must exclude other jobs, not just run_*_job."""
+    from openblade.jobs.archive import ArchiveService
+    from openblade.jobs.queue import JobQueue
+
+    repo_a, repo_b, library, ltfs = _stack(tmp_path)
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "a.bin").write_bytes(b"x" * 64)
+    service = ArchiveService(library, ltfs, repo_a, JobQueue())
+    seen: list[list[str]] = []
+    real_write = ltfs.write_file
+
+    def write(*args: Any, **kwargs: Any) -> Any:
+        seen.append([lease.job_id for lease in repo_b.live_leases()])
+        return real_write(*args, **kwargs)
+
+    monkeypatch.setattr(ltfs, "write_file", write)
+    job = service.enqueue("photos", source)
+    assert job.state == "completed"
+    assert seen and all(owners == [job.id] for owners in seen)  # seen from "another process"
+    assert repo_b.live_leases() == []

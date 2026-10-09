@@ -21,7 +21,7 @@ from openblade.domain.errors import (
 from openblade.domain.models import JobType, MountMode
 from openblade.jobs.inventory import InventoryService
 from openblade.jobs.queue import JobQueue
-from openblade.jobs.scheduler import DriveHandle, DriveScheduler
+from openblade.jobs.scheduler import CatalogLeaseStore, DriveHandle, DriveScheduler, LeaseStore
 from openblade.jobs.verify import sha256sum
 from openblade.nas.tape_orchestrator import TapeOperationFailedError, execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
@@ -432,11 +432,23 @@ class ArchiveService:
         ltfs: LTFSBackend,
         catalog: CatalogRepository,
         queue: JobQueue,
+        *,
+        lease_store: LeaseStore | None = None,
     ) -> None:
         self.library = library
         self.ltfs = ltfs
         self.catalog = catalog
         self.queue = queue
+        # Production passes the catalog-backed store so this job's drives are
+        # excluded from every other job, in this process or another one.
+        self.lease_store = lease_store if lease_store is not None else CatalogLeaseStore(catalog)
+
+    def _scheduler(self, job_id: str) -> DriveScheduler:
+        return DriveScheduler(
+            num_drives=len(InventoryService(self.library).snapshot().drives),
+            store=self.lease_store,
+            job_id=job_id,
+        )
 
     def enqueue(self, volume_group_name: str, source_path: Path) -> Job:
         job = self.catalog.create_job(
@@ -450,6 +462,7 @@ class ArchiveService:
                 self.ltfs,
                 self.catalog,
                 job.id,
+                scheduler=self._scheduler(job.id),
             )
         except Exception:
             for file_path in _iter_source_files(source_path):
