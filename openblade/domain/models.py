@@ -65,6 +65,11 @@ class MountMode(str, Enum):
 
 class FileInstanceState(str, Enum):
     PENDING = "pending"
+    # Sharded-archive lifecycle: written but not yet verified (STAGING), read
+    # back and being verified (VERIFYING). Neither is restorable or "archived";
+    # only the single commit at the end of a job moves them to ARCHIVED.
+    STAGING = "staging"
+    VERIFYING = "verifying"
     ARCHIVED = "archived"
     VERIFIED = "verified"
     FAILED = "failed"
