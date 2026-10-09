@@ -12,6 +12,15 @@ per the stub's mode:
   "tape_error" -> write `.ob-control/<relpath>.err` = OFFLINE_TAPE_UNAVAILABLE.
 Each recall is logged once to `.ob-control/hydration.log`; requests for a path
 already in flight are coalesced (one hydration event per path).
+
+The stub format is rig-only. The catalog has NO on-disk form for
+NasFileState.OFFLINE_ON_TAPE (openblade/nas/types.py): no stub, sidecar or
+xattr. An offline file exists only as a catalog NasFileRecord. /virtual reports
+it with the catalog size and status, and a read raises CartridgeOfflineError.
+The FUSE mount shows it read-only (0444) at catalog size. A read returns EIO, or
+with --hydrate blocks until restore. So this stub only stands in for "offline"
+when there is no FUSE layer. Its content, unlike FUSE, does not keep the
+catalog size.
 """
 
 import json
