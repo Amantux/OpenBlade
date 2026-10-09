@@ -129,7 +129,7 @@ def test_eviction_while_open_keeps_old_bytes_or_estale(mounted: Rig, proto: str)
 import os, time, errno
 f = open('/mnt/{proto}/rw/{rel}', 'rb'); first = f.read(4)
 srv = '/rig/export/rw/{rel}'  # server-side eviction, as the real evictor would
-open(srv + '.tmp', 'wb').write(b'OPENBLADE-OFFLINE-STUB\\n{{}}'); os.replace(srv + '.tmp', srv)
+open(srv + '.tmp', 'wb').write(b'OPENBLADE-OFFLINE-STUB\\n{{"state": "offline_on_tape", "mode": "immediate"}}'); os.replace(srv + '.tmp', srv)
 time.sleep(1)
 try:
     f.seek(0); print('OLD' if f.read(4) == first else 'NEW')

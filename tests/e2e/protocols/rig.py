@@ -51,6 +51,35 @@ SHARES = [
 ]
 
 
+RESTAGE = """
+import json, os, sys, glob
+root = '/rig/export/rw'
+offline = json.loads(sys.argv[1]); magic = sys.argv[2].encode()
+ctl = os.path.join(root, '.ob-control')
+for proto in ('smb', 'nfs'):
+    for scenario, mode in offline.items():
+        rel = f'offline/{proto}-{scenario}.bin'
+        tmp = os.path.join(root, rel + '.restage')
+        with open(tmp, 'wb') as f:
+            f.write(magic + json.dumps({'state': 'offline_on_tape', 'mode': mode}).encode())
+        os.chmod(tmp, 0o666)
+        os.replace(tmp, os.path.join(root, rel))
+for stale in glob.glob(os.path.join(ctl, 'offline', '*.req')) + glob.glob(os.path.join(ctl, 'offline', '*.err')):
+    os.unlink(stale)
+open(os.path.join(ctl, 'hydration.log'), 'w').close()
+print('restaged')
+"""
+
+
+def restage_snippet_args() -> list[str]:
+    """argv for RESTAGE: reset every offline stub in place (new inode, same path).
+
+    Used when a running rig is reused so an earlier run's hydrated files, stale
+    recall requests and log lines cannot leak into the next session.
+    """
+    return [json.dumps(OFFLINE), STUB_MAGIC.decode()]
+
+
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

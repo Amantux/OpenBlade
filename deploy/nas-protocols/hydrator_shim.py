@@ -37,8 +37,9 @@ def _hydrate(root: Path, rel: str, mode: str, inflight: set[str]) -> None:
     target = root / rel
     if mode == "tape_error":
         (root / ".ob-control" / f"{rel}.err").write_text("OFFLINE_TAPE_UNAVAILABLE")
-    elif mode.startswith("delay:"):
-        time.sleep(float(mode.split(":", 1)[1]))
+    elif mode.startswith("delay:") or mode == "immediate":
+        if mode.startswith("delay:"):
+            time.sleep(float(mode.split(":", 1)[1]))
         tmp = target.with_name(f".{target.name}.hydrating")
         tmp.write_bytes((root / ".ob-tape" / rel).read_bytes())
         os.replace(tmp, target)
@@ -58,7 +59,13 @@ def main(root: Path) -> None:
             data = (root / rel).read_bytes() if (root / rel).is_file() else b""
             if rel in inflight or not data.startswith(STUB_MAGIC):
                 continue
-            mode = json.loads(data[len(STUB_MAGIC) :])["mode"]
+            # The shim is the client container's main process: one malformed or
+            # partially written stub must never take the whole rig down.
+            try:
+                body = json.loads(data[len(STUB_MAGIC) :] or b"{}")
+                mode = str(body.get("mode", "immediate")) if isinstance(body, dict) else "immediate"
+            except ValueError:
+                mode = "immediate"
             inflight.add(rel)
             with (control / "hydration.log").open("a") as log:
                 log.write(f"recall {rel} mode={mode}\n")

@@ -74,6 +74,12 @@ def protocol_rig() -> Iterator[Rig]:
             pytest.skip(
                 f"protocol rig failed to start (docker compose up): {up.stderr.strip()[-300:]}"
             )
+    # Always reset the offline stubs in place: a reused rig still carries the
+    # previous session's hydrated files and recall log.
+    restaged = handle.compose(
+        "exec", "-T", "client", "python3", "-c", rig.RESTAGE, *rig.restage_snippet_args()
+    )
+    assert "restaged" in restaged.stdout, restaged.stderr
     yield handle
 
 
