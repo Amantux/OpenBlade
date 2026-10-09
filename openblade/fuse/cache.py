@@ -66,7 +66,8 @@ class HydrationCache:
     def _enforce_budget(self) -> None:
         if self.max_bytes is None:
             return
-        for checksum in list(self._lru):
+        # The newest entry is exempt: it was just stored for a reader about to open it.
+        for checksum in list(self._lru)[:-1]:
             if sum(self._lru.values()) <= self.max_bytes:
                 return
             if self._refs.get(checksum, 0) > 0:
