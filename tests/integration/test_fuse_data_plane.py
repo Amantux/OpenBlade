@@ -56,7 +56,7 @@ class FakeEngine:
     def find_active_job(self, catalog_path: str) -> str | None:
         return None
 
-    def resume(self, job_id: str) -> Path:
+    def resume(self, job_id: str, catalog_path: str | None = None) -> Path:
         raise HydrationFailedError(job_id)
 
 
@@ -327,3 +327,42 @@ def test_staging_copy_is_removed_after_verified_store(catalog, tmp_path, corrupt
     assert ticket.done.wait(3)
     assert (ticket.error is not None) is corrupt
     assert not (tmp_path / "s" / "c.bin").exists(), "staging copy leaked"
+
+
+def test_restarted_engine_finds_and_resumes_batch_job(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    """Regression: batch jobs store {"batch": [...]}; a restarted hydrator must see them."""
+    other = CatalogRepository(get_session())
+    job = other.create_job(
+        "restore",
+        {
+            "batch": [
+                {"catalog_path": "/a.bin", "dest_path": str(tmp_path / "a")},
+                {"catalog_path": "/b.bin", "dest_path": str(tmp_path / "b")},
+            ]
+        },
+    )
+    other.session.commit()
+    engine = JobRestoreEngine(
+        None, catalog, tmp_path / "s", poll_interval_s=0.02, resume_timeout_s=3.0
+    )
+    enqueued: list[object] = []
+    engine.restore_batch = lambda *a: enqueued.append(a) or {}  # type: ignore[method-assign,func-returns-value]
+
+    assert engine.find_active_job("/b.bin") == str(job.id)
+    assert engine.find_active_job("/c.bin") is None
+    row = other.get_job(job.id)
+    row.state = "completed"
+    other.session.commit()
+    assert engine.resume(str(job.id), "/b.bin") == tmp_path / "b"
+    assert enqueued == []
+
+
+def test_resume_job_without_destination_raises_typed_error(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    job = catalog.create_job("restore", {"something": "else"})
+    job.state = "completed"
+    catalog.session.commit()
+    engine = JobRestoreEngine(
+        None, catalog, tmp_path / "s", poll_interval_s=0.02, resume_timeout_s=1.0
+    )
+    with pytest.raises(HydrationFailedError):
+        engine.resume(str(job.id), "/a.bin")
