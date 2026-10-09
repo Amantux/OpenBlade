@@ -44,6 +44,14 @@ Repo → **Settings → Secrets and variables → Actions → Variables**:
 - **`SACRIFICIAL_BARCODES`** — comma-separated list of cartridges that may be
   loaded, formatted and overwritten (e.g. `OB0007L8,OB0008L8`). Nothing else may
   ever be touched by the destructive lane.
+- **`OPENBLADE_APPLIANCE_URL`**, **`OPENBLADE_APPLIANCE_USER`** (variables),
+  **`OPENBLADE_APPLIANCE_PASSWORD`** (secret — put it on the `hardware-destructive`
+  environment too), optional **`OPENBLADE_APPLIANCE_INSECURE`** = `true` for a
+  self-signed appliance cert. `OPENBLADE_CHANGER_DEVICE` and
+  `OPENBLADE_DRIVE_DEVICES` are set in the runner host's environment (`.env` of
+  the runner service). Every rig job has a **Preflight** step that fails if any
+  of these is empty — otherwise the rig tests would skip and the lane would go
+  green without testing anything.
 
 ## 3. Environment approval (settings-only — cannot be committed)
 

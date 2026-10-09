@@ -48,6 +48,10 @@ jobs:
     env:
       OPENBLADE_BACKEND: real
       OPENBLADE_REAL_HARDWARE_ENABLED: "true"
+      OPENBLADE_APPLIANCE_URL: ${{ vars.OPENBLADE_APPLIANCE_URL }}
+      OPENBLADE_APPLIANCE_USER: ${{ vars.OPENBLADE_APPLIANCE_USER }}
+      OPENBLADE_APPLIANCE_PASSWORD: ${{ secrets.OPENBLADE_APPLIANCE_PASSWORD }}
+      OPENBLADE_APPLIANCE_INSECURE: ${{ vars.OPENBLADE_APPLIANCE_INSECURE }}
       OPENBLADE_DIFFERENTIAL_REPORT: differential-report.json
       I3_AML_USER: ${{ secrets.QUANTUM_AML_USER }}
       I3_AML_PASSWORD: ${{ secrets.QUANTUM_AML_PASSWORD }}
@@ -59,6 +63,21 @@ jobs:
           python-version: "3.12"
 
       - run: pip install -e '.[dev]'
+
+      # A rig lane must never go green by skipping: the rig tests skip when
+      # these are unset, so refuse to run without them. OPENBLADE_CHANGER_DEVICE
+      # and OPENBLADE_DRIVE_DEVICES come from the runner host's environment.
+      - name: Preflight — rig configuration present
+        run: |
+          set -euo pipefail
+          missing=()
+          for v in OPENBLADE_APPLIANCE_URL OPENBLADE_APPLIANCE_USER OPENBLADE_APPLIANCE_PASSWORD OPENBLADE_CHANGER_DEVICE OPENBLADE_DRIVE_DEVICES; do
+            if [ -z "${!v:-}" ]; then missing+=("$v"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::rig lane misconfigured, missing: ${missing[*]}"
+            exit 1
+          fi
 
       # No allowlist step: this lane names no cartridges and performs no
       # motion. The snapshot diff below is what would catch a violation.
