@@ -12,6 +12,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
+from sqlalchemy.exc import InvalidRequestError
+
 from openblade.domain.errors import OpenBladeError
 from openblade.fuse.cache import CacheChecksumError, HydrationCache
 
@@ -104,7 +106,19 @@ class JobRestoreEngine:
     layer's concern, not ours).
     """
 
-    def __init__(self, restore_service: Any, catalog: Any, staging_root: Path) -> None:
+    def __init__(
+        self,
+        restore_service: Any,
+        catalog: Any,
+        staging_root: Path,
+        *,
+        poll_interval_s: float = 0.5,
+        resume_timeout_s: float | None = None,
+    ) -> None:
+        self.poll_interval_s = poll_interval_s
+        self.resume_timeout_s = (
+            hydrate_timeout_from_env() if resume_timeout_s is None else resume_timeout_s
+        )
         self.restore_service = restore_service
         self.catalog = catalog
         self.staging_root = staging_root
@@ -133,15 +147,25 @@ class JobRestoreEngine:
         return None
 
     def resume(self, job_id: str) -> Path:
+        deadline = time.monotonic() + self.resume_timeout_s
         while True:
             job = self.catalog.get_job(job_id)
+            if job is not None:
+                # The job is advanced by another session; re-read the row instead
+                # of trusting this session's identity-map copy.
+                try:
+                    self.catalog.session.refresh(job)
+                except InvalidRequestError:
+                    job = None
             if job is None:
                 raise HydrationFailedError(f"restore job {job_id} disappeared")
             if job.state == "completed":
                 return Path(json.loads(job.metadata_json)["dest_path"])
             if job.state not in {"pending", "running"}:
                 raise HydrationFailedError(f"restore job {job_id} ended {job.state}")
-            time.sleep(0.5)
+            if time.monotonic() >= deadline:
+                raise HydrationTimeoutError(f"restore job {job_id} did not finish in time")
+            time.sleep(self.poll_interval_s)
 
 
 class Hydrator:
@@ -283,6 +307,8 @@ class Hydrator:
         assert ticket.job_id is not None
         try:
             self._commit(ticket, self.engine.resume(ticket.job_id))
+        except HydrationTimeoutError:
+            self._fail(ticket, f"restore job {ticket.job_id} timed out")
         except (HydrationFailedError, OpenBladeError, OSError, KeyError):
             self._fail(ticket, f"restore job {ticket.job_id} did not complete")
         except Exception:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import os
 import threading
 from pathlib import Path
@@ -15,7 +16,12 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import CartridgeOfflineError
 from openblade.fuse.cache import CacheEntryInUseError, HydrationCache
 from openblade.fuse.filesystem import CatalogFilesystem
-from openblade.fuse.hydration import HydrationFailedError, Hydrator, JobRestoreEngine
+from openblade.fuse.hydration import (
+    HydrationFailedError,
+    HydrationTimeoutError,
+    Hydrator,
+    JobRestoreEngine,
+)
 from openblade.fuse.mount import STATE_XATTR, CatalogFuseOperations
 
 FILES = {
@@ -225,3 +231,26 @@ def test_request_unregisters_ticket_when_job_lookup_raises(catalog, tmp_path):  
     with pytest.raises(RuntimeError):
         hyd.request("/a.bin")
     assert hyd.status("/a.bin").value == "offline"
+
+
+def test_resume_sees_job_completed_by_another_session(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    job = catalog.create_job("restore", {"catalog_path": "/a.bin"})
+    engine = JobRestoreEngine(
+        None, catalog, tmp_path / "s", poll_interval_s=0.02, resume_timeout_s=3.0
+    )
+    assert catalog.get_job(job.id).state == "pending"  # load into the identity map
+    other = CatalogRepository(get_session())
+    row = other.get_job(job.id)
+    row.metadata_json = json.dumps({"catalog_path": "/a.bin", "dest_path": str(tmp_path / "x")})
+    row.state = "completed"
+    other.session.commit()
+    assert engine.resume(str(job.id)) == tmp_path / "x"
+
+
+def test_resume_gives_up_at_deadline_with_typed_error(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    job = catalog.create_job("restore", {"catalog_path": "/a.bin"})
+    engine = JobRestoreEngine(
+        None, catalog, tmp_path / "s", poll_interval_s=0.02, resume_timeout_s=0.2
+    )
+    with pytest.raises(HydrationTimeoutError):
+        engine.resume(str(job.id))
