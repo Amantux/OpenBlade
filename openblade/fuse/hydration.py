@@ -99,8 +99,8 @@ class RestoreEngine(Protocol):
     def find_active_job(self, catalog_path: str) -> str | None:
         """Return the id of a pending/running restore job for the path, if any."""
 
-    def resume(self, job_id: str) -> Path:
-        """Wait for an existing job to finish and return its staged file."""
+    def resume(self, job_id: str, catalog_path: str | None = None) -> Path:
+        """Wait for an existing job to finish and return the path's staged file."""
 
 
 class JobRestoreEngine:
@@ -189,15 +189,15 @@ class JobRestoreEngine:
         for job in self.catalog.list_jobs():
             if job.job_type != "restore" or job.state not in {"pending", "running"}:
                 continue
-            if json.loads(job.metadata_json or "{}").get("catalog_path") == catalog_path:
+            if _job_entry(json.loads(job.metadata_json or "{}"), catalog_path) is not None:
                 return str(job.id)
         return None
 
-    def resume(self, job_id: str) -> Path:
+    def resume(self, job_id: str, catalog_path: str | None = None) -> Path:
         with self._worker_catalog() as catalog:
-            return self._resume(catalog, job_id)
+            return self._resume(catalog, job_id, catalog_path)
 
-    def _resume(self, catalog: Any, job_id: str) -> Path:
+    def _resume(self, catalog: Any, job_id: str, catalog_path: str | None = None) -> Path:
         deadline = time.monotonic() + self.resume_timeout_s
         while True:
             job = catalog.get_job(job_id)
@@ -211,12 +211,40 @@ class JobRestoreEngine:
             if job is None:
                 raise HydrationFailedError(f"restore job {job_id} disappeared")
             if job.state == "completed":
-                return Path(json.loads(job.metadata_json)["dest_path"])
+                return _job_dest(job_id, json.loads(job.metadata_json or "{}"), catalog_path)
             if job.state not in {"pending", "running"}:
                 raise HydrationFailedError(f"restore job {job_id} ended {job.state}")
             if time.monotonic() >= deadline:
                 raise HydrationTimeoutError(f"restore job {job_id} did not finish in time")
             time.sleep(self.poll_interval_s)
+
+
+def _job_entry(metadata: Any, catalog_path: str | None) -> dict[str, Any] | None:
+    """The {catalog_path, dest_path} entry for ``catalog_path`` in single or batch job metadata.
+
+    Single jobs store the entry at top level; batch jobs store ``{"batch": [entry, ...]}``.
+    With ``catalog_path=None`` a single job's top-level entry is returned.
+    """
+    if not isinstance(metadata, dict):
+        return None
+    if "catalog_path" in metadata and catalog_path in {None, metadata["catalog_path"]}:
+        return metadata
+    batch = metadata.get("batch")
+    if catalog_path is not None and isinstance(batch, list):
+        for entry in batch:
+            if isinstance(entry, dict) and entry.get("catalog_path") == catalog_path:
+                return entry
+    return None
+
+
+def _job_dest(job_id: str, metadata: Any, catalog_path: str | None) -> Path:
+    entry = _job_entry(metadata, catalog_path)
+    dest = None if entry is None else entry.get("dest_path")
+    if not isinstance(dest, str) or not dest:
+        raise HydrationFailedError(
+            f"restore job {job_id} has no staged destination for {catalog_path or 'its path'}"
+        )
+    return Path(dest)
 
 
 class Hydrator:
@@ -309,6 +337,19 @@ class Hydrator:
         return ticket
 
     def wait(self, ticket: HydrationTicket, timeout: float | None = None) -> bytes:
+        return self._pinned_read(ticket, timeout, lambda: self.cache.retrieve(ticket.checksum))
+
+    def wait_range(
+        self, ticket: HydrationTicket, offset: int, length: int, timeout: float | None = None
+    ) -> bytes:
+        """Like ``wait`` but read only ``[offset, offset+length)``: O(length), no re-hash."""
+        return self._pinned_read(
+            ticket, timeout, lambda: self.cache.read_range(ticket.checksum, offset, length)
+        )
+
+    def _pinned_read(
+        self, ticket: HydrationTicket, timeout: float | None, read: Callable[[], bytes]
+    ) -> bytes:
         # Each waiter pins the entry before the restore commits, so the budget
         # cannot evict it (e.g. while a later file of the same batch is stored)
         # before this waiter has read it. Released on every exit path.
@@ -318,7 +359,7 @@ class Hydrator:
                 raise HydrationTimeoutError(f"{ticket.catalog_path} still hydrating")
             if ticket.error is not None:
                 raise HydrationFailedError(ticket.error)
-            return self.cache.retrieve(ticket.checksum)
+            return read()
         finally:
             self.cache.release(ticket.checksum)
 
@@ -378,7 +419,7 @@ class Hydrator:
     def _resume(self, ticket: HydrationTicket) -> None:
         assert ticket.job_id is not None
         try:
-            self._commit(ticket, self.engine.resume(ticket.job_id))
+            self._commit(ticket, self.engine.resume(ticket.job_id, ticket.catalog_path))
         except HydrationTimeoutError:
             self._fail(ticket, f"restore job {ticket.job_id} timed out")
         except (HydrationFailedError, OpenBladeError, OSError, KeyError):

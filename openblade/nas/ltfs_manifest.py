@@ -163,12 +163,17 @@ class TapeMetadataWriter:
         )
 
     def write_manifest(self, barcode: str, manifest: ManifestJson) -> str:
-        """Write /.openblade/manifest.json and return its sha256 checksum."""
+        """Write /.openblade/manifest.json and return the sha256 of the exact bytes written.
+
+        The checksum covers the on-tape bytes, not a re-dump of the model, so a commit
+        marker stays verifiable after ``ManifestJson`` gains new defaulted fields.
+        """
         self.ensure_openblade_dirs(barcode)
-        payload = manifest.model_dump(by_alias=True)
-        checksum = self.compute_json_checksum(payload)
-        self._write_json(barcode, self._metadata_path("manifest.json"), payload)
-        return checksum
+        content = json.dumps(
+            manifest.model_dump(by_alias=True), sort_keys=True, separators=(",", ":")
+        )
+        self._write_text(barcode, self._metadata_path("manifest.json"), content)
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def write_manifest_checksum(self, barcode: str, checksum: str) -> None:
         """Write /.openblade/manifest.sha256 for tamper-detection."""
