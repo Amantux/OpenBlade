@@ -1,0 +1,186 @@
+# Changed-path -> test-category ownership table for tools/ci_ownership.py.
+#
+# Every rule whose glob matches a path contributes its categories (union).
+# Globs use fnmatch semantics: `*` also spans `/`, so "openblade/api/*"
+# covers the whole subtree. There is deliberately NO catch-all
+# "openblade/*" rule: a new subpackage must be given an owner here, or
+# the ci-gate ownership check fails.
+#
+# Valid categories: unit, integration, safety, i3, compat, frontend,
+# docs-only, ci-only.
+
+# --- tests -----------------------------------------------------------------
+[[rule]]
+glob = "tests/unit/*"
+categories = ["unit"]
+
+[[rule]]
+glob = "tests/property/*"
+categories = ["unit"]
+
+[[rule]]
+glob = "tests/integration/*"
+categories = ["integration"]
+
+[[rule]]
+glob = "tests/fault/*"
+categories = ["integration"]
+
+[[rule]]
+glob = "tests/e2e/*"
+categories = ["integration"]
+
+[[rule]]
+glob = "tests/hardware/*"
+categories = ["integration"]
+
+[[rule]]
+glob = "tests/safety/*"
+categories = ["safety"]
+
+[[rule]]
+glob = "tests/i3/*"
+categories = ["i3"]
+
+[[rule]]
+glob = "tests/compat/*"
+categories = ["compat"]
+
+[[rule]]
+glob = "tests/fixtures/*"
+categories = ["unit", "compat"]
+
+[[rule]]
+glob = "tests/emulator_spec/*"
+categories = ["i3"]
+
+# Shared test scaffolding at the top of tests/.
+[[rule]]
+glob = "tests/conftest.py"
+categories = ["unit", "integration", "safety"]
+
+[[rule]]
+glob = "tests/__init__.py"
+categories = ["unit"]
+
+[[rule]]
+glob = "tests/assistant_support.py"
+categories = ["unit", "safety"]
+
+[[rule]]
+glob = "tests/gen_wiki_reference.py"
+categories = ["docs-only"]
+
+# --- openblade -------------------------------------------------------------
+[[rule]]
+glob = "openblade/__init__.py"
+categories = ["unit"]
+
+[[rule]]
+glob = "openblade/api/*"
+categories = ["unit", "integration", "i3"]
+
+[[rule]]
+glob = "openblade/emulator_contract/*"
+categories = ["unit", "i3", "compat"]
+
+[[rule]]
+glob = "openblade/assistant/*"
+categories = ["unit", "safety"]
+
+[[rule]]
+glob = "openblade/safety/*"
+categories = ["unit", "safety"]
+
+[[rule]]
+glob = "openblade/domain/*"
+categories = ["unit", "safety"]
+
+[[rule]]
+glob = "openblade/jobs/*"
+categories = ["unit", "integration", "safety"]
+
+[[rule]]
+glob = "openblade/catalog/*"
+categories = ["unit", "integration"]
+
+[[rule]]
+glob = "openblade/hardware/*"
+categories = ["unit", "integration", "compat"]
+
+[[rule]]
+glob = "openblade/simulator/*"
+categories = ["unit", "integration", "i3"]
+
+[[rule]]
+glob = "openblade/nas/*"
+categories = ["unit", "integration", "safety"]
+
+[[rule]]
+glob = "openblade/fuse/*"
+categories = ["unit", "integration"]
+
+[[rule]]
+glob = "openblade/sftp/*"
+categories = ["unit", "integration"]
+
+[[rule]]
+glob = "openblade/cli/*"
+categories = ["unit", "integration"]
+
+[[rule]]
+glob = "openblade/testing/*"
+categories = ["unit", "integration"]
+
+[[rule]]
+glob = "openblade/web_flask/*"
+categories = ["unit", "integration", "frontend"]
+
+[[rule]]
+glob = "openblade/bootstrap.py"
+categories = ["unit", "integration"]
+
+[[rule]]
+glob = "openblade/config.py"
+categories = ["unit", "integration"]
+
+[[rule]]
+glob = "openblade/config_validation.py"
+categories = ["unit"]
+
+[[rule]]
+glob = "openblade/deploy.py"
+categories = ["unit"]
+
+[[rule]]
+glob = "openblade/dr.py"
+categories = ["unit", "integration"]
+
+[[rule]]
+glob = "openblade/topology.py"
+categories = ["unit", "integration"]
+
+# --- outside the enforced trees (informational) ------------------------------
+[[rule]]
+glob = "docs/*"
+categories = ["docs-only"]
+
+[[rule]]
+glob = "*.md"
+categories = ["docs-only"]
+
+[[rule]]
+glob = ".github/*"
+categories = ["ci-only"]
+
+[[rule]]
+glob = "tools/ci_ownership*"
+categories = ["ci-only"]
+
+[[rule]]
+glob = "Makefile"
+categories = ["ci-only"]
+
+[[rule]]
+glob = ".yamllint"
+categories = ["ci-only"]
