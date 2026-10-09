@@ -179,7 +179,11 @@ VERIFYING instance states from item 4) — say so in the PR, do not stub it.
 ## Follow-up landed 2026-10-09 (phase 2: staged commits, journal, recovery report)
 
 Item 4's states and the job journal — listed under Non-goals above for phase 1 —
-landed as a foundation plus three parallel workstreams:
+landed as a foundation plus three parallel workstreams. The foundation (states,
+`journal`/`job_journal`, staged-instance repository methods) and the recovery report
+are on this branch; the sharded-archive wiring of those states and journal events and
+the non-sharded leases come from the sibling `fleet/jobs-sharded` and
+`fleet/jobs-leases` branches and are only true once those merge:
 
 - **States.** `FileInstanceState.STAGING` / `VERIFYING` mark a sharded-archive
   instance that is written but not committed. Instances are created STAGING
@@ -202,8 +206,9 @@ landed as a foundation plus three parallel workstreams:
   `staged_instances` — `{job_id: [{instance_id, barcode, tape_path,
   shard_index, state}]}` for every `failed_recoverable` job, i.e. what to
   reconcile on tape before retry — and `stale_pending_job_ids`: `pending` jobs
-  created more than one `DEFAULT_LEASE_TTL` ago with no live lease (judged from
-  the leases observed before recovery released any). Both are report-only:
+  created more than one `DEFAULT_LEASE_TTL` ago. Jobs mark themselves `running`
+  before they acquire a lease, so in practice this is an age signal: a job
+  legitimately queued longer than the TTL is reported too. Both are report-only:
   no state change, no media movement. Resuming from staged shards remains
   deferred.
 
