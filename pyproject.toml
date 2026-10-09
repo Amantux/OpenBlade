@@ -135,4 +135,5 @@ markers = [
   "i3: Quantum i3 emulator and protocol tests",
   "real_i3: tests requiring a physical Quantum Scalar i3",
   "contract: behavioural contract suite run against every backend pairing",
+  "protocols: containerised SMB/NFS protocol rig tests (make test-protocols)",
 ]

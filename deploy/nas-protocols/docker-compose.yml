@@ -1,0 +1,35 @@
+# OpenBlade NAS protocol test rig (roadmap item 19). `make protocols-up`.
+# The harness (tests/e2e/protocols/conftest.py) renders state/smb.conf and
+# state/ganesha.conf through openblade.nas.samba / openblade.nas.nfs and
+# populates state/export/ before bringing the rig up.
+name: ob-nas-protocols
+services:
+  samba:
+    build: { context: ., args: { ROLE: samba } }
+    command: ["smbd", "--foreground", "--no-process-group", "--debug-stdout", "-s", "/rig/smb.conf"]
+    volumes: ["./state:/rig"]
+    ports: ["${OB_SMB_PORT:-14450}:445"]
+    healthcheck:
+      test: ["CMD", "smbclient", "-N", "-L", "localhost", "-m", "SMB3"]
+      interval: 2s
+      retries: 30
+  nfs-ganesha:
+    build: { context: ., args: { ROLE: nfs } }
+    # Ganesha's VFS FSAL needs open_by_handle_at (CAP_DAC_READ_SEARCH) etc.
+    privileged: true
+    command: ["sh", "-c", "rpcbind && exec ganesha.nfsd -F -L STDOUT -p /tmp/ganesha.pid -f /rig/ganesha.conf"]
+    volumes: ["./state:/rig"]
+    ports: ["${OB_NFS_PORT:-20490}:2049"]
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qi ':0801 ' /proc/net/tcp /proc/net/tcp6"]
+      interval: 2s
+      retries: 30
+  client:
+    build: { context: ., args: { ROLE: client } }
+    # Kernel cifs/nfs4 mounts need CAP_SYS_ADMIN: privileged client container.
+    privileged: true
+    command: ["python3", "/usr/local/bin/hydrator_shim.py", "/rig/export/rw"]
+    volumes: ["./state:/rig"]
+    depends_on:
+      samba: { condition: service_healthy }
+      nfs-ganesha: { condition: service_healthy }

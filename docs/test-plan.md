@@ -41,3 +41,6 @@ fix flips them to XPASS and fails the run until the marker is removed.
 
 **Rule: a new backend must pass this suite before it may be selected via
 `OPENBLADE_BACKEND`.** Add it as a named pairing in `tests/contract/conftest.py`.
+
+## Protocol tests
+Run the SMB and NFS protocol rig with `make protocols-up && make test-protocols && make protocols-down` (tests are marked `protocols`, live in `tests/e2e/protocols`, and skip with a capability-naming reason when the rig is unavailable). They are not part of the default suite; `.github/workflows/nas-protocols.yml` runs them nightly and on manual dispatch, and CI records the results. The rig uses a hydrator shim to simulate tape recall, so it does not cover the real FUSE hydrator. See `docs/wiki/guides/fuse-and-nas.md`.
