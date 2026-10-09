@@ -19,6 +19,9 @@ OpenBlade is a simulator-first DIY tape archive controller inspired by iBlade-st
 5. **Continuous verification**: enforce compatibility and regression evidence in CI/CD before changes land on `master`.
 
 ## Layered CI/CD (targeted)
+
+
+Backend contract suite: `make test-contract` runs `tests/contract/` against every backend pairing (simulator, in-process AML emulator, and real hardware when explicitly enabled). A new backend must pass it before it may be selected via `OPENBLADE_BACKEND`; see docs/test-plan.md "Backend contract suite".
 OpenBlade CI/CD is intentionally split by layer so each change runs only relevant checks:
 
 | Layer | Primary workflow/jobs | Trigger scope |

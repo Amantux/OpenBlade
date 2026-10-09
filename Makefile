@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 .ONESHELL:
-.PHONY: up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware
+.PHONY: up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration test-contract seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware
 
 # Start all services
 up:
@@ -64,6 +64,11 @@ test-unit:
 # Run integration tests
 test-integration:
 	python3 -m pytest tests/integration/ -q --tb=short
+
+# Run the backend contract suite against every backend pairing
+# (the real+real pairing skips unless OPENBLADE_REAL_HARDWARE_ENABLED=true)
+test-contract:
+	python3 -m pytest tests/contract/ -m contract -q --tb=short
 
 # Seed default library instances (library-1, library-2, library-3)
 seed-libraries:
