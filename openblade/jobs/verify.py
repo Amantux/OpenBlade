@@ -8,9 +8,13 @@ from pathlib import Path, PurePosixPath
 from openblade.catalog.models import FileRecord
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
-from openblade.domain.models import MountMode
+from openblade.domain.models import FileInstanceState, MountMode
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
+
+_UNCOMMITTED_STATES = frozenset(
+    {FileInstanceState.STAGING.value, FileInstanceState.VERIFYING.value}
+)
 
 
 def sha256sum(path: Path) -> str:
@@ -63,6 +67,10 @@ def run_verify_job(
         handle = ltfs.mount(barcode, MountMode.READ_ONLY)
         try:
             for instance in catalog.list_instances_for_barcode(barcode):
+                if instance.state in _UNCOMMITTED_STATES:
+                    # A staged shard from an interrupted archive is not a
+                    # durability claim yet; recovery owns it, not verify.
+                    continue
                 record = catalog.session.get(FileRecord, instance.file_record_id)
                 if record is None:
                     continue
