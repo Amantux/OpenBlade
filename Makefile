@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 .ONESHELL:
-.PHONY: up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware
+.PHONY: up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware protocols-up protocols-down test-protocols
 
 # Start all services
 up:
@@ -106,3 +106,16 @@ all: lint test build
 
 test-hardware:
 	OPENBLADE_BACKEND=real OPENBLADE_REAL_HARDWARE_ENABLED=true python3 -m pytest tests/hardware/ -v
+
+# NAS protocol rig (SMB/NFS, containerised). Host ports: OB_SMB_PORT / OB_NFS_PORT.
+PROTOCOLS_COMPOSE = docker compose -f deploy/nas-protocols/docker-compose.yml
+
+protocols-up:
+	python -m tests.e2e.protocols.rig
+	OB_SMB_PORT=$${OB_SMB_PORT:-14450} OB_NFS_PORT=$${OB_NFS_PORT:-20490} $(PROTOCOLS_COMPOSE) up -d --build --wait
+
+protocols-down:
+	$(PROTOCOLS_COMPOSE) down -v --remove-orphans
+
+test-protocols:
+	python -m pytest -m protocols tests/e2e/protocols -q
