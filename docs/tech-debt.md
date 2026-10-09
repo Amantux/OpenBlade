@@ -65,20 +65,14 @@ raise.
 
 ## `datetime.utcnow` (deprecated since Python 3.12)
 
-```bash
-grep -roE "datetime\.utcnow\b" --include=*.py openblade tests tools | wc -l   # 54
-grep -rlE "datetime\.utcnow\b" --include=*.py openblade tests tools | wc -l   # 16 files
-```
+Paid down 2026-10-09: every call and SQLAlchemy column default now goes through
+`openblade/domain/clock.py::naive_utcnow()` (same naive-UTC value, no
+deprecation warning). `openblade/api/aml_state.py` keeps its own aware
+`_utcnow()` helper. Verify with:
 
-54 references in 16 files, all under `openblade/` (0 in `tests/` and `tools/`).
-They include both calls and bare references such as SQLAlchemy column defaults
-(`default=datetime.utcnow` in `openblade/catalog/models.py`). The largest
-groups are `openblade/catalog/models.py`, `openblade/catalog/repository.py`
-and `openblade/nas/protocol_gateway.py`. These return naive datetimes. Migrate
-them module by module to `datetime.now(timezone.utc)`, and check every column
-or comparison that mixes naive and aware values before you switch it.
-`openblade/api/aml_state.py` already uses its own aware `_utcnow()` helper and
-is not counted here.
+```bash
+grep -rE "datetime\.utcnow\b" --include=*.py openblade tests tools | grep -v domain/clock.py | wc -l   # 0
+```
 
 ## In-memory job queue
 

@@ -19,6 +19,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from openblade.domain.clock import naive_utcnow
 from openblade.fuse.cache import CacheEntryInUseError
 from openblade.fuse.hydration import HydrationFailedError, HydrationState, Hydrator
 
@@ -93,7 +94,7 @@ class GatewayCredential:
     _hashed_password: str
     allowed_paths: list[str] = field(default_factory=lambda: [InboxPath.GENERAL.value])
     enabled: bool = True
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=naive_utcnow)
     last_seen_at: datetime | None = None
 
     @classmethod
@@ -130,7 +131,7 @@ class GatewayUpload:
     requested_path: str
     routed_path: str
     bytes_uploaded: int
-    uploaded_at: datetime = field(default_factory=datetime.utcnow)
+    uploaded_at: datetime = field(default_factory=naive_utcnow)
 
 
 @dataclass
@@ -214,7 +215,7 @@ class ProtocolGateway:
         if not cred or not cred.enabled:
             return None
         if cred.verify_password(password):
-            cred.last_seen_at = datetime.utcnow()
+            cred.last_seen_at = naive_utcnow()
             return cred
         return None
 
@@ -255,7 +256,7 @@ class ProtocolGateway:
             session_id=secrets.token_hex(16),
             username=username,
             remote_addr=remote_addr,
-            connected_at=datetime.utcnow(),
+            connected_at=naive_utcnow(),
         )
         self._sessions.append(session)
         return session
@@ -287,7 +288,7 @@ class ProtocolGateway:
         session = self._get_session(session_id)
         if session is None:
             return
-        session.disconnected_at = datetime.utcnow()
+        session.disconnected_at = naive_utcnow()
         session.bytes_uploaded = max(session.bytes_uploaded, bytes_uploaded)
         session.files_uploaded = max(session.files_uploaded, files_uploaded)
         session.errors = errors
@@ -337,7 +338,7 @@ class ProtocolGateway:
         """Mark gateway as stopped, closing any active sessions."""
         if self._status is GatewayStatus.DISABLED:
             return
-        now = datetime.utcnow()
+        now = naive_utcnow()
         for session in self._sessions:
             if session.disconnected_at is None:
                 with contextlib.suppress(Exception):

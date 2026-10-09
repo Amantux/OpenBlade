@@ -36,9 +36,9 @@ class LibraryInstance(Base):
     role: Mapped[str] = mapped_column(String, default="primary")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=naive_utcnow, onupdate=naive_utcnow
     )
 
 
@@ -47,7 +47,7 @@ class VolumeGroup(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
     cartridges: Mapped[list[Cartridge]] = relationship(
         "Cartridge", back_populates="volume_group", cascade="save-update"
@@ -76,7 +76,7 @@ class Cartridge(Base):
     used_bytes: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[str] = mapped_column(String, default="in_slot")
     formatted: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
     volume_group: Mapped[VolumeGroup | None] = relationship(
         "VolumeGroup", back_populates="cartridges"
@@ -98,7 +98,7 @@ class FileRecord(Base):
     block_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     shard_profile: Mapped[str | None] = mapped_column(String(32), nullable=True)
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
     volume_group: Mapped[VolumeGroup] = relationship("VolumeGroup", back_populates="file_records")
     instances: Mapped[list[FileInstance]] = relationship(
@@ -121,7 +121,7 @@ class FileInstance(Base):
     state: Mapped[str] = mapped_column(String, default="pending")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     checksum_verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
     file_record: Mapped[FileRecord] = relationship("FileRecord", back_populates="instances")
 
@@ -134,9 +134,9 @@ class Job(Base):
     state: Mapped[str] = mapped_column(String, default="pending")
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=naive_utcnow, onupdate=naive_utcnow
     )
 
     @property
@@ -182,9 +182,9 @@ class AmlUser(Base):
     password: Mapped[str] = mapped_column(String(64), nullable=False)
     role: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     require_password_change: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=naive_utcnow, onupdate=naive_utcnow
     )
 
     @property
@@ -258,9 +258,9 @@ class NasStoragePolicy(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     policy_type: Mapped[str] = mapped_column(String(64), nullable=False)
     config_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=naive_utcnow, onupdate=naive_utcnow
     )
 
 
@@ -272,7 +272,7 @@ class NasCacheDrive(Base):
     root_path: Mapped[str] = mapped_column(String, nullable=False)
     config_json: Mapped[str] = mapped_column(Text, default="{}")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
 
 class NasConfig(Base):
@@ -289,7 +289,7 @@ class NasShare(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     share_type: Mapped[str] = mapped_column(String(32), nullable=False)
     config_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
 
 class NasPool(Base):
@@ -484,7 +484,7 @@ class JobJournalEntry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow)
     event: Mapped[str] = mapped_column(String(64), nullable=False)
     detail_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
