@@ -20,6 +20,7 @@ from openblade.fuse.cache import CacheChecksumError, HydrationCache
 logger = logging.getLogger(__name__)
 
 _UNEXPECTED = "restore failed unexpectedly"
+_UNMOUNTING = "hydration cancelled by unmount"
 
 
 @dataclass
@@ -242,12 +243,19 @@ class Hydrator:
             self._spawn(self._resume, ticket)
             return ticket
         with self._lock:
-            self._pending.setdefault(ticket.tape_key, []).append(ticket)
-            if ticket.tape_key not in self._timers:
-                timer = threading.Timer(self.batch_window_s, self._flush, args=(ticket.tape_key,))
-                timer.daemon = True
-                self._timers[ticket.tape_key] = timer
-                timer.start()
+            closed = self._closed
+            if not closed:
+                self._pending.setdefault(ticket.tape_key, []).append(ticket)
+                if ticket.tape_key not in self._timers:
+                    timer = threading.Timer(
+                        self.batch_window_s, self._flush, args=(ticket.tape_key,)
+                    )
+                    timer.daemon = True
+                    self._timers[ticket.tape_key] = timer
+                    timer.start()
+        if closed:
+            # shutdown() ran after the _closed check above; never strand the ticket.
+            self._fail(ticket, _UNMOUNTING)
         return ticket
 
     def wait(self, ticket: HydrationTicket, timeout: float | None = None) -> bytes:
@@ -275,9 +283,10 @@ class Hydrator:
             timer.cancel()
         for tickets in pending.values():
             for ticket in tickets:
-                self._fail(ticket, "hydration cancelled by unmount")
+                self._fail(ticket, _UNMOUNTING)
+        deadline = time.monotonic() + timeout
         for worker in workers:
-            worker.join(timeout)
+            worker.join(max(0.0, deadline - time.monotonic()))
 
     # -- internals -----------------------------------------------------------
     def _spawn(self, target: Any, *args: Any) -> None:
@@ -291,9 +300,15 @@ class Hydrator:
         with self._lock:
             self._timers.pop(tape_key, None)
             batch = self._pending.pop(tape_key, [])
-            if self._closed or not batch:
-                return
-            self._workers.append(threading.current_thread())
+            closed = self._closed
+            if not closed and batch:
+                self._workers.append(threading.current_thread())
+        if closed:
+            for ticket in batch:
+                self._fail(ticket, _UNMOUNTING)
+            return
+        if not batch:
+            return
         try:
             staged = self.engine.restore_batch(tape_key, [t.catalog_path for t in batch])
         except (HydrationFailedError, OpenBladeError) as exc:

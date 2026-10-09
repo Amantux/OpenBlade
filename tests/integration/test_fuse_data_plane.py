@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -285,3 +286,33 @@ def test_batch_member_is_not_evicted_before_its_waiter_reads_it(catalog, tmp_pat
     assert results == {"/a.bin": FILES["/a.bin"][0], "/b.bin": FILES["/b.bin"][0]}
     assert cache.open_count(tickets[0].checksum) == 0  # waiter pins are released
     assert cache.open_count(tickets[1].checksum) == 0
+
+
+def test_request_racing_shutdown_fails_ticket_instead_of_stranding_it(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    fs = CatalogFilesystem(catalog, cache_dir=str(tmp_path / "cache"))
+    hyd = Hydrator(catalog, fs.cache, FakeEngine(tmp_path / "s"), batch_window_s=0.01)
+    real_tape_key = hyd._tape_key
+
+    def shutdown_mid_request(path, record):  # type: ignore[no-untyped-def]
+        hyd.shutdown(timeout=1)  # lands after request() passed its _closed check
+        return real_tape_key(path, record)
+
+    hyd._tape_key = shutdown_mid_request  # type: ignore[method-assign]
+    ticket = hyd.request("/a.bin")
+    assert ticket.done.wait(2), "ticket stranded by shutdown"
+    assert ticket.error == "hydration cancelled by unmount"
+
+
+def test_shutdown_waits_on_one_overall_deadline(catalog, tmp_path):  # type: ignore[no-untyped-def]
+    fs = CatalogFilesystem(catalog, cache_dir=str(tmp_path / "cache"))
+    engine = FakeEngine(tmp_path / "s")
+    engine.gate.clear()
+    hyd = Hydrator(catalog, fs.cache, engine, batch_window_s=0.01)
+    hyd.request("/a.bin")  # TAPE01
+    hyd.request("/c.bin")  # TAPE02 -> a second blocked worker
+    threading.Event().wait(0.2)
+    started = time.monotonic()
+    hyd.shutdown(timeout=0.4)
+    elapsed = time.monotonic() - started
+    engine.gate.set()
+    assert elapsed < 0.6, f"shutdown took {elapsed:.2f}s for a 0.4s budget"
