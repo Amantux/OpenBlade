@@ -27,8 +27,14 @@ def test_smb_case_sensitive_share_keeps_distinct_names(mounted: Rig) -> None:
 def test_smb_acl_maps_posix_mode(mounted: Rig) -> None:
     res = mounted.sh("smbcacls -N //samba/ro mode640.txt")
     assert res.returncode == 0, res.stderr
-    assert "ACL:Everyone:ALLOWED/0x0/0x0" not in res.stdout or "Unix Group" in res.stdout
-    assert "Unix User\\root:ALLOWED/0x0/RW" in res.stdout, res.stdout
+    # smbcacls prints "ACL:<sid-name>:ALLOWED/<flags>/<perms>". Mode 0640 must map
+    # to owner=RW, group=R, Everyone=no rights. The owner's name is the server's
+    # netbios name (container id), so match on the OWNER: line rather than a literal.
+    lines = res.stdout.splitlines()
+    owner = next(line.split(":", 1)[1] for line in lines if line.startswith("OWNER:"))
+    assert f"ACL:{owner}:ALLOWED/0x0/RW" in lines, res.stdout
+    assert "ACL:Unix Group\\root:ALLOWED/0x0/R" in lines, res.stdout
+    assert "ACL:Everyone:ALLOWED/0x0/" in lines, res.stdout
 
 
 def test_smb_byte_range_lock_conflicts_across_sessions(mounted: Rig) -> None:
