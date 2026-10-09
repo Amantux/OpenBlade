@@ -48,6 +48,8 @@ def render_ganesha_conf(exports: Iterable[NfsExport]) -> str:
         "NFS_CORE_PARAM {\n"
         "  Protocols = 4;\n"
         "  NFS_Port = 2049;\n"
+        "  Enable_NLM = false;\n"
+        "  Enable_RQUOTA = false;\n"
         "}\n"
         "NFSV4 {\n"
         "  Grace_Period = 5;\n"
