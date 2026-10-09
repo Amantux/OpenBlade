@@ -39,6 +39,8 @@ class OpenBladeConfig:
     staging_dir: str = str(_DEFAULT_HOME / "staging")
     restore_dir: str = str(_DEFAULT_HOME / "restore")
     fuse_mount_point: str = str(_DEFAULT_HOME / "mount")
+    fuse_hydrate_timeout_s: float = 300.0
+    fuse_batch_window_ms: int = 250
     ltfs_mount_root: str = str(_DEFAULT_HOME / "ltfs")
     job_timeout_seconds: int = 3600
     changer_timeout_seconds: int = 60
@@ -184,6 +186,12 @@ def load_config() -> OpenBladeConfig:
         staging_dir=os.environ.get("OPENBLADE_STAGING_DIR", str(_DEFAULT_HOME / "staging")),
         restore_dir=os.environ.get("OPENBLADE_RESTORE_DIR", str(_DEFAULT_HOME / "restore")),
         ltfs_mount_root=os.environ.get("OPENBLADE_LTFS_MOUNT_ROOT", str(_DEFAULT_HOME / "ltfs")),
+        fuse_hydrate_timeout_s=float(
+            os.environ.get("OPENBLADE_FUSE_HYDRATE_TIMEOUT", "").strip() or 300.0
+        ),
+        fuse_batch_window_ms=int(
+            os.environ.get("OPENBLADE_FUSE_BATCH_WINDOW_MS", "").strip() or 250
+        ),
         hardware_dry_run=os.environ.get("OPENBLADE_HARDWARE_DRY_RUN", "false").lower() == "true",
         changer_device=os.environ.get("OPENBLADE_CHANGER_DEVICE") or None,
         drive_devices=drive_devices,

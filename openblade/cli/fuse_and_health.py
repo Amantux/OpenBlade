@@ -7,22 +7,26 @@ call. Nothing here is imported at ``main`` import time beyond this module.
 """
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
+from sqlalchemy.orm import Session
 
+from openblade.catalog.repository import CatalogRepository
 from openblade.config import load_config
 from openblade.domain.errors import RealHardwareDisabledError
 from openblade.fuse.filesystem import CatalogFilesystem
+from openblade.fuse.hydration import Hydrator, JobRestoreEngine
 from openblade.fuse.mount import FuseUnavailableError, mount_catalog
 from openblade.hardware.discovery import discover_library
 from openblade.hardware.runner import SafeRunner
 from openblade.hardware.safety import require_real_hardware
 from openblade.hardware.sg import sg_inq
 from openblade.hardware.tapealert import TapeAlertSeverity, read_tape_alerts
+from openblade.jobs.restore import RestoreService
 
 console = Console(highlight=False)
 
@@ -34,6 +38,37 @@ _SEVERITY_STYLE = {
     TapeAlertSeverity.INFORMATION: "cyan",
     TapeAlertSeverity.UNKNOWN: "magenta",
 }
+
+
+def build_data_plane(context: Any, filesystem: CatalogFilesystem) -> Hydrator:
+    """Production FUSE data plane: batched restores into the verified cache.
+
+    Worker threads build their own catalog + RestoreService over a private
+    Session (``JobRestoreEngine``); the CLI's session stays on this thread.
+    """
+    config = context.config
+    bind = context.catalog.session.get_bind()
+
+    def _catalog() -> CatalogRepository:
+        return CatalogRepository(Session(bind=bind, expire_on_commit=False))
+
+    def _service(catalog: CatalogRepository) -> RestoreService:
+        return RestoreService(context.library, context.ltfs, catalog, context.queue)
+
+    engine = JobRestoreEngine(
+        None,
+        context.catalog,
+        Path(config.restore_dir) / "fuse-hydrate",
+        resume_timeout_s=config.fuse_hydrate_timeout_s,
+        catalog_factory=_catalog,
+        restore_service_factory=_service,
+    )
+    return Hydrator(
+        context.catalog,
+        filesystem.cache,
+        engine,
+        batch_window_s=config.fuse_batch_window_ms / 1000.0,
+    )
 
 
 @fuse_app.command("mount")
@@ -67,19 +102,7 @@ def fuse_mount(
     context = _get_context()
     filesystem = CatalogFilesystem(context.catalog, cache_dir=context.config.cache_dir)
 
-    def _hydrate_through_restore(catalog_path: str) -> bytes:
-        """Restore through the existing restore service, then cache the bytes."""
-        record = context.catalog.get_file_record(catalog_path)
-        if record is None:
-            raise FileNotFoundError(catalog_path)
-        staging = Path(context.config.restore_dir) / "fuse-hydrate" / record.id
-        staging.parent.mkdir(parents=True, exist_ok=True)
-        context.restore_service.enqueue(catalog_path, staging)
-        data = staging.read_bytes()
-        filesystem.cache.store(record.checksum_sha256, data)
-        return data
-
-    hydrator: Callable[[str], bytes] | None = _hydrate_through_restore if hydrate else None
+    data_plane = build_data_plane(context, filesystem) if hydrate else None
 
     console.print(
         f"[green]Mounting[/green] catalog at {mountpoint} "
@@ -89,7 +112,7 @@ def fuse_mount(
         mount_catalog(
             filesystem,
             mountpoint,
-            hydrator=hydrator,
+            data_plane=data_plane,
             allow_other=allow_other,
         )
     except (FuseUnavailableError, NotADirectoryError) as exc:
