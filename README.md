@@ -19,19 +19,36 @@ OpenBlade is a simulator-first DIY tape archive controller inspired by iBlade-st
 5. **Continuous verification**: enforce compatibility and regression evidence in CI/CD before changes land on `master`.
 
 ## Layered CI/CD (targeted)
-
+OpenBlade CI/CD is split by layer so that each change runs only the checks that matter for it. A single required check, `ci-gate`, then aggregates the results.
 
 Backend contract suite: `make test-contract` runs `tests/contract/` against every backend pairing (simulator, in-process AML emulator, and real hardware when explicitly enabled). A new backend must pass it before it may be selected via `OPENBLADE_BACKEND`; see docs/test-plan.md "Backend contract suite".
-OpenBlade CI/CD is intentionally split by layer so each change runs only relevant checks:
 
-| Layer | Primary workflow/jobs | Trigger scope |
+**PR lanes (`CI` / `ci.yml`).** These lanes run on pull requests, and `detect-changes` path-filters them:
+
+| Layer | Jobs | Trigger scope |
 | --- | --- | --- |
-| API + backend domain | `CI`: `backend-lint`, `backend-typecheck`, `backend-tests`, `api-aml-integration` | `openblade/**/*.py`, AML integration tests, backend config |
-| Simulator/emulator parity | `CI`: `i3-smoke`; `i3-emulator-compliance`; `emulator-change-gates` | simulator, AML routes, emulator contract/tools, i3 tests, compose/runtime wiring |
-| Frontend/UI | `CI`: `frontend-build-test` (React SPA), `web-flask-smoke` (Flask NAS UI) | `frontend/**`; `openblade/web_flask/**`, `Dockerfile.web`, `docker-compose.yml` |
-| CI/CD policy layer | `CI`: `cicd-workflow-validate` | `.github/workflows/**` |
+| API + backend domain | `backend-lint` (ruff check + format), `backend-typecheck` (`mypy openblade`, strict), `backend-tests`, `api-aml-integration` | `openblade/**/*.py`, AML integration tests, backend config |
+| Simulator/emulator parity | `i3-smoke`; `i3-emulator-compliance`; `emulator-change-gates` | simulator, AML routes, emulator contract/tools, i3 tests, compose/runtime wiring |
+| Frontend/UI | `frontend-build-test` (React SPA), `web-flask-smoke` (Flask NAS UI) | `frontend/**`; `openblade/web_flask/**`, `Dockerfile.web`, `docker-compose.yml` |
+| CI/CD policy | `cicd-workflow-validate`; `workflow-lint` | `.github/workflows/**` |
 
-This keeps checks up to date and targeted while preserving full coverage on workflow dispatch and on emulator-specific workflows.
+- **Blocking.** Lint, format and `backend-typecheck` all block merge. None of these jobs uses `continue-on-error`, and `ci-gate` fails on any required job whose result is not `success` or `skipped`.
+- **Ownership check.** `tools/ci_ownership.py --base origin/master` takes the changed paths from `git diff --name-only origin/master...HEAD`. It maps them through the glob table in `tools/ci_ownership.toml` to these categories: `unit`, `integration`, `safety`, `i3`, `compat`, `frontend`, `docs-only` and `ci-only`. It prints its reasoning, and it fails if a changed `openblade/**` or `tests/**` path has no owning category.
+- **Emulator boot.** The reusable workflow `.github/workflows/_emulator-boot-test.yml` (`workflow_call`; inputs include `timing_profile`, `pytest_args` and `python_version`) boots the emulator, waits for it and runs pytest. `emulator-change-gates.yml` and `i3-emulator-compliance.yml` call it instead of copying those steps.
+
+**Workflow hygiene (`workflow-lint.yml`).** This workflow runs `actionlint` (with shellcheck on inline `run:` blocks), `zizmor` and `yamllint` (`.yamllint`). Every action is pinned to a full commit SHA with a `# vX.Y.Z` comment. Workflows declare `permissions: contents: read` at the top level and grant write scopes per job.
+
+**Nightly (`nightly.yml`).** Runs on a cron schedule and through `workflow_dispatch`. It is not a required PR check, but each of its lanes fails red:
+
+| Lane | Selection |
+| --- | --- |
+| `slow` | `-m slow` |
+| `stress` | `tests/fault` + `-m stress` |
+| `fuzz` | `tests/property` (`-m fuzz`) |
+| `rebuild` | `tests/unit/test_catalog_rebuild*` (`-m rebuild`) |
+| `mutation` | `tools/mutation_run.sh` (mutmut) over the safety-critical modules; ratchet against `mutation/baseline.txt`, so new surviving mutants fail the lane. Run it locally with `make mutation`. |
+
+**i3 timing profiles.** `I3_TIMING_PROFILE` selects a profile for both the emulator and pytest. The names `instant`, `realistic` and `hardware` still work. The new profiles are `normal`, `slow-robotics`, `busy-library`, `intermittent-drive`, `session-expiry`, `rebooting` and `degraded-media`. Profile delays go through a `Clock` protocol (`RealClock`/`VirtualClock` in `tests/i3/timing.py`), so profile tests run deterministically under `VirtualClock` without real sleeps.
 
 ## Quick start
 ```bash

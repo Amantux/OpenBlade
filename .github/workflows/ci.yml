@@ -26,8 +26,10 @@ jobs:
       cicd: ${{ steps.filter.outputs.cicd }}
       wiki: ${{ steps.filter.outputs.wiki }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad  # v3.0.4
         id: filter
         with:
           filters: |
@@ -99,8 +101,10 @@ jobs:
     # goes red, the fix is `ruff check --fix` / `ruff format` with the PINNED
     # version, never a version bump in the same change.
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -122,8 +126,10 @@ jobs:
     # `# type: ignore` comments left in openblade/ (down from 18) carries its
     # justification at the site.
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -136,8 +142,10 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.api == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -162,8 +170,10 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.api == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -185,8 +195,10 @@ jobs:
     env:
       I3_TIMING_PROFILE: instant
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -216,8 +228,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: "20"
           cache: "npm"
@@ -234,17 +248,16 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.webflask == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
       - run: pip install -e '.[dev]'
-      # BLOCKING mypy, scoped to this package alone. `mypy openblade` in
-      # backend-typecheck has to stay advisory because of ~300 pre-existing errors
-      # in the god-file modules; openblade/web_flask is clean under strict mode
-      # today, and this job is what keeps it that way instead of letting it join
-      # the backlog.
+      # BLOCKING mypy, scoped to this package alone, so a web_flask-only change
+      # is gated here too (backend-typecheck is path-filtered to backend paths).
       - run: mypy openblade/web_flask
       # Redundant with backend-tests (tests/unit covers this file) but kept so the
       # job is a complete gate on its own for a web_flask-only change. Seconds.
@@ -260,8 +273,10 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.wiki == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -278,8 +293,10 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.cicd == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip pyyaml yamllint
@@ -297,6 +314,26 @@ jobs:
       - name: yamllint workflows (real YAML errors — see .yamllint)
         run: yamllint -c .yamllint .github/workflows/
 
+  # Changed-path ownership: every changed openblade/** or tests/** path must map
+  # to a test category in tools/ci_ownership.toml, so a new module can't land
+  # outside every CI lane unnoticed. Always runs (not path-filtered).
+  ownership:
+    name: ownership
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Check changed paths have an owning test category
+        env:
+          # PRs diff against their target branch; pushes/dispatch against master.
+          BASE_REF: ${{ github.base_ref || 'master' }}
+        run: python tools/ci_ownership.py --base "origin/$BASE_REF"
+
   # Single always-running aggregation gate. Make THIS the only required
   # branch-protection check (plus operability-gate). It understands a valid
   # `skipped` result from path-filtered jobs and fails on any real failure or
@@ -305,6 +342,7 @@ jobs:
   ci-gate:
     name: ci-gate
     needs:
+      - ownership
       - backend-lint
       - backend-typecheck
       - backend-tests
@@ -326,6 +364,7 @@ jobs:
               *) echo "FAIL  $1=$2"; fail=1 ;;
             esac
           }
+          check ownership            "${{ needs.ownership.result }}"
           check backend-tests        "${{ needs.backend-tests.result }}"
           check api-aml-integration  "${{ needs.api-aml-integration.result }}"
           check i3-smoke             "${{ needs.i3-smoke.result }}"
@@ -360,8 +399,10 @@ jobs:
     env:
       I3_TIMING_PROFILE: instant
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"

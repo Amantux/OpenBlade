@@ -1,13 +1,15 @@
 name: Auto-merge trusted PRs
 
-on:
+# dangerous-triggers is ignored on `on:` below: this workflow runs only the GitHub API via
+# github-script on the trusted-author allowlist; never checks out or executes
+# PR code, which is what makes workflow_run dangerous.
+on:  # zizmor: ignore[dangerous-triggers] -- see comment above
   workflow_run:
     workflows: ["CI"]
     types: [completed]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   merge-trusted-pr:
@@ -15,9 +17,12 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Merge trusted PRs targeting master
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7.1.0
         with:
           script: |
             const owner = context.repo.owner;

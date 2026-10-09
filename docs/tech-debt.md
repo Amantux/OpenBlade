@@ -1,57 +1,92 @@
 # Tracked technical debt
 
-Known, quantified debt that is deliberately not blocking CI, with the safe way to
-pay it down. Advisory CI jobs (`continue-on-error: true`) still run and report;
-they just don't fail the build or block trusted-PR auto-merge.
+Current, verified state only. Every number below was produced by the command
+shown next to it, run from the repo root with the pinned dev toolchain
+(`ruff==0.15.22`, `mypy==2.3.0` from the `dev` extra) on 2026-10-09. If you
+change a number, re-run the command and paste the new result; do not estimate.
 
-## Lint / format backlog — PAID DOWN (2026-09-12)
+## Lint and format: clean and blocking
 
-**This section is history.** The backlog described here is cleared; see
+| Check | Command | Result |
+| --- | --- | --- |
+| Lint | `ruff check .` | `All checks passed!` (0 findings) |
+| Format | `ruff format --check .` | `365 files already formatted` |
+
+Both run in the `backend-lint` job of `.github/workflows/ci.yml`. That job has no
+`continue-on-error`, and `ci-gate` both lists it in `needs:` and fails on any
+result other than `success`/`skipped`, so a lint or format failure blocks merge.
+
+The older note that `openblade/assistant/tools.py` was the one file failing
+`ruff format --check` is no longer true:
+`ruff format --check openblade/assistant/tools.py` reports `1 file already formatted`.
+
+History of how the backlog was paid down:
 [`decisions/2026-09-11-pin-ruff-toolchain.md`](decisions/2026-09-11-pin-ruff-toolchain.md).
 
-What it used to say: ~180 `ruff check` findings + ~160 files needing
-`ruff format`, with `A002` (~68 findings) called out as un-fixable because
-FastAPI path/query params named `id`/`type`/`filter` are the wire contract.
+## Type check: strict, zero errors, blocking
 
-What actually happened: `A002` was added to the `ignore` list as that entry
-recommended, which is why the count fell from ~180 to **13**. Those 13 were then
-hand-fixed (12 real fixes + 1 justified `# noqa: SIM222`), and the 176-file
-format backlog was swept in a single format-only commit verified AST-identical.
-`ruff` is now pinned **exactly** (`ruff==0.15.22` in the `dev` extra), so
-`make lint`, the editor hook, and CI enforce the same rules on the same version
-instead of whatever each happened to resolve.
+| Check | Command (as in `ci.yml`) | Result |
+| --- | --- | --- |
+| Backend | `mypy openblade` (`backend-typecheck`) | `Success: no issues found in 170 source files` |
+| Flask UI | `mypy openblade/web_flask` (`web-flask-smoke`) | `Success: no issues found in 4 source files` |
 
-Two items remain, both deliberate and both scoped:
+`[tool.mypy]` sets `strict = true`. `backend-typecheck` has no
+`continue-on-error`. On this branch it is a required dependency of `ci-gate`:
+it is listed under `needs:`, and the gate's aggregate step checks its result.
+The old "advisory, ~300 errors" entry is obsolete.
 
-- `openblade/assistant/tools.py` is the one file still failing
-  `ruff format --check` — the package has a live owner and was left
-  byte-identical. It needs one `ruff format` pass from that owner.
-- 27 `# noqa` markers reference rules that are **not selected** (`BLE001` x23,
-  `S603`/`S404`/`S310` x4), so they are inert documentation. Enabling those
-  families was measured, not guessed: `BLE` = 44 findings, `S` = 3,748 (3,655 of
-  them `S101`, bare `assert` in tests, which would need a per-file ignore).
-  Do not delete those markers as dead code — they record intent for that work.
+## Remaining `# noqa` markers
 
-Rule for new debt of this kind: pin the tool version at the same time you pin
-the rule set. An unpinned linter makes "is the tree clean?" a question with a
-different answer per machine.
+Inventory command (counts rule codes, which is the same as counting lines here,
+because no marker lists more than one rule):
 
-## Type-check backlog (advisory: `backend-typecheck`)
+```bash
+grep -rhoE "# noqa: ?[A-Z0-9, ]+" --include=*.py openblade tests tools \
+  | sed -E 's/# noqa: ?//' | tr ',' '\n' | tr -d ' ' | grep -v '^$' \
+  | sort | uniq -c | sort -rn
+```
 
-- ~300 `mypy openblade` errors across 51 files, concentrated in the god-file
-  modules (`aml_state.py`, `routes_aml_*.py`).
-- Pay down **per module**, not in one sweep — annotate one file, keep it green,
-  and (eventually) move it to a mypy per-file strict allowlist so it can't
-  regress. Brute-forcing all 300 at once is high-regression-risk and unreviewable.
+| Rule | Count |
+| --- | --- |
+| `BLE001` (blind `except Exception`) | 65 |
+| `B009` (`getattr` with a constant) | 7 |
+| `SIM222` | 1 |
+| `F401` | 1 |
+| `A001` | 1 |
+| **Total** | **75** (openblade 55, tests 20, tools 0) |
 
-## Why the type-check backlog is still advisory
+There are no bare `# noqa` markers without a rule code (0 matches for
+`# noqa` not followed by `:`). `BLE` is now in the selected rule set
+(`[tool.ruff.lint] select`), so the `BLE001` markers are active suppressions,
+not inert documentation as an earlier version of this file said. Each marker is
+supposed to carry a written reason (project rule). Paying them down means
+narrowing each `except Exception` to the typed errors the call can actually
+raise.
 
-Hand-fixing 300 type errors across wire-contract code in one sweep is a large,
-unreviewable, high-regression change. `backend-typecheck` therefore stays
-`continue-on-error: true`. The required checks (`backend-tests`, `i3-smoke`) and
-the `operability-gate` remain hard gates.
+## `datetime.utcnow` (deprecated since Python 3.12)
 
-`backend-lint`'s `continue-on-error` no longer has a justification and should be
-removed — the exact workflow diff is in
-[`decisions/2026-09-11-pin-ruff-toolchain.md`](decisions/2026-09-11-pin-ruff-toolchain.md);
-it needs an owner of `.github/workflows/**` to apply it.
+```bash
+grep -roE "datetime\.utcnow\b" --include=*.py openblade tests tools | wc -l   # 54
+grep -rlE "datetime\.utcnow\b" --include=*.py openblade tests tools | wc -l   # 16 files
+```
+
+54 references in 16 files, all under `openblade/` (0 in `tests/` and `tools/`).
+They include both calls and bare references such as SQLAlchemy column defaults
+(`default=datetime.utcnow` in `openblade/catalog/models.py`). The largest
+groups are `openblade/catalog/models.py`, `openblade/catalog/repository.py`
+and `openblade/nas/protocol_gateway.py`. These return naive datetimes. Migrate
+them module by module to `datetime.now(timezone.utc)`, and check every column
+or comparison that mixes naive and aware values before you switch it.
+`openblade/api/aml_state.py` already uses its own aware `_utcnow()` helper and
+is not counted here.
+
+## In-memory job queue
+
+`openblade/jobs/queue.py:23` (`class JobQueue`) keeps jobs, drive owners and the
+changer owner in process memory (`dict`s guarded by a `threading.RLock`). It is
+created once in `openblade/bootstrap.py:614`. Nothing in `queue.py` persists
+anything, so a process restart loses queued and running job records and the
+ownership map. Any durable recovery has to come from elsewhere (for example,
+drive leases and `openblade/jobs/recovery.py`), not from the queue. The queue
+also assumes a single process, so running more than one worker process would
+give each one its own independent queue.

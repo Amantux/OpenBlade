@@ -57,3 +57,4 @@ Thumbs.db
 # this into the repo root by default (OPENBLADE_PERF_RESULTS_FILE), so every
 # run of the hardware suite would otherwise dirty the worktree.
 .openblade_perf_results.json
+mutants/

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 .ONESHELL:
-.PHONY: up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration test-contract seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware protocols-up protocols-down test-protocols
+.PHONY: mutation up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration test-contract seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware protocols-up protocols-down test-protocols
 
 # Start all services
 up:
@@ -124,3 +124,7 @@ protocols-down:
 
 test-protocols:
 	python -m pytest -m protocols tests/e2e/protocols -q
+
+# Mutation lane (nightly); see tools/mutation_run.sh and mutation/baseline.txt
+mutation:
+	PYTHON=$${PYTHON:-python} MUTATION_TIMEOUT=$${MUTATION_TIMEOUT:-3600} tools/mutation_run.sh

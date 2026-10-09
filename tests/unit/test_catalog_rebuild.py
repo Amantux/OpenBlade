@@ -32,6 +32,8 @@ from openblade.nas.types import (
     RebuildRunStatus,
 )
 
+pytestmark = pytest.mark.rebuild
+
 client = TestClient(app)
 
 

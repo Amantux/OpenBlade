@@ -22,6 +22,8 @@ from openblade.simulator.faults import FaultConfig, FaultType
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 
+pytestmark = pytest.mark.stress
+
 
 def _confirmation(barcode: str):
     from openblade.domain.policies import FormatConfirmation, SafetyToken
