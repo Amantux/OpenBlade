@@ -59,3 +59,9 @@ exact body match (use for `captured` cases where the full body is authoritative)
 3. Run the harness. If the emulator diverges, either the emulator is wrong (fix it)
    or the capture reveals a real contract we hadn't modeled (fix the emulator to
    match). The emulator is required to satisfy the corpus — not the reverse.
+
+## iblade-rev-a
+
+`iblade-rev-a/` is a scaffold profile for the Rev A (2017) iBlade surface. All its
+cases are `inferred`; see `iblade-rev-a/README.md`. The harness discovers it
+automatically (it globs `compatibility/**/*.json`).

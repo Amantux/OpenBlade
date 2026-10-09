@@ -1,0 +1,10 @@
+{
+  "id": "aml-auth-login-malformed-xml",
+  "profile": "scalar-i3-341g",
+  "source": "inferred",
+  "firmware": "341G",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "fidelity_notes": "Body sent with Content-Type application/xml but is not valid XML (the harness serialises json=), so it exercises the malformed-XML 400. A true XXE (DOCTYPE/ENTITY) case needs raw-body support in the harness; covered in integration tests instead.",
+  "request": { "method": "POST", "path": "/aml/users/login", "json": { "name": "admin", "password": "password" }, "headers": { "Content-Type": "application/xml" } },
+  "expected": { "status": 400, "json_contains": { "code": 400, "summary": "Malformed XML login payload" } }
+}

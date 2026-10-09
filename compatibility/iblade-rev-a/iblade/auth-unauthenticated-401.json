@@ -1,0 +1,10 @@
+{
+  "id": "iblade-unauthenticated-401",
+  "profile": "iblade-rev-a",
+  "source": "inferred",
+  "firmware": "RevA",
+  "manual_ref": "iBlade Rev A (Sep 2017), scaffold",
+  "fidelity_notes": "Scaffold: unauthenticated request is rejected with 401. Unverified.",
+  "request": { "method": "GET", "path": "/aml/physicalLibrary/elements" },
+  "expected": { "status": 401 }
+}

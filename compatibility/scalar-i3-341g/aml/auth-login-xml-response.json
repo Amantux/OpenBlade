@@ -1,0 +1,10 @@
+{
+  "id": "aml-auth-login-xml-response",
+  "profile": "scalar-i3-341g",
+  "source": "inferred",
+  "firmware": "341G",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "fidelity_notes": "XML response (root WSResultCode) when Accept names an XML type and not application/json. The harness only parses JSON bodies and cannot send a raw XML request body, so this checks status only; the XML request path and XXE rejection are covered in tests/integration/test_aml_auth_fidelity.py.",
+  "request": { "method": "POST", "path": "/aml/users/login", "json": { "name": "admin", "password": "password" }, "headers": { "Accept": "application/xml" } },
+  "expected": { "status": 200 }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "aml-auth-login-missing-content-type",
+  "profile": "scalar-i3-341g",
+  "source": "inferred",
+  "firmware": "341G",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "fidelity_notes": "Missing Content-Type on login returns 415. Inferred; unverified against an appliance.",
+  "request": { "method": "POST", "path": "/aml/users/login" },
+  "expected": { "status": 415, "json_contains": { "code": 415, "description": "Error", "summary": "Unsupported or missing Content-Type" } }
+}
