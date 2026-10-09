@@ -1,0 +1,18 @@
+# OpenBlade staging stack -- ALWAYS pinned by digest, never by tag.
+# The release workflow (and scripts/deploy.py rollback) set OPENBLADE_IMAGE to
+#   ghcr.io/amantux/openblade@sha256:<64 hex>
+# Compose refuses to start if it is unset, so a mutable tag can't sneak in.
+services:
+  openblade:
+    image: ${OPENBLADE_IMAGE:?set OPENBLADE_IMAGE to ghcr.io/amantux/openblade@sha256:<digest>}
+    ports:
+      - "8000:8000"
+    environment:
+      OPENBLADE_ENV: staging
+      OPENBLADE_DB_URL: sqlite:////data/openblade.db
+    volumes:
+      - openblade-staging-data:/data
+    restart: unless-stopped
+
+volumes:
+  openblade-staging-data:

@@ -1,14 +1,15 @@
 name: Release
 
-# Tag-triggered release: builds the controller image, pushes it to GHCR, and
-# cuts a GitHub Release from the tag. Runs on `v*` tag pushes only -- it never
+# Tag-triggered release: build once -> SBOM + vuln scan -> sign + provenance ->
+# verify -> staging (+ suites) -> approval -> production, all by image DIGEST.
+# Stage-by-stage rationale and the rollback rule: docs/runbooks/release.md. Runs on `v*` tag pushes only -- it never
 # runs on a branch push, so it cannot race the version-bump automation in
 # other workflows.
 #
 # NOTE: this workflow has never been exercised by an actual tag push (no `v*`
 # tag exists on this repo yet). The first real run is what proves the GHCR
 # login/push and release-notes generation actually work end to end; until
-# then, treat it as reviewed-but-unverified. See docs/wiki/guides/releasing.md
+# then, treat it as reviewed-but-unverified. See docs/runbooks/release.md
 # for what to check if that first run fails, and keep changes to this file
 # small and easy to bisect for exactly that reason.
 
@@ -29,64 +30,256 @@ permissions:
   contents: read
 
 jobs:
-  release:
-    name: build-and-release
+  # 1. Build ONCE. Every later job consumes needs.build.outputs.digest, never a tag.
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # to create the GitHub Release from the tag
-      packages: write  # to push images to ghcr.io
+      contents: read
+      packages: write  # push the image to ghcr.io
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
       - name: Derive version from the tag
         id: version
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          version="${tag#v}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
       - name: Cross-check tag against pyproject [project] version
         run: |
           pyproject_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           if [ "$pyproject_version" != "${{ steps.version.outputs.version }}" ]; then
-            echo "::error::tag v${{ steps.version.outputs.version }} does not match pyproject version ${pyproject_version} -- bump pyproject.toml and re-tag"
+            echo "::error::tag does not match pyproject version ${pyproject_version} -- bump pyproject.toml and re-tag"
             exit 1
           fi
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - name: Build wheel
+        run: python -m pip install build && python -m build --wheel --outdir dist/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wheel
+          path: dist/*.whl
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Controller image: the root Dockerfile (FastAPI/Typer app). This is the
-      # only image this workflow builds -- see the Dockerfile.web note below.
-      - name: Build and push controller image
-        uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build and push controller image (once)
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: |
-            ghcr.io/amantux/openblade:${{ steps.version.outputs.version }}
-            ghcr.io/amantux/openblade:latest
+          tags: ghcr.io/amantux/openblade:${{ steps.version.outputs.version }}
 
-      # `Dockerfile.web` is not tracked on master as of this workflow's
-      # authoring (only `frontend/Dockerfile` exists, consumed by
-      # docker-compose's `web` service, not published standalone to GHCR).
-      # If/when a top-level `Dockerfile.web` is added for a standalone web
-      # image, add a matching build-push step here tagged
-      # `ghcr.io/amantux/openblade-web:{version,latest}` -- do not invent one
-      # now.
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+  # 2 + 3. SBOMs (image spdx-json, wheel cyclonedx) and vuln scan; HIGH+ fails.
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ghcr.io/amantux/openblade
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ steps.version.outputs.tag }}
+          python-version: "3.12"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wheel
+          path: dist/
+      - name: Resolve wheel dependencies
+        run: |
+          python -m venv /tmp/rel
+          /tmp/rel/bin/pip install dist/*.whl
+          /tmp/rel/bin/pip freeze --exclude openblade > resolved-requirements.txt
+          python -m pip install pip-audit
+      - name: Wheel SBOM (CycloneDX)
+        run: pip-audit -r resolved-requirements.txt --no-deps --disable-pip -f cyclonedx-json -o wheel-sbom.cdx.json || true
+      - name: pip-audit (fails on any known vulnerability)
+        run: pip-audit -r resolved-requirements.txt --no-deps --disable-pip --strict
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image SBOM (SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+          format: spdx-json
+          output-file: image-sbom.spdx.json
+          upload-artifact: false
+      - name: Trivy image scan by digest (CRITICAL/HIGH fail the release)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          trivyignores: .trivyignore
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: |
+            image-sbom.spdx.json
+            wheel-sbom.cdx.json
+
+  # 4. Keyless sign + SLSA provenance. id-token: write exists ONLY on this job.
+  sign:
+    needs: [build, scan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # push signature + attestation to ghcr.io
+      id-token: write      # OIDC for keyless signing
+      attestations: write  # SLSA provenance
+    env:
+      IMAGE: ghcr.io/amantux/openblade
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: cosign sign by digest
+        run: cosign sign --yes "${IMAGE}@${{ needs.build.outputs.digest }}"
+      - name: SLSA build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ needs.build.outputs.digest }}
+          push-to-registry: true
+
+  verify:
+    needs: [build, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ghcr.io/amantux/openblade
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: cosign verify (expected release identity)
+        run: >-
+          cosign verify
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          --certificate-identity-regexp '^https://github\.com/Amantux/openblade/\.github/workflows/release\.yml@refs/tags/v.+$'
+          "${IMAGE}@${{ needs.build.outputs.digest }}"
+
+  release:
+    needs: [build, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the GitHub Release
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: assets/
+          merge-multiple: true
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           generate_release_notes: true
+          body: "Image: `ghcr.io/amantux/openblade@${{ needs.build.outputs.digest }}`"
+          files: assets/*
+
+  # 5 + 6. Staging: deploy the digest, read-only postcheck, suites, rollback on failure.
+  deploy-staging:
+    needs: [build, verify]
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      packages: read
+    env:
+      OPENBLADE_IMAGE: ghcr.io/amantux/openblade@${{ needs.build.outputs.digest }}
+      OPENBLADE_ENV: staging
+      I3_TIMING_PROFILE: instant
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wheel
+          path: dist/
+      - name: Install the released wheel (+ test extras)
+        run: pip install "$(ls dist/*.whl)[dev]"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: precheck -> deploy -> postcheck
+        run: >-
+          python scripts/deploy.py
+          --deploy-cmd "docker compose -f deploy/staging/docker-compose.yml up -d --wait"
+          --base-url http://localhost:8000
+      - name: Read-only appliance postcheck
+        id: postcheck
+        run: python scripts/deploy.py postcheck --base-url http://localhost:8000 --read-only-appliance-checks
+      - name: Suites (emulator smoke, NAS journey, rebuild, restore)
+        run: >-
+          pytest -q --tb=short
+          tests/i3/test_01_auth.py tests/i3/test_02_inventory.py tests/i3/test_03_changer.py
+          tests/i3/test_12_multi_library.py tests/i3/test_14_emulator_profile.py
+          tests/e2e/test_nas_journey.py tests/unit/test_catalog_rebuild.py
+          tests/unit/test_catalog_rebuild_worker.py tests/e2e/test_mock_archive_restore.py
+      - name: Rollback on postcheck failure (application code only)
+        if: failure() && steps.postcheck.outcome == 'failure' && vars.STAGING_LAST_GOOD_DIGEST != ''
+        run: >-
+          python scripts/deploy.py rollback --to "${{ vars.STAGING_LAST_GOOD_DIGEST }}"
+          --deploy-cmd "docker compose -f deploy/staging/docker-compose.yml up -d --wait"
+
+  # Required reviewers on the `production` environment are the approval gate
+  # (repo Settings -> Environments); this job waits there before any step runs.
+  deploy-production:
+    needs: [build, deploy-staging]
+    runs-on: [self-hosted, openblade-production]
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ghcr.io/amantux/openblade
+      OPENBLADE_IMAGE: ghcr.io/amantux/openblade@${{ needs.build.outputs.digest }}
+      OPENBLADE_ENV: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: cosign verify (expected release identity)
+        run: >-
+          cosign verify
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          --certificate-identity-regexp '^https://github\.com/Amantux/openblade/\.github/workflows/release\.yml@refs/tags/v.+$'
+          "${IMAGE}@${{ needs.build.outputs.digest }}"
+      - name: precheck -> deploy -> postcheck (same digest as staging)
+        run: >-
+          python3 scripts/deploy.py
+          --deploy-cmd "docker compose -f deploy/production/docker-compose.yml up -d --wait"
+          --base-url http://localhost:8000
+      - name: Read-only appliance postcheck
+        id: postcheck
+        run: python3 scripts/deploy.py postcheck --base-url http://localhost:8000 --read-only-appliance-checks
+      - name: Rollback on postcheck failure (application code only)
+        if: failure() && steps.postcheck.outcome == 'failure' && vars.PRODUCTION_LAST_GOOD_DIGEST != ''
+        run: >-
+          python3 scripts/deploy.py rollback --to "${{ vars.PRODUCTION_LAST_GOOD_DIGEST }}"
+          --deploy-cmd "docker compose -f deploy/production/docker-compose.yml up -d --wait"
