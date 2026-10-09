@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from openblade.domain.clock import naive_utcnow
 
 MANIFEST_SCHEMA_V1 = "openblade.manifest.v1"
 MANIFEST_SCHEMA_V2 = "openblade.manifest.v2"
@@ -367,4 +368,4 @@ class TapeMetadataWriter:
 
     @staticmethod
     def _utcnow_iso() -> str:
-        return datetime.utcnow().isoformat() + "Z"
+        return naive_utcnow().isoformat() + "Z"

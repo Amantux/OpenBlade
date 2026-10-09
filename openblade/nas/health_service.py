@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from datetime import datetime
 from typing import Any
 
 import structlog
@@ -12,6 +11,7 @@ from sqlalchemy import func, select
 
 from openblade.catalog.models import Cartridge, NasDataset, NasFileRecord, PathMapping
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.clock import naive_utcnow
 from openblade.nas.types import (
     CatalogStatusResponse,
     ComponentHealth,
@@ -31,7 +31,7 @@ _STATUS_PRIORITY = {
 
 
 def _utcnow_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return naive_utcnow().isoformat() + "Z"
 
 
 class HealthService:

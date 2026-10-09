@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import cast
 from uuid import uuid4
 
 from openblade.catalog.models import NasDataset as NasDatasetRow
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.clock import naive_utcnow
 from openblade.domain.protection import ProtectionPolicy
 from openblade.nas.catalog_shard import (
     CatalogShard,
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 def _utcnow_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return naive_utcnow().isoformat() + "Z"
 
 
 # The catalog rows below come back as `dict[str, object]` (serialized from the

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from openblade.domain.clock import naive_utcnow
 from openblade.domain.protection import ProtectionPolicy
 from openblade.nas.media import Cartridge, MediaGeneration
 
@@ -887,8 +887,8 @@ class PathMappingRecord(BaseModel):
     size: int = 0
     checksum: str = ""
     last_seen_at: str = ""
-    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
-    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    created_at: str = Field(default_factory=lambda: naive_utcnow().isoformat() + "Z")
+    updated_at: str = Field(default_factory=lambda: naive_utcnow().isoformat() + "Z")
 
     @field_validator("logical_path", mode="before")
     @classmethod

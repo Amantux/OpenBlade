@@ -10,6 +10,7 @@ from typing import Any
 import structlog
 
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.clock import naive_utcnow
 from openblade.nas.types import (
     CreateTokenRequest,
     CreateTokenResult,
@@ -279,4 +280,4 @@ class RbacService:
         return value
 
     def _utcnow_iso(self) -> str:
-        return datetime.utcnow().isoformat()
+        return naive_utcnow().isoformat()

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
+from openblade.domain.clock import naive_utcnow
 from openblade.nas.service import NasService
 from openblade.nas.types import NasFileState
 
@@ -23,7 +23,7 @@ class FuseHook:
     def _log_access(self, *, pool_id: str, logical_path: str, state: str, action: str) -> None:
         self._access_log.append(
             {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": naive_utcnow().isoformat() + "Z",
                 "pool_id": pool_id,
                 "path": logical_path,
                 "state": state,

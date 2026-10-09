@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 from pydantic import BaseModel, Field, ValidationError
 
+from openblade.domain.clock import naive_utcnow
 from openblade.nas.catalog_shard import CatalogShard, CatalogShardWriter
 from openblade.nas.ltfs_manifest import (
     MANIFEST_SCHEMA,
@@ -237,7 +237,7 @@ class VersionedManifestWriter:
         """
         self.writer.ensure_openblade_dirs(barcode)
         self.writer._ensure_dir(barcode, self.VERSIONS_DIR)
-        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        timestamp = naive_utcnow().strftime("%Y%m%dT%H%M%SZ")
         temp_path = f"{self.VERSIONS_DIR}/manifest.{timestamp}.tmp"
         self.writer._write_json(barcode, temp_path, manifest.model_dump(by_alias=True))
         return temp_path

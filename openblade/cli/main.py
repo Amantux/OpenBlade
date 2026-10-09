@@ -21,6 +21,7 @@ from openblade.bootstrap import AppContext, create_context, reset_context
 from openblade.cli.assist import assist as assist_command
 from openblade.cli.fuse_and_health import register as register_fuse_and_health
 from openblade.config import OpenBladeConfig, load_config
+from openblade.domain.clock import naive_utcnow
 from openblade.domain.errors import (
     CartridgeNotFoundError,
     DriveCorrelationError,
@@ -1070,7 +1071,7 @@ def catalog_backup(
     """
     context = _get_context()
     dest.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = naive_utcnow().strftime("%Y%m%dT%H%M%SZ")
     gz_path = dest / f"openblade-{timestamp}.db.gz"
     workdir = Path(tempfile.mkdtemp(prefix="openblade-backup-"))
     try:

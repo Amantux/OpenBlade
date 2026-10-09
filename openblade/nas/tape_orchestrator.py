@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import threading
-from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any, cast
 from uuid import uuid4
@@ -12,6 +11,7 @@ from uuid import uuid4
 import structlog
 
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.clock import naive_utcnow
 from openblade.domain.errors import (
     ChecksumMismatchError,
     ExportRefusedError,
@@ -670,4 +670,4 @@ def _required_int(extras: dict[str, Any], key: str, op_name: str) -> int:
 
 
 def _utcnow_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return naive_utcnow().isoformat() + "Z"

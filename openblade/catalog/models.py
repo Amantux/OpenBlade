@@ -18,6 +18,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from openblade.domain.clock import naive_utcnow
+
 
 class Base(DeclarativeBase):
     """Base class for catalog ORM models."""
@@ -197,8 +199,8 @@ class RbacRole(Base):
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     permissions: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
-    updated_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
 
 
 class RbacUser(Base):
@@ -213,8 +215,8 @@ class RbacUser(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     api_token_ids: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
-    updated_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
     last_login_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -227,7 +229,7 @@ class RbacApiToken(Base):
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     permissions: Mapped[str] = mapped_column(Text, default="[]")
     expires_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
     last_used_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -244,7 +246,7 @@ class RbacAuditEvent(Base):
     outcome: Mapped[str] = mapped_column(String, default="")
     details: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat(), index=True
+        Text, default=lambda: naive_utcnow().isoformat(), index=True
     )
     ip_address: Mapped[str | None] = mapped_column(String, nullable=True)
 
@@ -374,10 +376,10 @@ class PathMapping(Base):
     checksum: Mapped[str | None] = mapped_column(String, nullable=True)
     last_seen_at: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(
-        String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z"
+        String, nullable=False, default=lambda: naive_utcnow().isoformat() + "Z"
     )
     updated_at: Mapped[str] = mapped_column(
-        String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z"
+        String, nullable=False, default=lambda: naive_utcnow().isoformat() + "Z"
     )
 
     __table_args__ = (UniqueConstraint("logical_path", "pool_id", name="uq_path_pool"),)
@@ -397,12 +399,8 @@ class CatalogRebuildRun(Base):
     datasets_recovered: Mapped[int] = mapped_column(Integer, default=0)
     path_mappings_recovered: Mapped[int] = mapped_column(Integer, default=0)
     error_summary: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
-    )
-    updated_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
-    )
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat() + "Z")
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat() + "Z")
     completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -416,9 +414,7 @@ class ManifestVersion(Base):
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     file_count: Mapped[int] = mapped_column(Integer, default=0)
     is_current: Mapped[bool] = mapped_column(Boolean, default=False)
-    recorded_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
-    )
+    recorded_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat() + "Z")
 
 
 class NasRestoreJob(Base):

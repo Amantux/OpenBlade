@@ -17,6 +17,7 @@ from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
 from openblade.catalog.models import AmlUser
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.clock import naive_utcnow
 from openblade.domain.models import MountHandle, MountMode
 from openblade.domain.wire import coerce_int
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
@@ -220,7 +221,7 @@ def _manifest_payload(service: NasService, dataset_id: str) -> dict[str, object]
         ],
         "total_files": detail["file_count"],
         "total_bytes": detail["total_bytes"],
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": naive_utcnow().isoformat() + "Z",
     }
 
 
@@ -237,7 +238,7 @@ def _report_payload(service: NasService, dataset_id: str) -> dict[str, object]:
             for record in records
         ],
         "checksums": {record.relative_path: record.checksum_sha256 for record in records},
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": naive_utcnow().isoformat() + "Z",
     }
 
 

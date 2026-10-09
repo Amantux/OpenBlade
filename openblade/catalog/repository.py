@@ -42,6 +42,7 @@ from openblade.catalog.models import (
     TapeOpLog,
     VolumeGroup,
 )
+from openblade.domain.clock import naive_utcnow
 from openblade.domain.errors import FileNotFoundError
 from openblade.domain.models import DriveLease, FileInstanceState
 from openblade.domain.policies import SafetyToken
@@ -115,7 +116,7 @@ def _load_json_value(value: str | None, default: object) -> object:
 
 
 def _utcnow_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return naive_utcnow().isoformat()
 
 
 @dataclass(frozen=True)
@@ -669,7 +670,7 @@ class CatalogRepository:
         if instance is None:
             raise FileNotFoundError(f"File instance {instance_id} not found")
         instance.state = FileInstanceState.ARCHIVED.value
-        instance.archived_at = datetime.utcnow()
+        instance.archived_at = naive_utcnow()
         instance.checksum_verified = checksum_verified
         self.session.commit()
 
@@ -692,7 +693,7 @@ class CatalogRepository:
         """Append one event to ``job_id``'s journal and commit."""
         entry = JobJournalEntry(
             job_id=job_id,
-            at=datetime.utcnow(),
+            at=naive_utcnow(),
             event=event,
             detail_json=json.dumps(dict(detail or {}), sort_keys=True, default=str),
         )
@@ -739,7 +740,7 @@ class CatalogRepository:
         self.session.add(
             JobJournalEntry(
                 job_id=job_id,
-                at=datetime.utcnow(),
+                at=naive_utcnow(),
                 event=_SHARD_STAGED_EVENT,
                 detail_json=json.dumps(
                     {
@@ -819,7 +820,7 @@ class CatalogRepository:
         """
         verifying = frozenset({FileInstanceState.VERIFYING.value})
         instances = self._load_instances_in(instance_ids, verifying)
-        now = datetime.utcnow()
+        now = naive_utcnow()
         for instance in instances:
             instance.state = FileInstanceState.ARCHIVED.value
             instance.archived_at = now
@@ -839,7 +840,7 @@ class CatalogRepository:
             raise FileNotFoundError(f"Job {job_id} not found")
         job.state = state
         job.error = error
-        job.updated_at = datetime.utcnow()
+        job.updated_at = naive_utcnow()
         self.session.commit()
 
     def get_job(self, job_id: str) -> Job | None:
@@ -946,7 +947,7 @@ class CatalogRepository:
         policy.name = parsed.name
         policy.policy_type = parsed.policy_type
         policy.config_json = json.dumps(payload)
-        policy.updated_at = datetime.utcnow()
+        policy.updated_at = naive_utcnow()
         self.session.commit()
         self.session.refresh(policy)
         return policy
