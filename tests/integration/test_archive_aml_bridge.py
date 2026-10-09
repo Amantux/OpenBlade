@@ -168,7 +168,7 @@ def test_archive_failure_bridges_into_aml_jobs_events_and_resets_drive_state(
     monkeypatch.setattr(context.ltfs, "write_file", original_write_file)
 
     jobs = client.get("/aml/jobs").json()["jobList"]["job"]
-    aml_job = next(job for job in jobs if job["result"] == "archive bridge boom")
+    aml_job = next(job for job in jobs if job["result"] == "Job failed (RuntimeError); see server logs for detail")
     assert aml_job["type"] == "archive"
     assert aml_job["status"] == "failed"
 
@@ -179,7 +179,7 @@ def test_archive_failure_bridges_into_aml_jobs_events_and_resets_drive_state(
         if event["component"] == "archive" and event["details"].get("jobId") == aml_job["id"]
     )
     assert failure_event["severity"] == "error"
-    assert failure_event["details"]["error"] == "archive bridge boom"
+    assert failure_event["details"]["error"] == "Job failed (RuntimeError); see server logs for detail"
 
     drive = (
         client.get("/aml/drive/DRV-001").json().get("drive")
@@ -225,7 +225,7 @@ def test_restore_failure_bridges_into_aml_jobs_and_events(
     assert response.status_code == 500
 
     jobs = client.get("/aml/jobs").json()["jobList"]["job"]
-    aml_job = next(job for job in jobs if job["result"] == "restore bridge boom")
+    aml_job = next(job for job in jobs if job["result"] == "Job failed (RuntimeError); see server logs for detail")
     assert aml_job["type"] == "restore"
     assert aml_job["status"] == "failed"
 
@@ -236,7 +236,7 @@ def test_restore_failure_bridges_into_aml_jobs_and_events(
         if event["component"] == "restore" and event["details"].get("jobId") == aml_job["id"]
     )
     assert failure_event["severity"] == "error"
-    assert failure_event["details"]["error"] == "restore bridge boom"
+    assert failure_event["details"]["error"] == "Job failed (RuntimeError); see server logs for detail"
     assert failure_event["details"]["catalogPath"] == "/photos/restore.txt"
     assert archived_file.read_text() == "restore aml bridge"
 

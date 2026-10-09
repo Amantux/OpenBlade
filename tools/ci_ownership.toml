@@ -35,6 +35,14 @@ glob = "tests/hardware/*"
 categories = ["integration"]
 
 [[rule]]
+glob = "tests/contract/*"
+categories = ["integration"]
+
+[[rule]]
+glob = "tests/test_nas_protocol_render.py"
+categories = ["unit"]
+
+[[rule]]
 glob = "tests/safety/*"
 categories = ["safety"]
 
