@@ -205,6 +205,45 @@ policy-resolution helper for ingest and has nothing to do with mounting.
 
 ---
 
+## Protocol test rig
+
+`deploy/nas-protocols/docker-compose.yml` brings up a throwaway SMB and NFS
+stack so the protocol exports can be exercised by real clients. Services:
+
+- `samba` — serves shares from an `smb.conf` rendered by `openblade/nas/samba.py`.
+- `nfs-ganesha` — serves exports from a config rendered by `openblade/nas/nfs.py`.
+- `client` — a privileged container that mounts the NFS export internally
+  (mounting needs privileges the CI runner's test process does not have).
+
+Both config files are rendered from `NasShare` records, so the rig tests the
+renderers' output rather than hand-written configs.
+
+Run it:
+
+```bash
+make protocols-up && make test-protocols && make protocols-down
+```
+
+`protocols-up` builds, starts and waits for healthy; `test-protocols` runs
+`python -m pytest -m protocols tests/e2e/protocols -q`; `protocols-down` tears
+down with `-v`. Host ports come from `OB_SMB_PORT` and `OB_NFS_PORT`. Tests
+carry the `protocols` marker and skip, with a reason naming the missing
+capability, when the rig is not available.
+
+**What the rig simulates.** The rig contains a hydrator shim, not the real
+hydrator. The shim models a tape recall: a stub file becomes real content after
+a delay, or never does for an offline cartridge. It exists to check how SMB and
+NFS clients behave while a read blocks or times out. The real hydrator is the
+FUSE path described above, and it is not exercised by the rig, so rig results
+say nothing about actual recall from tape.
+
+**CI.** `.github/workflows/nas-protocols.yml` runs the rig nightly and on manual
+dispatch. It is not triggered by pull requests or pushes and is not a required
+check. Per-scenario results are recorded by CI runs; on failure the workflow
+uploads the compose logs as an artifact.
+
+---
+
 ## Doc corrections
 
 - `docs/fuse.md` calls this "a lightweight namespace abstraction over the
