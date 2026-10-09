@@ -73,15 +73,15 @@ Other limits, stated rather than hidden:
 |---|---|
 | `OPENBLADE_FUSE_MOUNT_POINT` | The config field `fuse_mount_point` exists, is **read by nothing**, and has no environment override. `openblade fuse mount` takes the mount point as an argument. |
 | A FUSE mount of the **NAS** namespace | **No.** Only the catalog namespace is mountable. |
-| An SMB (Samba) server | **No.** `openblade/nas/samba.py` is a 15-line class whose only method renders a 3-line `smb.conf` stanza. It is referenced by nothing — not by the app, not by tests. |
-| An NFS server | **No.** Same shape: `nfs.py` renders one `/etc/exports` line and is referenced by nothing. |
+| An SMB (Samba) server | **Not in the image.** The protocol rig lives in `deploy/nas-protocols`; see it for status. |
+| An NFS server | **Not in the image.** See `deploy/nas-protocols`. |
 | An SFTP listener | **Effectively no.** See below. |
-| `libfuse` in the shipped image | **No.** The extra and `libfuse2` are a host-side install; the container does not ship them. |
+| `libfuse` in the shipped image | `fuse3` is now apt-installed in the Dockerfile. The `fuse` Python extra (fusepy, libfuse2 API) and `/dev/fuse` + `SYS_ADMIN` at runtime are still the operator's job — unverified in a container. |
 
 The `nas_shares` table and the `/nas/shares` CRUD endpoints store share
 definitions as **metadata only**. Nothing renders or applies them.
 
-The code itself says so — `openblade/nas/fuse_hook.py`:
+Hydration for the **catalog** mount is now real (`openblade/fuse/hydration.py`, see `docs/fuse.md`). The NAS-pool hook below is still the old stub — `openblade/nas/fuse_hook.py`:
 
 > Stub for optional FUSE virtual filesystem integration. In v1, this is a no-op
 > stub that records access attempts and returns appropriate offline/hydrating
