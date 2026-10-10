@@ -5,7 +5,7 @@ ARG ROLE
 RUN apt-get update \
  && if [ "$ROLE" = samba ]; then pkgs="samba smbclient"; \
     elif [ "$ROLE" = nfs ]; then pkgs="nfs-ganesha nfs-ganesha-vfs rpcbind dbus"; \
-    else pkgs="smbclient cifs-utils nfs-common python3 python3-pip attr procps"; fi \
+    else pkgs="smbclient cifs-utils nfs-common nfs4-acl-tools python3 python3-pip attr procps"; fi \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $pkgs \
  && apt-get clean \
  && if [ "$ROLE" = client ]; then pip3 install --break-system-packages --no-cache-dir smbprotocol==1.15.0; fi
