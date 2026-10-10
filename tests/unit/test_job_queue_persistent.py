@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
-from openblade.domain.errors import ChangerBusyError, DriveOccupiedError
+from openblade.domain.errors import ChangerBusyError, DriveOccupiedError, DriveUnreconciledError
 from openblade.domain.models import JobState, JobType
 from openblade.jobs.queue import JobQueue
+from openblade.jobs.reconcile import PHYSICAL_STATE_UNKNOWN
 from openblade.jobs.scheduler import CatalogLeaseStore
 
 
@@ -129,3 +132,39 @@ def test_racing_claims_past_the_owner_precheck_exactly_one_wins(
     for t in threads:
         t.join()
     assert sorted(outcomes) == ["busy", "won"]
+
+
+def test_claim_drive_refuses_unreconciled_drive(tmp_path: Path) -> None:
+    """Regression S3: the public claim API honours the reconciliation barrier."""
+    init_db(f"sqlite:///{tmp_path / 'catalog.db'}")
+    repo = CatalogRepository(get_session())
+    queue = JobQueue(repo, CatalogLeaseStore(repo))
+    repo.journal(
+        "crashed-job", PHYSICAL_STATE_UNKNOWN, {"op": "unload", "barcode": "T1L8", "drive": 2}
+    )
+    job = queue.create_job(JobType.ARCHIVE, {})
+    with pytest.raises(DriveUnreconciledError):
+        queue.claim_drive(2, job.id)
+    assert all(lease.drive_id != 2 for lease in CatalogLeaseStore(repo).live_leases())
+    queue.claim_drive(1, job.id)  # other drives are unaffected
+
+
+def test_run_job_heartbeats_claims_past_the_ttl(tmp_path: Path) -> None:
+    """Regression S3: a holder running longer than the TTL keeps its drive claim."""
+    init_db(f"sqlite:///{tmp_path / 'catalog.db'}")
+    repo_a, repo_b = CatalogRepository(get_session()), CatalogRepository(get_session())
+    queue = JobQueue(repo_a, CatalogLeaseStore(repo_a), ttl=timedelta(seconds=2))
+    observer = CatalogLeaseStore(repo_b)
+    job = queue.create_job(JobType.ARCHIVE, {})
+    queue.claim_drive(0, job.id)
+    seen: list[bool] = []
+
+    def work() -> None:
+        for _ in range(10):
+            time.sleep(0.5)
+            repo_b.session.expire_all()
+            seen.append(any(lease.job_id == job.id for lease in observer.live_leases()))
+
+    queue.run_job(job, work)
+    assert len(seen) == 10
+    assert all(seen), seen

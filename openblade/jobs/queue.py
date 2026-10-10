@@ -16,6 +16,7 @@ from openblade.domain.errors import (
     safe_job_error,
 )
 from openblade.domain.models import Job, JobState, JobType
+from openblade.jobs.reconcile import ensure_drive_reconciled
 from openblade.jobs.scheduler import DEFAULT_LEASE_TTL, LeaseStore
 
 ResultT = TypeVar("ResultT")
@@ -114,6 +115,9 @@ class JobQueue:
     def claim_drive(self, drive_id: int, job_id: str) -> None:
         if drive_id < 0:
             raise ValueError(f"drive id {drive_id} out of range")
+        # Same barrier as DriveScheduler.acquire: a drive whose physical state is
+        # unknown after a crash must not be handed out (DriveUnreconciledError).
+        ensure_drive_reconciled(self._catalog, drive_id)
         self._claim_slot(
             drive_id,
             job_id,
@@ -135,13 +139,41 @@ class JobQueue:
     def release_changer(self, job_id: str) -> None:
         self._release_slot(CHANGER_DRIVE_ID, job_id)
 
+    def heartbeat(self, job_id: str) -> None:
+        """Renew every live drive/changer lease held by ``job_id`` for another ``ttl``."""
+        with self._lock:
+            mine = [lease.id for lease in self._lease_store.live_leases() if lease.job_id == job_id]
+            if mine:
+                self._lease_store.heartbeat(mine, self._ttl)
+
+    def _heartbeat_loop(self, job_id: str, stop: threading.Event) -> None:
+        interval = max(self._ttl.total_seconds() / 3.0, 0.05)
+        while not stop.wait(interval):
+            try:
+                self.heartbeat(job_id)
+            except Exception:  # noqa: BLE001 - a missed beat is logged; the next one retries
+                logger.warning("job %s lease heartbeat failed", job_id, exc_info=True)
+
     def run_job(self, job: Job, func: Callable[[], ResultT]) -> tuple[Job, ResultT]:
         self.update_job(job.id, state=JobState.RUNNING)
+        # Keep this job's claims alive while func runs; otherwise a holder past the
+        # TTL silently loses its slot and another job can lease the same drive.
+        stop = threading.Event()
+        beat = threading.Thread(
+            target=self._heartbeat_loop,
+            args=(job.id, stop),
+            name="job-lease-heartbeat",
+            daemon=True,
+        )
+        beat.start()
         try:
             result = func()
         except Exception as exc:
             logger.warning("job %s failed", job.id, exc_info=True)
             self.update_job(job.id, state=JobState.FAILED, error=safe_job_error(exc))
             raise
+        finally:
+            stop.set()
+            beat.join()
         completed = self.update_job(job.id, state=JobState.COMPLETED, error=None)
         return completed, result
