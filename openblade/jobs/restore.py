@@ -23,6 +23,7 @@ from openblade.domain.errors import (
 from openblade.domain.models import JobType, MountHandle, MountMode
 from openblade.jobs.inventory import InventoryService
 from openblade.jobs.queue import JobQueue
+from openblade.jobs.reconcile import ensure_drive_reconciled
 from openblade.jobs.scheduler import CatalogLeaseStore, DriveHandle, DriveScheduler, LeaseStore
 from openblade.jobs.sharded_archive import record_physical_state_unknown
 from openblade.jobs.verify import sha256sum
@@ -109,6 +110,7 @@ def _load_if_needed(
     barcode = handle.barcode
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
+        ensure_drive_reconciled(catalog, drive_id)
         # Already in a drive: record it as the PHYSICAL drive; the lease key
         # (handle.drive_id) stays what the scheduler reserved.
         if drive_id != handle.drive_id:
@@ -118,6 +120,7 @@ def _load_if_needed(
     if slot_id is None:
         raise CartridgeOfflineError(f"Cartridge {barcode} is offline")
     drive_id = handle.drive_id
+    ensure_drive_reconciled(catalog, drive_id)
     execute_tape_request(
         catalog,
         library,

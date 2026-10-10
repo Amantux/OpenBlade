@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.errors import DriveUnreconciledError
 
 PHYSICAL_STATE_UNKNOWN = "physical_state_unknown"
 DRIVE_RECONCILED = "drive_reconciled"
@@ -60,3 +61,13 @@ def drives_pending_reconciliation(catalog: CatalogRepository) -> dict[int, Pendi
             at=entry.at,
         )
     return pending
+
+
+def ensure_drive_reconciled(catalog: CatalogRepository, drive_id: int) -> None:
+    """Refuse to use ``drive_id`` while its physical state is unknown."""
+    item = drives_pending_reconciliation(catalog).get(drive_id)
+    if item is not None:
+        raise DriveUnreconciledError(
+            f"Drive {drive_id} (barcode {item.barcode or 'unknown'}) awaits reconciliation "
+            f"after a failed {item.op or 'operation'}; reconcile it before reuse"
+        )
