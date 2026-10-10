@@ -108,3 +108,36 @@ def test_reconcile_api_round_trip(tmp_path: Path) -> None:
     assert drives_pending_reconciliation(context.catalog) == {}
 
     assert client.post("/jobs/recovery/reconcile/99").status_code == 404
+
+
+def test_pending_orders_by_id_not_wall_clock(tmp_path: Path) -> None:
+    from datetime import timedelta
+
+    from openblade.jobs.reconcile import drives_pending_reconciliation
+
+    catalog = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'c.db'}")).catalog
+    job = catalog.create_job("archive", {})
+    catalog.journal(job.id, "drive_reconciled", {"drive": 1, "barcode": "MCK00001"})
+    later = catalog.journal(
+        job.id, "physical_state_unknown", {"op": "unmount", "barcode": "MCK00001", "drive": 1}
+    )
+    later.at = later.at - timedelta(hours=1)  # writer clock stepped back
+    catalog.session.commit()
+
+    assert 1 in drives_pending_reconciliation(catalog)
+
+
+def test_driveless_event_still_blocks_a_load_of_that_barcode(tmp_path: Path) -> None:
+    from openblade.jobs.reconcile import barcodes_pending_reconciliation, ensure_drive_reconciled
+
+    catalog = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'c.db'}")).catalog
+    job = catalog.create_job("archive", {})
+    catalog.journal(
+        job.id, "physical_state_unknown", {"op": "unmount", "barcode": "MCK00002", "drive": None}
+    )
+    assert barcodes_pending_reconciliation(catalog) == {"MCK00002"}
+    with pytest.raises(DriveUnreconciledError, match="MCK00002"):
+        ensure_drive_reconciled(catalog, 0, "MCK00002")
+    ensure_drive_reconciled(catalog, 0, "MCK00003")  # other barcodes unaffected
+    catalog.journal(job.id, "drive_reconciled", {"drive": 0, "barcode": "MCK00002"})
+    assert barcodes_pending_reconciliation(catalog) == set()

@@ -45,7 +45,9 @@ def drives_pending_reconciliation(catalog: CatalogRepository) -> dict[int, Pendi
     events = catalog.journal_events(PHYSICAL_STATE_UNKNOWN) + catalog.journal_events(
         DRIVE_RECONCILED
     )
-    events.sort(key=lambda entry: (entry.at, entry.id))
+    # Order by autoincrement id only: every writer inserts into one table, while
+    # `at` is the writer's wall clock and a clock step would reorder events.
+    events.sort(key=lambda entry: entry.id)
     pending: dict[int, PendingReconciliation] = {}
     for entry in events:
         detail = entry.detail
@@ -66,8 +68,43 @@ def drives_pending_reconciliation(catalog: CatalogRepository) -> dict[int, Pendi
     return pending
 
 
-def ensure_drive_reconciled(catalog: CatalogRepository, drive_id: int) -> None:
-    """Refuse to use ``drive_id`` while its physical state is unknown."""
+def barcodes_pending_reconciliation(catalog: CatalogRepository) -> set[str]:
+    """Barcodes whose cartridge's physical state is unknown.
+
+    Covers events journaled with ``drive=None`` (which no drive-keyed entry can
+    exclude): such an entry is cleared only by a later ``drive_reconciled``
+    naming the same barcode. Drive-keyed pending entries contribute their barcode.
+    """
+    events = catalog.journal_events(PHYSICAL_STATE_UNKNOWN) + catalog.journal_events(
+        DRIVE_RECONCILED
+    )
+    events.sort(key=lambda entry: entry.id)
+    driveless: set[str] = set()
+    for entry in events:
+        barcode = entry.detail.get("barcode")
+        if barcode is None:
+            continue
+        if entry.event == DRIVE_RECONCILED:
+            driveless.discard(str(barcode))
+        elif _drive_of(entry.detail) is None:
+            driveless.add(str(barcode))
+    keyed = {
+        item.barcode
+        for item in drives_pending_reconciliation(catalog).values()
+        if item.barcode is not None
+    }
+    return driveless | keyed
+
+
+def ensure_drive_reconciled(
+    catalog: CatalogRepository, drive_id: int, barcode: str | None = None
+) -> None:
+    """Refuse to use ``drive_id`` (or load ``barcode``) while its physical state is unknown."""
+    if barcode is not None and barcode in barcodes_pending_reconciliation(catalog):
+        raise DriveUnreconciledError(
+            f"Barcode {barcode} awaits reconciliation after a failed unmount/unload; "
+            "reconcile it before reuse"
+        )
     item = drives_pending_reconciliation(catalog).get(drive_id)
     if item is not None:
         raise DriveUnreconciledError(

@@ -349,7 +349,7 @@ def _ensure_loaded(
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
-        ensure_drive_reconciled(catalog, loaded_drive_id)
+        ensure_drive_reconciled(catalog, loaded_drive_id, handle.barcode)
         # Record the physical drive without mutating the scheduler lock key
         # (handle.drive_id); mutating it leaks the reserved drive on release.
         if loaded_drive_id != handle.drive_id:
@@ -359,7 +359,7 @@ def _ensure_loaded(
     slot_id = library.find_slot_by_barcode(handle.barcode)
     if slot_id is None:
         raise CartridgeOfflineError(f"Barcode {handle.barcode} not found in library")
-    ensure_drive_reconciled(catalog, handle.drive_id)
+    ensure_drive_reconciled(catalog, handle.drive_id, handle.barcode)
     execute_tape_request(
         catalog,
         library,

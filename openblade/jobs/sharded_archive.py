@@ -797,7 +797,7 @@ def _load_barcode(
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
-        ensure_drive_reconciled(catalog, loaded_drive_id)
+        ensure_drive_reconciled(catalog, loaded_drive_id, handle.barcode)
         # Cartridge is already in a drive. Record it as the PHYSICAL drive without
         # touching the scheduler lock key (handle.drive_id) — mutating that key would
         # leak the reserved drive and free a drive the scheduler never held.
@@ -816,7 +816,7 @@ def _load_barcode(
     )
     if slot_id is None:
         raise ValueError(f"Barcode {handle.barcode} not found in any slot")
-    ensure_drive_reconciled(catalog, handle.drive_id)
+    ensure_drive_reconciled(catalog, handle.drive_id, handle.barcode)
     execute_tape_request(
         catalog,
         library,
