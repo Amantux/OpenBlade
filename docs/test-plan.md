@@ -34,6 +34,7 @@ single-job) through `InventoryService`.
 |---|---|---|---|
 | `sim+sim` | `MockLibraryBackend` | `MockLTFSBackend` | always |
 | `emulator+sim-ltfs` | `ScalarHttpLibraryBackend` over in-process ASGI (`openblade.api.main:app`) | `MockLTFSBackend` | always |
+| `scsi+fake-ltfs` | `RealLibraryBackend` + `MtxChangerBackend` over a stateful fake `mtx`/`sg_inq` runner (`tests/fakes/mtx.py`) | `MockLTFSBackend` | always |
 | `real+real` | `get_library()` | `get_ltfs()` | only with `OPENBLADE_REAL_HARDWARE_ENABLED=true` (marker `real_hardware`) |
 
 Known contract violations are `xfail(strict=True)` with the defect's file:line, so a

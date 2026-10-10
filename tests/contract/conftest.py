@@ -89,6 +89,41 @@ def _emulator_pair(tmp_path: Path) -> Iterator[BackendPair]:
             pair.unload_everything()
 
 
+def _scsi_fake_ltfs_pair() -> Iterator[BackendPair]:
+    """The production SCSI backend (``RealLibraryBackend`` + ``MtxChangerBackend``)
+    driven by a stateful fake ``mtx``: real argv building, status parsing and the
+    unload-while-mounted gate, with no /dev access."""
+    from openblade.config import BackendMode, OpenBladeConfig
+    from openblade.hardware.discovery import LibraryDiscovery
+    from openblade.hardware.library import RealLibraryBackend
+    from tests.fakes.mtx import StatefulMtxRunner
+
+    devices = tuple(f"/dev/nst{i}" for i in range(3))
+    config = OpenBladeConfig(
+        backend=BackendMode.REAL,
+        real_hardware_enabled=True,
+        hardware_dry_run=False,
+        changer_device="/dev/sg3",
+        drive_devices=devices,
+        drive_serial_map=tuple((f"FAKESER{i}", i) for i in range(len(devices))),
+    )
+    runner = StatefulMtxRunner(
+        "/dev/sg3",
+        barcodes=dict(enumerate(SIM_BARCODES, start=1)),
+        drive_serials={device: f"FAKESER{i}" for i, device in enumerate(devices)},
+    )
+    library = RealLibraryBackend(
+        config=config,
+        runner=runner,
+        discovery=LibraryDiscovery(changers=[], drives=[], sg_map={}),
+    )
+    # MockLTFSBackend consumes only get_all_barcodes / find_drive_by_barcode /
+    # set_drive_mount_state, which RealLibraryBackend implements; the latter is
+    # what arms RealLibraryBackend.unload's TapeMountedError gate.
+    ltfs = MockLTFSBackend(cast(MockLibraryBackend, library), capacity_bytes=CAPACITY)
+    yield BackendPair("scsi+fake-ltfs", library, ltfs, len(devices), list(SIM_BARCODES))
+
+
 def _real_pair() -> Iterator[BackendPair]:
     from openblade.bootstrap import get_library, get_ltfs
 
@@ -103,6 +138,7 @@ _REAL_ENABLED = os.environ.get("OPENBLADE_REAL_HARDWARE_ENABLED", "false").lower
 PAIRINGS = [
     pytest.param("sim+sim", id="sim+sim"),
     pytest.param("emulator+sim-ltfs", id="emulator+sim-ltfs"),
+    pytest.param("scsi+fake-ltfs", id="scsi+fake-ltfs"),
     pytest.param(
         "real+real",
         id="real+real",
@@ -123,6 +159,8 @@ def backend_pair(request: pytest.FixtureRequest, tmp_path: Path) -> Generator[Ba
         yield from _sim_pair()
     elif name == "emulator+sim-ltfs":
         yield from _emulator_pair(tmp_path)
+    elif name == "scsi+fake-ltfs":
+        yield from _scsi_fake_ltfs_pair()
     else:
         yield from _real_pair()
 
