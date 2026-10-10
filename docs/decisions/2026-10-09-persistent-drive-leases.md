@@ -239,6 +239,21 @@ pending while its latest `physical_state_unknown` has no later `drive_reconciled
 - `POST /jobs/recovery/reconcile/{drive_id}` takes a fresh inventory snapshot, refuses
   (409) while the drive still reports a mount, else journals `drive_reconciled`
   (`{"drive","observed_barcode"}`); 404 for an unknown drive.
+- **Barcode-level exclusion.** A pending entry also blocks its *barcode*:
+  `acquire_drives` raises `DriveUnreconciledError` naming any requested barcode in
+  `barcodes_pending_reconciliation` (this covers entries with no drive id).
+- **Fail closed on journal failure.** If `physical_state_unknown` itself cannot be
+  journaled, the drive's lease is KEPT (`DriveHandle.hold_unjournaled`) and
+  `release_drives` raises `JournalWriteError` (a `SafetyViolationError`) after
+  releasing every other drive. The message names the original lane failure so the
+  job's recorded error is not only "journal write failed". Recovery likewise keeps
+  live leases of failed jobs and reports them in `held_failed_lease_ids`.
+  JobQueue slot claims (`drive_id < 0`, `QUEUE-CLAIM:`/`CHANGER:` barcodes) are not
+  compared against inventory as drive mismatches.
+- **Residual risk.** A held lease lives only as long as the process heartbeats it.
+  Once the process dies, the lease lapses at its TTL and, because the journal write
+  failed, no pending entry exists. The lease TTL is therefore the reconciliation
+  window for that case: an operator must reconcile before it expires.
 
 ## JobQueue follow-up landed
 
