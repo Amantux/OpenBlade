@@ -110,7 +110,7 @@ def _load_if_needed(
     barcode = handle.barcode
     drive_id = library.find_drive_by_barcode(barcode)
     if drive_id is not None:
-        ensure_drive_reconciled(catalog, drive_id)
+        ensure_drive_reconciled(catalog, drive_id, barcode)
         # Already in a drive: record it as the PHYSICAL drive; the lease key
         # (handle.drive_id) stays what the scheduler reserved.
         if drive_id != handle.drive_id:
@@ -120,7 +120,7 @@ def _load_if_needed(
     if slot_id is None:
         raise CartridgeOfflineError(f"Cartridge {barcode} is offline")
     drive_id = handle.drive_id
-    ensure_drive_reconciled(catalog, drive_id)
+    ensure_drive_reconciled(catalog, drive_id, barcode)
     execute_tape_request(
         catalog,
         library,
@@ -337,9 +337,11 @@ def _restore_tape_group(
                     # Still (maybe) mounted: unloading now could strand a dirty
                     # index. Leave the cartridge in the drive for reconcile.
                     unmount_failed = True
-                    # One payload shape ({op, barcode, drive}) for every producer; the
-                    # helper swallows a journal failure so it cannot replace this one.
-                    record_physical_state_unknown(catalog, job_id, "unmount", barcode, drive_id)
+                    # One payload shape ({op, barcode, drive}) for every producer. A
+                    # journal failure flags the handle; release_drives keeps its lease.
+                    record_physical_state_unknown(
+                        catalog, job_id, "unmount", barcode, drive_id, handles=handles
+                    )
                     tape_error = f"Unmount of {barcode} failed; left in drive for reconcile"
         except StaleLeaseError:
             fenced_out = True

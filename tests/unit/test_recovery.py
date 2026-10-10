@@ -140,3 +140,42 @@ def test_recovery_reports_stale_pending_jobs_without_touching_them(tmp_path: Pat
         refreshed = catalog.get_job(job_id)
         assert refreshed is not None
         assert refreshed.state == "pending"
+
+
+def test_recovery_keeps_live_lease_of_a_failed_job(tmp_path: Path) -> None:
+    # Fail closed: a failed job only leaves a live lease behind when it could not
+    # journal physical_state_unknown; auto-releasing it would hand the drive out.
+    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    catalog = context.catalog
+    failed = catalog.create_job("archive", {})
+    catalog.update_job_state(failed.id, "failed", error="physical state unknown")
+    lease_id = _lease(catalog, failed.id, "MCK00001", ttl=timedelta(minutes=15))
+    library = MockLibraryBackend(num_slots=4, num_drives=2, num_import_export_slots=1)
+
+    report = recover_after_restart(catalog, library)
+
+    assert report.released_lease_ids == []
+    assert report.held_failed_lease_ids == [lease_id]
+    assert [lease.id for lease in catalog.live_leases()] == [lease_id]
+
+
+def test_recovery_ignores_queue_claim_leases_but_reports_real_mismatches(tmp_path: Path) -> None:
+    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    catalog = context.catalog
+    job = catalog.create_job("archive", {})
+    catalog.update_job_state(job.id, "running")
+    expired = timedelta(seconds=-1)
+    # JobQueue's slot claims (jobs/queue.py): the changer at -1 and drive 1.
+    for drive_id, barcode in ((-1, "CHANGER:-1"), (1, "QUEUE-CLAIM:1")):
+        claim = catalog.acquire_drive_lease_at(
+            job_id=job.id, drive_id=drive_id, barcode=barcode, ttl=expired
+        )
+        assert claim is not None
+    _lease(catalog, job.id, "MCK00001", ttl=expired)  # a real tape lease
+    empty_library = MockLibraryBackend(num_slots=4, num_drives=2, num_import_export_slots=1)
+
+    report = recover_after_restart(catalog, empty_library)
+
+    assert [(m.expected_barcode, m.observed_barcode) for m in report.mismatches] == [
+        ("MCK00001", None)
+    ]

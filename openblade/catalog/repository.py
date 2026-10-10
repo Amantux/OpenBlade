@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -14,6 +15,7 @@ from typing import Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from openblade.catalog.models import (
@@ -709,6 +711,35 @@ class CatalogRepository:
         self.session.add(entry)
         self.session.commit()
         return entry
+
+    # journal_durable: one attempt plus three retries after these backoffs.
+    _JOURNAL_RETRY_DELAYS = (0.05, 0.1, 0.2)
+
+    def journal_durable(
+        self, job_id: str, event: str, detail: Mapping[str, object] | None = None
+    ) -> None:
+        """Append a journal event on a FRESH session over the same bind.
+
+        For safety evidence written on an error path: ``self.session`` may already
+        be poisoned (PendingRollbackError) by the failure being recorded, so it is
+        never touched. Retries ``OperationalError`` (e.g. SQLite "database is
+        locked") with 50/100/200 ms backoff, then re-raises the last error.
+        """
+        payload = json.dumps(dict(detail or {}), sort_keys=True, default=str)
+        for delay in (*self._JOURNAL_RETRY_DELAYS, None):
+            try:
+                with self._lease_session() as session:
+                    session.add(
+                        JobJournalEntry(
+                            job_id=job_id, at=naive_utcnow(), event=event, detail_json=payload
+                        )
+                    )
+                    session.commit()
+                return
+            except OperationalError:
+                if delay is None:
+                    raise
+                time.sleep(delay)
 
     def job_journal(self, job_id: str) -> list[JobJournalEntry]:
         """Every journal entry for ``job_id``, oldest first (ties broken by id)."""

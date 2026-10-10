@@ -54,6 +54,10 @@ class DriveUnreconciledError(SafetyViolationError):
     """A drive's physical state is unknown after a failed unmount/unload; reconcile first."""
 
 
+class JournalWriteError(SafetyViolationError):
+    """A drive's physical_state_unknown could not be journaled; its lease was kept."""
+
+
 class DriveBusyError(OpenBladeError):
     """Drive is busy."""
 

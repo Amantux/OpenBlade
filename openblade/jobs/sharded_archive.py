@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import uuid
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -14,7 +15,12 @@ from pathlib import Path, PurePosixPath
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.capacity import has_room_for
-from openblade.domain.errors import StaleLeaseError, TapeFullError, safe_job_error
+from openblade.domain.errors import (
+    JournalWriteError,
+    StaleLeaseError,
+    TapeFullError,
+    safe_job_error,
+)
 from openblade.domain.models import MountHandle, MountMode
 from openblade.jobs.inventory import InventoryService
 from openblade.jobs.reconcile import ensure_drive_reconciled
@@ -357,9 +363,22 @@ def _journal_failure(
 
 
 def record_physical_state_unknown(
-    catalog: CatalogRepository, job_id: str, op: str, barcode: str, drive: int | None
+    catalog: CatalogRepository,
+    job_id: str,
+    op: str,
+    barcode: str,
+    drive: int | None,
+    *,
+    handles: Sequence[DriveHandle],
 ) -> None:
-    """Log + journal a cleanup op that raised; the drive must be reconciled before reuse."""
+    """Log + journal a cleanup op that raised; the drive must be reconciled before reuse.
+
+    Fail closed: the row is written via ``journal_durable`` (fresh session, retried).
+    If that still fails, the matching handle is flagged ``hold_unjournaled`` so
+    ``release_drives`` keeps its lease and then raises ``JournalWriteError`` --
+    after every other drive was cleaned and released. With no matching handle
+    there is no lease to keep, so the error is raised here.
+    """
     logger.exception(
         "job %s: %s of %s (drive %s) failed during cleanup; %s",
         job_id,
@@ -369,11 +388,27 @@ def record_physical_state_unknown(
         PHYSICAL_STATE_UNKNOWN,
     )
     try:
-        catalog.journal(
+        catalog.journal_durable(
             job_id, "physical_state_unknown", {"op": op, "barcode": barcode, "drive": drive}
         )
-    except Exception:  # noqa: BLE001 - journal is evidence, must not stop cleanup of other drives
-        logger.exception("job %s: could not journal physical_state_unknown", job_id)
+    except Exception:  # noqa: BLE001 - any journal failure must fail closed, never pass
+        matched = [
+            h
+            for h in handles
+            if h.barcode == barcode or (drive is not None and drive in (h.drive_id, h.physical))
+        ]
+        logger.exception(
+            "job %s: could not journal physical_state_unknown for %s (drive %s); keeping its lease",
+            job_id,
+            barcode,
+            drive,
+        )
+        if not matched:
+            raise JournalWriteError(
+                f"physical_state_unknown for {barcode} could not be journaled"
+            ) from None
+        for handle in matched:
+            handle.hold_unjournaled = True
 
 
 def _best_effort_unmount_and_unload(
@@ -403,7 +438,12 @@ def _best_effort_unmount_and_unload(
             failed = True
             still_mounted.add(barcode)
             record_physical_state_unknown(
-                catalog, job_id, "unmount", barcode, drive_by_barcode.get(barcode)
+                catalog,
+                job_id,
+                "unmount",
+                barcode,
+                drive_by_barcode.get(barcode),
+                handles=handles,
             )
     for handle in handles:
         slot_id = loaded_slots.get(handle.physical)
@@ -430,7 +470,7 @@ def _best_effort_unmount_and_unload(
         except Exception:  # noqa: BLE001 - recorded as physical_state_unknown, cleanup continues
             failed = True
             record_physical_state_unknown(
-                catalog, job_id, "unload", handle.barcode, handle.physical
+                catalog, job_id, "unload", handle.barcode, handle.physical, handles=handles
             )
     if failed and errors is not None and not errors:
         errors.append(PHYSICAL_STATE_UNKNOWN)
@@ -612,7 +652,18 @@ def _archive_stripe(
                 _best_effort_unmount_and_unload(
                     catalog, library, ltfs, mounts, handles, loaded_slots, job_id, errors
                 )
-            scheduler.release_drives(handles)
+            try:
+                scheduler.release_drives(handles)
+            except JournalWriteError as release_exc:
+                # The lane error was caught above, so it is not in flight here and
+                # would be lost with `errors`: carry it into the raised message.
+                if not errors:
+                    raise
+                summary = _summarize_errors(errors)
+                logger.error("Lane failed before lease release: %s", summary)
+                raise JournalWriteError(
+                    f"{release_exc}; original failure: {summary}"
+                ) from release_exc
 
     return files_archived, bytes_archived
 
@@ -749,8 +800,10 @@ def _archive_block_stripe(
             _best_effort_unmount_and_unload(
                 catalog, library, ltfs, mounts, handles, loaded_slots, job_id, None
             )
-        scheduler.release_drives(handles)
-        shutil.rmtree(shard_dir, ignore_errors=True)
+        try:
+            scheduler.release_drives(handles)  # may raise JournalWriteError
+        finally:
+            shutil.rmtree(shard_dir, ignore_errors=True)
 
 
 def _load_barcode(
@@ -762,7 +815,7 @@ def _load_barcode(
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
-        ensure_drive_reconciled(catalog, loaded_drive_id)
+        ensure_drive_reconciled(catalog, loaded_drive_id, handle.barcode)
         # Cartridge is already in a drive. Record it as the PHYSICAL drive without
         # touching the scheduler lock key (handle.drive_id) — mutating that key would
         # leak the reserved drive and free a drive the scheduler never held.
@@ -781,7 +834,7 @@ def _load_barcode(
     )
     if slot_id is None:
         raise ValueError(f"Barcode {handle.barcode} not found in any slot")
-    ensure_drive_reconciled(catalog, handle.drive_id)
+    ensure_drive_reconciled(catalog, handle.drive_id, handle.barcode)
     execute_tape_request(
         catalog,
         library,

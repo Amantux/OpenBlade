@@ -11,13 +11,24 @@ from datetime import UTC, datetime, timedelta
 
 from openblade.catalog.repository import CatalogRepository, StagedInstance
 from openblade.domain.backends import LibraryBackend
+from openblade.domain.models import DriveLease
 from openblade.jobs.inventory import InventoryService
 from openblade.jobs.reconcile import PendingReconciliation, drives_pending_reconciliation
 from openblade.jobs.scheduler import DEFAULT_LEASE_TTL
 
+# Synthetic barcodes JobQueue stores on its slot-claim leases (`f"{kind}:{slot}"`,
+# kinds _DRIVE_KIND / _CHANGER_KIND in jobs/queue.py). They never name a cartridge.
+_QUEUE_CLAIM_PREFIXES = ("QUEUE-CLAIM:", "CHANGER:")
+
+
+def _is_queue_claim(lease: DriveLease) -> bool:
+    return lease.drive_id < 0 or lease.barcode.startswith(_QUEUE_CLAIM_PREFIXES)
+
+
 logger = logging.getLogger(__name__)
 
 _NON_TERMINAL_JOB_STATES = frozenset({"pending", "running"})
+_FAILED_JOB_STATES = frozenset({"failed", "failed_recoverable"})
 
 INTERRUPTED_ERROR = (
     "interrupted: drive lease expired without a heartbeat; physical state unknown — "
@@ -47,6 +58,10 @@ class RecoveryReport:
     # Drives whose physical state is unknown after a failed unmount/unload. Report
     # only: an operator reconciles each via POST /jobs/recovery/reconcile/{drive_id}.
     pending_reconciliation: list[PendingReconciliation] = field(default_factory=list)
+    # Live leases of FAILED jobs, deliberately NOT released: a failed job releases
+    # its leases in `finally` unless its physical_state_unknown could not be
+    # journaled (fail closed). Report only; the lease lapses at its TTL.
+    held_failed_lease_ids: list[str] = field(default_factory=list)
 
 
 def _is_older_than(created_at: datetime, ttl: timedelta, now: datetime) -> bool:
@@ -77,12 +92,15 @@ def recover_after_restart(catalog: CatalogRepository, library: LibraryBackend) -
             )
     # Bookkeeping: a live lease whose job already reached a terminal state.
     live = catalog.live_leases()
+    held: list[DriveLease] = []
     leased_job_ids = {lease.job_id for lease in live}
     for lease in live:
         owner = catalog.get_job(lease.job_id)
         # A pending or running owner may belong to another live process; its
         # lease is only reclaimed once it expires (handled above).
-        if owner is None or owner.state not in _NON_TERMINAL_JOB_STATES:
+        if owner is not None and owner.state in _FAILED_JOB_STATES:
+            held.append(lease)
+        elif owner is None or owner.state not in _NON_TERMINAL_JOB_STATES:
             orphaned.append(lease)
     catalog.release_leases([lease.id for lease in orphaned])
 
@@ -92,6 +110,8 @@ def recover_after_restart(catalog: CatalogRepository, library: LibraryBackend) -
     }
     mismatches: list[DriveMismatch] = []
     for lease in orphaned:
+        if _is_queue_claim(lease):
+            continue  # a JobQueue slot claim, not a tape in a drive: nothing to compare
         physical = (
             lease.physical_drive_id if lease.physical_drive_id is not None else lease.drive_id
         )
@@ -127,7 +147,15 @@ def recover_after_restart(catalog: CatalogRepository, library: LibraryBackend) -
         staged_instances=staged,
         stale_pending_job_ids=stale_pending,
         pending_reconciliation=list(drives_pending_reconciliation(catalog).values()),
+        held_failed_lease_ids=[lease.id for lease in held],
     )
+    for lease in held:
+        logger.error(
+            "recovery: keeping lease %s on drive %d (failed job %s); reconcile the drive",
+            lease.id,
+            lease.drive_id,
+            lease.job_id,
+        )
     logger.info(
         "recovery: %d job(s) interrupted, %d lease(s) released, %d drive mismatch(es), "
         "%d staged instance(s) awaiting reconcile, %d stale pending job(s), "

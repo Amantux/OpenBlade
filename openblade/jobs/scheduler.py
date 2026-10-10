@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
-from openblade.domain.errors import DriveBusyError, DriveUnreconciledError, StaleLeaseError
+from openblade.domain.errors import (
+    DriveBusyError,
+    DriveUnreconciledError,
+    JournalWriteError,
+    StaleLeaseError,
+    safe_job_error,
+)
 from openblade.domain.models import DriveLease
 
 if TYPE_CHECKING:
@@ -33,6 +40,10 @@ class DriveHandle:
     lease_id: str = ""
     fencing_token: int = 0
     _released: bool = field(default=False, init=False, repr=False)
+    # Set when this drive's physical_state_unknown could not be journaled:
+    # release_drives() then KEEPS the lease (fail closed) so no other job can
+    # LOAD/UNLOAD a drive that may still have LTFS mounted.
+    hold_unjournaled: bool = field(default=False, init=False, repr=False)
 
     @property
     def physical(self) -> int:
@@ -68,6 +79,10 @@ class LeaseStore(Protocol):
         """Drives awaiting reconciliation (physical state unknown) -> last barcode."""
         ...
 
+    def unreconciled_barcodes(self) -> set[str]:
+        """Barcodes whose cartridge may still sit in a drive awaiting reconciliation."""
+        ...
+
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None: ...
 
     def set_physical_drive(self, lease_id: str, physical_drive_id: int) -> None: ...
@@ -87,6 +102,8 @@ class InMemoryLeaseStore:
     def __init__(self) -> None:
         # Drive -> barcode for drives whose physical state is unknown (tests set this).
         self.unreconciled: dict[int, str | None] = {}
+        # Barcodes pending reconciliation (tests set this).
+        self.unreconciled_barcode_set: set[str] = set()
         self._lock = threading.Lock()
         self._leases: dict[str, DriveLease] = {}
         self._last_token = 0
@@ -150,6 +167,9 @@ class InMemoryLeaseStore:
 
     def unreconciled_drives(self) -> dict[int, str | None]:
         return dict(self.unreconciled)
+
+    def unreconciled_barcodes(self) -> set[str]:
+        return set(self.unreconciled_barcode_set)
 
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None:
         with self._lock:
@@ -221,6 +241,11 @@ class CatalogLeaseStore:
             drive_id: item.barcode
             for drive_id, item in drives_pending_reconciliation(self._repo).items()
         }
+
+    def unreconciled_barcodes(self) -> set[str]:
+        from openblade.jobs.reconcile import barcodes_pending_reconciliation  # local: no cycle
+
+        return barcodes_pending_reconciliation(self._repo)
 
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None:
         self._repo.heartbeat_leases(lease_ids, ttl)
@@ -304,6 +329,14 @@ class DriveScheduler:
             while True:
                 # A drive whose physical state is unknown (failed unmount/unload)
                 # may still hold a mounted tape: never a candidate until reconciled.
+                # A cartridge awaiting reconciliation may still be mounted in some
+                # drive: refuse it outright rather than move it.
+                pending = sorted(set(barcodes) & self._store.unreconciled_barcodes())
+                if pending:
+                    raise DriveUnreconciledError(
+                        f"Tape(s) {', '.join(pending)} awaiting reconciliation after a "
+                        "failed unmount/unload; reconcile before reuse"
+                    )
                 unreconciled = self._store.unreconciled_drives()
                 excluded = frozenset(d for d in unreconciled if 0 <= d < self._num_drives)
                 if self._num_drives - len(excluded) < len(barcodes):
@@ -374,7 +407,15 @@ class DriveScheduler:
 
     def release_drives(self, handles: list[DriveHandle]) -> None:
         """Release drives and notify waiting jobs."""
-        pending = [handle for handle in handles if not handle._released]
+        for handle in handles:
+            if handle.hold_unjournaled and not handle._released:
+                logger.error(
+                    "Keeping lease on drive %d (%s): physical_state_unknown was not "
+                    "journaled; reconcile the drive before reuse",
+                    handle.drive_id,
+                    handle.barcode,
+                )
+        pending = [h for h in handles if not h._released and not h.hold_unjournaled]
         self._store.release([handle.lease_id for handle in pending])
         with self._lock:
             for handle in pending:
@@ -384,6 +425,18 @@ class DriveScheduler:
             if not self._held:
                 self._stop_heartbeat.set()
             self._lock.notify_all()
+        kept = [h.drive_id for h in handles if h.hold_unjournaled and not h._released]
+        if kept:
+            message = f"physical_state_unknown not journaled for drive(s) {kept}; leases kept"
+            # Called from a `finally` that is unwinding the lane's real failure:
+            # this raise replaces it (it survives only as __context__), so log it
+            # and name it in the message the job records.
+            original = sys.exception()
+            if isinstance(original, Exception) and not isinstance(original, JournalWriteError):
+                logger.error("Lane failed before lease release", exc_info=original)
+                message += f"; original failure: {safe_job_error(original)}"
+            # Raised only after every other drive was released (collect, then raise).
+            raise JournalWriteError(message)
 
     def verify(self, handle: DriveHandle) -> None:
         """Raise StaleLeaseError unless the handle's lease is still live with its token."""

@@ -11,7 +11,12 @@ from fastapi.testclient import TestClient
 from openblade.api import routes_jobs
 from openblade.bootstrap import AppContext, create_context, get_context
 from openblade.config import OpenBladeConfig
-from openblade.domain.errors import DriveUnreconciledError
+from openblade.domain.errors import (
+    DriveUnreconciledError,
+    JournalWriteError,
+    TapeFullError,
+    safe_job_error,
+)
 from openblade.domain.models import MountState
 from openblade.jobs.reconcile import (
     DRIVE_RECONCILED,
@@ -20,7 +25,12 @@ from openblade.jobs.reconcile import (
     reconcile_drive,
 )
 from openblade.jobs.restore import _load_if_needed
-from openblade.jobs.scheduler import DriveHandle, DriveScheduler, InMemoryLeaseStore
+from openblade.jobs.scheduler import (
+    CatalogLeaseStore,
+    DriveHandle,
+    DriveScheduler,
+    InMemoryLeaseStore,
+)
 from openblade.simulator.library import MockLibraryBackend
 
 
@@ -108,3 +118,80 @@ def test_reconcile_api_round_trip(tmp_path: Path) -> None:
     assert drives_pending_reconciliation(context.catalog) == {}
 
     assert client.post("/jobs/recovery/reconcile/99").status_code == 404
+
+
+def test_pending_orders_by_id_not_wall_clock(tmp_path: Path) -> None:
+    from datetime import timedelta
+
+    from openblade.jobs.reconcile import drives_pending_reconciliation
+
+    catalog = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'c.db'}")).catalog
+    job = catalog.create_job("archive", {})
+    catalog.journal(job.id, "drive_reconciled", {"drive": 1, "barcode": "MCK00001"})
+    later = catalog.journal(
+        job.id, "physical_state_unknown", {"op": "unmount", "barcode": "MCK00001", "drive": 1}
+    )
+    later.at = later.at - timedelta(hours=1)  # writer clock stepped back
+    catalog.session.commit()
+
+    assert 1 in drives_pending_reconciliation(catalog)
+
+
+def test_driveless_event_still_blocks_a_load_of_that_barcode(tmp_path: Path) -> None:
+    from openblade.jobs.reconcile import barcodes_pending_reconciliation, ensure_drive_reconciled
+
+    catalog = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'c.db'}")).catalog
+    job = catalog.create_job("archive", {})
+    catalog.journal(
+        job.id, "physical_state_unknown", {"op": "unmount", "barcode": "MCK00002", "drive": None}
+    )
+    assert barcodes_pending_reconciliation(catalog) == {"MCK00002"}
+    with pytest.raises(DriveUnreconciledError, match="MCK00002"):
+        ensure_drive_reconciled(catalog, 0, "MCK00002")
+    ensure_drive_reconciled(catalog, 0, "MCK00003")  # other barcodes unaffected
+    catalog.journal(job.id, "drive_reconciled", {"drive": 0, "barcode": "MCK00002"})
+    assert barcodes_pending_reconciliation(catalog) == set()
+
+
+def test_scheduler_refuses_barcode_pending_reconciliation() -> None:
+    store = InMemoryLeaseStore()
+    store.unreconciled_barcode_set = {"MCK00001"}
+    scheduler = DriveScheduler(3, store=store)
+    with pytest.raises(DriveUnreconciledError, match="MCK00001"):
+        scheduler.acquire_drives(["MCK00002", "MCK00001"], timeout=0.1)
+    # Other barcodes are unaffected, and no lease leaked from the refusal.
+    handles = scheduler.acquire_drives(["MCK00002", "MCK00003", "MCK00004"], timeout=0.1)
+    assert len(handles) == 3
+    scheduler.release_drives(handles)
+
+
+def test_catalog_store_reports_driveless_pending_barcode(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    _mark_unknown(context, None, barcode="MCK00007")
+    scheduler = DriveScheduler(2, store=CatalogLeaseStore(context.catalog))
+    with pytest.raises(DriveUnreconciledError, match="MCK00007"):
+        scheduler.acquire_drives(["MCK00007"], timeout=0.1)
+
+
+def test_release_failure_in_finally_names_the_original_lane_error() -> None:
+    scheduler = DriveScheduler(2, store=InMemoryLeaseStore())
+    [handle] = scheduler.acquire_drives(["MCK00001"], timeout=0.1)
+    handle.hold_unjournaled = True
+    with pytest.raises(JournalWriteError) as caught:
+        try:
+            raise TapeFullError("tape MCK00001 is full")
+        finally:
+            scheduler.release_drives([handle])
+    recorded = safe_job_error(caught.value)  # what the job queue stores
+    assert "not journaled" in recorded
+    assert "original failure: tape MCK00001 is full" in recorded
+    assert isinstance(caught.value.__context__, TapeFullError)
+
+
+def test_release_failure_without_lane_error_keeps_plain_message() -> None:
+    scheduler = DriveScheduler(2, store=InMemoryLeaseStore())
+    [handle] = scheduler.acquire_drives(["MCK00001"], timeout=0.1)
+    handle.hold_unjournaled = True
+    with pytest.raises(JournalWriteError) as caught:
+        scheduler.release_drives([handle])
+    assert "original failure" not in str(caught.value)
