@@ -12,7 +12,7 @@ import pytest
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
 from openblade.fuse import cache as cache_mod
-from openblade.fuse.cache import SAMPLE_BYTES, CacheIntegrityError, HydrationCache
+from openblade.fuse.cache import SAMPLE_BYTES, CacheError, CacheIntegrityError, HydrationCache
 from openblade.fuse.filesystem import CatalogFilesystem
 from openblade.fuse.hydration import HydrationFailedError, Hydrator
 from openblade.fuse.mount import CatalogFuseOperations
@@ -193,3 +193,20 @@ def test_read_range_loops_over_short_preads(
     assert calls.n > 1
     # Past EOF: exactly the bytes available.
     assert cache.read_range(BIG_SUM, len(BIG) - 10, 100) == BIG[-10:]
+
+
+def test_non_hex_checksum_large_entry_stores_and_verifies(tmp_path: Path) -> None:
+    """Regression S5: a non-hex checksum on a >64 KiB file must not raise ValueError."""
+    cache = HydrationCache(str(tmp_path))
+    data = b"x" * (200 * 1024)
+    path = cache.store("preset", data)
+    assert path.read_bytes() == data
+    assert cache.verify_entry("preset") is True
+
+
+@pytest.mark.parametrize("checksum", ["../x", "", ".", "..", "a/b", "a\\b", "a\0b"])
+def test_unsafe_checksum_path_component_is_rejected(tmp_path: Path, checksum: str) -> None:
+    cache = HydrationCache(str(tmp_path))
+    with pytest.raises(CacheError):
+        cache.store(checksum, b"")
+    assert not (tmp_path.parent / "x").exists()

@@ -1362,6 +1362,45 @@ class CatalogRepository:
         self.session.commit()
         return self._nas_reservation_to_dict(row)
 
+    def reserve_nas_capacity(
+        self,
+        pool_id: str,
+        nbytes: int,
+        owner: str,
+        expires_at: datetime,
+        *,
+        capacity_bytes: int,
+        now: datetime,
+    ) -> bool:
+        """Atomically insert a reservation only if it fits under ``capacity_bytes``.
+
+        Check-and-insert run inside one ``BEGIN IMMEDIATE`` on a dedicated
+        connection, so two processes racing for the last bytes cannot both pass
+        the check (reviewer S6). Returns whether the reservation was inserted.
+        """
+        with self._lock, self._lease_session() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            rows = session.scalars(select(NasReservation).where(NasReservation.pool_id == pool_id))
+            reserved = sum(
+                int(row.bytes)
+                for row in rows
+                if cast(datetime, self._nas_reservation_to_dict(row)["expires_at"]) > now
+            )
+            if nbytes > capacity_bytes - reserved:
+                session.rollback()
+                return False
+            session.add(
+                NasReservation(
+                    id=str(uuid.uuid4()),
+                    pool_id=pool_id,
+                    bytes=nbytes,
+                    owner=owner,
+                    expires_at=expires_at.isoformat(),
+                )
+            )
+            session.commit()
+            return True
+
     def delete_nas_reservation(self, reservation_id: str) -> bool:
         return self._delete_nas_row(NasReservation, reservation_id)
 

@@ -129,13 +129,18 @@ class ReservationLedger:
         free_bytes: int,
         now: datetime,
     ) -> CapacityReservation:
-        if nbytes > self.available(pool_id, free_bytes, now):
-            raise ReservationError(f"pool {pool_id} cannot reserve {nbytes} bytes")
         res = CapacityReservation(pool_id=pool_id, bytes=nbytes, owner=owner, expires_at=now + ttl)
         if self._catalog is not None:
-            self._catalog.upsert_nas_reservation(res.model_dump())
-        else:
-            self._items.append(res)
+            # Check-and-insert is one BEGIN IMMEDIATE transaction in the catalog,
+            # so concurrent processes cannot both claim the last bytes.
+            if not self._catalog.reserve_nas_capacity(
+                pool_id, nbytes, owner, res.expires_at, capacity_bytes=free_bytes, now=now
+            ):
+                raise ReservationError(f"pool {pool_id} cannot reserve {nbytes} bytes")
+            return res
+        if nbytes > self.available(pool_id, free_bytes, now):
+            raise ReservationError(f"pool {pool_id} cannot reserve {nbytes} bytes")
+        self._items.append(res)
         return res
 
     def release(self, pool_id: str, owner: str) -> int:
