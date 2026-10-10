@@ -11,6 +11,7 @@ import pytest
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import DriveBusyError, StaleLeaseError
+from openblade.domain.models import DriveLease
 from openblade.jobs.scheduler import CatalogLeaseStore, DriveScheduler, InMemoryLeaseStore
 
 
@@ -84,3 +85,68 @@ def test_held_leases_are_kept_alive_without_explicit_heartbeats() -> None:
     scheduler.release_drives(handles)
     time.sleep(0.4)
     assert store.live_leases() == []  # released, and the thread did not revive it
+
+
+TTL = timedelta(seconds=60)
+
+
+def test_excluded_drive_is_skipped_in_one_call(tmp_path: Path) -> None:
+    repo, _ = _two_repos(tmp_path)
+    leases = repo.acquire_drive_leases(
+        job_id="j", barcodes=["A00001L9"], num_drives=2, ttl=TTL, exclude=frozenset({0})
+    )
+    assert leases is not None and [lease.drive_id for lease in leases] == [1]
+    assert (
+        CatalogLeaseStore(repo).acquire(
+            job_id="k", barcodes=["B"], num_drives=2, ttl=TTL, exclude=frozenset({0})
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("drive_id", [0, -1])
+def test_acquire_drive_lease_at_free_then_held(tmp_path: Path, drive_id: int) -> None:
+    repo, other = _two_repos(tmp_path)
+    lease = repo.acquire_drive_lease_at(job_id="j", drive_id=drive_id, barcode="A", ttl=TTL)
+    assert lease is not None and lease.drive_id == drive_id
+    assert other.acquire_drive_lease_at(job_id="k", drive_id=drive_id, barcode="B", ttl=TTL) is None
+    repo.release_leases([lease.id])
+    assert other.acquire_drive_lease_at(job_id="k", drive_id=drive_id, barcode="B", ttl=TTL)
+
+
+def test_in_memory_acquire_drive_lease_at_is_exclusive() -> None:
+    store = InMemoryLeaseStore()
+    assert store.acquire_drive_lease_at(job_id="j", drive_id=-1, barcode="A", ttl=TTL)
+    assert store.acquire_drive_lease_at(job_id="k", drive_id=-1, barcode="B", ttl=TTL) is None
+
+
+def test_two_sessions_racing_for_one_drive_id_exactly_one_wins(tmp_path: Path) -> None:
+    import threading
+
+    repo_a, repo_b = _two_repos(tmp_path)
+    for _ in range(20):
+        barrier = threading.Barrier(2)
+        results: list[DriveLease | None] = []
+
+        def grab(
+            repo: CatalogRepository,
+            job: str,
+            barrier: threading.Barrier = barrier,
+            results: list[DriveLease | None] = results,
+        ) -> None:
+            barrier.wait()
+            results.append(
+                repo.acquire_drive_lease_at(job_id=job, drive_id=3, barcode=job, ttl=TTL)
+            )
+
+        threads = [
+            threading.Thread(target=grab, args=(repo_a, "a")),
+            threading.Thread(target=grab, args=(repo_b, "b")),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        winners = [r for r in results if r is not None]
+        assert len(winners) == 1
+        repo_a.release_leases([winners[0].id])

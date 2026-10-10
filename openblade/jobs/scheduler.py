@@ -58,6 +58,12 @@ class LeaseStore(Protocol):
         exclude: frozenset[int] = frozenset(),
     ) -> list[DriveLease] | None: ...
 
+    def acquire_drive_lease_at(
+        self, *, job_id: str, drive_id: int, barcode: str, ttl: timedelta
+    ) -> DriveLease | None:
+        """Lease one specific drive id, or None if a live lease already holds it."""
+        ...
+
     def unreconciled_drives(self) -> dict[int, str | None]:
         """Drives awaiting reconciliation (physical state unknown) -> last barcode."""
         ...
@@ -118,6 +124,30 @@ class InMemoryLeaseStore:
                 acquired.append(lease)
             return acquired
 
+    def acquire_drive_lease_at(
+        self, *, job_id: str, drive_id: int, barcode: str, ttl: timedelta
+    ) -> DriveLease | None:
+        with self._lock:
+            now = _now()
+            if any(
+                lease.drive_id == drive_id and _live(lease, now) for lease in self._leases.values()
+            ):
+                return None
+            self._last_token += 1
+            lease = DriveLease(
+                id=str(uuid4()),
+                drive_id=drive_id,
+                job_id=job_id,
+                barcode=barcode,
+                physical_drive_id=None,
+                fencing_token=self._last_token,
+                acquired_at=now,
+                heartbeat_at=now,
+                expires_at=now + ttl,
+            )
+            self._leases[lease.id] = lease
+            return lease
+
     def unreconciled_drives(self) -> dict[int, str | None]:
         return dict(self.unreconciled)
 
@@ -173,15 +203,16 @@ class CatalogLeaseStore:
         ttl: timedelta,
         exclude: frozenset[int] = frozenset(),
     ) -> list[DriveLease] | None:
-        leases = self._repo.acquire_drive_leases(
-            job_id=job_id, barcodes=barcodes, num_drives=num_drives, ttl=ttl
+        return self._repo.acquire_drive_leases(
+            job_id=job_id, barcodes=barcodes, num_drives=num_drives, ttl=ttl, exclude=exclude
         )
-        if leases is not None and any(lease.drive_id in exclude for lease in leases):
-            # The repository cannot yet skip drives itself: never hand out an
-            # unreconciled drive -- give the leases back and report "not now".
-            self._repo.release_leases([lease.id for lease in leases])
-            return None
-        return leases
+
+    def acquire_drive_lease_at(
+        self, *, job_id: str, drive_id: int, barcode: str, ttl: timedelta
+    ) -> DriveLease | None:
+        return self._repo.acquire_drive_lease_at(
+            job_id=job_id, drive_id=drive_id, barcode=barcode, ttl=ttl
+        )
 
     def unreconciled_drives(self) -> dict[int, str | None]:
         from openblade.jobs.reconcile import drives_pending_reconciliation  # local: no cycle
