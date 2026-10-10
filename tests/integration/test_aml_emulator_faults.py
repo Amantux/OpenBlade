@@ -14,13 +14,6 @@ from openblade.api.main import app
 from openblade.bootstrap import create_context, reset_context
 from openblade.config import OpenBladeConfig
 
-# 503/409 need the middleware in openblade/api/main.py to call
-# aml_latency.resolve_request_fault (cross-cutting request, not owned by this
-# workstream). strict=True: these flip to failures once wired, forcing removal.
-_NEEDS_MAIN_HOOK = pytest.mark.xfail(
-    strict=True, reason="main.py middleware does not yet call resolve_request_fault"
-)
-
 
 def _client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str | None) -> TestClient:
     if profile is None:
@@ -55,7 +48,6 @@ def test_no_fault_profile_mount_requests_never_409(
     assert 409 not in statuses
 
 
-@_NEEDS_MAIN_HOOK
 def test_intermittent_drive_every_third_load_returns_409(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -68,7 +60,6 @@ def test_intermittent_drive_every_third_load_returns_409(
     assert responses[2].json()["code"] == "AML_CONFLICT"
 
 
-@_NEEDS_MAIN_HOOK
 def test_rebooting_returns_503_with_retry_after(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
