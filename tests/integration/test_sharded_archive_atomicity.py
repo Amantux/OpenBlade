@@ -76,7 +76,7 @@ def test_load_helpers_do_not_mutate_scheduler_lock_key() -> None:
         assert slot is not None
         library.load(slot, 1)  # cartridge physically in drive 1
         handle = DriveHandle(drive_id=0, barcode=BARCODES[0])  # scheduler reserved drive 0
-        physical, _slot = helper(None, library, ltfs, handle, "job")  # already-loaded fast path
+        physical, _slot = helper(_catalog(), library, ltfs, handle, "job")  # already-loaded fast path
         assert handle.drive_id == 0, f"{helper.__name__} mutated the scheduler lock key"
         assert handle.physical == 1 and physical == 1
 

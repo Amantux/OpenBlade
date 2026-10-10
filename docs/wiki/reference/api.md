@@ -6,7 +6,7 @@
 
 Introspected from the OpenAPI schema of `openblade.api.main:app`.
 
-**1179 operations** total: 199 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
+**1186 operations** total: 206 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
 
 The application serves two surfaces from one ASGI app. Setting
 `OPENBLADE_SCALAR_API_ONLY=true` puts it in emulator-only mode, where the
@@ -83,12 +83,13 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `POST` | `/restore/` | Enqueue Restore | - | `openblade__api__routes_restore__RestoreRequest` | `EnqueuedJobResponse` |
 | `POST` | `/restore/tree` | Restore Tree | - | `TreeRestoreApiRequest` | `TreeRestoreResponse` |
 
-### `jobs` (3 operations)
+### `jobs` (4 operations)
 
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/jobs/` | List Jobs | `library_id`? (query) | - | `openblade__api__routes_jobs__JobResponse[]` |
 | `GET` | `/jobs/recovery` | Get Recovery Report | - | - | `RecoveryReportResponse` |
+| `POST` | `/jobs/recovery/reconcile/{drive_id}` | Post Reconcile Drive | `drive_id` (path) | - | `ReconcileDriveResponse` |
 | `GET` | `/jobs/{job_id}` | Get Job | `job_id` (path) | - | `openblade__api__routes_jobs__JobResponse` |
 
 ### `catalog` (6 operations)
@@ -113,7 +114,7 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `GET` | `/virtual/ls` | List Virtual Directory | `path`? (query) | - | `VirtualDirectoryListing` |
 | `GET` | `/virtual/stat` | Stat Virtual Path | `path` (query) | - | `VirtualFileEntry` |
 
-### `NAS Config` (118 operations)
+### `NAS Config` (124 operations)
 
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
@@ -136,6 +137,7 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `GET` | `/nas/datasets/{dataset_id}/manifest` | Get Dataset Manifest | `dataset_id` (path) | - | `object` |
 | `GET` | `/nas/datasets/{dataset_id}/report` | Get Dataset Report | `dataset_id` (path) | - | `object` |
 | `POST` | `/nas/datasets/{dataset_id}/verify` | Verify Dataset | `dataset_id` (path) | - | `object` |
+| `GET` | `/nas/export-sets` | List Export Sets | - | - | `object[]` |
 | `GET` | `/nas/fuse/log` | Get Fuse Log | - | - | `object[]` |
 | `POST` | `/nas/fuse/open` | Open Virtual File | - | `FuseOpenRequest` | `object` |
 | `POST` | `/nas/ingest/start` | Start Ingest | - | `StartIngestRequest` | `StartIngestResponse` |
@@ -159,6 +161,7 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `GET` | `/nas/pools/{pool_id}/browse` | Browse Pool | `pool_id` (path), `path`? (query) | - | `object` |
 | `GET` | `/nas/pools/{pool_id}/files/{file_path}` | Get Pool File Detail | `pool_id` (path), `file_path` (path) | - | `NasFileRecord` |
 | `POST` | `/nas/pools/{pool_id}/request-restore` | Request Restore | `pool_id` (path) | `RestorePlanRequest` | `NasRestoreJob` |
+| `GET` | `/nas/reservations` | List Reservations | `pool_id`? (query) | - | `object[]` |
 | `POST` | `/nas/resolve-policy` | Resolve Policy | - | `ResolvePolicyRequest` | `EffectivePolicy` |
 | `GET` | `/nas/restore-jobs` | List Restore Jobs | - | - | `NasRestoreJob[]` |
 | `GET` | `/nas/restore-jobs/{job_id}` | Get Restore Job | `job_id` (path) | - | `NasRestoreJob` |
@@ -176,6 +179,7 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `GET` | `/nas/source-stream` | Get Source Stream Config | - | - | `SourceStreamConfig` |
 | `PUT` | `/nas/source-stream` | Update Source Stream Config | - | `SourceStreamConfig` | `SourceStreamConfig` |
 | `DELETE` | `/nas/source-stream` | Delete Source Stream Config | - | - | `object` |
+| `GET` | `/nas/vaults` | List Vaults | - | - | `object[]` |
 | `POST` | `/storage/nas/archive-plan` | Archive Plan | - | `ArchivePlanRequest` | `ArchivePlan` |
 | `GET` | `/storage/nas/cache-drives` | List Cache Drives | - | - | `CacheDriveConfig[]` |
 | `POST` | `/storage/nas/cache-drives` | Create Or Update Cache Drive | - | `CacheDriveConfig` | `CacheDriveConfig` |
@@ -195,6 +199,7 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `GET` | `/storage/nas/datasets/{dataset_id}/manifest` | Get Dataset Manifest | `dataset_id` (path) | - | `object` |
 | `GET` | `/storage/nas/datasets/{dataset_id}/report` | Get Dataset Report | `dataset_id` (path) | - | `object` |
 | `POST` | `/storage/nas/datasets/{dataset_id}/verify` | Verify Dataset | `dataset_id` (path) | - | `object` |
+| `GET` | `/storage/nas/export-sets` | List Export Sets | - | - | `object[]` |
 | `GET` | `/storage/nas/fuse/log` | Get Fuse Log | - | - | `object[]` |
 | `POST` | `/storage/nas/fuse/open` | Open Virtual File | - | `FuseOpenRequest` | `object` |
 | `POST` | `/storage/nas/ingest/start` | Start Ingest | - | `StartIngestRequest` | `StartIngestResponse` |
@@ -218,6 +223,7 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `GET` | `/storage/nas/pools/{pool_id}/browse` | Browse Pool | `pool_id` (path), `path`? (query) | - | `object` |
 | `GET` | `/storage/nas/pools/{pool_id}/files/{file_path}` | Get Pool File Detail | `pool_id` (path), `file_path` (path) | - | `NasFileRecord` |
 | `POST` | `/storage/nas/pools/{pool_id}/request-restore` | Request Restore | `pool_id` (path) | `RestorePlanRequest` | `NasRestoreJob` |
+| `GET` | `/storage/nas/reservations` | List Reservations | `pool_id`? (query) | - | `object[]` |
 | `POST` | `/storage/nas/resolve-policy` | Resolve Policy | - | `ResolvePolicyRequest` | `EffectivePolicy` |
 | `GET` | `/storage/nas/restore-jobs` | List Restore Jobs | - | - | `NasRestoreJob[]` |
 | `GET` | `/storage/nas/restore-jobs/{job_id}` | Get Restore Job | `job_id` (path) | - | `NasRestoreJob` |
@@ -235,6 +241,7 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `GET` | `/storage/nas/source-stream` | Get Source Stream Config | - | - | `SourceStreamConfig` |
 | `PUT` | `/storage/nas/source-stream` | Update Source Stream Config | - | `SourceStreamConfig` | `SourceStreamConfig` |
 | `DELETE` | `/storage/nas/source-stream` | Delete Source Stream Config | - | - | `object` |
+| `GET` | `/storage/nas/vaults` | List Vaults | - | - | `object[]` |
 
 ### `upload-download` (6 operations)
 
