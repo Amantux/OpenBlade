@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -226,3 +227,33 @@ def test_api_exposes_pool_protection_and_persisted_lists(tmp_path: Path) -> None
     assert client.get("/nas/reservations", params={"pool_id": "other"}).json() == []
     assert client.get("/nas/export-sets").json()[0]["id"] == "e1"
     assert client.get("/nas/vaults").json()[0]["location"] == "offsite"
+
+
+def test_concurrent_reservations_across_processes_never_overcommit(tmp_path: Path) -> None:
+    """Regression S6: 20 racers over two catalog sessions each want 60% -> exactly one wins."""
+    init_db(f"sqlite:///{tmp_path / 'race.db'}")
+    ledgers = [ReservationLedger(CatalogRepository(get_session())) for _ in range(2)]
+    start = threading.Barrier(20)
+    won: list[str] = []
+    errors: list[BaseException] = []
+
+    def racer(i: int) -> None:
+        start.wait()
+        try:
+            ledgers[i % 2].reserve(
+                "p1", 600, f"owner-{i}", timedelta(minutes=5), free_bytes=1000, now=_NOW
+            )
+            won.append(f"owner-{i}")
+        except ReservationError:
+            pass
+        except BaseException as exc:  # noqa: BLE001 - surfaced by the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=racer, args=(i,)) for i in range(20)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert len(won) == 1
+    assert ledgers[0].reserved("p1", _NOW) == 600
