@@ -611,14 +611,15 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
             with suppress(Exception):
                 _seed_demo_ltfs(catalog, ltfs)
     run_inventory_job(library, catalog)
-    queue = JobQueue()
+    lease_store = CatalogLeaseStore(catalog)
+    queue = JobQueue(catalog, lease_store)
     worker = Worker(queue)
     return AppContext(
         config=active_config,
         library=library,
         ltfs=ltfs,
         catalog=catalog,
-        lease_store=CatalogLeaseStore(catalog),
+        lease_store=lease_store,
         recovery_report=recovery_report,
         queue=queue,
         worker=worker,

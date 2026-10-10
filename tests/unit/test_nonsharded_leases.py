@@ -157,7 +157,7 @@ def test_archive_service_holds_a_catalog_lease_while_writing(
     source = tmp_path / "src"
     source.mkdir()
     (source / "a.bin").write_bytes(b"x" * 64)
-    service = ArchiveService(library, ltfs, repo_a, JobQueue())
+    service = ArchiveService(library, ltfs, repo_a, JobQueue(repo_a, CatalogLeaseStore(repo_a)))
     seen: list[list[str]] = []
     real_write = ltfs.write_file
 
@@ -183,8 +183,10 @@ def test_restore_service_holds_a_catalog_lease_while_reading(
     source = tmp_path / "src"
     source.mkdir()
     (source / "a.bin").write_bytes(b"y" * 64)
-    ArchiveService(library, ltfs, repo_a, JobQueue()).enqueue("photos", source)
-    service = RestoreService(library, ltfs, repo_a, JobQueue())
+    ArchiveService(library, ltfs, repo_a, JobQueue(repo_a, CatalogLeaseStore(repo_a))).enqueue(
+        "photos", source
+    )
+    service = RestoreService(library, ltfs, repo_a, JobQueue(repo_a, CatalogLeaseStore(repo_a)))
     seen: list[list[str]] = []
     real_read = ltfs.read_file
 
