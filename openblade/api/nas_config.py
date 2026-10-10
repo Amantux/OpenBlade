@@ -879,6 +879,28 @@ async def get_pool(pool_id: str, service: NasService = Depends(get_nas_service))
     return pool
 
 
+@router.get("/reservations")
+async def list_reservations(
+    pool_id: str | None = None,
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> list[dict[str, object]]:
+    return repo.list_nas_reservations(pool_id)
+
+
+@router.get("/export-sets")
+async def list_export_sets(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> list[dict[str, object]]:
+    return repo.list_nas_export_sets()
+
+
+@router.get("/vaults")
+async def list_vaults(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> list[dict[str, object]]:
+    return repo.list_nas_vaults()
+
+
 @router.put("/pools/{pool_id}", response_model=NasPool)
 async def update_pool(
     pool_id: str,

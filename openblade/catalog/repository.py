@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from openblade.catalog.models import (
+    Base,
     Cartridge,
     CatalogRebuildRun,
     DriveLeaseRecord,
@@ -28,11 +30,16 @@ from openblade.catalog.models import (
     NasCacheDrive,
     NasConfig,
     NasDataset,
+    NasExportSet,
     NasFileRecord,
+    NasFileSpan,
     NasPool,
+    NasReservation,
     NasRestoreJob,
     NasShare,
     NasStoragePolicy,
+    NasVault,
+    NasVgReplication,
     PathMapping,
     RbacApiToken,
     RbacAuditEvent,
@@ -174,6 +181,8 @@ class CatalogRepository:
             "cache_target_id": row.cache_target_id,
             "restore_target_path": row.restore_target_path,
             "access_mode": row.access_mode,
+            "replication_factor": row.replication_factor,
+            "protection": _load_json_value(row.protection_json, None),
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -1074,6 +1083,12 @@ class CatalogRepository:
         row.cache_target_id = parsed.cache_target_id
         row.restore_target_path = parsed.restore_target_path
         row.access_mode = parsed.access_mode
+        row.replication_factor = parsed.replication_factor
+        row.protection_json = (
+            json.dumps(parsed.protection.to_dict(), sort_keys=True)
+            if parsed.protection is not None
+            else None
+        )
         row.created_at = row.created_at or parsed.created_at or _utcnow_iso()
         row.updated_at = parsed.updated_at or _utcnow_iso()
         self.session.commit()
@@ -1293,6 +1308,154 @@ class CatalogRepository:
         self.session.delete(row)
         self.session.commit()
         return True
+
+    # --- NAS domain persistence ---
+
+    _SCRATCH_THRESHOLDS_KEY = "scratch_thresholds"
+
+    def _delete_nas_row(self, model: type[Base], key: str) -> bool:
+        row = self.session.get(model, key)
+        if row is None:
+            return False
+        self.session.delete(row)
+        self.session.commit()
+        return True
+
+    @staticmethod
+    def _nas_reservation_to_dict(row: NasReservation) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "pool_id": row.pool_id,
+            "bytes": row.bytes,
+            "owner": row.owner,
+            "expires_at": datetime.fromisoformat(row.expires_at),
+        }
+
+    def list_nas_reservations(self, pool_id: str | None = None) -> list[dict[str, object]]:
+        stmt = select(NasReservation).order_by(NasReservation.expires_at)
+        if pool_id is not None:
+            stmt = stmt.where(NasReservation.pool_id == pool_id)
+        rows = self.session.execute(stmt).scalars().all()
+        return [self._nas_reservation_to_dict(row) for row in rows]
+
+    def reservations_for_pool(self, pool_id: str, *, now: datetime) -> list[dict[str, object]]:
+        """Unexpired reservations for ``pool_id`` (a reservation expiring at ``now`` is expired)."""
+        return [
+            item
+            for item in self.list_nas_reservations(pool_id)
+            if cast(datetime, item["expires_at"]) > now
+        ]
+
+    def upsert_nas_reservation(self, data: dict[str, object]) -> dict[str, object]:
+        expires_at = data["expires_at"]
+        if not isinstance(expires_at, datetime):
+            expires_at = datetime.fromisoformat(str(expires_at))
+        reservation_id = str(data.get("id") or uuid.uuid4())
+        row = self.session.get(NasReservation, reservation_id)
+        if row is None:
+            row = NasReservation(id=reservation_id)
+            self.session.add(row)
+        row.pool_id = str(data["pool_id"])
+        row.bytes = int(cast(int, data["bytes"]))
+        row.owner = str(data["owner"])
+        row.expires_at = expires_at.isoformat()
+        self.session.commit()
+        return self._nas_reservation_to_dict(row)
+
+    def delete_nas_reservation(self, reservation_id: str) -> bool:
+        return self._delete_nas_row(NasReservation, reservation_id)
+
+    def list_nas_export_sets(self) -> list[dict[str, object]]:
+        rows = self.session.execute(select(NasExportSet).order_by(NasExportSet.id)).scalars()
+        return [
+            {"id": r.id, "barcodes": _load_json_value(r.barcodes_json, []), "state": r.state}
+            for r in rows
+        ]
+
+    def upsert_nas_export_set(self, data: dict[str, object]) -> dict[str, object]:
+        row = self.session.get(NasExportSet, str(data["id"])) or NasExportSet(id=str(data["id"]))
+        self.session.add(row)
+        row.barcodes_json = json.dumps(list(cast(list[str], data.get("barcodes", []))))
+        row.state = str(data["state"])
+        self.session.commit()
+        return {"id": row.id, "barcodes": json.loads(row.barcodes_json), "state": row.state}
+
+    def delete_nas_export_set(self, export_set_id: str) -> bool:
+        return self._delete_nas_row(NasExportSet, export_set_id)
+
+    def list_nas_vaults(self) -> list[dict[str, object]]:
+        rows = self.session.execute(select(NasVault).order_by(NasVault.id)).scalars()
+        return [
+            {"id": r.id, "barcodes": _load_json_value(r.barcodes_json, []), "location": r.location}
+            for r in rows
+        ]
+
+    def upsert_nas_vault(self, data: dict[str, object]) -> dict[str, object]:
+        row = self.session.get(NasVault, str(data["id"])) or NasVault(id=str(data["id"]))
+        self.session.add(row)
+        row.barcodes_json = json.dumps(list(cast(list[str], data.get("barcodes", []))))
+        row.location = str(data["location"])
+        self.session.commit()
+        return {"id": row.id, "barcodes": json.loads(row.barcodes_json), "location": row.location}
+
+    def delete_nas_vault(self, vault_id: str) -> bool:
+        return self._delete_nas_row(NasVault, vault_id)
+
+    @staticmethod
+    def _nas_vg_replication_to_dict(row: NasVgReplication) -> dict[str, object]:
+        return {
+            "vg_id": row.vg_id,
+            "barcodes": _load_json_value(row.barcodes_json, []),
+            "replicas_required": row.replicas_required,
+            "replicas_present": row.replicas_present,
+        }
+
+    def list_nas_vg_replication(self) -> list[dict[str, object]]:
+        rows = self.session.execute(select(NasVgReplication).order_by(NasVgReplication.vg_id))
+        return [self._nas_vg_replication_to_dict(row) for row in rows.scalars()]
+
+    def upsert_nas_vg_replication(self, data: dict[str, object]) -> dict[str, object]:
+        vg_id = str(data["vg_id"])
+        row = self.session.get(NasVgReplication, vg_id) or NasVgReplication(vg_id=vg_id)
+        self.session.add(row)
+        row.barcodes_json = json.dumps(list(cast(list[str], data.get("barcodes", []))))
+        row.replicas_required = int(cast(int, data.get("replicas_required", 1)))
+        row.replicas_present = int(cast(int, data.get("replicas_present", 0)))
+        self.session.commit()
+        return self._nas_vg_replication_to_dict(row)
+
+    def delete_nas_vg_replication(self, vg_id: str) -> bool:
+        return self._delete_nas_row(NasVgReplication, vg_id)
+
+    def list_nas_file_spans(self, path: str | None = None) -> list[dict[str, object]]:
+        stmt = select(NasFileSpan).order_by(NasFileSpan.path, NasFileSpan.id)
+        if path is not None:
+            stmt = stmt.where(NasFileSpan.path == path)
+        return [
+            {"id": r.id, "path": r.path, "segments": _load_json_value(r.segments_json, [])}
+            for r in self.session.execute(stmt).scalars()
+        ]
+
+    def upsert_nas_file_span(self, data: dict[str, object]) -> dict[str, object]:
+        span_id = str(data.get("id") or uuid.uuid4())
+        row = self.session.get(NasFileSpan, span_id) or NasFileSpan(id=span_id)
+        self.session.add(row)
+        row.path = str(data["path"])
+        row.segments_json = json.dumps(list(cast(list[object], data.get("segments", []))))
+        self.session.commit()
+        return {"id": row.id, "path": row.path, "segments": json.loads(row.segments_json)}
+
+    def delete_nas_file_span(self, span_id: str) -> bool:
+        return self._delete_nas_row(NasFileSpan, span_id)
+
+    def get_scratch_thresholds(self) -> dict[str, object] | None:
+        return self.get_nas_config(self._SCRATCH_THRESHOLDS_KEY)
+
+    def set_scratch_thresholds(self, scratch_min: int, scratch_warn: int) -> dict[str, object]:
+        return self.set_nas_config(
+            self._SCRATCH_THRESHOLDS_KEY,
+            {"scratch_min": scratch_min, "scratch_warn": scratch_warn},
+        )
 
     def create_rebuild_run(self, run: dict[str, object]) -> dict[str, object]:
         parsed = CatalogRebuildRunRecord.model_validate(run)

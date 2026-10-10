@@ -10,10 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from openblade.nas.types import NasFileState
+
+if TYPE_CHECKING:
+    from openblade.catalog.repository import CatalogRepository
 
 # --- 2. scratch thresholds -------------------------------------------------
 
@@ -91,13 +95,26 @@ class CapacityReservation(BaseModel):
 
 
 class ReservationLedger:
-    """In-memory ledger of capacity reservations per pool."""
+    """Ledger of capacity reservations per pool.
 
-    def __init__(self) -> None:
+    Pure in-memory by default; constructed with ``catalog`` it reads and writes
+    through the persisted ``nas_reservations`` table so reservations survive restarts.
+    """
+
+    def __init__(self, catalog: CatalogRepository | None = None) -> None:
         self._items: list[CapacityReservation] = []
+        self._catalog = catalog
+
+    def _active(self, pool_id: str, now: datetime) -> list[CapacityReservation]:
+        if self._catalog is None:
+            return [r for r in self._items if r.pool_id == pool_id and r.active(now)]
+        return [
+            CapacityReservation.model_validate(item)
+            for item in self._catalog.reservations_for_pool(pool_id, now=now)
+        ]
 
     def reserved(self, pool_id: str, now: datetime) -> int:
-        return sum(r.bytes for r in self._items if r.pool_id == pool_id and r.active(now))
+        return sum(r.bytes for r in self._active(pool_id, now))
 
     def available(self, pool_id: str, free_bytes: int, now: datetime) -> int:
         return max(0, free_bytes - self.reserved(pool_id, now))
@@ -115,10 +132,19 @@ class ReservationLedger:
         if nbytes > self.available(pool_id, free_bytes, now):
             raise ReservationError(f"pool {pool_id} cannot reserve {nbytes} bytes")
         res = CapacityReservation(pool_id=pool_id, bytes=nbytes, owner=owner, expires_at=now + ttl)
-        self._items.append(res)
+        if self._catalog is not None:
+            self._catalog.upsert_nas_reservation(res.model_dump())
+        else:
+            self._items.append(res)
         return res
 
     def release(self, pool_id: str, owner: str) -> int:
+        if self._catalog is not None:
+            removed = 0
+            for item in self._catalog.list_nas_reservations(pool_id):
+                if item["owner"] == owner and self._catalog.delete_nas_reservation(str(item["id"])):
+                    removed += 1
+            return removed
         before = len(self._items)
         self._items = [r for r in self._items if not (r.pool_id == pool_id and r.owner == owner)]
         return before - len(self._items)

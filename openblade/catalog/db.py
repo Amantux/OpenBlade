@@ -113,6 +113,14 @@ def _migrate_schema(engine: Engine) -> None:
             library_columns = {
                 column["name"] for column in inspector.get_columns("library_instances")
             }
+        if "nas_pools" in inspector.get_table_names():
+            pool_columns = {column["name"] for column in inspector.get_columns("nas_pools")}
+            if "replication_factor" not in pool_columns:
+                connection.execute(
+                    text("ALTER TABLE nas_pools ADD COLUMN replication_factor INTEGER DEFAULT 1")
+                )
+            if "protection_json" not in pool_columns:
+                connection.execute(text("ALTER TABLE nas_pools ADD COLUMN protection_json TEXT"))
         if "nas_datasets" in inspector.get_table_names():
             dataset_columns = {column["name"] for column in inspector.get_columns("nas_datasets")}
             if "protection_json" not in dataset_columns:
@@ -291,6 +299,20 @@ def _migrate_schema(engine: Engine) -> None:
                 """
             )
         )
+    # NAS domain tables (added after initial release); create_all(checkfirst) is idempotent.
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Base.metadata.tables[name]
+            for name in (
+                "nas_reservations",
+                "nas_export_sets",
+                "nas_vaults",
+                "nas_vg_replication",
+                "nas_file_spans",
+            )
+        ],
+    )
 
 
 def init_db(db_url: str = "sqlite:///./openblade.db") -> None:
