@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import os
 import threading
 from collections import OrderedDict
 from pathlib import Path
 
 from openblade.domain.errors import OpenBladeError
+
+logger = logging.getLogger(__name__)
+
+SAMPLE_BYTES = 64 * 1024
 
 
 class CacheEntryInUseError(RuntimeError):
@@ -21,6 +27,17 @@ class CacheError(OpenBladeError, ValueError):
 
 class CacheChecksumError(CacheError):
     """Raised when staged bytes do not match the catalog checksum."""
+
+
+class CacheIntegrityError(CacheError):
+    """Raised when a cached entry no longer matches its integrity record (it is evicted)."""
+
+
+def _sample_offset(checksum: str, size: int) -> int:
+    """Deterministic sample offset derived from the checksum; 0 when the file fits in one block."""
+    if size <= SAMPLE_BYTES:
+        return 0
+    return int(checksum[:8], 16) % max(1, size - SAMPLE_BYTES)
 
 
 class HydrationCache:
@@ -101,8 +118,75 @@ class HydrationCache:
             os.replace(tmp, final)
         finally:
             tmp.unlink(missing_ok=True)
+        self._write_meta(checksum)
         self._track(checksum, final.stat().st_size)
         return final
+
+    # -- integrity records ---------------------------------------------------
+    def meta_key(self, checksum: str) -> Path:
+        path = self.cache_key(checksum)
+        return path.with_name(f"{path.name}.meta.json")
+
+    def _sample_digest(self, path: Path, offset: int, length: int) -> str:
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            return hashlib.sha256(handle.read(length)).hexdigest()
+
+    def _write_meta(self, checksum: str) -> None:
+        """Record size, mtime_ns and a sampled block hash beside the cached file."""
+        path = self.cache_key(checksum)
+        st = path.stat()
+        offset = _sample_offset(checksum, st.st_size)
+        length = min(SAMPLE_BYTES, st.st_size)
+        record = {
+            "size": st.st_size,
+            "mtime_ns": st.st_mtime_ns,
+            "sample": {
+                "offset": offset,
+                "len": length,
+                "sha256": self._sample_digest(path, offset, length),
+            },
+        }
+        meta = self.meta_key(checksum)
+        tmp = meta.with_name(f".{meta.name}.{os.getpid()}.{threading.get_ident()}.part")
+        try:
+            tmp.write_text(json.dumps(record), encoding="utf-8")
+            os.replace(tmp, meta)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def _entry_matches(self, checksum: str) -> bool:
+        path = self.cache_key(checksum)
+        try:
+            record = json.loads(self.meta_key(checksum).read_text(encoding="utf-8"))
+            st = path.stat()
+            sample = record["sample"]
+            if st.st_size != record["size"] or st.st_mtime_ns != record["mtime_ns"]:
+                return False
+            offset, length = int(sample["offset"]), int(sample["len"])
+            if (offset, length) != (
+                _sample_offset(checksum, st.st_size),
+                min(SAMPLE_BYTES, st.st_size),
+            ):
+                return False
+            return bool(self._sample_digest(path, offset, length) == sample["sha256"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def verify_entry(self, checksum: str) -> bool:
+        """Cheap open-time check: size + mtime_ns + one sampled 64 KiB block.
+
+        On mismatch or a missing/unreadable integrity record the entry (file and
+        sidecar) is dropped and ``CacheIntegrityError`` raised, so the caller can
+        fall through to re-hydration.
+        """
+        with self._lock:
+            if self._entry_matches(checksum):
+                return True
+            self._lru.pop(checksum, None)
+            self.cache_key(checksum).unlink(missing_ok=True)
+            self.meta_key(checksum).unlink(missing_ok=True)
+        raise CacheIntegrityError("cached entry failed integrity verification and was evicted")
 
     def cache_key(self, checksum: str) -> Path:
         return self.cache_dir / checksum[:2] / checksum
@@ -115,6 +199,7 @@ class HydrationCache:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as handle:
             handle.write(data)
+        self._write_meta(checksum)
         self._track(checksum, len(data))
         return path
 
@@ -156,3 +241,4 @@ class HydrationCache:
             path = self.cache_key(checksum)
             if path.exists():
                 path.unlink()
+            self.meta_key(checksum).unlink(missing_ok=True)
