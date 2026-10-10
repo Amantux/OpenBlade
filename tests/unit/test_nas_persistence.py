@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -87,3 +88,63 @@ def test_pool_protection_is_serialised_like_dataset_protection(repo: CatalogRepo
     assert saved["protection"] == json.loads(json.dumps(policy.to_dict(), sort_keys=True))
     again = repo.upsert_nas_pool(dict(saved))
     assert again["protection"] == saved["protection"]
+
+
+_NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+
+
+def test_reservations_round_trip_and_expiry_filter(repo: CatalogRepository) -> None:
+    live = repo.upsert_nas_reservation(
+        {"pool_id": "p1", "bytes": 100, "owner": "job-1", "expires_at": _NOW + timedelta(hours=1)}
+    )
+    repo.upsert_nas_reservation(
+        {"pool_id": "p1", "bytes": 50, "owner": "job-2", "expires_at": _NOW}
+    )
+    repo.upsert_nas_reservation(
+        {"pool_id": "p2", "bytes": 7, "owner": "job-3", "expires_at": _NOW + timedelta(days=1)}
+    )
+    assert live["expires_at"] == _NOW + timedelta(hours=1)
+    assert len(repo.list_nas_reservations("p1")) == 2
+    active = repo.reservations_for_pool("p1", now=_NOW)
+    assert [item["owner"] for item in active] == ["job-1"]
+    assert repo.delete_nas_reservation(str(live["id"])) is True
+    assert repo.reservations_for_pool("p1", now=_NOW) == []
+    assert repo.delete_nas_reservation(str(live["id"])) is False
+
+
+def test_export_sets_vaults_and_vg_replication_round_trip(repo: CatalogRepository) -> None:
+    repo.upsert_nas_export_set({"id": "e1", "barcodes": ["A00001L9"], "state": "pending"})
+    repo.upsert_nas_export_set({"id": "e1", "barcodes": ["A00001L9", "A00002L9"], "state": "out"})
+    assert repo.list_nas_export_sets() == [
+        {"id": "e1", "barcodes": ["A00001L9", "A00002L9"], "state": "out"}
+    ]
+    repo.upsert_nas_vault({"id": "v1", "barcodes": ["A00003L9"], "location": "offsite"})
+    assert repo.list_nas_vaults() == [{"id": "v1", "barcodes": ["A00003L9"], "location": "offsite"}]
+    repo.upsert_nas_vg_replication(
+        {"vg_id": "vg1", "barcodes": ["A"], "replicas_required": 2, "replicas_present": 1}
+    )
+    assert repo.list_nas_vg_replication() == [
+        {"vg_id": "vg1", "barcodes": ["A"], "replicas_required": 2, "replicas_present": 1}
+    ]
+    assert repo.delete_nas_export_set("e1")
+    assert repo.delete_nas_vault("v1")
+    assert repo.delete_nas_vg_replication("vg1")
+    assert repo.list_nas_export_sets() == repo.list_nas_vaults() == []
+    assert repo.list_nas_vg_replication() == []
+
+
+def test_file_spans_and_scratch_thresholds_round_trip(repo: CatalogRepository) -> None:
+    segments = [
+        {"barcode": "A00001L9", "offset": 0, "length": 10},
+        {"barcode": "A00002L9", "offset": 0, "length": 5},
+    ]
+    span = repo.upsert_nas_file_span({"path": "/big.bin", "segments": segments})
+    repo.upsert_nas_file_span({"path": "/other.bin", "segments": segments[:1]})
+    assert repo.list_nas_file_spans("/big.bin") == [
+        {"id": span["id"], "path": "/big.bin", "segments": segments}
+    ]
+    assert len(repo.list_nas_file_spans()) == 2
+    assert repo.delete_nas_file_span(str(span["id"]))
+    assert repo.get_scratch_thresholds() is None
+    repo.set_scratch_thresholds(2, 5)
+    assert repo.get_scratch_thresholds() == {"scratch_min": 2, "scratch_warn": 5}
