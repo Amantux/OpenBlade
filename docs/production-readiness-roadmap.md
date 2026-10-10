@@ -48,7 +48,7 @@ Verified against the tree, not asserted. "Landed" = implemented and tested in-re
 | 13 | Consolidated emulator workflows | landed | `_emulator-boot-test.yml` |
 | 14 | Lint/type ratchet | landed (both blocking, both at zero) | `ci.yml` |
 | 15 | Workflow hardening | landed: SHA pins, per-job permissions, actionlint/zizmor/shellcheck/yamllint | `workflow-lint.yml` |
-| 16 | Differential + mutation | mutation lane landed (mutmut, ratchet baseline for 2 modules); differential appliance-gated | `tools/mutation_run.sh`, `mutation/baseline.txt` |
+| 16 | Differential + mutation | mutation lane landed (mutmut 3.8.0, ratchet baseline for 6/6 modules as of 2026-10-10); differential appliance-gated | `tools/mutation_run.sh`, `mutation/baseline.txt` |
 | 17 | Timing profiles + virtual clock | landed (10 profiles; 4 simulated client-side) | `tests/i3/timing.py` |
 | 18 | Auth fidelity | landed as inferred behaviour + corpus cases: session cap, strict 412, XML, 415/406, 429 Retry-After, error matrix; MFA-required pending state not modelled | `routes_aml_auth.py`, `compatibility/` |
 | 19 | Real SMB/NFS protocol tests | landed (containerised rig, 31 scenarios pass locally; SMB byte-range lock + NFS ACL skip) | `deploy/nas-protocols/`, `tests/e2e/protocols/` |
