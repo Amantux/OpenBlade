@@ -19,6 +19,7 @@ from uuid import uuid4
 import pyotp
 from sqlalchemy import select
 
+from openblade.api.aml_faults import get_fault_state
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.models import AmlUser
 from openblade.simulator.i3_config import scalar_i3_active_config
@@ -2479,6 +2480,15 @@ def max_sessions_per_user() -> int:
     return value if value >= 1 else _DEFAULT_MAX_SESSIONS_PER_USER
 
 
+def _session_lifetime() -> timedelta:
+    # OPENBLADE_EMULATOR_FAULT_PROFILE auth_ttl_s (e.g. "session-expiry") overrides
+    # the configured timeout so expiry is observable within a test run.
+    ttl = get_fault_state().profile.auth_ttl_s
+    if ttl is not None:
+        return timedelta(seconds=ttl)
+    return timedelta(minutes=_STATE.session_timeout_minutes)
+
+
 def create_session(user: AmlUser) -> SessionRecord:
     purge_expired_sessions()
     # Evict the user's oldest sessions so the new login always succeeds: refusing
@@ -2495,7 +2505,7 @@ def create_session(user: AmlUser) -> SessionRecord:
         user_name=user.name,
         role=user.role,
         created_at=now,
-        expires_at=now + timedelta(minutes=_STATE.session_timeout_minutes),
+        expires_at=now + _session_lifetime(),
     )
     _STATE.sessions[record.token] = record
     return record
@@ -2506,7 +2516,9 @@ def get_session_user(token: str) -> AmlUser | None:
     record = _STATE.sessions.get(token)
     if record is None:
         return None
-    record.expires_at = _utcnow() + timedelta(minutes=_STATE.session_timeout_minutes)
+    if get_fault_state().profile.auth_ttl_s is None:
+        # Sliding expiry; a fault-profile TTL is absolute from login instead.
+        record.expires_at = _utcnow() + timedelta(minutes=_STATE.session_timeout_minutes)
     return get_user(record.user_name)
 
 

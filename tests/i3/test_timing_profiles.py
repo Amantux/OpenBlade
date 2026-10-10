@@ -33,6 +33,7 @@ _MAX_WALL_S = 1.0
 def vclock(monkeypatch: pytest.MonkeyPatch) -> Iterator[VirtualClock]:
     monkeypatch.delenv("I3_TIMING_PROFILE", raising=False)
     monkeypatch.delenv("I3_TEST_MODE", raising=False)
+    monkeypatch.setenv("I3_FAULTS_SERVER_SIDE", "0")
     clock = VirtualClock()
     started = time.monotonic()
     with use_clock(clock):
@@ -246,3 +247,16 @@ def test_emulator_env_latency_override_accepted_by_emulator_hook(
     assert env["OPENBLADE_EMULATOR_LATENCY_PROFILE"] == "realistic"
     assert parsed == json.loads(env["OPENBLADE_EMULATOR_LATENCY_PROFILE_MS"])
     assert parsed is not None and parsed["move"]["realistic"] == 4500
+
+
+def test_profile_runtime_server_side_faults_skips_client_injection(
+    vclock: VirtualClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("I3_FAULTS_SERVER_SIDE", "1")
+    runtime = ProfileRuntime("intermittent-drive", clock=vclock)
+
+    for _ in range(6):
+        runtime.perform("tape_load")
+    runtime.check_session(runtime.issue_session() - 3600.0)
+
+    assert runtime.loads == 6
