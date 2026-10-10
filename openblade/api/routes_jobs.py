@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from openblade.bootstrap import AppContext, get_context
+from openblade.domain.errors import DriveUnreconciledError
+from openblade.jobs.reconcile import UnknownDriveError, reconcile_drive
 
 router = APIRouter()
 
@@ -61,12 +65,28 @@ class StagedInstanceResponse(BaseModel):
     state: str
 
 
+class PendingReconciliationResponse(BaseModel):
+    drive_id: int
+    barcode: str | None
+    op: str
+    job_id: str
+    at: datetime
+
+
 class RecoveryReportResponse(BaseModel):
     interrupted_job_ids: list[str]
     released_lease_ids: list[str]
     mismatches: list[DriveMismatchResponse]
     staged_instances: dict[str, list[StagedInstanceResponse]]
     stale_pending_job_ids: list[str]
+    pending_reconciliation: list[PendingReconciliationResponse]
+
+
+class ReconcileDriveResponse(BaseModel):
+    drive: int
+    observed_barcode: str | None
+    job_id: str
+    at: datetime
 
 
 # Declared before /{job_id} so the literal path wins route matching.
@@ -104,6 +124,31 @@ async def get_recovery_report(
             for job_id, instances in report.staged_instances.items()
         },
         stale_pending_job_ids=list(report.stale_pending_job_ids),
+        pending_reconciliation=[
+            PendingReconciliationResponse(
+                drive_id=p.drive_id, barcode=p.barcode, op=p.op, job_id=p.job_id, at=p.at
+            )
+            for p in report.pending_reconciliation
+        ],
+    )
+
+
+@router.post("/recovery/reconcile/{drive_id}", response_model=ReconcileDriveResponse)
+async def post_reconcile_drive(
+    drive_id: int, context: AppContext = Depends(get_context)
+) -> ReconcileDriveResponse:
+    """Clear a drive's "physical state unknown" mark after checking it is unmounted.
+
+    Bearer-token gated like every native route (api_auth middleware)."""
+    try:
+        done = reconcile_drive(context.catalog, context.library, drive_id)
+    except UnknownDriveError:
+        raise HTTPException(status_code=404, detail=f"Drive {drive_id} not found") from None
+    except DriveUnreconciledError as exc:
+        # Curated message from reconcile_drive (drive id, barcode, mount state).
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return ReconcileDriveResponse(
+        drive=done.drive_id, observed_barcode=done.barcode, job_id=done.job_id, at=done.at
     )
 
 

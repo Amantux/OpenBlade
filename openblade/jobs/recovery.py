@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from openblade.catalog.repository import CatalogRepository, StagedInstance
 from openblade.domain.backends import LibraryBackend
 from openblade.jobs.inventory import InventoryService
+from openblade.jobs.reconcile import PendingReconciliation, drives_pending_reconciliation
 from openblade.jobs.scheduler import DEFAULT_LEASE_TTL
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,9 @@ class RecoveryReport:
     staged_instances: dict[str, list[StagedInstance]] = field(default_factory=dict)
     # `pending` jobs older than one lease TTL with no live lease. Report only.
     stale_pending_job_ids: list[str] = field(default_factory=list)
+    # Drives whose physical state is unknown after a failed unmount/unload. Report
+    # only: an operator reconciles each via POST /jobs/recovery/reconcile/{drive_id}.
+    pending_reconciliation: list[PendingReconciliation] = field(default_factory=list)
 
 
 def _is_older_than(created_at: datetime, ttl: timedelta, now: datetime) -> bool:
@@ -122,14 +126,17 @@ def recover_after_restart(catalog: CatalogRepository, library: LibraryBackend) -
         mismatches=mismatches,
         staged_instances=staged,
         stale_pending_job_ids=stale_pending,
+        pending_reconciliation=list(drives_pending_reconciliation(catalog).values()),
     )
     logger.info(
         "recovery: %d job(s) interrupted, %d lease(s) released, %d drive mismatch(es), "
-        "%d staged instance(s) awaiting reconcile, %d stale pending job(s)",
+        "%d staged instance(s) awaiting reconcile, %d stale pending job(s), "
+        "%d drive(s) awaiting reconciliation",
         len(report.interrupted_job_ids),
         len(report.released_lease_ids),
         len(report.mismatches),
         sum(len(items) for items in staged.values()),
         len(stale_pending),
+        len(report.pending_reconciliation),
     )
     return report
