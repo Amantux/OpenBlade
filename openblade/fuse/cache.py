@@ -55,6 +55,48 @@ class HydrationCache:
         self._lock = threading.RLock()
         self._lru: OrderedDict[str, int] = OrderedDict()
         self._refs: dict[str, int] = {}
+        with self._lock:
+            # Not persisted here: a fresh cache stays empty on disk, and the scan
+            # re-finds any unindexed files on the next start. Evictions persist.
+            self._load_index()
+            self._enforce_budget()
+
+    # -- persisted LRU index -------------------------------------------------
+    @property
+    def index_path(self) -> Path:
+        return self.cache_dir / "index.json"
+
+    def _load_index(self) -> None:
+        """Rebuild ``_lru`` from ``index.json`` plus any on-disk entries it misses.
+
+        Entries whose file is gone are dropped; files not in the index are appended
+        (size from stat) so a restart always counts on-disk bytes against the budget.
+        """
+        if self.index_path.exists():
+            try:
+                raw = json.loads(self.index_path.read_text(encoding="utf-8"))
+                for checksum, size in raw:
+                    if isinstance(checksum, str) and self.cache_key(checksum).is_file():
+                        self._lru[checksum] = int(size)
+            except (OSError, ValueError, TypeError):
+                logger.warning("fuse cache: index.json unreadable; rebuilding from disk scan")
+                self._lru.clear()
+        for path in sorted(self.cache_dir.glob("??/*")):
+            name = path.name
+            if name.startswith(".") or name.endswith(".meta.json") or not path.is_file():
+                continue
+            if name not in self._lru:
+                self._lru[name] = path.stat().st_size
+
+    def _persist_index(self) -> None:
+        tmp = self.index_path.with_name(f".index.json.{os.getpid()}.{threading.get_ident()}.part")
+        try:
+            tmp.write_text(json.dumps([[c, n] for c, n in self._lru.items()]), encoding="utf-8")
+            os.replace(tmp, self.index_path)
+        except OSError:
+            logger.warning("fuse cache: could not persist index.json")
+        finally:
+            tmp.unlink(missing_ok=True)
 
     # -- refcounting / LRU ---------------------------------------------------
     def acquire(self, checksum: str) -> None:
@@ -85,6 +127,7 @@ class HydrationCache:
             self._lru[checksum] = size
             self._lru.move_to_end(checksum)
             self._enforce_budget()
+            self._persist_index()
 
     def _enforce_budget(self) -> None:
         if self.max_bytes is None:
@@ -186,6 +229,7 @@ class HydrationCache:
             self._lru.pop(checksum, None)
             self.cache_key(checksum).unlink(missing_ok=True)
             self.meta_key(checksum).unlink(missing_ok=True)
+            self._persist_index()
         raise CacheIntegrityError("cached entry failed integrity verification and was evicted")
 
     def cache_key(self, checksum: str) -> Path:
@@ -242,3 +286,4 @@ class HydrationCache:
             if path.exists():
                 path.unlink()
             self.meta_key(checksum).unlink(missing_ok=True)
+            self._persist_index()
