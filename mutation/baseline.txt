@@ -5,4 +5,5 @@ openblade/domain/policies.py 23
 openblade/domain/scalar_coordinate.py 4
 openblade/jobs/recovery.py 43
 openblade/jobs/scheduler.py 87
+openblade/nas/manifest_validator.py 74
 openblade/safety/import_guard.py 20
