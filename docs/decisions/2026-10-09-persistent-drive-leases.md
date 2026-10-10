@@ -223,3 +223,19 @@ Item 4's STAGING/VERIFYING states, job resume, replacing `JobQueue`, any
 `tests/unit tests/integration tests/safety` green, frontend untouched, reviewer
 subagent pass, one commit per logical change (models+repo, scheduler, fencing
 at call sites, recovery+route, docs).
+
+## Reconciliation
+
+A failed unmount/unload journals `physical_state_unknown` (`{"op","barcode","drive"}`):
+the drive may still hold a possibly LTFS-mounted tape. `openblade/jobs/reconcile.py`
+derives the pending set across all jobs (`CatalogRepository.journal_events`): a drive is
+pending while its latest `physical_state_unknown` has no later `drive_reconciled` entry.
+
+- `DriveScheduler.acquire_drives` excludes pending drives from its candidates and raises
+  `DriveUnreconciledError` only when too few reconciled drives remain.
+- The restore / sharded-archive / sharded-restore load helpers refuse a pending drive.
+- `recover_after_restart` lists pending drives in `RecoveryReport.pending_reconciliation`
+  (report only; nothing is auto-reconciled).
+- `POST /jobs/recovery/reconcile/{drive_id}` takes a fresh inventory snapshot, refuses
+  (409) while the drive still reports a mount, else journals `drive_reconciled`
+  (`{"drive","observed_barcode"}`); 404 for an unknown drive.
