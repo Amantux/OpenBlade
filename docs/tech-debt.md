@@ -74,13 +74,20 @@ deprecation warning). `openblade/api/aml_state.py` keeps its own aware
 grep -rE "datetime\.utcnow\b" --include=*.py openblade tests tools | grep -v domain/clock.py | wc -l   # 0
 ```
 
-## In-memory job queue
+## Job queue (resolved 2026-10-10)
 
-`openblade/jobs/queue.py:23` (`class JobQueue`) keeps jobs, drive owners and the
-changer owner in process memory (`dict`s guarded by a `threading.RLock`). It is
-created once in `openblade/bootstrap.py:614`. Nothing in `queue.py` persists
-anything, so a process restart loses queued and running job records and the
-ownership map. Any durable recovery has to come from elsewhere (for example,
-drive leases and `openblade/jobs/recovery.py`), not from the queue. The queue
-also assumes a single process, so running more than one worker process would
-give each one its own independent queue.
+`openblade/jobs/queue.py` is now a façade over the catalog `jobs` table and the
+`LeaseStore` (`acquire_drive_lease_at`, changer = pseudo-drive `-1`); claims are
+heartbeated during `run_job` and refuse drives pending reconciliation. Remaining
+gap: `DriveScheduler` leases and queue claims share one drive-id space by design,
+and no production caller uses `claim_drive`/`claim_changer` yet.
+
+## NAS persistence gaps
+
+`ArchivePlanRequest.reserved_bytes` is keyed by barcode while `nas_reservations`
+are per pool; mapping one to the other needs a design decision before the planner
+can consume the ledger. Scratch-threshold health (`get_scratch_thresholds`) has no
+consumer because the catalog has no scratch-cartridge count to evaluate.
+`nas_file_spans` has no `pool_id`, so identical relative paths in two pools share
+spans. A real NFSv4 ACL protocol scenario needs a Ganesha image built with VFS
+ACL support; the shipped Debian package cannot store ACLs.
