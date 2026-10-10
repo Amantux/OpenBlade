@@ -154,7 +154,11 @@ only_mutate = [
   "openblade/domain/scalar_coordinate.py",
   "openblade/nas/manifest_validator.py",
 ]
-pytest_add_cli_args = ["-p", "no:cacheprovider", "-q"]
+# "-s": mutmut runs several pytest sessions in one process. openblade.bootstrap
+# binds structlog to the sys.stderr seen at import (pytest's capture file in
+# session 1), which is closed by session 2 -> "I/O operation on closed file" in
+# the clean-test run. No capture keeps the stream valid across sessions.
+pytest_add_cli_args = ["-p", "no:cacheprovider", "-q", "-s"]
 # tests/safety/test_assistant_read_only.py is excluded: it does not exercise the
 # mutated modules and stalled >60s locally (2026-10-09), which blocks mutmut stats.
 pytest_add_cli_args_test_selection = [
@@ -164,4 +168,11 @@ pytest_add_cli_args_test_selection = [
   "tests/unit/test_drive_leases.py",
   "tests/unit/test_recovery.py",
   "tests/unit/test_scalar_coordinate.py",
+  "tests/unit/test_manifest_validator.py",
+  "tests/unit/test_import_guard.py",
+  "tests/unit/test_safety_gates.py",
+  "tests/unit/test_hardware_safety.py",
+  "tests/unit/test_capacity_policy.py",
+  "tests/unit/test_policies_guards.py",
+  "tests/unit/test_recovery_guards.py",
 ]
