@@ -88,3 +88,10 @@ def test_fake_mtx_unknown_argv_returns_2() -> None:
         ["sg_inq", DEV],
     ):
         assert runner.run(argv).returncode == 2, argv
+
+
+def test_fake_mtx_answers_sg_inq_only_for_declared_drives() -> None:
+    runner = StatefulMtxRunner(DEV, barcodes={}, drive_serials={"/dev/nst0": "SER0"})
+
+    assert "Unit serial number: SER0" in runner.run(["sg_inq", "/dev/nst0"]).stdout
+    assert runner.run(["sg_inq", "/dev/nst1"]).returncode == 2

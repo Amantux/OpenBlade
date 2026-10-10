@@ -27,6 +27,7 @@ class StatefulMtxRunner(SafeRunner):
         slots: int = 50,
         ie_slots: int = 2,
         barcodes: dict[int, str],
+        drive_serials: dict[str, str] | None = None,
     ) -> None:
         super().__init__(dry_run=False)
         self.device = device
@@ -40,6 +41,9 @@ class StatefulMtxRunner(SafeRunner):
         self.slots: dict[int, str | None] = {s: barcodes.get(s) for s in range(1, total + 1)}
         # Per drive: (barcode, source slot) when full, None when empty.
         self.drives: dict[int, tuple[str, int] | None] = dict.fromkeys(range(drives))
+        # ``RealLibraryBackend`` correlates drives at construction with
+        # ``sg_inq <device>``; answer it for the tape devices named here.
+        self.drive_serials = dict(drive_serials or {})
         self.calls: list[list[str]] = []
 
     def run(
@@ -49,6 +53,8 @@ class StatefulMtxRunner(SafeRunner):
         redact_args: list[int] | None = None,
     ) -> CommandResult:
         self.calls.append(list(args))
+        if len(args) == 2 and args[0] == "sg_inq" and args[1] in self.drive_serials:
+            return self._result(args, 0, stdout=_sg_inq_output(self.drive_serials[args[1]]))
         if len(args) < 4 or args[:3] != ["mtx", "-f", self.device]:
             return self._result(args, 2, stderr=f"mtx: unsupported invocation {args!r}")
         verb, operands = args[3], args[4:]
@@ -128,6 +134,16 @@ class StatefulMtxRunner(SafeRunner):
         return CommandResult(
             args=list(args), returncode=code, stdout=stdout, stderr=stderr, elapsed_seconds=0.0
         )
+
+
+def _sg_inq_output(serial: str) -> str:
+    return (
+        "standard INQUIRY:\n"
+        "  PQual=0  PDT=1  RMB=1  LU_CONG=0  version=0x06  [SPC-4]\n"
+        " Vendor identification: IBM\n"
+        " Product identification: ULTRIUM-TD8\n"
+        f" Unit serial number: {serial}\n"
+    )
 
 
 def _ints(values: list[str]) -> list[int] | None:
