@@ -10,19 +10,29 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
+from openblade.catalog.db import get_session, init_db
+from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import ChangerBusyError, DriveOccupiedError
 from openblade.domain.models import JobType, MountMode
 from openblade.domain.policies import FormatConfirmation, SafetyToken
 from openblade.jobs.queue import JobQueue
-from openblade.jobs.scheduler import DriveScheduler
+from openblade.jobs.scheduler import CatalogLeaseStore, DriveScheduler
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
 from openblade.simulator.scenarios import scalar_i3_default
 
 BARCODES = ["TRI001L8", "TRI002L8", "TRI003L8"]
+
+
+@pytest.fixture
+def queue(tmp_path: Path) -> JobQueue:
+    init_db(f"sqlite:///{tmp_path / 'catalog.db'}")
+    catalog = CatalogRepository(get_session())
+    return JobQueue(catalog, CatalogLeaseStore(catalog))
 
 
 @pytest.fixture
@@ -55,10 +65,10 @@ def test_simulator_drive_count_is_configurable() -> None:
 
 def test_three_jobs_run_on_three_drives_with_disjoint_ownership(
     three_drive_library: tuple[MockLibraryBackend, MockLTFSBackend],
+    queue: JobQueue,
 ) -> None:
     library, ltfs = three_drive_library
     scheduler = DriveScheduler(num_drives=3)
-    queue = JobQueue()
     jobs = [queue.create_job(JobType.ARCHIVE, {"barcode": barcode}) for barcode in BARCODES]
 
     started = threading.Barrier(len(jobs))
@@ -116,8 +126,7 @@ def test_three_jobs_run_on_three_drives_with_disjoint_ownership(
         assert ltfs.read_bytes(barcode, f"/{barcode}.bin") == b"x" * 1024
 
 
-def test_job_queue_refuses_to_share_a_drive_between_jobs() -> None:
-    queue = JobQueue()
+def test_job_queue_refuses_to_share_a_drive_between_jobs(queue: JobQueue) -> None:
     first = queue.create_job(JobType.ARCHIVE, {})
     second = queue.create_job(JobType.ARCHIVE, {})
     queue.claim_drive(2, first.id)

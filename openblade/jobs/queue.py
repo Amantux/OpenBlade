@@ -1,12 +1,14 @@
-"""In-process job queue with resource ownership tracking."""
+"""Job queue persisted in the catalog, with resource ownership tracking."""
 
+import json
 import logging
 import threading
 from collections.abc import Callable
-from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import timedelta, timezone
 from typing import TypeVar
 
+from openblade.catalog import models as catalog_models
+from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import (
     ChangerBusyError,
     DriveOccupiedError,
@@ -14,48 +16,62 @@ from openblade.domain.errors import (
     safe_job_error,
 )
 from openblade.domain.models import Job, JobState, JobType
+from openblade.jobs.scheduler import DEFAULT_LEASE_TTL, LeaseStore
 
 ResultT = TypeVar("ResultT")
 
 logger = logging.getLogger(__name__)
 
 
+def _job_from_row(row: catalog_models.Job) -> Job:
+    return Job(
+        id=row.id,
+        job_type=JobType(row.job_type),
+        state=JobState(row.state),
+        created_at=row.created_at.replace(tzinfo=timezone.utc),
+        updated_at=row.updated_at.replace(tzinfo=timezone.utc),
+        error=row.error,
+        metadata=json.loads(row.metadata_json or "{}"),
+    )
+
+
 class JobQueue:
-    def __init__(self) -> None:
+    """Jobs live in the catalog ``jobs`` table, so every process sharing it sees them."""
+
+    def __init__(
+        self,
+        catalog: CatalogRepository,
+        lease_store: LeaseStore,
+        *,
+        ttl: timedelta = DEFAULT_LEASE_TTL,
+    ) -> None:
+        self._catalog = catalog
+        self._lease_store = lease_store
+        self._ttl = ttl
         self._lock = threading.RLock()
-        self._jobs: dict[str, Job] = {}
         self._drive_owners: dict[int, str] = {}
         self._changer_owner: str | None = None
 
     def create_job(self, job_type: JobType, metadata: dict[str, object]) -> Job:
-        job = Job(job_type=job_type, metadata=dict(metadata))
         with self._lock:
-            self._jobs[job.id] = job
-        return job
+            row = self._catalog.create_job(JobType(job_type).value, dict(metadata))
+            return _job_from_row(row)
 
     def get_job(self, job_id: str) -> Job:
         with self._lock:
-            try:
-                return self._jobs[job_id]
-            except KeyError as exc:
-                raise JobNotFoundError(job_id) from exc
-
-    def _set_job(self, job: Job) -> None:
-        with self._lock:
-            self._jobs[job.id] = job
+            row = self._catalog.get_job(job_id)
+            if row is None:
+                raise JobNotFoundError(job_id)
+            self._catalog.session.refresh(row)
+            return _job_from_row(row)
 
     def update_job(
         self, job_id: str, *, state: JobState | None = None, error: str | None = None
     ) -> Job:
-        job = self.get_job(job_id)
-        updated = replace(
-            job,
-            state=state or job.state,
-            error=error,
-            updated_at=datetime.now(timezone.utc),
-        )
-        self._set_job(updated)
-        return updated
+        with self._lock:
+            job = self.get_job(job_id)
+            self._catalog.update_job_state(job_id, (state or job.state).value, error)
+            return self.get_job(job_id)
 
     def claim_drive(self, drive_id: int, job_id: str) -> None:
         with self._lock:
