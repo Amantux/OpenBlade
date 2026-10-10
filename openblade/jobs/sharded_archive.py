@@ -647,7 +647,18 @@ def _archive_stripe(
                 _best_effort_unmount_and_unload(
                     catalog, library, ltfs, mounts, handles, loaded_slots, job_id, errors
                 )
-            scheduler.release_drives(handles)
+            try:
+                scheduler.release_drives(handles)
+            except JournalWriteError as release_exc:
+                # The lane error was caught above, so it is not in flight here and
+                # would be lost with `errors`: carry it into the raised message.
+                if not errors:
+                    raise
+                summary = _summarize_errors(errors)
+                logger.error("Lane failed before lease release: %s", summary)
+                raise JournalWriteError(
+                    f"{release_exc}; original failure: {summary}"
+                ) from release_exc
 
     return files_archived, bytes_archived
 
@@ -784,8 +795,10 @@ def _archive_block_stripe(
             _best_effort_unmount_and_unload(
                 catalog, library, ltfs, mounts, handles, loaded_slots, job_id, None
             )
-        scheduler.release_drives(handles)
-        shutil.rmtree(shard_dir, ignore_errors=True)
+        try:
+            scheduler.release_drives(handles)  # may raise JournalWriteError
+        finally:
+            shutil.rmtree(shard_dir, ignore_errors=True)
 
 
 def _load_barcode(

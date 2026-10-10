@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from openblade.api import routes_jobs
 from openblade.bootstrap import AppContext, create_context, get_context
 from openblade.config import OpenBladeConfig
-from openblade.domain.errors import DriveUnreconciledError
+from openblade.domain.errors import DriveUnreconciledError, TapeFullError, safe_job_error
 from openblade.domain.models import MountState
 from openblade.jobs.reconcile import (
     DRIVE_RECONCILED,
@@ -25,6 +25,7 @@ from openblade.jobs.scheduler import (
     DriveHandle,
     DriveScheduler,
     InMemoryLeaseStore,
+    JournalWriteError,
 )
 from openblade.simulator.library import MockLibraryBackend
 
@@ -166,3 +167,27 @@ def test_catalog_store_reports_driveless_pending_barcode(tmp_path: Path) -> None
     scheduler = DriveScheduler(2, store=CatalogLeaseStore(context.catalog))
     with pytest.raises(DriveUnreconciledError, match="MCK00007"):
         scheduler.acquire_drives(["MCK00007"], timeout=0.1)
+
+
+def test_release_failure_in_finally_names_the_original_lane_error() -> None:
+    scheduler = DriveScheduler(2, store=InMemoryLeaseStore())
+    [handle] = scheduler.acquire_drives(["MCK00001"], timeout=0.1)
+    handle.hold_unjournaled = True
+    with pytest.raises(JournalWriteError) as caught:
+        try:
+            raise TapeFullError("tape MCK00001 is full")
+        finally:
+            scheduler.release_drives([handle])
+    recorded = safe_job_error(caught.value)  # what the job queue stores
+    assert "not journaled" in recorded
+    assert "original failure: tape MCK00001 is full" in recorded
+    assert isinstance(caught.value.__context__, TapeFullError)
+
+
+def test_release_failure_without_lane_error_keeps_plain_message() -> None:
+    scheduler = DriveScheduler(2, store=InMemoryLeaseStore())
+    [handle] = scheduler.acquire_drives(["MCK00001"], timeout=0.1)
+    handle.hold_unjournaled = True
+    with pytest.raises(JournalWriteError) as caught:
+        scheduler.release_drives([handle])
+    assert "original failure" not in str(caught.value)

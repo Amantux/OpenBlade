@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -14,6 +15,7 @@ from openblade.domain.errors import (
     DriveUnreconciledError,
     OpenBladeError,
     StaleLeaseError,
+    safe_job_error,
 )
 from openblade.domain.models import DriveLease
 
@@ -429,10 +431,16 @@ class DriveScheduler:
             self._lock.notify_all()
         kept = [h.drive_id for h in handles if h.hold_unjournaled and not h._released]
         if kept:
+            message = f"physical_state_unknown not journaled for drive(s) {kept}; leases kept"
+            # Called from a `finally` that is unwinding the lane's real failure:
+            # this raise replaces it (it survives only as __context__), so log it
+            # and name it in the message the job records.
+            original = sys.exception()
+            if isinstance(original, Exception) and not isinstance(original, JournalWriteError):
+                logger.error("Lane failed before lease release", exc_info=original)
+                message += f"; original failure: {safe_job_error(original)}"
             # Raised only after every other drive was released (collect, then raise).
-            raise JournalWriteError(
-                f"physical_state_unknown not journaled for drive(s) {kept}; leases kept"
-            )
+            raise JournalWriteError(message)
 
     def verify(self, handle: DriveHandle) -> None:
         """Raise StaleLeaseError unless the handle's lease is still live with its token."""

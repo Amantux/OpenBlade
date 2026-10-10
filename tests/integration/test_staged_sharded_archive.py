@@ -167,7 +167,7 @@ def test_journal_failure_keeps_the_lease_fail_closed(tmp_path: Path, monkeypatch
     monkeypatch.setattr(catalog, "journal_durable", broken)
     store = InMemoryLeaseStore()
     job = catalog.create_job("archive", {})
-    with pytest.raises(JournalWriteError):
+    with pytest.raises(JournalWriteError) as caught:
         run_sharded_archive(
             _request(_source(tmp_path)),
             library,
@@ -176,6 +176,8 @@ def test_journal_failure_keeps_the_lease_fail_closed(tmp_path: Path, monkeypatch
             DriveScheduler(num_drives=2, store=store, job_id=job.id),
             job.id,
         )
+    # The job's recorded error still names the lane failure, not only the journal.
+    assert "original failure: " in str(caught.value)
     in_drives = {str(d.barcode) for d in library.inventory().drives if d.barcode}
     assert BARCODES[1] not in in_drives  # the other drive was still cleaned
     assert unloaded  # ...by a real UNLOAD
