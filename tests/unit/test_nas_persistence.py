@@ -10,6 +10,10 @@ from sqlalchemy import create_engine, inspect, text
 
 from openblade.catalog.db import _migrate_schema, get_session, init_db
 from openblade.catalog.repository import CatalogRepository
+from openblade.nas.capacity import ReservationError, ReservationLedger
+from openblade.nas.restore_planner import RestorePlanner
+from openblade.nas.types import RestorePlanRequest
+from tests.unit.test_nas_restore_planner import make_nas_service, seed_dataset, seed_file, seed_pool
 
 
 @pytest.fixture
@@ -148,3 +152,50 @@ def test_file_spans_and_scratch_thresholds_round_trip(repo: CatalogRepository) -
     assert repo.get_scratch_thresholds() is None
     repo.set_scratch_thresholds(2, 5)
     assert repo.get_scratch_thresholds() == {"scratch_min": 2, "scratch_warn": 5}
+
+
+def test_ledger_reservation_survives_new_ledger_instance(repo: CatalogRepository) -> None:
+    ReservationLedger(repo).reserve(
+        "p1", 400, "job-1", timedelta(hours=1), free_bytes=1_000, now=_NOW
+    )
+    fresh = ReservationLedger(repo)
+    assert fresh.reserved("p1", _NOW) == 400
+    assert fresh.available("p1", 1_000, _NOW) == 600
+    with pytest.raises(ReservationError):
+        fresh.reserve("p1", 700, "job-2", timedelta(hours=1), free_bytes=1_000, now=_NOW)
+    assert fresh.reserved("p1", _NOW + timedelta(hours=2)) == 0  # expired
+    assert fresh.release("p1", "job-1") == 1
+    assert ReservationLedger(repo).reserved("p1", _NOW) == 0
+
+
+def test_in_memory_ledger_does_not_touch_catalog(repo: CatalogRepository) -> None:
+    ReservationLedger().reserve("p1", 10, "job", timedelta(hours=1), free_bytes=100, now=_NOW)
+    assert repo.list_nas_reservations() == []
+
+
+def test_spanning_file_requires_every_segment_tape(tmp_path: Path) -> None:
+    service = make_nas_service(tmp_path)
+    pool = seed_pool(service)
+    dataset = seed_dataset(service, pool_id=pool.id)
+    seed_file(
+        service,
+        dataset_id=dataset.id,
+        pool_id=pool.id,
+        relative_path="video/big.mkv",
+        tape_barcode="VOL001L9",
+    )
+    service.repository.upsert_nas_file_span(
+        {
+            "path": "video/big.mkv",
+            "segments": [
+                {"barcode": "VOL001L9", "offset": 0, "length": 6},
+                {"barcode": "VOL002L9", "offset": 0, "length": 4},
+            ],
+        }
+    )
+
+    plan = RestorePlanner(service).plan(RestorePlanRequest(pool_id=pool.id))
+
+    assert set(plan.required_tapes) == {"VOL001L9", "VOL002L9"}
+    assert set(plan.tape_load_order) == {"VOL001L9", "VOL002L9"}
+    assert plan.batches_by_tape["VOL002L9"] == ["video/big.mkv"]
