@@ -173,4 +173,6 @@ pytest_add_cli_args_test_selection = [
   "tests/unit/test_safety_gates.py",
   "tests/unit/test_hardware_safety.py",
   "tests/unit/test_capacity_policy.py",
+  "tests/unit/test_policies_guards.py",
+  "tests/unit/test_recovery_guards.py",
 ]
