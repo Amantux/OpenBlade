@@ -81,6 +81,10 @@ class LeaseStore(Protocol):
         """Drives awaiting reconciliation (physical state unknown) -> last barcode."""
         ...
 
+    def unreconciled_barcodes(self) -> set[str]:
+        """Barcodes whose cartridge may still sit in a drive awaiting reconciliation."""
+        ...
+
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None: ...
 
     def set_physical_drive(self, lease_id: str, physical_drive_id: int) -> None: ...
@@ -100,6 +104,8 @@ class InMemoryLeaseStore:
     def __init__(self) -> None:
         # Drive -> barcode for drives whose physical state is unknown (tests set this).
         self.unreconciled: dict[int, str | None] = {}
+        # Barcodes pending reconciliation (tests set this).
+        self.unreconciled_barcode_set: set[str] = set()
         self._lock = threading.Lock()
         self._leases: dict[str, DriveLease] = {}
         self._last_token = 0
@@ -163,6 +169,9 @@ class InMemoryLeaseStore:
 
     def unreconciled_drives(self) -> dict[int, str | None]:
         return dict(self.unreconciled)
+
+    def unreconciled_barcodes(self) -> set[str]:
+        return set(self.unreconciled_barcode_set)
 
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None:
         with self._lock:
@@ -234,6 +243,11 @@ class CatalogLeaseStore:
             drive_id: item.barcode
             for drive_id, item in drives_pending_reconciliation(self._repo).items()
         }
+
+    def unreconciled_barcodes(self) -> set[str]:
+        from openblade.jobs.reconcile import barcodes_pending_reconciliation  # local: no cycle
+
+        return barcodes_pending_reconciliation(self._repo)
 
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None:
         self._repo.heartbeat_leases(lease_ids, ttl)
@@ -317,6 +331,14 @@ class DriveScheduler:
             while True:
                 # A drive whose physical state is unknown (failed unmount/unload)
                 # may still hold a mounted tape: never a candidate until reconciled.
+                # A cartridge awaiting reconciliation may still be mounted in some
+                # drive: refuse it outright rather than move it.
+                pending = sorted(set(barcodes) & self._store.unreconciled_barcodes())
+                if pending:
+                    raise DriveUnreconciledError(
+                        f"Tape(s) {', '.join(pending)} awaiting reconciliation after a "
+                        "failed unmount/unload; reconcile before reuse"
+                    )
                 unreconciled = self._store.unreconciled_drives()
                 excluded = frozenset(d for d in unreconciled if 0 <= d < self._num_drives)
                 if self._num_drives - len(excluded) < len(barcodes):

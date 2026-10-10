@@ -20,7 +20,12 @@ from openblade.jobs.reconcile import (
     reconcile_drive,
 )
 from openblade.jobs.restore import _load_if_needed
-from openblade.jobs.scheduler import DriveHandle, DriveScheduler, InMemoryLeaseStore
+from openblade.jobs.scheduler import (
+    CatalogLeaseStore,
+    DriveHandle,
+    DriveScheduler,
+    InMemoryLeaseStore,
+)
 from openblade.simulator.library import MockLibraryBackend
 
 
@@ -141,3 +146,23 @@ def test_driveless_event_still_blocks_a_load_of_that_barcode(tmp_path: Path) -> 
     ensure_drive_reconciled(catalog, 0, "MCK00003")  # other barcodes unaffected
     catalog.journal(job.id, "drive_reconciled", {"drive": 0, "barcode": "MCK00002"})
     assert barcodes_pending_reconciliation(catalog) == set()
+
+
+def test_scheduler_refuses_barcode_pending_reconciliation() -> None:
+    store = InMemoryLeaseStore()
+    store.unreconciled_barcode_set = {"MCK00001"}
+    scheduler = DriveScheduler(3, store=store)
+    with pytest.raises(DriveUnreconciledError, match="MCK00001"):
+        scheduler.acquire_drives(["MCK00002", "MCK00001"], timeout=0.1)
+    # Other barcodes are unaffected, and no lease leaked from the refusal.
+    handles = scheduler.acquire_drives(["MCK00002", "MCK00003", "MCK00004"], timeout=0.1)
+    assert len(handles) == 3
+    scheduler.release_drives(handles)
+
+
+def test_catalog_store_reports_driveless_pending_barcode(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    _mark_unknown(context, None, barcode="MCK00007")
+    scheduler = DriveScheduler(2, store=CatalogLeaseStore(context.catalog))
+    with pytest.raises(DriveUnreconciledError, match="MCK00007"):
+        scheduler.acquire_drives(["MCK00007"], timeout=0.1)
