@@ -1,6 +1,6 @@
 # Mutation ratchet: <module path> <max surviving + untested mutants>.
-# Real counts from tools/mutation_run.sh, mutmut 3.8.0, 2026-10-09. Only ever lower them.
-# Modules not yet baselined (policies, safety/*, recovery, manifest_validator) need a first run.
+# Real counts from tools/mutation_run.sh, mutmut 3.8.0, 2026-10-10. Only ever lower them.
+# All 6 modules in [tool.mutmut].only_mutate are baselined (openblade/safety/* == import_guard.py).
 openblade/domain/policies.py 2
 openblade/domain/scalar_coordinate.py 4
 openblade/jobs/recovery.py 32
