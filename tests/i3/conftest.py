@@ -6,7 +6,13 @@ Env vars:
     I3_AML_URL                base URL for AML API (default: http://localhost:8000)
     I3_AML_USER               AML username (default: admin)
     I3_AML_PASSWORD           AML password (default: password)
-    I3_TIMING_PROFILE         instant | realistic | hardware
+    I3_TIMING_PROFILE         instant | realistic | hardware | <scenario profile>
+    I3_FAULTS_SERVER_SIDE     1 = emulator injects faults (default when I3_TEST_MODE=emulator)
+
+Server-side faults: the emulator must be started with
+OPENBLADE_EMULATOR_FAULT_PROFILE set to the SAME name as I3_TIMING_PROFILE
+(presets in openblade.api.aml_faults). No AML endpoint exposes the fault
+profile name, so the client cannot assert the two match -- keep them in sync.
     I3_REAL_HARDWARE_ENABLED  safety gate — must be "true" to run real-i3 tests
     OPENBLADE_API_TOKEN       native-REST bearer token, if the target enforces one
     OPENBLADE_API_TOKEN_FILE  file holding that token (takes precedence)

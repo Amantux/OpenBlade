@@ -21,7 +21,8 @@ asserted deterministically without real sleeping.
 
 Delays are applied client-side by ``wait_for_op``. Faults (load failures,
 session expiry, 503 window, checksum retries) are applied client-side by a
-``ProfileRuntime`` because the emulator has no env-driven fault hook for them;
+``ProfileRuntime`` unless ``faults_server_side()`` -- then the emulator injects
+them via ``OPENBLADE_EMULATOR_FAULT_PROFILE`` (presets in ``openblade.api.aml_faults``);
 ``emulator_env()`` exports the env vars the emulator DOES honour
 (``I3_TIMING_PROFILE``, ``OPENBLADE_EMULATOR_LATENCY_PROFILE``,
 ``OPENBLADE_EMULATOR_LATENCY_PROFILE_MS``) so its own latency matches.
@@ -39,6 +40,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, get_args
+
+from openblade.api.aml_faults import PRESETS as FAULT_PRESETS
 
 OpType = Literal[
     "tape_load",
@@ -226,18 +229,33 @@ class ProfileFaults:
     checksum_retry_every: int = 0
 
 
-PROFILE_FAULTS: dict[ProfileName, ProfileFaults] = {
-    "instant": ProfileFaults(base="instant"),
-    "realistic": ProfileFaults(base="realistic"),
-    "hardware": ProfileFaults(base="hardware"),
-    "normal": ProfileFaults(),
-    "slow-robotics": ProfileFaults(),
-    "busy-library": ProfileFaults(),
-    "intermittent-drive": ProfileFaults(load_fail_every=3),
-    "session-expiry": ProfileFaults(auth_ttl_s=5.0),
-    "rebooting": ProfileFaults(reboot_window_s=20.0),
-    "degraded-media": ProfileFaults(checksum_retry_every=4),
+_FAULT_BASES: dict[ProfileName, LegacyProfileName] = {
+    "instant": "instant",
+    "hardware": "hardware",
 }
+
+# Fault knobs come from the emulator's presets (single source of truth).
+PROFILE_FAULTS: dict[ProfileName, ProfileFaults] = {
+    name: ProfileFaults(
+        base=_FAULT_BASES.get(name, "realistic"),
+        load_fail_every=FAULT_PRESETS[name].load_fail_every,
+        auth_ttl_s=FAULT_PRESETS[name].auth_ttl_s,
+        reboot_window_s=FAULT_PRESETS[name].reboot_window_s,
+        checksum_retry_every=FAULT_PRESETS[name].checksum_retry_every,
+    )
+    for name in TIMING_PROFILES
+}
+
+
+def faults_server_side() -> bool:
+    """True when the emulator injects the faults (``OPENBLADE_EMULATOR_FAULT_PROFILE``).
+
+    ``I3_FAULTS_SERVER_SIDE`` wins; otherwise ON when ``I3_TEST_MODE`` is emulator (its default).
+    """
+    raw = os.environ.get("I3_FAULTS_SERVER_SIDE")
+    if raw is not None and raw.strip():
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get("I3_TEST_MODE", "emulator").strip().lower() == "emulator"
 
 
 class RetryableOpError(Exception):
@@ -269,6 +287,8 @@ class ProfileRuntime:
 
     @property
     def faults(self) -> ProfileFaults:
+        if faults_server_side():
+            return ProfileFaults(base=PROFILE_FAULTS[self.name].base)
         return PROFILE_FAULTS[self.name]
 
     def _sleep_for(self, op_type: OpType, multiplier: float = 1.0) -> None:
