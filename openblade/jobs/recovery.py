@@ -16,6 +16,15 @@ from openblade.jobs.inventory import InventoryService
 from openblade.jobs.reconcile import PendingReconciliation, drives_pending_reconciliation
 from openblade.jobs.scheduler import DEFAULT_LEASE_TTL
 
+# Synthetic barcodes JobQueue stores on its slot-claim leases (`f"{kind}:{slot}"`,
+# kinds _DRIVE_KIND / _CHANGER_KIND in jobs/queue.py). They never name a cartridge.
+_QUEUE_CLAIM_PREFIXES = ("QUEUE-CLAIM:", "CHANGER:")
+
+
+def _is_queue_claim(lease: DriveLease) -> bool:
+    return lease.drive_id < 0 or lease.barcode.startswith(_QUEUE_CLAIM_PREFIXES)
+
+
 logger = logging.getLogger(__name__)
 
 _NON_TERMINAL_JOB_STATES = frozenset({"pending", "running"})
@@ -101,6 +110,8 @@ def recover_after_restart(catalog: CatalogRepository, library: LibraryBackend) -
     }
     mismatches: list[DriveMismatch] = []
     for lease in orphaned:
+        if _is_queue_claim(lease):
+            continue  # a JobQueue slot claim, not a tape in a drive: nothing to compare
         physical = (
             lease.physical_drive_id if lease.physical_drive_id is not None else lease.drive_id
         )

@@ -12,7 +12,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from openblade.catalog.models import FileInstance
-from openblade.jobs.scheduler import DriveScheduler, InMemoryLeaseStore, JournalWriteError
+from openblade.domain.errors import JournalWriteError
+from openblade.jobs.scheduler import DriveScheduler, InMemoryLeaseStore
 from openblade.jobs.sharded_archive import PHYSICAL_STATE_UNKNOWN, run_sharded_archive
 from tests.integration.test_sharded_archive_atomicity import (
     BARCODES,

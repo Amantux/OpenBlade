@@ -13,7 +13,7 @@ from uuid import uuid4
 from openblade.domain.errors import (
     DriveBusyError,
     DriveUnreconciledError,
-    OpenBladeError,
+    JournalWriteError,
     StaleLeaseError,
     safe_job_error,
 )
@@ -23,10 +23,6 @@ if TYPE_CHECKING:
     from openblade.catalog.repository import CatalogRepository
 
 logger = logging.getLogger(__name__)
-
-
-class JournalWriteError(OpenBladeError):
-    """A drive's physical_state_unknown could not be journaled; its lease was kept."""
 
 
 @dataclass

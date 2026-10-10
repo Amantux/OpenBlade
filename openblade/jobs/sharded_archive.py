@@ -15,11 +15,16 @@ from pathlib import Path, PurePosixPath
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.capacity import has_room_for
-from openblade.domain.errors import StaleLeaseError, TapeFullError, safe_job_error
+from openblade.domain.errors import (
+    JournalWriteError,
+    StaleLeaseError,
+    TapeFullError,
+    safe_job_error,
+)
 from openblade.domain.models import MountHandle, MountMode
 from openblade.jobs.inventory import InventoryService
 from openblade.jobs.reconcile import ensure_drive_reconciled
-from openblade.jobs.scheduler import DriveHandle, DriveScheduler, JournalWriteError
+from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
     DEFAULT_BLOCK_SIZE,
     ShardMode,
