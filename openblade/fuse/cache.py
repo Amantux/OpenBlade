@@ -38,7 +38,10 @@ def _sample_offset(checksum: str, size: int) -> int:
     """Deterministic sample offset derived from the checksum; 0 when the file fits in one block."""
     if size <= SAMPLE_BYTES:
         return 0
-    return int(checksum[:8], 16) % max(1, size - SAMPLE_BYTES)
+    # Seed from a digest of the checksum so any string (legacy non-hex records,
+    # test presets) yields a deterministic offset instead of a ValueError.
+    seed = int.from_bytes(hashlib.sha256(checksum.encode()).digest()[:8], "big")
+    return seed % max(1, size - SAMPLE_BYTES)
 
 
 class HydrationCache:
@@ -223,6 +226,10 @@ class HydrationCache:
         On mismatch or a missing/unreadable integrity record the entry (file and
         sidecar) is dropped and ``CacheIntegrityError`` raised, so the caller can
         fall through to re-hydration.
+
+        This is a sampled check by design: bit-rot outside the sampled window on
+        a file whose size and mtime_ns are preserved is NOT detected here; only
+        a full re-hash (``store_verified``) catches that.
         """
         with self._lock:
             if self._entry_matches(checksum):
@@ -234,6 +241,8 @@ class HydrationCache:
         raise CacheIntegrityError("cached entry failed integrity verification and was evicted")
 
     def cache_key(self, checksum: str) -> Path:
+        if checksum in ("", ".") or any(bad in checksum for bad in ("/", "\\", "..", "\0")):
+            raise CacheError("checksum is not a safe cache path component")
         return self.cache_dir / checksum[:2] / checksum
 
     def is_cached(self, checksum: str) -> bool:
