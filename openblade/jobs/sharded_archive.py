@@ -17,6 +17,7 @@ from openblade.domain.capacity import has_room_for
 from openblade.domain.errors import StaleLeaseError, TapeFullError, safe_job_error
 from openblade.domain.models import MountHandle, MountMode
 from openblade.jobs.inventory import InventoryService
+from openblade.jobs.reconcile import ensure_drive_reconciled
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import (
     DEFAULT_BLOCK_SIZE,
@@ -761,6 +762,7 @@ def _load_barcode(
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
+        ensure_drive_reconciled(catalog, loaded_drive_id)
         # Cartridge is already in a drive. Record it as the PHYSICAL drive without
         # touching the scheduler lock key (handle.drive_id) — mutating that key would
         # leak the reserved drive and free a drive the scheduler never held.
@@ -779,6 +781,7 @@ def _load_barcode(
     )
     if slot_id is None:
         raise ValueError(f"Barcode {handle.barcode} not found in any slot")
+    ensure_drive_reconciled(catalog, handle.drive_id)
     execute_tape_request(
         catalog,
         library,

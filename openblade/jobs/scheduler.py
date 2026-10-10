@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
-from openblade.domain.errors import DriveBusyError, StaleLeaseError
+from openblade.domain.errors import DriveBusyError, DriveUnreconciledError, StaleLeaseError
 from openblade.domain.models import DriveLease
 
 if TYPE_CHECKING:
@@ -49,8 +49,18 @@ class LeaseStore(Protocol):
     poll_interval: float
 
     def acquire(
-        self, *, job_id: str, barcodes: list[str], num_drives: int, ttl: timedelta
+        self,
+        *,
+        job_id: str,
+        barcodes: list[str],
+        num_drives: int,
+        ttl: timedelta,
+        exclude: frozenset[int] = frozenset(),
     ) -> list[DriveLease] | None: ...
+
+    def unreconciled_drives(self) -> dict[int, str | None]:
+        """Drives awaiting reconciliation (physical state unknown) -> last barcode."""
+        ...
 
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None: ...
 
@@ -69,17 +79,25 @@ class InMemoryLeaseStore:
     poll_interval = 1.0
 
     def __init__(self) -> None:
+        # Drive -> barcode for drives whose physical state is unknown (tests set this).
+        self.unreconciled: dict[int, str | None] = {}
         self._lock = threading.Lock()
         self._leases: dict[str, DriveLease] = {}
         self._last_token = 0
 
     def acquire(
-        self, *, job_id: str, barcodes: list[str], num_drives: int, ttl: timedelta
+        self,
+        *,
+        job_id: str,
+        barcodes: list[str],
+        num_drives: int,
+        ttl: timedelta,
+        exclude: frozenset[int] = frozenset(),
     ) -> list[DriveLease] | None:
         with self._lock:
             now = _now()
             busy = {lease.drive_id for lease in self._leases.values() if _live(lease, now)}
-            free = [d for d in range(num_drives) if d not in busy]
+            free = [d for d in range(num_drives) if d not in busy and d not in exclude]
             if len(free) < len(barcodes):
                 return None
             acquired: list[DriveLease] = []
@@ -99,6 +117,9 @@ class InMemoryLeaseStore:
                 self._leases[lease.id] = lease
                 acquired.append(lease)
             return acquired
+
+    def unreconciled_drives(self) -> dict[int, str | None]:
+        return dict(self.unreconciled)
 
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None:
         with self._lock:
@@ -144,11 +165,31 @@ class CatalogLeaseStore:
         self._repo = repository
 
     def acquire(
-        self, *, job_id: str, barcodes: list[str], num_drives: int, ttl: timedelta
+        self,
+        *,
+        job_id: str,
+        barcodes: list[str],
+        num_drives: int,
+        ttl: timedelta,
+        exclude: frozenset[int] = frozenset(),
     ) -> list[DriveLease] | None:
-        return self._repo.acquire_drive_leases(
+        leases = self._repo.acquire_drive_leases(
             job_id=job_id, barcodes=barcodes, num_drives=num_drives, ttl=ttl
         )
+        if leases is not None and any(lease.drive_id in exclude for lease in leases):
+            # The repository cannot yet skip drives itself: never hand out an
+            # unreconciled drive -- give the leases back and report "not now".
+            self._repo.release_leases([lease.id for lease in leases])
+            return None
+        return leases
+
+    def unreconciled_drives(self) -> dict[int, str | None]:
+        from openblade.jobs.reconcile import drives_pending_reconciliation  # local: no cycle
+
+        return {
+            drive_id: item.barcode
+            for drive_id, item in drives_pending_reconciliation(self._repo).items()
+        }
 
     def heartbeat(self, lease_ids: list[str], ttl: timedelta) -> None:
         self._repo.heartbeat_leases(lease_ids, ttl)
@@ -230,11 +271,25 @@ class DriveScheduler:
         with self._lock:
             deadline = _monotonic() + timeout
             while True:
+                # A drive whose physical state is unknown (failed unmount/unload)
+                # may still hold a mounted tape: never a candidate until reconciled.
+                unreconciled = self._store.unreconciled_drives()
+                excluded = frozenset(d for d in unreconciled if 0 <= d < self._num_drives)
+                if self._num_drives - len(excluded) < len(barcodes):
+                    named = ", ".join(
+                        f"drive {d} (barcode {unreconciled[d] or 'unknown'})"
+                        for d in sorted(excluded)
+                    )
+                    raise DriveUnreconciledError(
+                        f"Not enough reconciled drives for {len(barcodes)} tape(s): {named} "
+                        "awaiting reconciliation after a failed unmount/unload"
+                    )
                 leases = self._store.acquire(
                     job_id=self._job_id,
                     barcodes=barcodes,
                     num_drives=self._num_drives,
                     ttl=self._ttl,
+                    exclude=excluded,
                 )
                 if leases is not None:
                     break
