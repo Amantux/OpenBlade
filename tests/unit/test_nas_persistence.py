@@ -199,3 +199,30 @@ def test_spanning_file_requires_every_segment_tape(tmp_path: Path) -> None:
     assert set(plan.required_tapes) == {"VOL001L9", "VOL002L9"}
     assert set(plan.tape_load_order) == {"VOL001L9", "VOL002L9"}
     assert plan.batches_by_tape["VOL002L9"] == ["video/big.mkv"]
+
+
+def test_api_exposes_pool_protection_and_persisted_lists(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from openblade.api.main import app
+    from openblade.bootstrap import create_context, get_context, reset_context
+    from openblade.config import OpenBladeConfig
+
+    reset_context(create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'api.db'}")))
+    catalog = get_context().catalog
+    catalog.upsert_nas_pool({"id": "p1", "name": "pool-a", "replication_factor": 2})
+    catalog.upsert_nas_reservation(
+        {"pool_id": "p1", "bytes": 5, "owner": "job", "expires_at": _NOW}
+    )
+    catalog.upsert_nas_export_set({"id": "e1", "barcodes": ["A"], "state": "out"})
+    catalog.upsert_nas_vault({"id": "v1", "barcodes": ["B"], "location": "offsite"})
+    client = TestClient(app)
+
+    pool = client.get("/nas/pools/p1").json()
+    assert pool["replication_factor"] == 2
+    assert "protection" in pool
+    reservations = client.get("/nas/reservations", params={"pool_id": "p1"}).json()
+    assert [item["owner"] for item in reservations] == ["job"]
+    assert client.get("/nas/reservations", params={"pool_id": "other"}).json() == []
+    assert client.get("/nas/export-sets").json()[0]["id"] == "e1"
+    assert client.get("/nas/vaults").json()[0]["location"] == "offsite"
