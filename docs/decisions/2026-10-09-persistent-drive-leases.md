@@ -223,3 +223,22 @@ Item 4's STAGING/VERIFYING states, job resume, replacing `JobQueue`, any
 `tests/unit tests/integration tests/safety` green, frontend untouched, reviewer
 subagent pass, one commit per logical change (models+repo, scheduler, fencing
 at call sites, recovery+route, docs).
+
+## JobQueue follow-up landed
+
+The `JobQueue` deferral above (and the "replacing `JobQueue`" non-goal) is now
+done as a persistent façade, not a replacement:
+`JobQueue(catalog, lease_store, *, ttl=DEFAULT_LEASE_TTL)` keeps jobs only in the
+catalog `jobs` table (`run_job` persists RUNNING before the work and
+COMPLETED/FAILED after, error text still via `safe_job_error`), and drive/changer
+ownership is a lease in the shared lease table, so it holds across processes.
+`LeaseStore.acquire` allocates the lowest free ids and cannot target one, so a
+claim requests every free id up to the target in one `BEGIN IMMEDIATE`
+transaction, keeps the target, releases the probe leases, and retries briefly
+under contention. Changer ownership is a lease on the reserved pseudo-drive
+`CHANGER_DRIVE_ID = 64` (negative ids are unreachable through `range(num_drives)`;
+a large sentinel would insert one probe row per lower id on every claim).
+Known costs: each claim of id *k* writes up to *k* released probe rows; claims
+are not heartbeated, so they lapse after the TTL. A repository method that
+leases one specific drive id would remove both the probes and the retry loop.
+Covered by `tests/unit/test_job_queue_persistent.py` (two sessions, one file).
