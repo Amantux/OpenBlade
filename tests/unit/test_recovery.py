@@ -140,3 +140,20 @@ def test_recovery_reports_stale_pending_jobs_without_touching_them(tmp_path: Pat
         refreshed = catalog.get_job(job_id)
         assert refreshed is not None
         assert refreshed.state == "pending"
+
+
+def test_recovery_keeps_live_lease_of_a_failed_job(tmp_path: Path) -> None:
+    # Fail closed: a failed job only leaves a live lease behind when it could not
+    # journal physical_state_unknown; auto-releasing it would hand the drive out.
+    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    catalog = context.catalog
+    failed = catalog.create_job("archive", {})
+    catalog.update_job_state(failed.id, "failed", error="physical state unknown")
+    lease_id = _lease(catalog, failed.id, "MCK00001", ttl=timedelta(minutes=15))
+    library = MockLibraryBackend(num_slots=4, num_drives=2, num_import_export_slots=1)
+
+    report = recover_after_restart(catalog, library)
+
+    assert report.released_lease_ids == []
+    assert report.held_failed_lease_ids == [lease_id]
+    assert [lease.id for lease in catalog.live_leases()] == [lease_id]

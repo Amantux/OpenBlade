@@ -337,9 +337,11 @@ def _restore_tape_group(
                     # Still (maybe) mounted: unloading now could strand a dirty
                     # index. Leave the cartridge in the drive for reconcile.
                     unmount_failed = True
-                    # One payload shape ({op, barcode, drive}) for every producer; the
-                    # helper swallows a journal failure so it cannot replace this one.
-                    record_physical_state_unknown(catalog, job_id, "unmount", barcode, drive_id)
+                    # One payload shape ({op, barcode, drive}) for every producer. A
+                    # journal failure flags the handle; release_drives keeps its lease.
+                    record_physical_state_unknown(
+                        catalog, job_id, "unmount", barcode, drive_id, handles=handles
+                    )
                     tape_error = f"Unmount of {barcode} failed; left in drive for reconcile"
         except StaleLeaseError:
             fenced_out = True

@@ -9,13 +9,22 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
-from openblade.domain.errors import DriveBusyError, DriveUnreconciledError, StaleLeaseError
+from openblade.domain.errors import (
+    DriveBusyError,
+    DriveUnreconciledError,
+    OpenBladeError,
+    StaleLeaseError,
+)
 from openblade.domain.models import DriveLease
 
 if TYPE_CHECKING:
     from openblade.catalog.repository import CatalogRepository
 
 logger = logging.getLogger(__name__)
+
+
+class JournalWriteError(OpenBladeError):
+    """A drive's physical_state_unknown could not be journaled; its lease was kept."""
 
 
 @dataclass
@@ -33,6 +42,10 @@ class DriveHandle:
     lease_id: str = ""
     fencing_token: int = 0
     _released: bool = field(default=False, init=False, repr=False)
+    # Set when this drive's physical_state_unknown could not be journaled:
+    # release_drives() then KEEPS the lease (fail closed) so no other job can
+    # LOAD/UNLOAD a drive that may still have LTFS mounted.
+    hold_unjournaled: bool = field(default=False, init=False, repr=False)
 
     @property
     def physical(self) -> int:
@@ -374,7 +387,15 @@ class DriveScheduler:
 
     def release_drives(self, handles: list[DriveHandle]) -> None:
         """Release drives and notify waiting jobs."""
-        pending = [handle for handle in handles if not handle._released]
+        for handle in handles:
+            if handle.hold_unjournaled and not handle._released:
+                logger.error(
+                    "Keeping lease on drive %d (%s): physical_state_unknown was not "
+                    "journaled; reconcile the drive before reuse",
+                    handle.drive_id,
+                    handle.barcode,
+                )
+        pending = [h for h in handles if not h._released and not h.hold_unjournaled]
         self._store.release([handle.lease_id for handle in pending])
         with self._lock:
             for handle in pending:
@@ -384,6 +405,12 @@ class DriveScheduler:
             if not self._held:
                 self._stop_heartbeat.set()
             self._lock.notify_all()
+        kept = [h.drive_id for h in handles if h.hold_unjournaled and not h._released]
+        if kept:
+            # Raised only after every other drive was released (collect, then raise).
+            raise JournalWriteError(
+                f"physical_state_unknown not journaled for drive(s) {kept}; leases kept"
+            )
 
     def verify(self, handle: DriveHandle) -> None:
         """Raise StaleLeaseError unless the handle's lease is still live with its token."""
