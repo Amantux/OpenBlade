@@ -15,6 +15,7 @@ from openblade.domain.errors import OpenBladeError
 logger = logging.getLogger(__name__)
 
 SAMPLE_BYTES = 64 * 1024
+_PREAD_CAP = 1 << 30  # 1 GiB per os.pread call
 
 
 class CacheEntryInUseError(RuntimeError):
@@ -273,7 +274,19 @@ class HydrationCache:
         except FileNotFoundError:
             raise FileNotFoundError(f"Not in cache: {checksum}") from None
         try:
-            return os.pread(fd, length, offset)
+            # pread may return short (and Linux caps one call near 2 GiB): loop until
+            # ``length`` bytes or EOF, returning exactly the bytes available.
+            parts: list[bytes] = []
+            remaining = length
+            pos = offset
+            while remaining > 0:
+                chunk = os.pread(fd, min(remaining, _PREAD_CAP), pos)
+                if not chunk:
+                    break  # EOF
+                parts.append(chunk)
+                pos += len(chunk)
+                remaining -= len(chunk)
+            return b"".join(parts)
         finally:
             os.close(fd)
 
