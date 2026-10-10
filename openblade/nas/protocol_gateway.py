@@ -10,6 +10,7 @@ import contextlib
 import hashlib
 import hmac
 import importlib.util
+import logging
 import os
 import posixpath
 import secrets
@@ -21,8 +22,10 @@ from enum import Enum
 from typing import Any
 
 from openblade.domain.clock import naive_utcnow
-from openblade.fuse.cache import CacheEntryInUseError
+from openblade.fuse.cache import CacheEntryInUseError, CacheIntegrityError
 from openblade.fuse.hydration import HydrationFailedError, HydrationState, Hydrator
+
+logger = logging.getLogger(__name__)
 
 
 class GatewayStatus(str, Enum):
@@ -400,6 +403,16 @@ class ProtocolGateway:
         that pin, so a double close cannot drop another handle's pin.
         """
         hydrator = self._require_hydrator()
+        record = hydrator.catalog.get_file_record(catalog_path)
+        if record is not None and hydrator.cache.is_cached(record.checksum_sha256):
+            # Open-time integrity check; a failed entry is evicted so request() re-hydrates.
+            try:
+                hydrator.cache.verify_entry(record.checksum_sha256)
+            except CacheIntegrityError:
+                logger.warning(
+                    "gateway: cached entry %s failed integrity check; re-hydrating",
+                    record.checksum_sha256,
+                )
         ticket = hydrator.request(catalog_path)
         hydrator.cache.acquire(ticket.checksum)
         try:

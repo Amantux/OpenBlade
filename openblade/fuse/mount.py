@@ -34,6 +34,7 @@ from collections.abc import Callable, Iterable
 from pathlib import PurePosixPath
 from typing import Any
 
+from openblade.fuse.cache import CacheIntegrityError, HydrationCache
 from openblade.fuse.filesystem import CatalogFilesystem, VirtualDirEntry
 from openblade.fuse.hydration import (
     HydrationFailedError,
@@ -249,6 +250,7 @@ class CatalogFuseOperations:
         # Pin before materialising so the entry cannot be evicted in between.
         record = self.filesystem.catalog.get_file_record(str(entry.path))
         if record is not None:
+            _verify_cached_entry(self.filesystem.cache, record.checksum_sha256)
             self.filesystem.cache.acquire(record.checksum_sha256)
         try:
             data = self._materialise(str(entry.path))
@@ -376,3 +378,13 @@ def mount_catalog(
         fsname="openblade-catalog",
         subtype="openblade",
     )
+
+
+def _verify_cached_entry(cache: HydrationCache, checksum: str) -> None:
+    """Open-time integrity check; a failed entry is evicted so hydration refetches it."""
+    if not cache.is_cached(checksum):
+        return
+    try:
+        cache.verify_entry(checksum)
+    except CacheIntegrityError:
+        logger.warning("fuse: cached entry %s failed integrity check; re-hydrating", checksum)
