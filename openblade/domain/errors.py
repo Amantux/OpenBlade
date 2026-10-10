@@ -50,6 +50,10 @@ class DriveLeasedError(SafetyViolationError):
     """Another job holds a live lease on this drive; it may have LTFS mounted."""
 
 
+class DriveUnreconciledError(SafetyViolationError):
+    """A drive's physical state is unknown after a failed unmount/unload; reconcile first."""
+
+
 class DriveBusyError(OpenBladeError):
     """Drive is busy."""
 

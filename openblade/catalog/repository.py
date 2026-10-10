@@ -2078,6 +2078,16 @@ class CatalogRepository:
             session.commit()
             return len(rows)
 
+    # -- Drive reconciliation (cross-job journal query) ------------------------
+
+    def journal_events(self, event: str, *, since: datetime | None = None) -> list[JobJournalEntry]:
+        """Every ``event`` journal entry across all jobs, oldest first (ties by id)."""
+        stmt = select(JobJournalEntry).where(JobJournalEntry.event == event)
+        if since is not None:
+            stmt = stmt.where(JobJournalEntry.at >= since)
+        stmt = stmt.order_by(JobJournalEntry.at, JobJournalEntry.id)
+        return list(self.session.scalars(stmt))
+
 
 def _lease_now() -> datetime:
     """Naive UTC, matching how the catalog's DateTime columns store values."""
