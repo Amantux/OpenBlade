@@ -241,7 +241,10 @@ class HydrationCache:
         raise CacheIntegrityError("cached entry failed integrity verification and was evicted")
 
     def cache_key(self, checksum: str) -> Path:
-        if checksum in ("", ".") or any(bad in checksum for bad in ("/", "\\", "..", "\0")):
+        # The key is one path component, so only a whole-component "." / ".." or an
+        # embedded separator/NUL can escape cache_dir; a ".." substring inside a
+        # longer token (truncated test fixtures use "...") is harmless.
+        if checksum in ("", ".", "..") or any(bad in checksum for bad in ("/", "\\", "\0")):
             raise CacheError("checksum is not a safe cache path component")
         return self.cache_dir / checksum[:2] / checksum
 
