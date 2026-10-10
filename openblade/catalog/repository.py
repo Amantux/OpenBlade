@@ -2118,7 +2118,13 @@ class CatalogRepository:
             yield session
 
     def acquire_drive_leases(
-        self, *, job_id: str, barcodes: list[str], num_drives: int, ttl: timedelta
+        self,
+        *,
+        job_id: str,
+        barcodes: list[str],
+        num_drives: int,
+        ttl: timedelta,
+        exclude: frozenset[int] = frozenset(),
     ) -> list[DriveLease] | None:
         """All-or-nothing: one live lease per barcode, or None if not enough free drives."""
         with self._lock, self._lease_session() as session:
@@ -2135,7 +2141,7 @@ class CatalogRepository:
                     )
                 )
             )
-            free = [d for d in range(num_drives) if d not in busy]
+            free = [d for d in range(num_drives) if d not in busy and d not in exclude]
             if len(free) < len(barcodes):
                 session.rollback()
                 return None
@@ -2160,6 +2166,43 @@ class CatalogRepository:
                 rows.append(row)
             session.commit()
             return [_lease_from_row(row) for row in rows]
+
+    def acquire_drive_lease_at(
+        self, *, job_id: str, drive_id: int, barcode: str, ttl: timedelta
+    ) -> DriveLease | None:
+        """Lease one specific drive id (negative ids allowed), or None if it is held."""
+        with self._lock, self._lease_session() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            now = _lease_now()
+            held = session.scalar(
+                select(func.count())
+                .select_from(DriveLeaseRecord)
+                .where(
+                    DriveLeaseRecord.drive_id == drive_id,
+                    DriveLeaseRecord.released_at.is_(None),
+                    DriveLeaseRecord.expires_at > now,
+                )
+            )
+            if held:
+                session.rollback()
+                return None
+            token = int(
+                session.scalar(select(func.coalesce(func.max(DriveLeaseRecord.fencing_token), 0)))
+                or 0
+            )
+            row = DriveLeaseRecord(
+                id=str(uuid4()),
+                drive_id=drive_id,
+                job_id=job_id,
+                barcode=barcode,
+                fencing_token=token + 1,
+                acquired_at=now,
+                heartbeat_at=now,
+                expires_at=now + ttl,
+            )
+            session.add(row)
+            session.commit()
+            return _lease_from_row(row)
 
     def heartbeat_leases(self, lease_ids: list[str], ttl: timedelta) -> None:
         with self._lock, self._lease_session() as session:

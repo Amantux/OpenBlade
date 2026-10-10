@@ -3,7 +3,6 @@
 import json
 import logging
 import threading
-import time
 from collections.abc import Callable
 from datetime import timedelta, timezone
 from typing import TypeVar
@@ -16,40 +15,18 @@ from openblade.domain.errors import (
     JobNotFoundError,
     safe_job_error,
 )
-from openblade.domain.models import DriveLease, Job, JobState, JobType
+from openblade.domain.models import Job, JobState, JobType
 from openblade.jobs.scheduler import DEFAULT_LEASE_TTL, LeaseStore
 
 ResultT = TypeVar("ResultT")
 
 logger = logging.getLogger(__name__)
 
-# Changer ownership is a lease on this reserved pseudo-drive id. The lease store
-# only allocates ids in range(num_drives) (no negatives), and claiming a slot
-# probes every free id below it, so the sentinel is kept small: it must exceed
-# any real drive count (a Scalar i3 tops out well below it) but stay cheap.
-CHANGER_DRIVE_ID = 64
+# Changer ownership is a lease on this reserved pseudo-drive id. Real drives
+# are 0..N-1, so a negative id can never collide with one.
+CHANGER_DRIVE_ID = -1
 _CHANGER_KIND = "CHANGER"
 _DRIVE_KIND = "QUEUE-CLAIM"
-_PROBE_BARCODE = "QUEUE-PROBE"
-_CLAIM_ATTEMPTS = 50
-_CLAIM_RETRY_SECONDS = 0.01
-
-
-def _is_transient(lease: DriveLease) -> bool:
-    """True for another claimer's in-flight lease, which never denotes ownership.
-
-    Claim barcodes name their target (``KIND:slot``). When a claimer's snapshot
-    is stale the store can hand its claim barcode to a lower id; that lease, like
-    every probe, is released immediately and must not read as an owner.
-    """
-    if lease.barcode == _PROBE_BARCODE:
-        return True
-    kind, sep, _ = lease.barcode.partition(":")
-    return (
-        bool(sep)
-        and kind in (_DRIVE_KIND, _CHANGER_KIND)
-        and lease.barcode != f"{kind}:{lease.drive_id}"
-    )
 
 
 def _job_from_row(row: catalog_models.Job) -> Job:
@@ -102,37 +79,28 @@ class JobQueue:
             self._catalog.update_job_state(job_id, (state or job.state).value, error)
             return self.get_job(job_id)
 
+    def _owner(self, slot: int) -> str | None:
+        for lease in self._lease_store.live_leases():
+            if lease.drive_id == slot:
+                return lease.job_id
+        return None
+
     def _claim_slot(
         self, slot: int, job_id: str, kind: str, busy: Callable[[str], Exception]
     ) -> None:
-        for _attempt in range(_CLAIM_ATTEMPTS):
-            live = self._lease_store.live_leases()
-            for lease in live:
-                if lease.drive_id == slot and not _is_transient(lease):
-                    if lease.job_id == job_id:
-                        return
-                    raise busy(lease.job_id)
-            # The store allocates the lowest free ids in range(num_drives); it
-            # cannot target one id. So request every free id up to and including
-            # ``slot`` in one all-or-nothing transaction, keep ``slot``, and
-            # release the probes. A concurrent claimer's probes make this miss;
-            # re-check and retry until ``slot`` has a real owner or is ours.
-            taken = {lease.drive_id for lease in live}
-            probes = sum(1 for d in range(slot) if d not in taken)
-            leases = self._lease_store.acquire(
-                job_id=job_id,
-                barcodes=[_PROBE_BARCODE] * probes + [f"{kind}:{slot}"],
-                num_drives=slot + 1,
-                ttl=self._ttl,
+        owner = self._owner(slot)
+        if owner == job_id:
+            return
+        if owner is None:
+            lease = self._lease_store.acquire_drive_lease_at(
+                job_id=job_id, drive_id=slot, barcode=f"{kind}:{slot}", ttl=self._ttl
             )
-            if leases is not None:
-                extra = [lease.id for lease in leases if lease.drive_id != slot]
-                if extra:
-                    self._lease_store.release(extra)
-                if len(extra) < len(leases):
-                    return
-            time.sleep(_CLAIM_RETRY_SECONDS)
-        raise busy("another job (claim contended)")
+            if lease is not None:
+                return
+            owner = self._owner(slot)
+            if owner == job_id:
+                return
+        raise busy(owner or "another job")
 
     def _release_slot(self, slot: int, job_id: str) -> None:
         mine = [
@@ -144,7 +112,7 @@ class JobQueue:
             self._lease_store.release(mine)
 
     def claim_drive(self, drive_id: int, job_id: str) -> None:
-        if drive_id < 0 or drive_id >= CHANGER_DRIVE_ID:
+        if drive_id < 0:
             raise ValueError(f"drive id {drive_id} out of range")
         self._claim_slot(
             drive_id,

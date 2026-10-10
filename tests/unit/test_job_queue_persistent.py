@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -83,3 +84,48 @@ def test_run_job_transitions_are_visible_from_another_process(
     worker.join(timeout=5)
     assert results == ["done"]
     assert b.get_job(job.id).state is JobState.COMPLETED
+
+
+@pytest.mark.parametrize("target", ["drive", "changer"])
+def test_racing_claims_past_the_owner_precheck_exactly_one_wins(
+    queues: tuple[JobQueue, JobQueue], monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    # Both claimers pass the "nobody owns it" pre-check before either acquires,
+    # so exclusivity rests solely on the store's targeted acquisition.
+    barrier = threading.Barrier(2)
+    for queue in queues:
+        original = queue._owner
+        calls = {"n": 0}
+
+        def gated(
+            slot: int,
+            original: Callable[[int], str | None] = original,
+            calls: dict[str, int] = calls,
+        ) -> str | None:
+            calls["n"] += 1
+            result = original(slot)
+            if calls["n"] == 1:
+                barrier.wait(timeout=5)
+            return result
+
+        monkeypatch.setattr(queue, "_owner", gated)
+
+    outcomes: list[str] = []
+
+    def claim(queue: JobQueue) -> None:
+        job = queue.create_job(JobType.ARCHIVE, {})
+        try:
+            if target == "drive":
+                queue.claim_drive(2, job.id)
+            else:
+                queue.claim_changer(job.id)
+            outcomes.append("won")
+        except (DriveOccupiedError, ChangerBusyError):
+            outcomes.append("busy")
+
+    threads = [threading.Thread(target=claim, args=(q,)) for q in queues]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(outcomes) == ["busy", "won"]
