@@ -174,6 +174,8 @@ class CatalogRepository:
             "cache_target_id": row.cache_target_id,
             "restore_target_path": row.restore_target_path,
             "access_mode": row.access_mode,
+            "replication_factor": row.replication_factor,
+            "protection": _load_json_value(row.protection_json, None),
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -1074,6 +1076,12 @@ class CatalogRepository:
         row.cache_target_id = parsed.cache_target_id
         row.restore_target_path = parsed.restore_target_path
         row.access_mode = parsed.access_mode
+        row.replication_factor = parsed.replication_factor
+        row.protection_json = (
+            json.dumps(parsed.protection.to_dict(), sort_keys=True)
+            if parsed.protection is not None
+            else None
+        )
         row.created_at = row.created_at or parsed.created_at or _utcnow_iso()
         row.updated_at = parsed.updated_at or _utcnow_iso()
         self.session.commit()

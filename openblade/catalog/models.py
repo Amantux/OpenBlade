@@ -307,6 +307,9 @@ class NasPool(Base):
     cache_target_id: Mapped[str | None] = mapped_column(String, nullable=True)
     restore_target_path: Mapped[str] = mapped_column(String, default="/openblade/restore")
     access_mode: Mapped[str] = mapped_column(String, default="read_only")
+    replication_factor: Mapped[int] = mapped_column(Integer, default=1)
+    # Serialized ProtectionPolicy.to_dict(); None means derive from replication_factor.
+    protection_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -491,3 +494,47 @@ class JobJournalEntry(Base):
     @property
     def detail(self) -> dict[str, Any]:
         return cast("dict[str, Any]", json.loads(self.detail_json or "{}"))
+
+
+class NasReservation(Base):
+    __tablename__ = "nas_reservations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    pool_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    owner: Mapped[str] = mapped_column(String, nullable=False)
+    # ISO-8601 with offset (SQLite DateTime would drop the tzinfo).
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class NasExportSet(Base):
+    __tablename__ = "nas_export_sets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    barcodes_json: Mapped[str] = mapped_column(Text, default="[]")
+    state: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class NasVault(Base):
+    __tablename__ = "nas_vaults"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    barcodes_json: Mapped[str] = mapped_column(Text, default="[]")
+    location: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class NasVgReplication(Base):
+    __tablename__ = "nas_vg_replication"
+
+    vg_id: Mapped[str] = mapped_column(String, primary_key=True)
+    barcodes_json: Mapped[str] = mapped_column(Text, default="[]")
+    replicas_required: Mapped[int] = mapped_column(Integer, default=1)
+    replicas_present: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class NasFileSpan(Base):
+    __tablename__ = "nas_file_spans"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    path: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    segments_json: Mapped[str] = mapped_column(Text, default="[]")
