@@ -298,3 +298,64 @@ def test_error_envelope_shape(
     assert "Traceback" not in text and LEAK not in text and "RuntimeError" not in text
     message = body.get("summary", body.get("detail", body.get("message")))
     assert isinstance(message, str) and message
+
+
+# --- MFA-required pending session (inferred; no Rev D challenge wire shape) -----
+
+MFA_WARNING = '199 - "MFA Required"'
+
+
+def _enable_totp(client: TestClient) -> str:
+    """Enable TOTP for admin through the documented routes; return the secret."""
+    import pyotp
+
+    token = _login(client)
+    auth = {"Authorization": f"Bearer {token}"}
+    secret = client.get("/aml/users/login/mfa/totp/key", headers=auth).json()["key"]
+    enabled = client.put(
+        "/aml/users/mfa",
+        json={"type": "totp", "enabled": True, "authenticationCode": pyotp.TOTP(secret).now()},
+        headers=auth,
+    )
+    assert enabled.status_code == 200, enabled.text
+    client.cookies.clear()
+    return str(secret)
+
+
+def test_mfa_login_lenient_is_200_with_warning_and_pending(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENBLADE_AML_STRICT_PRECONDITIONS", raising=False)
+    _enable_totp(client)
+    response = client.post("/aml/users/login", json=CREDS)
+    assert response.status_code == 200
+    assert MFA_WARNING in response.headers.get_list("Warning")
+    assert "Default Password Supplied" in response.headers.get_list("Warning")
+    # No new JSON fields: same keys as an ordinary (non-pending) login body.
+    assert set(response.json()) == {
+        "action",
+        "code",
+        "customCode",
+        "description",
+        "summary",
+        "token",
+    }
+    assert aml_state._STATE.sessions[response.json()["token"]].mfa_pending is True
+
+
+def test_mfa_login_strict_is_412_and_session_issued(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_totp(client)
+    monkeypatch.setenv("OPENBLADE_AML_STRICT_PRECONDITIONS", "true")
+    response = client.post("/aml/users/login", json=CREDS)
+    assert response.status_code == 412
+    body = response.json()
+    assert body["code"] == 412 and body["summary"] == "MFA verification required"
+    assert MFA_WARNING in response.headers.get_list("Warning")
+    assert aml_state._STATE.sessions[body["token"]].mfa_pending is True
+
+
+def test_login_without_enabled_mfa_is_not_pending(client: TestClient) -> None:
+    token = _login(client)
+    assert aml_state._STATE.sessions[token].mfa_pending is False

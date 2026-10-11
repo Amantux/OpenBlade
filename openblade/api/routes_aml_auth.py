@@ -603,7 +603,8 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     _clear_rate_limit(remote_address)
     if user.role == 2 and not aml_state.get_service_access().get("enabled", True):
         raise HTTPException(status_code=503, detail="Service access is disabled")
-    session_record = aml_state.create_session(user)
+    mfa_pending = aml_state.user_has_enabled_mfa(user.name)
+    session_record = aml_state.create_session(user, mfa_pending=mfa_pending)
     aml_state.record_login_activity(user.name, success=True, remote_address=remote_address)
     body = _ws_result("Login successful").model_dump()
     # Provide session token in response body for API clients/tests that expect it
@@ -612,9 +613,13 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     # OPENBLADE_AML_STRICT_PRECONDITIONS=true the same login answers 412 instead of
     # 200; the session is still issued so the client can change the password.
     strict = os.environ.get("OPENBLADE_AML_STRICT_PRECONDITIONS", "false").lower() == "true"
-    precondition_failed = strict and user.require_password_change
+    # Inferred likewise for MFA: the challenge wire shape is not in Rev D, so a
+    # pending login is signalled by a Warning header (412 when strict). MFA wins
+    # the summary because the pending session cannot change a password anyway.
+    precondition_failed = strict and (user.require_password_change or mfa_pending)
     if precondition_failed:
-        body.update(code=412, description="Error", summary="Default password must be changed")
+        summary = "MFA verification required" if mfa_pending else "Default password must be changed"
+        body.update(code=412, description="Error", summary=summary)
     response = _negotiated(request, 412 if precondition_failed else 200, body)
     _is_production = os.environ.get("OPENBLADE_ENV", "development").lower() == "production"
     response.set_cookie(
@@ -627,6 +632,8 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     )
     if user.require_password_change:
         response.headers["Warning"] = "Default Password Supplied"
+    if mfa_pending:
+        response.headers.append("Warning", '199 - "MFA Required"')
     return response
 
 
