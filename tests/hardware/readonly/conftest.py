@@ -12,11 +12,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import ssl
-import urllib.error
-import urllib.request
-from dataclasses import dataclass, field
-from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +19,16 @@ import pytest
 
 from openblade.config import load_config
 from openblade.domain.policies import RealHardwareGuard
+
+# Moved to openblade/hardware/appliance_client.py (shared with tools/hardware/
+# preflight.py); re-exported so fixtures and RebootClient keep importing from here.
+from openblade.hardware.appliance_client import (  # noqa: F401 - re-export façade for importers of this conftest
+    AUTH_REQUESTS,
+    ApplianceClient,
+    ApplianceResponse,
+    ReadOnlyViolation,
+    check_appliance_request,
+)
 from openblade.hardware.runner import CommandResult, SafeRunner
 from openblade.hardware.safety import require_real_hardware
 
@@ -32,28 +37,6 @@ CORPUS_DIR = Path(__file__).resolve().parents[3] / "compatibility"
 
 def read_corpus() -> list[dict[str, Any]]:
     return [json.loads(p.read_text()) for p in sorted(CORPUS_DIR.rglob("*.json"))]
-
-
-class ReadOnlyViolation(RuntimeError):
-    """A read-only-lane test attempted an HTTP request or command that could mutate the rig."""
-
-
-# The only non-GET requests the read-only lane may send: the session handshake.
-AUTH_REQUESTS = frozenset({("POST", "/aml/users/login"), ("POST", "/aml/auth/logout")})
-
-
-def check_appliance_request(method: str, path: str) -> None:
-    """Raise ReadOnlyViolation unless ``method path`` is a GET or the login/logout call.
-
-    The method is matched exactly (HTTP methods are case-sensitive), so ``"get"``
-    is refused rather than normalised.
-    """
-    verb = method
-    if not path.startswith("/"):
-        raise ReadOnlyViolation(f"appliance path must be absolute, got {path!r}")
-    if verb == "GET" or (verb, path) in AUTH_REQUESTS:
-        return
-    raise ReadOnlyViolation(f"read-only lane refuses {verb} {path}")
 
 
 _DEVICE = re.compile(r"/dev/[A-Za-z0-9_./:+-]+")
@@ -98,63 +81,6 @@ class ReadOnlyRunner(SafeRunner):
         if isinstance(args, str) or not is_allowed_argv(list(args)):
             raise ReadOnlyViolation(f"read-only lane refuses command {args!r}")
         return super().run(args, timeout=timeout, redact_args=redact_args)
-
-
-@dataclass
-class ApplianceResponse:
-    status: int
-    body: Any
-
-
-@dataclass
-class ApplianceClient:
-    """Minimal cookie-session HTTP client for the real appliance's AML API."""
-
-    base_url: str
-    user: str
-    password: str
-    insecure: bool = False
-    _opener: urllib.request.OpenerDirector = field(init=False)
-
-    def __post_init__(self) -> None:
-        context = ssl.create_default_context()
-        if self.insecure:
-            # Opt-in via OPENBLADE_APPLIANCE_INSECURE=true for a rig whose
-            # appliance only has its factory self-signed certificate.
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-        self._opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(CookieJar()),
-            urllib.request.HTTPSHandler(context=context),
-        )
-
-    def request(self, method: str, path: str, json_body: Any = None) -> ApplianceResponse:
-        check_appliance_request(method, path)
-        data = None if json_body is None else json.dumps(json_body).encode()
-        req = urllib.request.Request(  # noqa: S310 - base URL is operator-set rig config, scheme checked in fixture
-            self.base_url.rstrip("/") + path,
-            data=data,
-            method=method,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
-        try:
-            with self._opener.open(req, timeout=30) as resp:
-                status, raw = resp.status, resp.read()
-        except urllib.error.HTTPError as exc:
-            status, raw = exc.code, exc.read()
-        try:
-            body: Any = json.loads(raw) if raw else None
-        except ValueError:
-            body = None
-        return ApplianceResponse(status=status, body=body)
-
-    def login(self) -> ApplianceResponse:
-        return self.request(
-            "POST", "/aml/users/login", {"name": self.user, "password": self.password}
-        )
-
-    def logout(self) -> ApplianceResponse:
-        return self.request("POST", "/aml/auth/logout")
 
 
 @pytest.fixture

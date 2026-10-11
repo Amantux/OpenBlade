@@ -283,6 +283,15 @@ jobs:
           sudo dmesg | tail -80 || true
           cat /etc/mhvtl/device.conf || true
 
+      # Real mode refuses to start without an API token (openblade/config.py
+      # raises RealHardwareDisabledError). Mint a throwaway one per run, masked.
+      - name: Mint a per-run API token
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "OPENBLADE_API_TOKEN=$token" >> "$GITHUB_ENV"
+
       # Resolving the rig is its own step so that "the rig cannot be addressed"
       # fails HERE, loudly, instead of leaking into the pytest step.
       #
@@ -329,6 +338,7 @@ jobs:
           sudo env \
             OPENBLADE_BACKEND="$OPENBLADE_BACKEND" \
             OPENBLADE_REAL_HARDWARE_ENABLED="$OPENBLADE_REAL_HARDWARE_ENABLED" \
+            OPENBLADE_API_TOKEN="$OPENBLADE_API_TOKEN" \
             OPENBLADE_CHANGER_DEVICE="$OPENBLADE_CHANGER_DEVICE" \
             OPENBLADE_DRIVE_DEVICES="$OPENBLADE_DRIVE_DEVICES" \
             "$(command -v python)" -m tools.hardware.snapshot capture --out snapshots/before.json
@@ -346,6 +356,7 @@ jobs:
           # and if it somehow did not, say which one is missing.
           : "${OPENBLADE_BACKEND:?not set — the rig-env step did not run}"
           : "${OPENBLADE_REAL_HARDWARE_ENABLED:?not set — the rig-env step did not run}"
+          : "${OPENBLADE_API_TOKEN:?not set — the mint-token step did not run}"
           : "${OPENBLADE_CHANGER_DEVICE:?not set — the rig-env step did not run}"
           : "${OPENBLADE_DRIVE_DEVICES:?not set — the rig-env step did not run}"
           : "${OPENBLADE_SCRATCH_BARCODES:?not set — the rig-env step did not run}"
@@ -376,6 +387,7 @@ jobs:
           sudo env \
             OPENBLADE_BACKEND="$OPENBLADE_BACKEND" \
             OPENBLADE_REAL_HARDWARE_ENABLED="$OPENBLADE_REAL_HARDWARE_ENABLED" \
+            OPENBLADE_API_TOKEN="$OPENBLADE_API_TOKEN" \
             OPENBLADE_CHANGER_DEVICE="$OPENBLADE_CHANGER_DEVICE" \
             OPENBLADE_DRIVE_DEVICES="$OPENBLADE_DRIVE_DEVICES" \
             OPENBLADE_SCRATCH_BARCODES="$OPENBLADE_SCRATCH_BARCODES" \
@@ -403,6 +415,7 @@ jobs:
           sudo env \
             OPENBLADE_BACKEND="$OPENBLADE_BACKEND" \
             OPENBLADE_REAL_HARDWARE_ENABLED="$OPENBLADE_REAL_HARDWARE_ENABLED" \
+            OPENBLADE_API_TOKEN="$OPENBLADE_API_TOKEN" \
             OPENBLADE_CHANGER_DEVICE="$OPENBLADE_CHANGER_DEVICE" \
             OPENBLADE_DRIVE_DEVICES="$OPENBLADE_DRIVE_DEVICES" \
             "$(command -v python)" -m tools.hardware.snapshot capture --out snapshots/after.json

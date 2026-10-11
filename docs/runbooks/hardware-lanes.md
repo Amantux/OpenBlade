@@ -80,6 +80,9 @@ move on until it is.
 4. Install host tools the suites call: `sg3-utils`, `lsscsi`, `mtx`, LTFS.
 5. Add repo secrets `QUANTUM_AML_USER` / `QUANTUM_AML_PASSWORD` (AML login).
 
+The lanes mint a per-run `OPENBLADE_API_TOKEN`; real mode refuses to start without one,
+so do not set a token in the runner's `.env`.
+
 Verify the host with `make hw-preflight` (§0 step 5) before dispatching any lane.
 
 ## 2. Repository variables

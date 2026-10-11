@@ -83,6 +83,15 @@ jobs:
 
       - run: pip install -e '.[dev]'
 
+      # Real mode refuses to start without an API token (openblade/config.py
+      # raises RealHardwareDisabledError). Mint a throwaway one per run, masked.
+      - name: Mint a per-run API token
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "OPENBLADE_API_TOKEN=$token" >> "$GITHUB_ENV"
+
       # A rig lane must never go green by skipping: the rig tests skip when
       # these are unset, so refuse to run without them. OPENBLADE_CHANGER_DEVICE
       # and OPENBLADE_DRIVE_DEVICES come from the runner host's environment.
