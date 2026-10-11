@@ -12,6 +12,7 @@ from openblade.config_validation import (
     BLOCKING,
     DEFAULT_SERVICE_PASSWORD,
     DEFAULT_SERVICE_TOKEN,
+    WARNING,
     Finding,
     is_deployable,
     validate_config,
@@ -221,3 +222,31 @@ def test_api_startup_hook_refuses_production_without_api_token(
     monkeypatch.delenv("OPENBLADE_API_TOKEN_FILE", raising=False)
     with pytest.raises(ConfigurationError, match="OPENBLADE_API_TOKEN"):
         asyncio.run(main.initialize_aml_state())
+
+
+def test_production_insecure_session_cookies_warn() -> None:
+    findings = validate_config({**_SAFE_PROD, "OPENBLADE_WEB_SECURE_COOKIES": "false"})
+    assert "insecure_session_cookies" in _codes(findings, WARNING)
+    assert "insecure_session_cookies" not in _codes(validate_config(_SAFE_PROD))
+
+
+def test_web_flask_refuses_production_without_secret_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openblade.web_flask import app as web_app
+
+    monkeypatch.setenv("OPENBLADE_ENV", "production")
+    monkeypatch.delenv("FLASK_SECRET_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="FLASK_SECRET_KEY"):
+        web_app.create_app()
+
+
+def test_web_flask_production_cookies_secure_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openblade.web_flask import app as web_app
+
+    monkeypatch.setenv("OPENBLADE_ENV", "production")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "k" * 32)
+    monkeypatch.delenv("OPENBLADE_WEB_SECURE_COOKIES", raising=False)
+    assert web_app.create_app().config["SESSION_COOKIE_SECURE"] is True

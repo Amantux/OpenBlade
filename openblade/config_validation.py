@@ -122,6 +122,22 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
                 )
             )
 
+    # Mirrors web_flask/app.py::_bool_env: any set, non-truthy value is "off".
+    cookies = env.get("OPENBLADE_WEB_SECURE_COOKIES")
+    if (
+        is_prod
+        and cookies is not None
+        and cookies.strip().lower() not in {"1", "true", "yes", "on"}
+    ):
+        findings.append(
+            Finding(
+                WARNING,
+                "insecure_session_cookies",
+                "INSECURE FLASK COOKIES: OPENBLADE_WEB_SECURE_COOKIES=false in production "
+                "(session cookies cross the LAN in cleartext; put TLS in front)",
+            )
+        )
+
     if not is_prod:
         return findings
 
