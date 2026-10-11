@@ -698,6 +698,12 @@ def register_archive_plan(plan: ArchivePlan) -> ArchivePlan:
     return plan
 
 
+def unregister_archive_plan(plan_id: str) -> None:
+    """Drop a plan from the in-memory registry (no-op if absent)."""
+    with _STORE_LOCK:
+        ArchivePlanStore.pop(plan_id, None)
+
+
 def get_archive_plan(plan_id: str) -> ArchivePlan | None:
     with _STORE_LOCK:
         return ArchivePlanStore.get(plan_id)
