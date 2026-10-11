@@ -240,6 +240,7 @@ def test_drive_health_cli_reports_unsupported_drives(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setenv("OPENBLADE_BACKEND", "real")
     monkeypatch.setenv("OPENBLADE_REAL_HARDWARE_ENABLED", "true")
+    monkeypatch.setenv("OPENBLADE_API_TOKEN", "test-token")  # real mode now requires an API token
     monkeypatch.setattr(
         fuse_and_health,
         "sg_inq",
