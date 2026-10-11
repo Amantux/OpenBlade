@@ -102,3 +102,19 @@ with POSIX-ACL mapping); NFSv4→POSIX ACL mapping is lossy: POSIX has no DENY, 
 special-principal deny (e.g. `D::EVERYONE@:r`) is folded into the mode bits and strips
 that permission from the owner too, the `n`/`N` named-attribute bits are dropped, and
 removing a named-user ACE leaves a residual `A::<uid>:...` entry behind.
+## Security posture follow-ups (as of 2026-10-11)
+
+Production is fail-closed (no native API token, weak/default AML passwords, or a
+CORS wildcard refuse startup) and hardware gates are enforced in code (single-use
+format token, scratch allowlist on a real backend, real backend requires an API
+token, ingest never auto-formats on a real backend). Still open:
+
+- Simulator ingest still mints its own format token instead of going through
+  `FormatService.dry_run` + `confirm`; only the real-backend refusal is enforced.
+- `RealHardwareGuard.operator_acknowledgment` is a constant and not a control; the
+  vacuous policy branch remains (its removal was blocked as a security-test change).
+- The LAN deployment (`deploy/lan/`) is plain HTTP; TLS termination in front of
+  ports 8090–8092 is the next step before exposing beyond the local subnets.
+- `auto-merge-trusted.yml` accepts any `github-actions` check run named
+  `ci-gate`/`operability-gate` on the head SHA; the fixed fallback list drifts if the
+  required checks change.

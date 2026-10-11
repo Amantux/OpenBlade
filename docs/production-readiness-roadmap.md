@@ -26,7 +26,7 @@ Verified against the repo before writing (not asserted from memory):
 - `sharded_archive.py:234,251` calls `mark_instance_archived` per-shard inside the write loop → review #6 confirmed real. ✅
 - Review #5 (scheduler `drive_id` mutation) **not reproduced**: `jobs/scheduler.py` is a plain allocator with no `_load_barcode`/mutation — re-investigate before "fixing." ⚠️
 
-## Status as of 2026-10-11 (fleet integration on `feat/persistent-drive-leases`)
+## Status as of 2026-10-11 (rounds 1–4 merged to `master`)
 
 Verified against the tree, not asserted. "Landed" = implemented and tested in-repo;
 "appliance-gated" = authored and runnable, cannot be certified without the rig.
@@ -47,14 +47,14 @@ Verified against the tree, not asserted. "Landed" = implemented and tested in-re
 | 12 | Full suite on master + nightly lanes | landed | `ci.yml::full-suite`, `nightly.yml` |
 | 13 | Consolidated emulator workflows | landed | `_emulator-boot-test.yml` |
 | 14 | Lint/type ratchet | landed (both blocking, both at zero) | `ci.yml` |
-| 15 | Workflow hardening | landed: SHA pins, per-job permissions, actionlint/zizmor/shellcheck/yamllint | `workflow-lint.yml` |
+| 15 | Workflow hardening | landed: SHA pins, per-job permissions, actionlint/zizmor/shellcheck/yamllint; trusted auto-merge waits for every required check and dispatches the post-merge master lanes (Copilot PRs need owner approval) | `workflow-lint.yml`, `auto-merge-trusted.yml` |
 | 16 | Differential + mutation | mutation lane landed (mutmut 3.8.0, ratchet baseline for 6/6 modules as of 2026-10-10); differential appliance-gated | `tools/mutation_run.sh`, `mutation/baseline.txt` |
 | 17 | Timing profiles + virtual clock | landed (10 profiles; the 4 fault profiles are injected by the emulator via `OPENBLADE_EMULATOR_FAULT_PROFILE`) | `tests/i3/timing.py` |
 | 18 | Auth fidelity | landed as inferred behaviour + corpus cases: session cap, strict 412, XML, 415/406, 429 Retry-After, error matrix; MFA-pending session modelled (inferred): enabled-MFA login → 200 + `Warning: 199 - "MFA Required"` (412 strict); 401 except MFA challenge/key/logout until a valid TOTP; certify by appliance capture | `routes_aml_auth.py`, `compatibility/` |
 | 19 | Real SMB/NFS protocol tests | landed (containerised rig, 33/33 pass locally incl. real SMB byte-range lock conflict; NFSv4 named-user DENY ACE enforced across uids (Fedora 41 Ganesha 5.9 stage, VFS ACL mapping; EVERYONE@ deny folds into mode bits)) | `deploy/nas-protocols/`, `tests/e2e/protocols/` |
 | 20 | Tape-native NAS models | landed; pool protection/replication, reservations (atomic reserve), export sets, vaults, VG replication and file spans persisted in the catalog; scratch-threshold health and per-barcode `reserved_bytes` mapping still TODO | `nas/state_machine.py`, `nas/media.py`, `nas/capacity.py` |
 | 21 | FUSE data plane | landed: hydrator, cache (open-time integrity check, persisted LRU index, chunked pread), xattr state, gateway; see `docs/fuse.md` | `fuse/` |
-| 22 | Self-hosted i3/LTFS lanes | appliance-gated, authored: read-only nightly + destructive with environment approval, allowlist, snapshots; reboot persistence still manual (soft-reboot automation drafted, held for operator decision) | `hardware-*.yml`, `tools/hardware/` |
+| 22 | Self-hosted i3/LTFS lanes | appliance-gated, authored: read-only nightly + destructive with environment approval, allowlist (now also enforced in `FormatService` on a real backend), snapshots, per-run API token; `tools/hardware/preflight.py` replaces inline env checks; soft-reboot persistence opt-in via `HARDWARE_REBOOT_TESTS=true`; hard power-cycle manual | `hardware-*.yml`, `tools/hardware/` |
 | 23 | Drive-identity bridge | implemented + test authored; uncertified — skips on mhvtl (needs an AML endpoint with matching serials); certify on appliance | `hardware/correlation.py`, `tests/hardware/readonly/` |
 | 24 | Release pipeline | landed (never exercised on a tag): build-once digest, SBOM, scans, cosign, staging→approval→production, rollback | `release.yml`, `docs/runbooks/release.md` |
 
