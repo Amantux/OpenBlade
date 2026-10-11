@@ -18,54 +18,22 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from collections.abc import Sequence
+
+# Parsing lives in the domain so the service-side gate and this CI tool share it.
+from openblade.domain.media_allowlist import (
+    AllowlistError,
+    check_subset,
+    format_barcodes,
+    parse_barcodes,
+)
 
 EXIT_OK = 0
 EXIT_VIOLATION = 2
 
-_SEPARATORS = re.compile(r"[\s,]+")
 
-
-class AllowlistError(Exception):
-    """The requested barcodes are not safe to use destructively."""
-
-
-def parse_barcodes(raw: str | None) -> list[str]:
-    """Split a comma/whitespace list into upper-cased, de-duplicated barcodes."""
-    seen: dict[str, None] = {}
-    for token in _SEPARATORS.split(raw or ""):
-        if token:
-            seen.setdefault(token.strip().upper(), None)
-    return list(seen)
-
-
-def format_barcodes(barcodes: Sequence[str]) -> str:
-    """The normalized stdout form: comma-joined, no spaces."""
-    return ",".join(barcodes)
-
-
-def check_subset(requested: Sequence[str], allowlist: Sequence[str]) -> list[str]:
-    """Return ``requested`` if it is a non-empty subset of a non-empty allowlist.
-
-    Raises :class:`AllowlistError` naming the offenders otherwise.
-    """
-    if not allowlist:
-        raise AllowlistError(
-            "SACRIFICIAL_BARCODES is empty: no tape is approved for destructive use (fail closed)."
-        )
-    if not requested:
-        raise AllowlistError("No barcodes requested (pass --barcodes or set BARCODES).")
-    allowed = set(allowlist)
-    offenders = [b for b in requested if b not in allowed]
-    if offenders:
-        raise AllowlistError(
-            "Barcodes outside the sacrificial allowlist: "
-            + ", ".join(offenders)
-            + ". Refusing before touching hardware."
-        )
-    return list(requested)
+__all__ = ["AllowlistError", "check_subset", "format_barcodes", "main", "parse_barcodes"]
 
 
 def main(argv: Sequence[str] | None = None) -> int:

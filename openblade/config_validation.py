@@ -59,6 +59,20 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
             )
         )
 
+    if (
+        backend == "real"
+        and env.get("OPENBLADE_REAL_HARDWARE_ENABLED", "false").strip().lower() == "true"
+        and not env.get("OPENBLADE_API_TOKEN", "").strip()
+        and not env.get("OPENBLADE_API_TOKEN_FILE", "").strip()
+    ):
+        findings.append(
+            Finding(
+                BLOCKING,
+                "real_backend_requires_api_token",
+                "OPENBLADE_BACKEND=real with OPENBLADE_REAL_HARDWARE_ENABLED=true requires OPENBLADE_API_TOKEN (or OPENBLADE_API_TOKEN_FILE)",
+            )
+        )
+
     if env.get(
         "OPENBLADE_ROBOTICS_TRANSPORT", "scsi"
     ).strip().lower() == "webservices" and not env.get("OPENBLADE_SCALAR_URL"):

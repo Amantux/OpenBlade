@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 from typing import Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
@@ -2181,11 +2181,23 @@ class CatalogRepository:
             expires_at=row.expires_at,
         )
 
-    def delete_safety_token(self, token_value: str) -> None:
-        row = self.session.get(SafetyTokenRecord, token_value)
-        if row is not None:
-            self.session.delete(row)
-            self.session.commit()
+    def delete_safety_token(self, token_value: str) -> bool:
+        """Atomically consume a token; True only for the one caller that deleted it.
+
+        Single-use guarantee for destructive confirms: the DELETE runs inside
+        ``BEGIN IMMEDIATE`` on its own session (same pattern as the drive
+        leases), so two concurrent confirms with one token cannot both see
+        rowcount 1.
+        """
+        with self._lock, self._lease_session() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            result = session.execute(
+                delete(SafetyTokenRecord).where(SafetyTokenRecord.token == token_value)
+            )
+            session.commit()
+        # A stale identity-map copy in `self.session` is harmless: a later
+        # get_safety_token may still see it, but this DELETE then returns False.
+        return bool(getattr(result, "rowcount", 0) == 1)
 
     # ── Drive leases (docs/decisions/2026-10-09-persistent-drive-leases.md) ──
     #
