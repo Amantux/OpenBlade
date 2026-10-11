@@ -311,8 +311,18 @@ Decisions (WS-capacity, fleet round 3):
    with a message, CRITICAL is DEGRADED, never UNHEALTHY. Thresholds are managed by
    `GET`/`PUT /nas/scratch-thresholds` (404 unset, 422 on `warn < min`).
 
-Reviewer risks still open: `book_plan_capacity` books against `plan.pool`, not the
-`pool_id` of the start request, so a plan previewed for one pool and started into
-another is budgeted against the first; the share-push registers its plan before
-booking, so a 409 there leaves a registered plan with no job; and a started job that
-never reaches a terminal state without raising holds its bytes for the full hour.
+Reviewer risks, resolved (2026-10-11):
+- **Pool mismatch — resolved.** `POST /nas/ingest/start` returns 409 (`pool_id does
+  not match plan pool`) when `request.pool_id != plan.pool`, including a pool-less
+  preview started into a pool; the job's dataset is created in `plan.pool`, the pool
+  that was booked.
+- **Orphan plan on share-push 409 — resolved.** Share-push books first and registers
+  the plan only after the booking succeeds.
+- **Booking held after a failed start — resolved.** In both start paths everything
+  after `book_plan_capacity` runs under try/except: on any exception the booking is
+  released (`release_plan_capacity`, owner = `plan_id`) and the plan is dropped
+  (`unregister_archive_plan`), then the original exception is re-raised. A failed
+  release is logged and left to the TTL; it never masks the start error.
+
+Still open: a started job that never reaches a terminal state without raising holds
+its bytes for the full hour.
