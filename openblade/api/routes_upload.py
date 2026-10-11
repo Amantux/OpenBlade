@@ -64,6 +64,7 @@ from openblade.nas.ingest import (
     register_archive_plan,
     run_ingest_job,
     start_ingest_job,
+    unregister_archive_plan,
 )
 from openblade.nas.service import NasService
 from openblade.nas.types import (
@@ -608,23 +609,28 @@ async def push_staged_files_to_share(
         plan = _plan_share_push(repo, ArchivePlanRequest.model_validate(request_data))
         plan.policy_name = policy.name
         plan.policy_type = policy.policy_type
-        plan = register_archive_plan(plan)
 
         dataset_name = request.dataset_name or (
             f"share-push-{pool_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         )
+        # Book before registering so a refused booking (409) leaves no orphan plan.
         try:
             book_plan_capacity(repo, plan, get_context().library, now=datetime.now(timezone.utc))
         except ReservationError as exc:
             # Curated domain message (pool + plan id only); the pool budget is exhausted.
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-        job = start_ingest_job(
-            plan=plan,
-            dataset_name=dataset_name,
-            pool_id=pool_id,
-            nas_service=service,
-            cache_drive_id=None,
-        )
+        plan = register_archive_plan(plan)
+        try:
+            job = start_ingest_job(
+                plan=plan,
+                dataset_name=dataset_name,
+                pool_id=pool_id,
+                nas_service=service,
+                cache_drive_id=None,
+            )
+        except Exception:
+            unregister_archive_plan(plan.plan_id)
+            raise
         context = get_context()
         background_tasks.add_task(
             _run_share_push_ingest_job,
