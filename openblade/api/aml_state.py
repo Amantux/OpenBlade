@@ -2526,6 +2526,17 @@ def get_session_user(token: str) -> AmlUser | None:
     return get_user(record.user_name)
 
 
+def is_session_mfa_pending(token: str) -> bool:
+    record = _STATE.sessions.get(token)
+    return record is not None and record.mfa_pending
+
+
+def clear_session_mfa_pending(token: str) -> None:
+    record = _STATE.sessions.get(token)
+    if record is not None:
+        record.mfa_pending = False
+
+
 def clear_session(token: str) -> None:
     _STATE.sessions.pop(token, None)
 

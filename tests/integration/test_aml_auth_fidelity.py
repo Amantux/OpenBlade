@@ -359,3 +359,50 @@ def test_mfa_login_strict_is_412_and_session_issued(
 def test_login_without_enabled_mfa_is_not_pending(client: TestClient) -> None:
     token = _login(client)
     assert aml_state._STATE.sessions[token].mfa_pending is False
+
+
+def _pending_login(client: TestClient) -> tuple[str, dict[str, str]]:
+    secret = _enable_totp(client)
+    response = client.post("/aml/users/login", json=CREDS)
+    assert response.status_code == 200
+    client.cookies.clear()
+    return secret, {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def test_mfa_pending_session_is_401_until_valid_code(client: TestClient) -> None:
+    import pyotp
+
+    secret, auth = _pending_login(client)
+    assert client.get("/aml/users", headers=auth).status_code == 401
+    assert client.get("/aml/physicalLibrary/elements", headers=auth).status_code == 401
+    bad = client.post(
+        "/aml/users/login/mfa", json={"type": "totp", "authenticationCode": "000001"}, headers=auth
+    )
+    assert bad.status_code == 401
+    assert client.get("/aml/users", headers=auth).status_code == 401  # still pending
+    good = client.post(
+        "/aml/users/login/mfa",
+        json={"type": "totp", "authenticationCode": pyotp.TOTP(secret).now()},
+        headers=auth,
+    )
+    assert good.status_code == 200, good.text
+    assert client.get("/aml/users", headers=auth).status_code == 200
+
+
+def test_mfa_pending_cookie_session_is_gated_without_dropping_cookie(
+    client: TestClient,
+) -> None:
+    _enable_totp(client)
+    assert client.post("/aml/users/login", json=CREDS).status_code == 200
+    blocked = client.get("/aml/users")
+    assert blocked.status_code == 401
+    assert "set-cookie" not in blocked.headers
+
+
+def test_mfa_pending_session_can_fetch_key_route_and_logout(client: TestClient) -> None:
+    _, auth = _pending_login(client)
+    # Key route is reachable (403 because TOTP is already confirmed, not 401).
+    assert client.get("/aml/users/login/mfa/totp/key", headers=auth).status_code == 403
+    client.cookies.set("sessionID", auth["Authorization"].split(" ", 1)[1])
+    assert client.delete("/aml/users/login").status_code == 200
+    assert client.get("/aml/users", headers=auth).status_code == 401
