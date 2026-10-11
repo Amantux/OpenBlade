@@ -286,7 +286,13 @@ routes_aml_matrix_fallback.register_missing_matrix_routes(app)
 @app.on_event("startup")
 async def initialize_aml_state() -> None:
     from openblade.api.aml_state import ensure_initialized
+    from openblade.config_validation import enforce_startup_config, startup_banner
 
+    # Production: raises ConfigurationError on any open auth gate (fail-closed).
+    # Elsewhere: one loud banner listing every open gate.
+    banner = startup_banner(enforce_startup_config(os.environ))
+    if banner:
+        logging.getLogger("openblade.security").warning("%s", banner)
     log_api_auth_status()
     # Parse the fault profile at boot so a typo fails loudly here, not as a 500 on
     # the first request; this also anchors the reboot window at process start.

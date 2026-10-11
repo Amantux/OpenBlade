@@ -17,7 +17,9 @@ on:
 
 concurrency:
   group: operability-${{ github.ref }}
-  cancel-in-progress: true
+  # PR runs supersede each other; dispatched master runs (post-merge full-suite /
+  # operability) must never cancel one another or a merge ends up with no result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -77,5 +79,7 @@ jobs:
           OPENBLADE_ADMIN_PASSWORD: ci-strong-admin
           OPENBLADE_SERVICE_PASSWORD: ci-strong-service
           OPENBLADE_SERVICE_TOKEN: ci-strong-token
+          # Production refuses to start with the native API open (native_api_open).
+          OPENBLADE_API_TOKEN: ci-strong-api-token
           OPENBLADE_DB_URL: sqlite:////tmp/openblade-ci-deploy.db
         run: python scripts/deploy.py --skip-deploy

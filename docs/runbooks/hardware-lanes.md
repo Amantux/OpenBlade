@@ -24,6 +24,47 @@ refuses (exit 2) if the backend is in hardware dry-run mode.
 and job id (`register-and-validate`) keep resolving for any branch-protection
 rule that references them.
 
+## 0. Day one (in order)
+
+Do these once, in this order. Each step says what "green" looks like; do not
+move on until it is.
+
+1. **Register the runner** with label `i3` (§1). Green: the runner shows
+   *Idle* under Settings → Actions → Runners with labels `self-hosted, i3`.
+2. **Write the runner `.env`**: `OPENBLADE_CHANGER_DEVICE=/dev/sgN`,
+   `OPENBLADE_DRIVE_DEVICES=/dev/nstN,...` (DTE order), optional
+   `OPENBLADE_DRIVE_SERIAL_MAP=<serial>:<dte>,...`; runner user in the `tape`
+   and `disk` groups; `sg3-utils`, `lsscsi`, `mtx`, LTFS installed. Green: the
+   runner service restarts and `id` lists both groups.
+3. **Set repo variables and secrets** (§2) — exact names:
+
+   | Kind | Name | Purpose |
+   |---|---|---|
+   | var | `HARDWARE_RIG_AVAILABLE` | `true` enables the rig lanes (set LAST) |
+   | var | `SACRIFICIAL_BARCODES` | scratch cartridges the destructive lane may touch |
+   | var | `OPENBLADE_APPLIANCE_URL` | `https://<i3-host>` |
+   | var | `OPENBLADE_APPLIANCE_USER` | AML user for the read-only API checks |
+   | var | `OPENBLADE_APPLIANCE_INSECURE` | `true` only for a self-signed cert (preflight WARNs) |
+   | secret | `OPENBLADE_APPLIANCE_PASSWORD` | password for that user |
+   | secret | `QUANTUM_AML_USER` / `QUANTUM_AML_PASSWORD` | AML login (→ `I3_AML_USER/PASSWORD`) |
+
+   Green: all names appear under Settings → Secrets and variables → Actions.
+4. **Create the `hardware-destructive` environment with required reviewers**
+   (§3). Green: the environment lists at least one reviewer.
+5. **Run `make hw-preflight` on the runner host, as the runner user**, with the
+   lane env exported (add `PREFLIGHT_LANE=destructive` once the allowlist is
+   set). It is read-only (inquiry/listing and an appliance login/logout only)
+   and must not run with `OPENBLADE_REAL_HARDWARE_ENABLED` set. Green: exit 0,
+   no `FAIL` lines; every `WARN` is understood (e.g. insecure TLS).
+6. **Dispatch `hardware-library-smoke`**. Green: the job passes, its JUnit gate
+   reports zero skips, and the `preflight-readonly-*` artifact shows `"ok": true`.
+7. **Capture the compatibility evidence**:
+   `python tools/compat_capture.py capture … --source captured --attest "<operator>"`
+   (full command in `compatibility/README.md`). Green: the captured files are
+   committed and the attestation names the operator and firmware.
+8. **Let the nightly read-only lane watch itself.** Enable the destructive lane
+   only after one green smoke run AND one green read-only night.
+
 ## 1. Register the self-hosted runner
 
 1. On the host attached to the i3 (SAS/FC to the changer and drives), create an
@@ -38,6 +79,11 @@ rule that references them.
    drive map described in [../hardware-setup.md](../hardware-setup.md).
 4. Install host tools the suites call: `sg3-utils`, `lsscsi`, `mtx`, LTFS.
 5. Add repo secrets `QUANTUM_AML_USER` / `QUANTUM_AML_PASSWORD` (AML login).
+
+The lanes mint a per-run `OPENBLADE_API_TOKEN`; real mode refuses to start without one,
+so do not set a token in the runner's `.env`.
+
+Verify the host with `make hw-preflight` (§0 step 5) before dispatching any lane.
 
 ## 2. Repository variables
 
@@ -59,6 +105,12 @@ Repo → **Settings → Secrets and variables → Actions → Variables**:
   writes JUnit XML and a final **Gate** step (`python -m tools.hardware.junit_gate`)
   fails the job if any test skipped or nothing passed. An expected skip must be
   passed explicitly (`--expected-skip classname::name`) with a comment saying why.
+- **`HARDWARE_REBOOT_TESTS`** = `true` — optional opt-in for the destructive
+  lane's soft-reboot step (see §5 "Reboot persistence"). Unset (the default),
+  the step is skipped and the run shows a `::notice::` saying so.
+
+Every rig lane starts with `python -m tools.hardware.preflight --lane <lane> --json`;
+a missing variable shows up there as a `FAIL` naming it (artifact `preflight-<lane>-<run>`).
 
 ## 3. Environment approval (settings-only — cannot be committed)
 
@@ -70,6 +122,9 @@ Repo → **Settings → Environments → New environment** `hardware-destructive
 
 Without the environment, GitHub creates it on first use with no protection —
 so create it, with reviewers, before setting `HARDWARE_RIG_AVAILABLE`.
+
+The destructive lane's preflight (`--lane destructive`) additionally FAILs if
+`SACRIFICIAL_BARCODES` is empty, names a cartridge not in inventory, or one is loaded.
 
 ## 4. The cartridge allowlist
 
@@ -90,6 +145,10 @@ Each lane also captures inventory + drive state before and after
 (`tools.hardware.snapshot capture`), diffs them, and uploads `snapshots/` as an
 artifact even on failure. On the read-only lanes the diff must be empty.
 
+The allowlist is also enforced by the service itself: on a real backend
+`FormatService` refuses to dry-run or confirm a format for any barcode outside
+`OPENBLADE_SCRATCH_BARCODES`, and an empty list refuses everything.
+
 ## 5. The destructive sequence
 
 Load/unload → LTFS write/read/checksum → archive + restore → sharded write +
@@ -100,12 +159,42 @@ LTFS format goes only through the two-phase flow (dry-run plan → explicit
 barcode + one-time safety token). `test_mkltfs_formats_tape` is deselected in
 this lane because it calls `mkltfs` directly.
 
-### Reboot persistence (manual)
+### Reboot persistence
 
-The runner cannot power-cycle the appliance. Once per quarter, after a green
-destructive run: reboot the i3 from its web UI, wait for it to come Ready,
-dispatch `hardware-library-smoke.yml`, and confirm the snapshot diff against
-the pre-reboot `after.json` shows the same cartridges in the same slots.
+**Automated (soft reboot) — opt-in, two levels.** The
+"Reboot persistence (AML soft reboot)" step of `hardware-destructive.yml` runs
+`tests/hardware/test_reboot_persistence.py` only when:
+
+1. repo variable **`HARDWARE_REBOOT_TESTS`** = `true` (§2) — unset, the step is
+   skipped and a `::notice::` says so; and
+2. every earlier step succeeded (`success()`, never `always()`): the test steps,
+   the junit gate, the recovery-report check and the lane's after-snapshot.
+
+The step itself exports `OPENBLADE_REBOOT_TESTS=enabled`; the test skips without
+it, so a plain `pytest tests/hardware -m real_hardware` never reboots anything.
+It runs under the same `hardware-destructive` environment approval, after the
+lane's after-snapshot (so the lane diff is not polluted) and before the upload,
+with `timeout-minutes: 20`. It pins `OPENBLADE_APPLIANCE_INSECURE=false`: a rig
+with a self-signed appliance cert fails this step until the cert is trusted.
+
+The test refuses to reboot (fails loudly) unless the library is quiescent — no
+live drive leases, no drive loaded, nothing mounted. It then snapshots inventory,
+drive state and live leases, sends the documented `POST /aml/system/reboot`
+`{"delay":0,"force":false}` (a dropped connection counts as accepted), polls
+every 2 s until a login fails (bounded: 5 min — proves the reboot happened) and
+then until a login succeeds (bounded: 10 min), re-snapshots, and fails on any
+inventory/drive diff or lease change. It does **not** call
+`recover_after_restart` (that function has no report-only mode and would release
+leases); the lane's "Recovery report must be clean" step is the recovery
+assertion. Only `reboot()` bypasses the read-only AML guard, for that one path;
+a no-hardware unit test in the same file pins that `request()` still refuses
+writes.
+
+**Manual (hard power-cycle) — fallback.** The runner cannot cut power. Once per
+quarter, or whenever a soft reboot is not representative (firmware update,
+power event): after a green destructive run, power-cycle the i3, wait for it to
+come Ready, dispatch `hardware-library-smoke.yml`, and confirm the snapshot diff
+against the pre-reboot `after.json` shows the same cartridges in the same slots.
 
 ## 6. What "no rig" looks like — and the no-green-by-skipping rule
 

@@ -62,6 +62,11 @@ categories = ["compat"]
 glob = "tools/compat_capture*"
 categories = ["compat"]
 
+# Hardware lane tooling (preflight, allowlist, junit gate) is unit-tested with fakes.
+[[rule]]
+glob = "tools/hardware/*"
+categories = ["unit"]
+
 [[rule]]
 glob = "tests/fixtures/*"
 categories = ["unit", "compat"]

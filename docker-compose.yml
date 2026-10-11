@@ -16,7 +16,7 @@ services:
     volumes:
       - openblade-data:/data
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -34,14 +34,14 @@ services:
     image: ${OPENBLADE_EMULATOR_IMAGE:-ghcr.io/amantux/openblade-i3-emulator:0.1.0}
     profiles: ["emulator"]
     ports:
-      - "8010:8010"
+      - "127.0.0.1:8010:8010"
 
   web:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
     depends_on:
       api:
         condition: service_healthy
@@ -101,7 +101,7 @@ services:
       # literal here keeps the two in step; exporting the var overrides both.
       OPENBLADE_SERVICE_TOKEN: ${OPENBLADE_SERVICE_TOKEN:-openblade-controller-dev-token-do-not-expose}
     ports:
-      - "5175:8080"
+      - "127.0.0.1:5175:8080"
     depends_on:
       api:
         condition: service_healthy

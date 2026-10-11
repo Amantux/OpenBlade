@@ -28,6 +28,7 @@ def _clear_backend_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "OPENBLADE_BACKEND",
         "OPENBLADE_REAL_HARDWARE_ENABLED",
+        "OPENBLADE_API_TOKEN",
         "OPENBLADE_DB_URL",
         "OPENBLADE_CACHE_DIR",
         "OPENBLADE_STAGING_DIR",
@@ -45,6 +46,7 @@ def test_default_config_honours_real_backend_env(monkeypatch: pytest.MonkeyPatch
     """The bug: this used to come back MOCK, silently simulating a real library."""
     monkeypatch.setenv("OPENBLADE_BACKEND", "real")
     monkeypatch.setenv("OPENBLADE_REAL_HARDWARE_ENABLED", "true")
+    monkeypatch.setenv("OPENBLADE_API_TOKEN", "test-token")  # real mode now requires an API token
 
     config = cli_main._default_config()
 
@@ -66,6 +68,7 @@ def test_mock_config_pins_mock_even_under_real_env(monkeypatch: pytest.MonkeyPat
     """`openblade mock init` must never reach for a real changer."""
     monkeypatch.setenv("OPENBLADE_BACKEND", "real")
     monkeypatch.setenv("OPENBLADE_REAL_HARDWARE_ENABLED", "true")
+    monkeypatch.setenv("OPENBLADE_API_TOKEN", "test-token")  # real mode now requires an API token
 
     config = cli_main._mock_config()
 
@@ -246,6 +249,7 @@ def test_mock_subcommands_never_reach_a_real_library(monkeypatch: pytest.MonkeyP
     """
     monkeypatch.setenv("OPENBLADE_BACKEND", "real")
     monkeypatch.setenv("OPENBLADE_REAL_HARDWARE_ENABLED", "true")
+    monkeypatch.setenv("OPENBLADE_API_TOKEN", "test-token")  # real mode now requires an API token
 
     captured: list[BackendMode] = []
     monkeypatch.setattr(
@@ -263,6 +267,7 @@ def test_plain_subcommands_still_honour_a_real_backend(monkeypatch: pytest.Monke
     """The guard above must not also neuter the non-mock commands."""
     monkeypatch.setenv("OPENBLADE_BACKEND", "real")
     monkeypatch.setenv("OPENBLADE_REAL_HARDWARE_ENABLED", "true")
+    monkeypatch.setenv("OPENBLADE_API_TOKEN", "test-token")  # real mode now requires an API token
 
     captured: list[BackendMode] = []
     monkeypatch.setattr(

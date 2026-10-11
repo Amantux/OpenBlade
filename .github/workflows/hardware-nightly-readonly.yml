@@ -69,20 +69,38 @@ jobs:
 
       - run: pip install -e '.[dev]'
 
+      # Real mode refuses to start without an API token (openblade/config.py
+      # raises RealHardwareDisabledError). Mint a throwaway one per run, masked.
+      - name: Mint a per-run API token
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "OPENBLADE_API_TOKEN=$token" >> "$GITHUB_ENV"
+
       # A rig lane must never go green by skipping: the rig tests skip when
       # these are unset, so refuse to run without them. OPENBLADE_CHANGER_DEVICE
       # and OPENBLADE_DRIVE_DEVICES come from the runner host's environment.
-      - name: Preflight — rig configuration present
+      - name: Preflight — rig ready (python -m tools.hardware.preflight)
+        # Read-only tool (env, devices, inquiry serials, changer, allowlist,
+        # appliance login). It must never run armed: blank the job-level enable.
+        env:
+          OPENBLADE_REAL_HARDWARE_ENABLED: ""
         run: |
           set -euo pipefail
-          missing=()
-          for v in OPENBLADE_APPLIANCE_URL OPENBLADE_APPLIANCE_USER OPENBLADE_APPLIANCE_PASSWORD OPENBLADE_CHANGER_DEVICE OPENBLADE_DRIVE_DEVICES; do
-            if [ -z "${!v:-}" ]; then missing+=("$v"); fi
-          done
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::rig lane misconfigured, missing: ${missing[*]}"
+          if ! python -m tools.hardware.preflight --lane readonly --json > preflight.json; then
+            cat preflight.json
+            echo "::error::rig lane preflight failed; see the FAIL checks above"
             exit 1
           fi
+
+      - name: Upload preflight report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: preflight-readonly-${{ github.run_id }}
+          path: preflight.json
+          if-no-files-found: ignore
 
       # No allowlist step: this lane names no cartridges and performs no
       # motion. The snapshot diff below is what would catch a violation.

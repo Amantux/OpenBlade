@@ -238,6 +238,18 @@ def book_plan_capacity(
         raise ReservationError(f"pool {pool_id} cannot reserve capacity for plan {plan.plan_id}")
 
 
+def release_plan_capacity(repository: CatalogRepository, plan_id: str) -> None:
+    """Roll back a start-path booking; never raises, so the caller's error surfaces.
+
+    Used when a start fails after ``book_plan_capacity``. A failed release is logged
+    and left to expire by TTL rather than masking the original exception.
+    """
+    try:
+        repository.delete_nas_reservations_for_owner(plan_id)
+    except Exception as exc:  # noqa: BLE001 - a failed release must not replace the start failure being re-raised; the booking expires by TTL
+        logger.warning("reservation rollback failed for plan %s", plan_id, exc_info=exc)
+
+
 class CapacityReservation(BaseModel):
     model_config = ConfigDict(frozen=True)
 

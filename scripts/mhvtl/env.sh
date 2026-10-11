@@ -46,8 +46,14 @@ EOF
 
 [ -n "$drive_nst" ] || rig_die "no tape drives found on this rig"
 
+# Real mode refuses to start without an API token (openblade/config.py raises
+# RealHardwareDisabledError). Keep the caller's (the workflow mints and masks
+# one per run); otherwise mint a throwaway one for a local run.
+OPENBLADE_API_TOKEN="${OPENBLADE_API_TOKEN:-$(openssl rand -hex 32)}"
+
 cat <<EOF
 export OPENBLADE_BACKEND=real
+export OPENBLADE_API_TOKEN=${OPENBLADE_API_TOKEN}
 export OPENBLADE_REAL_HARDWARE_ENABLED=true
 export OPENBLADE_CHANGER_DEVICE=${changer_sg}
 export OPENBLADE_DRIVE_DEVICES=${drive_nst}

@@ -27,6 +27,7 @@ from openblade.nas.capacity import (
     ScratchThresholds,
     book_plan_capacity,
     plan_with_pool_budget,
+    release_plan_capacity,
     server_budget_request,
 )
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
@@ -44,6 +45,7 @@ from openblade.nas.ingest import (
     register_archive_plan,
     run_ingest_job,
     start_ingest_job,
+    unregister_archive_plan,
 )
 from openblade.nas.ltfs_manifest import TapeMetadataWriter
 from openblade.nas.manifest_validator import ManifestValidator
@@ -1232,6 +1234,12 @@ async def start_ingest(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Archive plan is not safe to enqueue"
         )
+    if plan.pool != request.pool_id:
+        # The booking is made against plan.pool; starting into any other pool (or a
+        # pool-less preview into a pool) would write to an unbudgeted pool.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="pool_id does not match plan pool"
+        )
     if plan.ingest_mode is IngestMode.CACHE_DRIVE:
         if request.cache_drive_id is None:
             raise HTTPException(
@@ -1257,25 +1265,40 @@ async def start_ingest(
     except ReservationError as exc:
         # Curated domain message (pool + plan id only); the pool budget is exhausted.
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    if auto_clean_drives:
-        cleaned_drives = _auto_clean_required_drives()
-    job = start_ingest_job(
-        plan=plan,
-        dataset_name=request.dataset_name,
-        pool_id=request.pool_id,
-        nas_service=service,
-        cache_drive_id=request.cache_drive_id,
-    )
-    if cleaned_drives:
-        job.notes.append(f"Auto-cleaned drives before ingest: {', '.join(cleaned_drives)}")
-    background_tasks.add_task(
-        run_ingest_job,
-        job.job_id,
-        nas_service=service,
-        library=context.library,
-        ltfs=context.ltfs,
-        cache_drive_id=request.cache_drive_id,
-    )
+    try:
+        if auto_clean_drives:
+            cleaned_drives = _auto_clean_required_drives()
+        job = start_ingest_job(
+            plan=plan,
+            dataset_name=request.dataset_name,
+            pool_id=plan.pool,
+            nas_service=service,
+            cache_drive_id=request.cache_drive_id,
+        )
+        if cleaned_drives:
+            job.notes.append(f"Auto-cleaned drives before ingest: {', '.join(cleaned_drives)}")
+        background_tasks.add_task(
+            run_ingest_job,
+            job.job_id,
+            nas_service=service,
+            library=context.library,
+            ltfs=context.ltfs,
+            cache_drive_id=request.cache_drive_id,
+        )
+    except Exception:
+        # Anything failing after the booking must not leave pool budget held for 1h
+        # or a startable plan behind; re-raise the original error unchanged.
+        # Each cleanup step is isolated so a failing cleanup can never replace
+        # the original error (which is what the caller must see).
+        try:
+            release_plan_capacity(service.repository, plan.plan_id)
+        except Exception:  # noqa: BLE001 - best-effort rollback; original error re-raised below
+            logger.exception("rollback: release_plan_capacity failed for %s", plan.plan_id)
+        try:
+            unregister_archive_plan(plan.plan_id)
+        except Exception:  # noqa: BLE001 - best-effort rollback; original error re-raised below
+            logger.exception("rollback: unregister_archive_plan failed for %s", plan.plan_id)
+        raise
     return StartIngestResponse(job_id=job.job_id, dataset_id=job.dataset_id, status="running")
 
 

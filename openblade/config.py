@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from openblade.domain.errors import DriveCorrelationError
+from openblade.domain.errors import DriveCorrelationError, RealHardwareDisabledError
+
+_LOG = logging.getLogger(__name__)
 
 
 class BackendMode(str, Enum):
@@ -164,14 +167,33 @@ def _load_iblade_compat_mode() -> IBladeCompatibilityMode:
     return IBladeCompatibilityMode.EXTENDED
 
 
+def _api_token_configured() -> bool:
+    return bool(
+        os.environ.get("OPENBLADE_API_TOKEN", "").strip()
+        or os.environ.get("OPENBLADE_API_TOKEN_FILE", "").strip()
+    )
+
+
 def load_config() -> OpenBladeConfig:
-    backend_str = os.environ.get("OPENBLADE_BACKEND", "mock").lower()
+    backend_str = os.environ.get("OPENBLADE_BACKEND", "mock").strip().lower()
+    if backend_str == "simulator":  # Dockerfile spelling; same as mock
+        backend_str = BackendMode.MOCK.value
     try:
         backend = BackendMode(backend_str)
     except ValueError:
+        _LOG.warning(
+            "Unrecognised OPENBLADE_BACKEND=%r; using the simulator (mock) backend",
+            backend_str.replace("\r", "").replace("\n", ""),
+        )
         backend = BackendMode.MOCK
 
     real_hw = os.environ.get("OPENBLADE_REAL_HARDWARE_ENABLED", "false").lower() == "true"
+    if backend == BackendMode.REAL and real_hw and not _api_token_configured():
+        # Third signal: no unauthenticated native API in front of real robotics.
+        raise RealHardwareDisabledError(
+            "OPENBLADE_BACKEND=real with OPENBLADE_REAL_HARDWARE_ENABLED=true "
+            "also requires OPENBLADE_API_TOKEN (or OPENBLADE_API_TOKEN_FILE) to be set"
+        )
     drive_devices = tuple(
         device.strip()
         for device in os.environ.get("OPENBLADE_DRIVE_DEVICES", "").split(",")
