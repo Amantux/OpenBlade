@@ -14,11 +14,9 @@ Exit 0 when no check FAILs, 1 otherwise.
 from __future__ import annotations
 
 import argparse
-import http.cookiejar
 import json
 import os
 import shutil
-import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -28,6 +26,7 @@ from typing import Literal, Protocol
 
 from openblade.config import parse_drive_serial_map
 from openblade.domain.errors import DriveCorrelationError
+from openblade.hardware.appliance_client import ApplianceClient, ApplianceResponse
 from openblade.hardware.mtx import MtxStatus, parse_mtx_status
 from openblade.hardware.runner import SafeRunner
 from openblade.hardware.sg import parse_sg_inq
@@ -60,50 +59,32 @@ class PreflightError(Exception):
     """A curated, operator-facing failure (never carries raw upstream text)."""
 
 
-class _UrllibAppliance:
-    """Cookie-session login/logout against the appliance AML API (read-only)."""
+class _ApplianceProbe:
+    """Login/logout probe over the shared read-only ApplianceClient."""
 
     def __init__(self, base_url: str, user: str, password: str, *, insecure: bool) -> None:
         # Validate at the point of use: the URL arrives from runner env, not an API.
         if not base_url.startswith(("https://", "http://")):
             raise PreflightError("OPENBLADE_APPLIANCE_URL must start with http:// or https://")
-        self._base = base_url.rstrip("/")
-        self._user = user
-        self._password = password
-        handlers: list[urllib.request.BaseHandler] = [
-            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
-        ]
-        if insecure:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            handlers.append(urllib.request.HTTPSHandler(context=ctx))
-        self._opener = urllib.request.build_opener(*handlers)
-
-    def _post(self, path: str, body: Mapping[str, str] | None) -> int:
-        req = urllib.request.Request(  # noqa: S310 - scheme validated in __init__
-            self._base + path,
-            data=json.dumps(body or {}).encode(),
-            method="POST",
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        self._client = ApplianceClient(
+            base_url=base_url, user=user, password=password, insecure=insecure, timeout_s=15.0
         )
+
+    def _call(self, op: Callable[[], ApplianceResponse]) -> int:
         try:
-            with self._opener.open(req, timeout=15) as resp:
-                return int(resp.status)
-        except urllib.error.HTTPError as exc:
-            return int(exc.code)
+            return op().status
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             raise PreflightError(f"appliance unreachable ({type(exc).__name__})") from exc
 
     def login(self) -> int:
-        return self._post("/aml/users/login", {"name": self._user, "password": self._password})
+        return self._call(self._client.login)
 
     def logout(self) -> int:
-        return self._post("/aml/auth/logout", None)
+        return self._call(self._client.logout)
 
 
 def _default_appliance(env: Mapping[str, str]) -> ApplianceProbe:
-    return _UrllibAppliance(
+    return _ApplianceProbe(
         env.get("OPENBLADE_APPLIANCE_URL", ""),
         env.get("OPENBLADE_APPLIANCE_USER", ""),
         env.get("OPENBLADE_APPLIANCE_PASSWORD", ""),
