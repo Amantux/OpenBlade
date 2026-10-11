@@ -47,6 +47,10 @@ class FormatService:
             raise FormatRequiresConfirmationError("Unknown or missing safety token")
         if token.operation != "format" or token.target_barcode != barcode:
             raise FormatRequiresConfirmationError("Safety token does not authorize this barcode")
+        # Consume BEFORE the job: single-use even under concurrent confirms, and
+        # a failed job does not re-arm the token (operator re-runs dry-run).
+        if not self.catalog.delete_safety_token(token_value):
+            raise FormatRequiresConfirmationError("Safety token already used or expired")
         result = run_format_job(
             barcode,
             FormatConfirmation(expected_barcode=barcode, safety_token=token),
@@ -54,7 +58,6 @@ class FormatService:
             self.ltfs,
             self.catalog,
         )
-        self.catalog.delete_safety_token(token_value)
         cartridge = self.catalog.add_cartridge(barcode)
         cartridge.formatted = True
         cartridge.used_bytes = 0
