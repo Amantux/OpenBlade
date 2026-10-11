@@ -116,6 +116,50 @@ def test_concurrent_confirms_with_one_token_run_the_job_once(
     assert job_calls == [BARCODE]
 
 
+def test_two_repositories_on_one_file_claim_a_token_exactly_once(tmp_path: Path) -> None:
+    """Cross-process claim: independent engines share only the sqlite FILE.
+
+    Each repository has its own engine, connection pool and ``_lock``, so the
+    in-process RLock cannot serialise them; only the database lock can.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from openblade.catalog.db import _sqlite_connect_args
+
+    url = f"sqlite:///{tmp_path / 'shared.db'}"
+    init_db(url)
+    engines = [create_engine(url, connect_args=_sqlite_connect_args(url)) for _ in range(2)]
+    repos = [CatalogRepository(Session(bind=e, expire_on_commit=False)) for e in engines]
+    assert repos[0]._lock is not repos[1]._lock
+    try:
+        for _ in range(25):
+            token = _armed_token(repos[0])
+            barrier = threading.Barrier(2)
+            claims: list[bool] = []
+
+            def claim(
+                r: CatalogRepository,
+                value: str = token.token,
+                barrier: threading.Barrier = barrier,
+                claims: list[bool] = claims,
+            ) -> None:
+                barrier.wait(timeout=10)
+                claims.append(r.delete_safety_token(value))
+
+            threads = [threading.Thread(target=claim, args=(r,)) for r in repos]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+            assert sorted(claims) == [False, True]
+    finally:
+        for r in repos:
+            r.session.close()
+        for e in engines:
+            e.dispose()
+
+
 def test_failed_delete_refuses_and_never_runs_the_job(
     repo: CatalogRepository, job_calls: list[str]
 ) -> None:
