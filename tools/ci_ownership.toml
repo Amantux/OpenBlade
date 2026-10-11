@@ -59,6 +59,10 @@ glob = "tests/compat/*"
 categories = ["compat"]
 
 [[rule]]
+glob = "tools/compat_capture*"
+categories = ["compat"]
+
+[[rule]]
 glob = "tests/fixtures/*"
 categories = ["unit", "compat"]
 
