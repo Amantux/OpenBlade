@@ -89,5 +89,8 @@ are per pool; mapping one to the other needs a design decision before the planne
 can consume the ledger. Scratch-threshold health (`get_scratch_thresholds`) has no
 consumer because the catalog has no scratch-cartridge count to evaluate.
 `nas_file_spans` has no `pool_id`, so identical relative paths in two pools share
-spans. A real NFSv4 ACL protocol scenario needs a Ganesha image built with VFS
-ACL support; the shipped Debian package cannot store ACLs.
+spans. The protocol rig's NFS server is Fedora 41 nfs-ganesha 5.9 (VFS FSAL, built
+with POSIX-ACL mapping); NFSv4→POSIX ACL mapping is lossy: POSIX has no DENY, so a
+special-principal deny (e.g. `D::EVERYONE@:r`) is folded into the mode bits and strips
+that permission from the owner too, the `n`/`N` named-attribute bits are dropped, and
+removing a named-user ACE leaves a residual `A::<uid>:...` entry behind.

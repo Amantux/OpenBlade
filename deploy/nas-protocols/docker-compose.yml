@@ -14,7 +14,7 @@ services:
       interval: 2s
       retries: 30
   nfs-ganesha:
-    build: { context: ., args: { ROLE: nfs } }
+    build: { context: ., target: nfs-ganesha, args: { ROLE: nfs } }
     # Ganesha's VFS FSAL needs open_by_handle_at (CAP_DAC_READ_SEARCH) etc.
     privileged: true
     command: ["sh", "-c", "rpcbind && exec ganesha.nfsd -F -L STDOUT -p /tmp/ganesha.pid -f /rig/ganesha.conf"]

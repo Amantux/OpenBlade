@@ -23,22 +23,36 @@ def test_nfs_posix_lock_granted_by_server(mounted: Rig) -> None:
 
 
 def test_nfs_acl_mapping(mounted: Rig) -> None:
-    """Access control on the rw export as the rig's Ganesha actually provides it.
+    """A real NFSv4 ACL is enforced server-side, beyond what the mode bits say.
 
-    Limit (verified on the pinned debian:bookworm nfs-ganesha 4.3 + nfs-ganesha-vfs build):
-    the VFS FSAL does not advertise the NFSv4 ``acl`` attribute, even with
-    ``Disable_ACL = false`` on the export and a fresh client mount -- ``nfs4_getfacl``
-    reports "Operation to request attribute not supported" and ``nfs4_setfacl`` fails
-    with "Failed to instantiate ACL". Ganesha 4.3 has no ``Allow_ACL`` key. So NFSv4 ACEs
-    cannot be set or read through this server; the test pins that limit (it fails, and
-    must be rewritten as a set/get round-trip, if a future image starts storing ACLs) and
-    asserts that POSIX mode bits are enforced server-side for a second uid instead.
+    The rig's Ganesha (Fedora 41 nfs-ganesha 5.9, VFS FSAL) maps NFSv4 ACLs onto POSIX
+    ACLs. A DENY ACE for a named user (``nobody``, uid 65534 -- numeric principals, the
+    kernel client's default without idmapping) is stored as a ``user:65534:---`` POSIX
+    entry, so ``nobody`` is refused a read that mode 644 alone would allow, while the
+    owner keeps reading. The mapping is lossy (POSIX has no DENY and no
+    ``n``/``N`` named-attribute bits), so only the deny ACE itself is asserted to
+    round-trip, not the whole ACL text. Mode-bit enforcement for a second uid is kept.
     """
     f = "/mnt/nfs/rw/acl.bin"
-    assert mounted.sh(f"echo hi > {f}").returncode == 0
-    acl = mounted.sh(f"nfs4_getfacl {f}; nfs4_setfacl -a A::OWNER@:rwatTnNcCy {f}")
-    assert "attribute not supported" in acl.stdout + acl.stderr, acl.stdout + acl.stderr
-    assert acl.returncode != 0, "nfs4_setfacl succeeded: server now stores ACLs, extend this test"
+    deny_ace = "D::65534:r"
+    assert mounted.sh(f"rm -f {f} && echo hi > {f} && chmod 644 {f}").returncode == 0
+    assert mounted.sh(f"runuser -u nobody -- cat {f}").returncode == 0
+
+    set_ = mounted.sh(f"nfs4_setfacl -a {deny_ace} {f}")
+    assert set_.returncode == 0, set_.stdout + set_.stderr
+    assert deny_ace in mounted.sh(f"nfs4_getfacl {f}").stdout.splitlines()
+    assert mounted.sh(f"stat -c %a {f}").stdout.strip() == "644"
+    assert mounted.sh(f"runuser -u nobody -- cat {f}").returncode != 0
+    owner = mounted.sh(f"cat {f}")
+    assert owner.returncode == 0 and owner.stdout.strip() == "hi", owner.stderr
+
+    unset = mounted.sh(f"nfs4_setfacl -x {deny_ace} {f}")
+    assert unset.returncode == 0, unset.stdout + unset.stderr
+    assert deny_ace not in mounted.sh(f"nfs4_getfacl {f}").stdout.splitlines()
+    readable = mounted.sh(f"runuser -u nobody -- cat {f}")
+    assert readable.returncode == 0 and readable.stdout.strip() == "hi", readable.stderr
+
+    assert mounted.sh(f"rm -f {f} && echo hi > {f}").returncode == 0
     assert mounted.sh(f"chmod 600 {f} && runuser -u nobody -- cat {f}").returncode != 0
     allowed = mounted.sh(f"chmod 644 {f} && runuser -u nobody -- cat {f}")
     assert allowed.returncode == 0 and allowed.stdout.strip() == "hi", allowed.stderr
