@@ -14,9 +14,14 @@ from pydantic import BaseModel, Field
 
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
-from openblade.domain.errors import OpenBladeError, safe_job_error
+from openblade.domain.errors import (
+    FormatRequiresConfirmationError,
+    OpenBladeError,
+    safe_job_error,
+)
 from openblade.domain.models import MountHandle, MountMode
 from openblade.domain.policies import FormatConfirmation, SafetyToken
+from openblade.jobs.format import real_backend_from_config
 from openblade.nas.archive_lifecycle import (
     ArchiveLifecycleManager,
     ArchiveLifecycleResult,
@@ -144,6 +149,7 @@ class _BaseIngest:
         service: NasService,
         library: LibraryBackend,
         ltfs: LTFSBackend,
+        real_backend: bool | None = None,
     ) -> None:
         self.job = job
         self.dataset = dataset
@@ -153,6 +159,8 @@ class _BaseIngest:
         self._load_tape = library.load
         self._unload_tape = library.unload
         self._format_tape = ltfs.format
+        # Same detection FormatService uses: on a real backend ingest never formats.
+        self._real_backend = real_backend_from_config() if real_backend is None else real_backend
         self._write_tape_bytes = ltfs.write_bytes
         self._file_record_ids = {
             record.relative_path: record.id for record in service.list_file_records(dataset.id)
@@ -340,6 +348,15 @@ class _BaseIngest:
         tape = self.ltfs.ensure_tape(barcode)
         if tape.formatted:
             return
+        if self._real_backend:
+            # Never mkltfs from ingest on real hardware: formatting is only the
+            # two-phase /ltfs/format flow (scratch allowlist + persisted single-use
+            # token). Typed, so run() marks the job FAILED with this curated text.
+            raise FormatRequiresConfirmationError(
+                f"Tape {barcode} is not LTFS-formatted; ingest will not format on real "
+                "hardware - format it via the two-phase /ltfs/format flow"
+            )
+        # Simulator only: direct auto-format with a self-minted token.
         self._format_tape(
             barcode,
             FormatConfirmation(

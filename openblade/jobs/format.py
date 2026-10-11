@@ -19,6 +19,15 @@ from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
 
 
+def real_backend_from_config() -> bool:
+    """True when the configured backend is REAL, ignoring the enable flag (fail closed).
+
+    The single detection used by ``FormatService`` and by NAS ingest's refusal to
+    auto-format on real hardware.
+    """
+    return load_config().backend == BackendMode.REAL
+
+
 class FormatService:
     def __init__(
         self,
@@ -35,9 +44,7 @@ class FormatService:
         # Real media gate: on a REAL backend only allowlisted scratch tapes may be
         # formatted. Defaults come from the environment so every construction
         # site is covered; the backend check ignores the enable flag (fail closed).
-        self._real_backend = (
-            load_config().backend == BackendMode.REAL if real_backend is None else real_backend
-        )
+        self._real_backend = real_backend_from_config() if real_backend is None else real_backend
         self._scratch_barcodes = (
             scratch_barcodes_from_env() if scratch_barcodes is None else list(scratch_barcodes)
         )
