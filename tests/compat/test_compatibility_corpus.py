@@ -61,7 +61,31 @@ def _authenticate(client: TestClient) -> None:
     assert resp.status_code == 200, f"corpus auth setup failed: {resp.status_code}"
 
 
+def _enable_mfa(client: TestClient, user: str, mfa_type: str) -> None:
+    # Same documented route pair as tests/i3/test_aml_mfa_pending.py: fetch the
+    # user's key, then PUT /aml/users/mfa with a valid code to enable it.
+    import pyotp
+
+    login = client.post("/aml/users/login", json={"name": user, "password": _EMULATOR_PASSWORD})
+    assert login.status_code == 200, f"corpus mfa setup login failed: {login.status_code}"
+    bearer = {"Authorization": f"Bearer {login.json()['token']}"}
+    key = client.get(f"/aml/users/login/mfa/{mfa_type}/key", headers=bearer)
+    assert key.status_code == 200, f"corpus mfa setup key failed: {key.status_code}"
+    code = pyotp.TOTP(key.json()["key"]).now()
+    enabled = client.put(
+        "/aml/users/mfa",
+        json={"type": mfa_type, "enabled": True, "authenticationCode": code},
+        headers=bearer,
+    )
+    assert enabled.status_code == 200, f"corpus mfa setup enable failed: {enabled.status_code}"
+    client.cookies.clear()
+
+
 def _run(client: TestClient, case: dict):
+    # Optional "setup": {"mfa": {"user": ..., "type": "totp"}} enables MFA first.
+    mfa = (case.get("setup") or {}).get("mfa")
+    if mfa:
+        _enable_mfa(client, mfa["user"], mfa["type"])
     if case.get("auth") == "admin":
         _authenticate(client)
     req = case["request"]

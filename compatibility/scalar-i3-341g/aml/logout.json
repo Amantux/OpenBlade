@@ -5,7 +5,7 @@
   "firmware": "341G",
   "auth": "admin",
   "manual_ref": "Web Services Guide Rev D §2.5 (logout)",
-  "fidelity_notes": "Emulator supports BOTH cookie-session (sessionID) and Bearer, with logout at POST /aml/auth/logout AND RESTful DELETE /aml/users/login, clearing the session cookie — closer to the real contract than the review assumed. Session-expiry, MFA, max-sessions, and default-password states remain unmodeled (roadmap Phase 5); certify the exact logout path/verb against a capture.",
+  "fidelity_notes": "Emulator supports BOTH cookie-session (sessionID) and Bearer, with logout at POST /aml/auth/logout AND RESTful DELETE /aml/users/login, clearing the session cookie — closer to the real contract than the review assumed. Session expiry (sliding timeout), per-user max-sessions eviction, the default-password Warning, and an inferred MFA-pending session (logout stays reachable while pending) are now modelled; all are emulator-inferred, not appliance-captured. Certify the exact logout path/verb against a capture.",
   "request": { "method": "POST", "path": "/aml/auth/logout" },
   "expected": { "status": 200 }
 }
