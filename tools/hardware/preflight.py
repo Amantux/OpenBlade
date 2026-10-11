@@ -2,7 +2,7 @@
 
 READ-ONLY on hardware: it runs inquiries and listings only (``sg_inq``, ``mtx status``,
 an appliance login/logout) and never moves, loads, formats or erases media. It must
-never run armed, so it does not need (and warns about) ``OPENBLADE_REAL_HARDWARE_ENABLED``.
+never run armed, so it does not need (and FAILs on) ``OPENBLADE_REAL_HARDWARE_ENABLED``.
 
 Usage::
 
@@ -120,7 +120,7 @@ def check_armed(host: Host) -> Check:
     if host.env.get("OPENBLADE_REAL_HARDWARE_ENABLED"):
         return Check(
             "armed",
-            "WARN",
+            "FAIL",
             "OPENBLADE_REAL_HARDWARE_ENABLED is set in the preflight env",
             "unset it: preflight is read-only and must never run armed",
         )

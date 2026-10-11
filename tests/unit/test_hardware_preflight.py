@@ -153,9 +153,18 @@ def test_allowlisted_barcode_absent_from_inventory_fails() -> None:
     assert any("ZZZ999L8" in c.detail for c in fails)
 
 
-def test_armed_env_warns() -> None:
+def test_armed_env_fails() -> None:
     host, _ = _host(_env(OPENBLADE_REAL_HARDWARE_ENABLED="true"))
-    assert pf.check_armed(host).status == "WARN"
+    assert pf.check_armed(host).status == "FAIL"
+
+
+def test_armed_env_fails_an_otherwise_healthy_run() -> None:
+    # main() exits EXIT_FAIL iff any check FAILs; armed must be enough on its own.
+    host, _ = _host(_env(OPENBLADE_REAL_HARDWARE_ENABLED="true"))
+
+    checks = pf.run_preflight(host, "readonly")
+
+    assert [c.name for c in _by(checks, "FAIL")] == ["armed"]
 
 
 def test_missing_tool_fails() -> None:

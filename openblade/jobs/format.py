@@ -19,6 +19,25 @@ from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
 
 
+def normalize_barcode(barcode: str) -> str:
+    """Service-boundary form (``strip().upper()``), matching the scratch allowlist.
+
+    Applied once on entry so allowlist, inventory lookup, token and catalog all
+    see the same barcode (``" abc123"`` used to pass the allowlist, then fail as
+    unknown).
+    """
+    return barcode.strip().upper()
+
+
+def real_backend_from_config() -> bool:
+    """True when the configured backend is REAL, ignoring the enable flag (fail closed).
+
+    The single detection used by ``FormatService`` and by NAS ingest's refusal to
+    auto-format on real hardware.
+    """
+    return load_config().backend == BackendMode.REAL
+
+
 class FormatService:
     def __init__(
         self,
@@ -35,9 +54,7 @@ class FormatService:
         # Real media gate: on a REAL backend only allowlisted scratch tapes may be
         # formatted. Defaults come from the environment so every construction
         # site is covered; the backend check ignores the enable flag (fail closed).
-        self._real_backend = (
-            load_config().backend == BackendMode.REAL if real_backend is None else real_backend
-        )
+        self._real_backend = real_backend_from_config() if real_backend is None else real_backend
         self._scratch_barcodes = (
             scratch_barcodes_from_env() if scratch_barcodes is None else list(scratch_barcodes)
         )
@@ -49,6 +66,7 @@ class FormatService:
             )
 
     def dry_run(self, barcode: str) -> tuple[DryRunPlan, SafetyToken]:
+        barcode = normalize_barcode(barcode)
         self._require_scratch_media(barcode)
         inventory = self.library.inventory()
         known = {str(slot.barcode) for slot in inventory.slots if slot.barcode is not None} | {
@@ -69,6 +87,7 @@ class FormatService:
         return plan, token
 
     def confirm(self, barcode: str, token_value: str) -> OperationResult:
+        barcode = normalize_barcode(barcode)
         self._require_scratch_media(barcode)
         token = self.catalog.get_safety_token(token_value)
         if token is None:
