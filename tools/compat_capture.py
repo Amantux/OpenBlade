@@ -34,6 +34,8 @@ SERIAL = "<serial>"
 HOST = "<host>"
 TIMESTAMP = "<timestamp>"
 REDACTED = "<redacted>"
+# A request password that was NOT the --login credential (a deliberate bad-password case).
+REDACTED_INVALID = "<redacted-invalid>"
 
 SOURCES = ("self-captured", "captured")
 _COOKIE_ATTRS = frozenset({"path", "domain", "expires", "max-age", "samesite"})
@@ -79,7 +81,26 @@ def _scrub_cookie(value: str) -> str:
     return re.sub(r"([^=;,\s]+)=([^;,]*)", repl, value)
 
 
+def _scrub_xml(value: str, rules: Rules) -> str:
+    # XML bodies (Accept: application/xml) carry the same secrets as JSON keys.
+    def repl(m: re.Match[str]) -> str:
+        tag, text = m.group(1), m.group(2)
+        if not text:  # already a placeholder (or empty): keep idempotent
+            return m.group(0)
+        for needles, mark in (
+            (rules.password_keys, REDACTED),
+            (rules.token_keys, TOKEN),
+            (rules.serial_keys, SERIAL),
+        ):
+            if _key_hit(tag, needles):
+                return f"<{tag}>{mark}</{tag}>"
+        return m.group(0)
+
+    return re.sub(r"<([A-Za-z_][\w.-]*)>([^<]*)</\1>", repl, value)
+
+
 def _scrub_str(value: str, rules: Rules) -> str:
+    value = _scrub_xml(value, rules)
     value = rules.bearer.sub(lambda m: f"{m.group(1)} {TOKEN}", value)
     value = rules.url_host.sub(lambda m: f"{m.group(1)}://{HOST}", value)
     value = rules.ipv4.sub(HOST, value)
@@ -93,9 +114,9 @@ def _walk(node: Any, rules: Rules) -> Any:
             if value is None or isinstance(value, bool):
                 out[key] = value
             elif _key_hit(key, rules.password_keys):
-                out[key] = REDACTED
+                out[key] = value if value in (REDACTED, REDACTED_INVALID) else REDACTED
             elif _key_hit(key, rules.cookie_keys) and isinstance(value, str):
-                out[key] = _scrub_cookie(value)
+                out[key] = _scrub_str(_scrub_cookie(value), rules)
             elif _key_hit(key, rules.token_keys) and not isinstance(value, (dict, list)):
                 out[key] = TOKEN
             elif _key_hit(key, rules.serial_keys) and not isinstance(value, (dict, list)):
@@ -122,8 +143,11 @@ def dumps_case(case: dict[str, Any]) -> str:
 
 
 def load_recipes(path: Path) -> list[dict[str, Any]]:
-    files = sorted(path.rglob("*.json")) if path.is_dir() else [path]
-    return [json.loads(p.read_text()) for p in files]
+    if not path.is_dir():
+        return [json.loads(path.read_text())]
+    # A directory's own earlier outputs are not recipes: their passwords are redacted.
+    cases = [json.loads(p.read_text()) for p in sorted(path.rglob("*.json"))]
+    return [c for c in cases if c.get("source") not in SOURCES]
 
 
 def _login(client: httpx.Client, login: str | None) -> None:
@@ -168,6 +192,7 @@ def build_case(
     profile: str | None = None,
     appliance_firmware: str | None = None,
     attest: str | None = None,
+    login: str | None = None,
 ) -> dict[str, Any]:
     if source not in SOURCES:
         raise CaptureRefusedError(f"source must be one of {SOURCES}, not {source!r}")
@@ -195,6 +220,19 @@ def build_case(
         expected=expected,
         observed={"headers": observed_headers, "body": clean},
     )
+    good = login.partition(":")[2] if login else None
+    payload = case.get("request", {}).get("json")
+    if isinstance(payload, dict):
+        # Keep "right vs wrong password" replayable after redaction.
+        case["request"] = {
+            **case["request"],
+            "json": {
+                k: REDACTED_INVALID
+                if _key_hit(k, DEFAULT_RULES.password_keys) and isinstance(v, str) and v != good
+                else v
+                for k, v in payload.items()
+            },
+        }
     if profile:
         case["profile"] = profile
     if source == "captured":
@@ -248,7 +286,7 @@ def run_capture(factory: ClientFactory, cases: list[dict[str, Any]], out: Path, 
     built = []
     for recipe in cases:  # build everything first: a refusal writes nothing
         with factory() as client:
-            built.append(build_case(recipe, replay(client, recipe, login), **opts))
+            built.append(build_case(recipe, replay(client, recipe, login), login=login, **opts))
     out.mkdir(parents=True, exist_ok=True)
     for case in built:
         (out / f"{case['id']}.json").write_text(dumps_case(case))

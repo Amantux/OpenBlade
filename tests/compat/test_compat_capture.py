@@ -31,7 +31,9 @@ def _dirty_case() -> dict[str, Any]:
             "json": {"name": "admin", "password": "hunter2-plain", "newPassword": "pw2"},
         },
         "observed": {
-            "headers": {"set-cookie": f"sessionID={SECRET}; Path=/; HttpOnly; SameSite=lax"},
+            "headers": {
+                "set-cookie": f"sessionID={SECRET}; expires=Sun, 11 Oct 2026 03:23:02 GMT; Path=/"
+            },
             "body": {
                 "sessionId": SECRET,
                 "access_token": SECRET,
@@ -42,6 +44,7 @@ def _dirty_case() -> dict[str, Any]:
                 "when": "2026-10-11T09:15:02.123Z",
                 "httpDate": "Sun, 11 Oct 2026 09:15:02 GMT",
                 "nested": [{"session_token": SECRET, "count": 3, "ok": True}],
+                "xml": f"<r><code>0</code><token>{SECRET}</token><serialNumber>SN9</serialNumber></r>",
             },
         },
     }
@@ -50,7 +53,7 @@ def _dirty_case() -> dict[str, Any]:
 def test_sanitize_scrubs_every_secret_class() -> None:
     clean = cc.sanitize(_dirty_case())
     text = json.dumps(clean)
-    for leaked in (SECRET, "hunter2-plain", "pw2", "QTM-SN-998877", "PB-1234"):
+    for leaked in (SECRET, "hunter2-plain", "pw2", "QTM-SN-998877", "PB-1234", "03:23:02"):
         assert leaked not in text, f"leaked {leaked!r}"
     for leaked in ("i3-lab.example.com", "10.20.30.40", "2026-10-11T09", "09:15:02 GMT"):
         assert leaked not in text, f"leaked {leaked!r}"
@@ -63,8 +66,9 @@ def test_sanitize_scrubs_every_secret_class() -> None:
     assert body["nested"][0] == {"session_token": cc.TOKEN, "count": 3, "ok": True}
     # Cookie attributes survive; only the value is replaced.
     assert clean["observed"]["headers"]["set-cookie"] == (
-        f"sessionID={cc.TOKEN}; Path=/; HttpOnly; SameSite=lax"
+        f"sessionID={cc.TOKEN}; expires={cc.TIMESTAMP}; Path=/"
     )
+    assert "<code>0</code>" in body["xml"] and "SN9" not in body["xml"]
 
 
 def test_sanitize_is_pure_and_idempotent() -> None:
@@ -135,3 +139,12 @@ def test_cli_refusal_writes_nothing(tmp_path: Path) -> None:
     assert not out.exists()
     assert cc.main(argv, factory=factory) == 0
     assert (out / "r1.json").exists()
+
+
+def test_wrong_password_stays_distinguishable_after_redaction() -> None:
+    recipe = {**RECIPE, "request": {"json": {"name": "a", "password": "wrong"}}}
+    bad = cc.build_case(recipe, _resp({}), source="self-captured", login="a:right")
+    recipe["request"]["json"]["password"] = "right"
+    good = cc.build_case(recipe, _resp({}), source="self-captured", login="a:right")
+    assert bad["request"]["json"]["password"] == cc.REDACTED_INVALID
+    assert good["request"]["json"]["password"] == cc.REDACTED
