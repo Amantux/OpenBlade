@@ -176,3 +176,35 @@ def test_scratch_critical_is_degraded_not_unhealthy(tmp_path: Path) -> None:
     _, component = _scratch_component(tmp_path, 1, (2, 5))
     assert component is not None
     assert component.status is HealthStatus.DEGRADED
+
+
+def test_upload_share_push_plan_refused_when_pool_budget_consumed(
+    repo: CatalogRepository,
+) -> None:
+    from fastapi import HTTPException
+
+    from openblade.api.routes_upload import _plan_share_push
+
+    # Arrange: another job holds 1500 of the pool's 2000 bytes; the push needs 600.
+    assert repo.reserve_nas_capacity(
+        "pool-1", 1_500, "other-job", NOW + timedelta(hours=1), capacity_bytes=2_000, now=NOW
+    )
+
+    # Act
+    with pytest.raises(HTTPException) as exc_info:
+        _plan_share_push(repo, _request(0, pool="pool-1"))
+
+    # Assert: refused on the budget, and nothing new was booked.
+    assert exc_info.value.status_code == 400
+    assert POOL_BUDGET_BLOCKER in str(exc_info.value.detail)
+    assert [r["owner"] for r in repo.reservations_for_pool("pool-1", now=NOW)] == ["other-job"]
+
+
+def test_upload_share_push_plan_books_its_reservation(repo: CatalogRepository) -> None:
+    from openblade.api.routes_upload import _plan_share_push
+
+    plan = _plan_share_push(repo, _request(0, pool="pool-1"))
+
+    assert {r["owner"] for r in repo.reservations_for_pool("pool-1", now=datetime.now(UTC))} == {
+        plan.plan_id
+    }
