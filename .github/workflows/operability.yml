@@ -17,7 +17,9 @@ on:
 
 concurrency:
   group: operability-${{ github.ref }}
-  cancel-in-progress: true
+  # PR runs supersede each other; dispatched master runs (post-merge full-suite /
+  # operability) must never cancel one another or a merge ends up with no result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
