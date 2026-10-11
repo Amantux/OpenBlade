@@ -84,3 +84,40 @@ def test_matching_pool_starts_and_dataset_uses_the_plan_pool() -> None:
     assert dataset is not None and dataset.pool_id == "pool-1"
     assert _owners("pool-1") == {plan["plan_id"]}
     assert get_archive_plan(str(plan["plan_id"])) is not None
+
+
+class _Boom(RuntimeError):
+    pass
+
+
+def test_start_failure_after_booking_releases_booking_and_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise(**_: object) -> None:
+        raise _Boom("start failed")
+
+    monkeypatch.setattr("openblade.api.nas_config.start_ingest_job", _raise)
+    plan = _preview("pool-1")
+
+    with pytest.raises(_Boom):
+        _start(plan["plan_id"], "pool-1")
+
+    assert _owners("pool-1") == set()
+    assert get_archive_plan(str(plan["plan_id"])) is None
+
+
+def test_failed_rollback_release_does_not_mask_the_start_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise(**_: object) -> None:
+        raise _Boom("start failed")
+
+    def _broken_release(_owner: str) -> None:
+        raise OSError("db gone")
+
+    monkeypatch.setattr("openblade.api.nas_config.start_ingest_job", _raise)
+    monkeypatch.setattr(get_context().catalog, "delete_nas_reservations_for_owner", _broken_release)
+    plan = _preview("pool-1")
+
+    with pytest.raises(_Boom):
+        _start(plan["plan_id"], "pool-1")

@@ -57,6 +57,7 @@ from openblade.nas.capacity import (
     ReservationError,
     book_plan_capacity,
     plan_with_pool_budget,
+    release_plan_capacity,
     server_budget_request,
 )
 from openblade.nas.ingest import (
@@ -628,31 +629,33 @@ async def push_staged_files_to_share(
                 nas_service=service,
                 cache_drive_id=None,
             )
+            context = get_context()
+            background_tasks.add_task(
+                _run_share_push_ingest_job,
+                job_id=job.job_id,
+                nas_service=service,
+                library=context.library,
+                ltfs=context.ltfs,
+                workspace=workspace,
+                repo=repo,
+                pool_id=pool_id,
+                staged_file_ids=staged_file_ids,
+            )
+
+            return PushToShareResponse(
+                job_id=job.job_id,
+                dataset_id=job.dataset_id,
+                plan_id=plan.plan_id,
+                pushed_files=len(staged_file_ids),
+                pool_id=pool_id,
+                share_path=share.path,
+                status="running",
+            )
         except Exception:
+            # Roll back the booking and the registration; re-raise the original error.
+            release_plan_capacity(repo, plan.plan_id)
             unregister_archive_plan(plan.plan_id)
             raise
-        context = get_context()
-        background_tasks.add_task(
-            _run_share_push_ingest_job,
-            job_id=job.job_id,
-            nas_service=service,
-            library=context.library,
-            ltfs=context.ltfs,
-            workspace=workspace,
-            repo=repo,
-            pool_id=pool_id,
-            staged_file_ids=staged_file_ids,
-        )
-
-        return PushToShareResponse(
-            job_id=job.job_id,
-            dataset_id=job.dataset_id,
-            plan_id=plan.plan_id,
-            pushed_files=len(staged_file_ids),
-            pool_id=pool_id,
-            share_path=share.path,
-            status="running",
-        )
     except Exception:
         shutil.rmtree(workspace, ignore_errors=True)
         raise

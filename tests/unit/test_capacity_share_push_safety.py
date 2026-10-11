@@ -92,3 +92,4 @@ def test_share_push_start_failure_releases_booking_and_plan(
         _push(client)
 
     assert set(ArchivePlanStore) == plans_before
+    assert _owners() == set()
