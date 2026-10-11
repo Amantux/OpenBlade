@@ -799,7 +799,12 @@ def run_ingest_job(
         # The plan's pool booking (owner=plan_id) is held only while the job can still
         # write; any terminal state frees it. A non-terminal exit keeps it until expiry.
         if job.status in _TERMINAL_JOB_STATES:
-            nas_service.repository.delete_nas_reservations_for_owner(job.plan.plan_id)
+            try:
+                nas_service.repository.delete_nas_reservations_for_owner(job.plan.plan_id)
+            except Exception as exc:  # noqa: BLE001 - a failed release (e.g. session in PendingRollbackError) must not replace the executor's exception; the booking expires by TTL
+                logger.warning(
+                    "reservation release failed for plan %s", job.plan.plan_id, exc_info=exc
+                )
 
 
 _TERMINAL_JOB_STATES = frozenset(
