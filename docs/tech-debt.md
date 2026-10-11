@@ -84,10 +84,14 @@ and no production caller uses `claim_drive`/`claim_changer` yet.
 
 ## NAS persistence gaps
 
-`ArchivePlanRequest.reserved_bytes` is keyed by barcode while `nas_reservations`
-are per pool; mapping one to the other needs a design decision before the planner
-can consume the ledger. Scratch-threshold health (`get_scratch_thresholds`) has no
-consumer because the catalog has no scratch-cartridge count to evaluate.
+Resolved: unexpired `nas_reservations` rows are a pool-level budget
+(`ArchivePlanRequest.pool_reserved_bytes`) that every plan from `/nas/archive-plan`
+and the upload share-push must fit under; the per-barcode `reserved_bytes` dict
+stays for explicit holds. A safe plan books its own bytes (`owner=plan_id`) with a
+1h TTL, released when its ingest job reaches a terminal state and otherwise by
+expiry (abandoned plans hold the pool for up to an hour). Scratch health counts
+cartridges with `volume_group_id IS NULL AND state='in_slot'`; the `scratch`
+component appears only once thresholds are set and degrades, never fails readiness.
 `nas_file_spans` has no `pool_id`, so identical relative paths in two pools share
 spans. A real NFSv4 ACL protocol scenario needs a Ganesha image built with VFS
 ACL support; the shipped Debian package cannot store ACLs.
