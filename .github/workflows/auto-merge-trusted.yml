@@ -78,6 +78,29 @@ jobs:
               return { decision, pending, failed };
             }
 
+            // reviewGate(author, reviews, headSha) -> { ok, reason }
+            // Pure. The owner merges directly. Any other trusted author (Copilot,
+            // whose PR content is steered by issue text) additionally needs the
+            // owner's latest substantive review to be APPROVED on the exact head
+            // SHA; a later push, CHANGES_REQUESTED or DISMISSED review resets it.
+            const reviewOwner = "Amantux";
+            function reviewGate(author, reviews, headSha) {
+              if (author === reviewOwner) return { ok: true, reason: "owner" };
+              let latest = null;
+              for (const r of reviews) {
+                if (!r.user || r.user.login !== reviewOwner) continue;
+                if (r.state === "COMMENTED" || r.state === "PENDING") continue;
+                latest = r; // listReviews is chronological
+              }
+              if (!latest || latest.state !== "APPROVED") {
+                return { ok: false, reason: `no ${reviewOwner} approval` };
+              }
+              if (latest.commit_id !== headSha) {
+                return { ok: false, reason: `${reviewOwner} approval is on an older commit` };
+              }
+              return { ok: true, reason: "approved" };
+            }
+
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const allowedAuthors = new Set(["Amantux", "Copilot"]);
@@ -158,6 +181,18 @@ jobs:
               }
               if (verdict.decision === "fail") {
                 core.notice(`Not merging #${number}: required check(s) not successful: ${verdict.failed.join(", ")}.`);
+                continue;
+              }
+
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner,
+                repo,
+                pull_number: number,
+                per_page: 100,
+              });
+              const review = reviewGate(pr.user.login, reviews, pr.head.sha);
+              if (!review.ok) {
+                core.notice(`Not merging #${number}: ${review.reason} on ${pr.head.sha}.`);
                 continue;
               }
 
