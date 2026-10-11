@@ -183,10 +183,14 @@ emulator.
     (GitHub Environment approval, allowlisted sacrificial barcodes, snapshot
     before/after, load/unload, LTFS format, write/read/checksum, reboot persistence,
     sharded write+restore, safe failure injection, guaranteed recovery).
-23. 🔴 **#E Physical drive-identity bridge:** certify AML coordinate ↔ serial ↔ SCSI
-    inquiry ↔ `/dev/tape/by-id` ↔ LTFS mount on the rig before enabling any real
-    write path. Never rely on transient `/dev/nst0` ordering. (`scalar_http` currently
-    raises `NotImplementedError` here — correct until proven on metal.)
+23. 🟡 **#E Physical drive-identity bridge:** AML coordinate ↔ serial ↔ SCSI
+    inquiry ↔ `/dev/tape/by-id` ↔ LTFS mount (dry) is implemented in
+    `openblade/hardware/correlation.py` (`resolve_tape_by_id`) and covered by
+    `tests/hardware/readonly/test_drive_identity_bridge.py`. Never rely on transient
+    `/dev/nst0` ordering. Not yet certified: the test needs an AML endpoint
+    (`OPENBLADE_APPLIANCE_*`), so on the mhvtl rig it skips (2026-10-11: discovery
+    passes, bridge skipped). Certify on the appliance before enabling any real write
+    path.
 
 ## Phase 8 — Release pipeline (P2) 🟢🟡
 
