@@ -250,3 +250,26 @@ def test_web_flask_production_cookies_secure_by_default(
     monkeypatch.setenv("FLASK_SECRET_KEY", "k" * 32)
     monkeypatch.delenv("OPENBLADE_WEB_SECURE_COOKIES", raising=False)
     assert web_app.create_app().config["SESSION_COOKIE_SECURE"] is True
+
+
+def test_dev_db_path_finding_redacts_url_credentials() -> None:
+    """WARNING findings are logged verbatim by the startup banner: no secrets."""
+    findings = validate_config(
+        {
+            "OPENBLADE_ENV": "production",
+            "OPENBLADE_DB_URL": "postgresql://ob:S3cretPassw0rd@db.lan:5432/tmp/openblade",
+        }
+    )
+    msgs = [f.message for f in findings if f.code == "dev_db_path"]
+    assert len(msgs) == 1
+    assert "S3cretPassw0rd" not in msgs[0]
+    assert "ob:" not in msgs[0]
+    assert "postgresql://***@db.lan:5432/tmp/openblade" in msgs[0]
+    assert all("S3cretPassw0rd" not in f.message for f in findings)
+
+
+def test_redact_url_drops_query_and_handles_plain_paths() -> None:
+    from openblade.config_validation import redact_url
+
+    assert redact_url("postgresql://u:p@h/db?password=x") == "postgresql://***@h/db"
+    assert redact_url("sqlite:////tmp/x.db") == "sqlite:////tmp/x.db"

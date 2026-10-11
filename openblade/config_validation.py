@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 BLOCKING = "blocking"
 WARNING = "warning"
@@ -30,6 +31,26 @@ class Finding:
     severity: str  # BLOCKING | WARNING
     code: str
     message: str
+
+
+def redact_url(url: str) -> str:
+    """Return ``url`` as scheme://host[:port]/path with credentials as ``***``.
+
+    Query and fragment are dropped (they can carry ``password=`` parameters).
+    Every finding message that quotes a URL goes through this, because
+    WARNING findings are logged verbatim by the startup banner.
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:
+        return "<unparseable URL>"
+    if port is not None:
+        host = f"{host}:{port}"
+    creds = "***@" if (parts.username is not None or parts.password is not None) else ""
+    scheme = f"{parts.scheme}://" if parts.scheme else ""
+    return f"{scheme}{creds}{host}{parts.path}"
 
 
 def validate_config(env: Mapping[str, str]) -> list[Finding]:
@@ -196,7 +217,7 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
             Finding(
                 WARNING,
                 "dev_db_path",
-                f"OPENBLADE_DB_URL={db_url!r} looks like a development/default path",
+                f"OPENBLADE_DB_URL={redact_url(db_url)!r} looks like a development/default path",
             )
         )
 
