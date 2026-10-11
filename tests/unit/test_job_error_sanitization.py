@@ -37,10 +37,15 @@ def test_typed_domain_error_message_passes_through() -> None:
     )
 
 
-def test_run_job_records_sanitized_error() -> None:
+def test_run_job_records_sanitized_error(tmp_path) -> None:
+    from openblade.catalog.db import get_session, init_db
+    from openblade.catalog.repository import CatalogRepository
     from openblade.jobs.queue import JobQueue
+    from openblade.jobs.scheduler import CatalogLeaseStore
 
-    queue = JobQueue()
+    init_db(f"sqlite:///{tmp_path / 'catalog.db'}")
+    catalog = CatalogRepository(get_session())
+    queue = JobQueue(catalog, CatalogLeaseStore(catalog))
     job = queue.create_job("archive", {})
 
     def boom():

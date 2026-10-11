@@ -4,32 +4,44 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Mapping, Sequence
+import time
+import uuid
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from openblade.catalog.models import (
+    Base,
     Cartridge,
     CatalogRebuildRun,
+    DriveLeaseRecord,
     FileInstance,
     FileRecord,
     Job,
+    JobJournalEntry,
     LibraryInstance,
     ManifestVersion,
     NasCacheDrive,
     NasConfig,
     NasDataset,
+    NasExportSet,
     NasFileRecord,
+    NasFileSpan,
     NasPool,
+    NasReservation,
     NasRestoreJob,
     NasShare,
     NasStoragePolicy,
+    NasVault,
+    NasVgReplication,
     PathMapping,
     RbacApiToken,
     RbacAuditEvent,
@@ -39,8 +51,9 @@ from openblade.catalog.models import (
     TapeOpLog,
     VolumeGroup,
 )
+from openblade.domain.clock import naive_utcnow
 from openblade.domain.errors import FileNotFoundError
-from openblade.domain.models import FileInstanceState
+from openblade.domain.models import DriveLease, FileInstanceState
 from openblade.domain.policies import SafetyToken
 from openblade.nas.types import (
     CacheDriveConfig,
@@ -112,7 +125,7 @@ def _load_json_value(value: str | None, default: object) -> object:
 
 
 def _utcnow_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return naive_utcnow().isoformat()
 
 
 @dataclass(frozen=True)
@@ -122,6 +135,24 @@ class CatalogBrowseEntry:
     tape_barcode: str
     archived_at: datetime | None
     shard_count: int
+
+
+@dataclass(frozen=True)
+class StagedInstance:
+    """A sharded-archive instance not yet committed (STAGING or VERIFYING)."""
+
+    instance_id: str
+    file_record_id: str
+    barcode: str
+    tape_path: str
+    shard_index: int | None
+    state: str
+
+
+_STAGED_INSTANCE_STATES = frozenset(
+    {FileInstanceState.STAGING.value, FileInstanceState.VERIFYING.value}
+)
+_SHARD_STAGED_EVENT = "shard_staged"
 
 
 class CatalogRepository:
@@ -152,6 +183,8 @@ class CatalogRepository:
             "cache_target_id": row.cache_target_id,
             "restore_target_path": row.restore_target_path,
             "access_mode": row.access_mode,
+            "replication_factor": row.replication_factor,
+            "protection": _load_json_value(row.protection_json, None),
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -648,7 +681,7 @@ class CatalogRepository:
         if instance is None:
             raise FileNotFoundError(f"File instance {instance_id} not found")
         instance.state = FileInstanceState.ARCHIVED.value
-        instance.archived_at = datetime.utcnow()
+        instance.archived_at = naive_utcnow()
         instance.checksum_verified = checksum_verified
         self.session.commit()
 
@@ -658,6 +691,180 @@ class CatalogRepository:
         if instance is None:
             raise FileNotFoundError(f"File instance {instance_id} not found")
         instance.state = FileInstanceState.FAILED.value
+        self.session.commit()
+
+    # -- Sharded-archive staging + job journal ---------------------------------
+    # Lifecycle: create_staged_instance (STAGING) -> mark_instances_verifying ->
+    # mark_instances_archived, the last being the job's ONE commit. Each bulk
+    # call validates every id before mutating anything, so it is all-or-nothing.
+
+    def journal(
+        self, job_id: str, event: str, detail: Mapping[str, object] | None = None
+    ) -> JobJournalEntry:
+        """Append one event to ``job_id``'s journal and commit."""
+        entry = JobJournalEntry(
+            job_id=job_id,
+            at=naive_utcnow(),
+            event=event,
+            detail_json=json.dumps(dict(detail or {}), sort_keys=True, default=str),
+        )
+        self.session.add(entry)
+        self.session.commit()
+        return entry
+
+    # journal_durable: one attempt plus three retries after these backoffs.
+    _JOURNAL_RETRY_DELAYS = (0.05, 0.1, 0.2)
+
+    def journal_durable(
+        self, job_id: str, event: str, detail: Mapping[str, object] | None = None
+    ) -> None:
+        """Append a journal event on a FRESH session over the same bind.
+
+        For safety evidence written on an error path: ``self.session`` may already
+        be poisoned (PendingRollbackError) by the failure being recorded, so it is
+        never touched. Retries ``OperationalError`` (e.g. SQLite "database is
+        locked") with 50/100/200 ms backoff, then re-raises the last error.
+        """
+        payload = json.dumps(dict(detail or {}), sort_keys=True, default=str)
+        for delay in (*self._JOURNAL_RETRY_DELAYS, None):
+            try:
+                with self._lease_session() as session:
+                    session.add(
+                        JobJournalEntry(
+                            job_id=job_id, at=naive_utcnow(), event=event, detail_json=payload
+                        )
+                    )
+                    session.commit()
+                return
+            except OperationalError:
+                if delay is None:
+                    raise
+                time.sleep(delay)
+
+    def job_journal(self, job_id: str) -> list[JobJournalEntry]:
+        """Every journal entry for ``job_id``, oldest first (ties broken by id)."""
+        stmt = (
+            select(JobJournalEntry)
+            .where(JobJournalEntry.job_id == job_id)
+            .order_by(JobJournalEntry.at, JobJournalEntry.id)
+        )
+        return list(self.session.scalars(stmt))
+
+    def create_staged_instance(
+        self,
+        job_id: str,
+        file_record_id: str,
+        barcode: str,
+        tape_path: str,
+        *,
+        state: FileInstanceState = FileInstanceState.STAGING,
+    ) -> FileInstance:
+        """Create an uncommitted shard instance and its ``shard_staged`` journal row.
+
+        Both rows land in one transaction; the journal row is the job linkage
+        that ``list_staged_instances`` reads.
+        """
+        if state.value not in _STAGED_INSTANCE_STATES:
+            raise ValueError(f"staged instance state must be staging/verifying, not {state.value}")
+        record = self.session.get(FileRecord, file_record_id)
+        if record is None:
+            raise FileNotFoundError(f"File record {file_record_id} not found")
+        instance = FileInstance(
+            file_record_id=file_record_id,
+            barcode=barcode,
+            tape_path=str(PurePosixPath(tape_path)),
+            state=state.value,
+        )
+        self.session.add(instance)
+        self.session.flush()
+        self.session.add(
+            JobJournalEntry(
+                job_id=job_id,
+                at=naive_utcnow(),
+                event=_SHARD_STAGED_EVENT,
+                detail_json=json.dumps(
+                    {
+                        "instance_id": instance.id,
+                        "barcode": barcode,
+                        "tape_path": instance.tape_path,
+                        "shard_index": record.shard_index,
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
+        self.session.commit()
+        self.session.refresh(instance)
+        return instance
+
+    def list_staged_instances(self, job_id: str) -> list[StagedInstance]:
+        """Instances staged by ``job_id`` that are still STAGING or VERIFYING."""
+        instance_ids = [
+            str(entry.detail.get("instance_id"))
+            for entry in self.job_journal(job_id)
+            if entry.event == _SHARD_STAGED_EVENT
+        ]
+        if not instance_ids:
+            return []
+        stmt = (
+            select(FileInstance, FileRecord.shard_index)
+            .join(FileRecord, FileInstance.file_record_id == FileRecord.id)
+            .where(
+                FileInstance.id.in_(instance_ids),
+                FileInstance.state.in_(_STAGED_INSTANCE_STATES),
+            )
+        )
+        staged = [
+            StagedInstance(
+                instance_id=instance.id,
+                file_record_id=instance.file_record_id,
+                barcode=instance.barcode,
+                tape_path=instance.tape_path,
+                shard_index=shard_index,
+                state=instance.state,
+            )
+            for instance, shard_index in self.session.execute(stmt)
+        ]
+        staged.sort(key=lambda s: (s.shard_index is None, s.shard_index or 0, s.barcode))
+        return staged
+
+    def _load_instances_in(
+        self, instance_ids: Sequence[str], allowed_states: frozenset[str]
+    ) -> list[FileInstance]:
+        instances: list[FileInstance] = []
+        for instance_id in dict.fromkeys(instance_ids):
+            instance = self.session.get(FileInstance, instance_id)
+            if instance is None:
+                raise FileNotFoundError(f"File instance {instance_id} not found")
+            if instance.state not in allowed_states:
+                raise ValueError(
+                    f"File instance {instance_id} is {instance.state}, "
+                    f"expected one of {sorted(allowed_states)}"
+                )
+            instances.append(instance)
+        return instances
+
+    def mark_instances_verifying(self, instance_ids: Sequence[str]) -> None:
+        """Move STAGING (or already VERIFYING) instances to VERIFYING in one commit."""
+        instances = self._load_instances_in(instance_ids, _STAGED_INSTANCE_STATES)
+        for instance in instances:
+            instance.state = FileInstanceState.VERIFYING.value
+        self.session.commit()
+
+    def mark_instances_archived(
+        self, instance_ids: Sequence[str], *, checksum_verified: bool = True
+    ) -> None:
+        """The job's single commit: every VERIFYING instance becomes ARCHIVED together.
+
+        Raises (changing nothing) if any id is missing or not VERIFYING.
+        """
+        verifying = frozenset({FileInstanceState.VERIFYING.value})
+        instances = self._load_instances_in(instance_ids, verifying)
+        now = naive_utcnow()
+        for instance in instances:
+            instance.state = FileInstanceState.ARCHIVED.value
+            instance.archived_at = now
+            instance.checksum_verified = checksum_verified
         self.session.commit()
 
     def create_job(self, job_type: str, metadata: dict[str, object]) -> Job:
@@ -673,7 +880,7 @@ class CatalogRepository:
             raise FileNotFoundError(f"Job {job_id} not found")
         job.state = state
         job.error = error
-        job.updated_at = datetime.utcnow()
+        job.updated_at = naive_utcnow()
         self.session.commit()
 
     def get_job(self, job_id: str) -> Job | None:
@@ -754,6 +961,8 @@ class CatalogRepository:
             return
         if any(
             instance.state in {FileInstanceState.ARCHIVED.value, FileInstanceState.VERIFIED.value}
+            # Staged shards must stay discoverable for resume / reconcile.
+            or instance.state in _STAGED_INSTANCE_STATES
             for instance in record.instances
         ):
             return
@@ -778,7 +987,7 @@ class CatalogRepository:
         policy.name = parsed.name
         policy.policy_type = parsed.policy_type
         policy.config_json = json.dumps(payload)
-        policy.updated_at = datetime.utcnow()
+        policy.updated_at = naive_utcnow()
         self.session.commit()
         self.session.refresh(policy)
         return policy
@@ -905,6 +1114,12 @@ class CatalogRepository:
         row.cache_target_id = parsed.cache_target_id
         row.restore_target_path = parsed.restore_target_path
         row.access_mode = parsed.access_mode
+        row.replication_factor = parsed.replication_factor
+        row.protection_json = (
+            json.dumps(parsed.protection.to_dict(), sort_keys=True)
+            if parsed.protection is not None
+            else None
+        )
         row.created_at = row.created_at or parsed.created_at or _utcnow_iso()
         row.updated_at = parsed.updated_at or _utcnow_iso()
         self.session.commit()
@@ -1124,6 +1339,206 @@ class CatalogRepository:
         self.session.delete(row)
         self.session.commit()
         return True
+
+    # --- NAS domain persistence ---
+
+    _SCRATCH_THRESHOLDS_KEY = "scratch_thresholds"
+
+    def _delete_nas_row(self, model: type[Base], key: str) -> bool:
+        row = self.session.get(model, key)
+        if row is None:
+            return False
+        self.session.delete(row)
+        self.session.commit()
+        return True
+
+    @staticmethod
+    def _nas_reservation_to_dict(row: NasReservation) -> dict[str, object]:
+        return {
+            "id": row.id,
+            "pool_id": row.pool_id,
+            "bytes": row.bytes,
+            "owner": row.owner,
+            "expires_at": datetime.fromisoformat(row.expires_at),
+        }
+
+    def list_nas_reservations(self, pool_id: str | None = None) -> list[dict[str, object]]:
+        stmt = select(NasReservation).order_by(NasReservation.expires_at)
+        if pool_id is not None:
+            stmt = stmt.where(NasReservation.pool_id == pool_id)
+        rows = self.session.execute(stmt).scalars().all()
+        return [self._nas_reservation_to_dict(row) for row in rows]
+
+    def reservations_for_pool(self, pool_id: str, *, now: datetime) -> list[dict[str, object]]:
+        """Unexpired reservations for ``pool_id`` (a reservation expiring at ``now`` is expired)."""
+        return [
+            item
+            for item in self.list_nas_reservations(pool_id)
+            if cast(datetime, item["expires_at"]) > now
+        ]
+
+    def upsert_nas_reservation(self, data: dict[str, object]) -> dict[str, object]:
+        expires_at = data["expires_at"]
+        if not isinstance(expires_at, datetime):
+            expires_at = datetime.fromisoformat(str(expires_at))
+        reservation_id = str(data.get("id") or uuid.uuid4())
+        row = self.session.get(NasReservation, reservation_id)
+        if row is None:
+            row = NasReservation(id=reservation_id)
+            self.session.add(row)
+        row.pool_id = str(data["pool_id"])
+        row.bytes = int(cast(int, data["bytes"]))
+        row.owner = str(data["owner"])
+        row.expires_at = expires_at.isoformat()
+        self.session.commit()
+        return self._nas_reservation_to_dict(row)
+
+    def reserve_nas_capacity(
+        self,
+        pool_id: str,
+        nbytes: int,
+        owner: str,
+        expires_at: datetime,
+        *,
+        capacity_bytes: int,
+        now: datetime,
+    ) -> bool:
+        """Atomically insert a reservation only if it fits under ``capacity_bytes``.
+
+        Check-and-insert run inside one ``BEGIN IMMEDIATE`` on a dedicated
+        connection, so two processes racing for the last bytes cannot both pass
+        the check (reviewer S6). Returns whether the reservation was inserted.
+        """
+        with self._lock, self._lease_session() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            rows = session.scalars(select(NasReservation).where(NasReservation.pool_id == pool_id))
+            reserved = sum(
+                int(row.bytes)
+                for row in rows
+                if cast(datetime, self._nas_reservation_to_dict(row)["expires_at"]) > now
+            )
+            if nbytes > capacity_bytes - reserved:
+                session.rollback()
+                return False
+            session.add(
+                NasReservation(
+                    id=str(uuid.uuid4()),
+                    pool_id=pool_id,
+                    bytes=nbytes,
+                    owner=owner,
+                    expires_at=expires_at.isoformat(),
+                )
+            )
+            session.commit()
+            return True
+
+    def delete_nas_reservation(self, reservation_id: str) -> bool:
+        return self._delete_nas_row(NasReservation, reservation_id)
+
+    def delete_nas_reservations_for_owner(self, owner: str) -> int:
+        """Delete every reservation booked by ``owner`` (a plan id); return how many."""
+        rows = list(
+            self.session.execute(
+                select(NasReservation).where(NasReservation.owner == owner)
+            ).scalars()
+        )
+        for row in rows:
+            self.session.delete(row)
+        if rows:
+            self.session.commit()
+        return len(rows)
+
+    def list_nas_export_sets(self) -> list[dict[str, object]]:
+        rows = self.session.execute(select(NasExportSet).order_by(NasExportSet.id)).scalars()
+        return [
+            {"id": r.id, "barcodes": _load_json_value(r.barcodes_json, []), "state": r.state}
+            for r in rows
+        ]
+
+    def upsert_nas_export_set(self, data: dict[str, object]) -> dict[str, object]:
+        row = self.session.get(NasExportSet, str(data["id"])) or NasExportSet(id=str(data["id"]))
+        self.session.add(row)
+        row.barcodes_json = json.dumps(list(cast(list[str], data.get("barcodes", []))))
+        row.state = str(data["state"])
+        self.session.commit()
+        return {"id": row.id, "barcodes": json.loads(row.barcodes_json), "state": row.state}
+
+    def delete_nas_export_set(self, export_set_id: str) -> bool:
+        return self._delete_nas_row(NasExportSet, export_set_id)
+
+    def list_nas_vaults(self) -> list[dict[str, object]]:
+        rows = self.session.execute(select(NasVault).order_by(NasVault.id)).scalars()
+        return [
+            {"id": r.id, "barcodes": _load_json_value(r.barcodes_json, []), "location": r.location}
+            for r in rows
+        ]
+
+    def upsert_nas_vault(self, data: dict[str, object]) -> dict[str, object]:
+        row = self.session.get(NasVault, str(data["id"])) or NasVault(id=str(data["id"]))
+        self.session.add(row)
+        row.barcodes_json = json.dumps(list(cast(list[str], data.get("barcodes", []))))
+        row.location = str(data["location"])
+        self.session.commit()
+        return {"id": row.id, "barcodes": json.loads(row.barcodes_json), "location": row.location}
+
+    def delete_nas_vault(self, vault_id: str) -> bool:
+        return self._delete_nas_row(NasVault, vault_id)
+
+    @staticmethod
+    def _nas_vg_replication_to_dict(row: NasVgReplication) -> dict[str, object]:
+        return {
+            "vg_id": row.vg_id,
+            "barcodes": _load_json_value(row.barcodes_json, []),
+            "replicas_required": row.replicas_required,
+            "replicas_present": row.replicas_present,
+        }
+
+    def list_nas_vg_replication(self) -> list[dict[str, object]]:
+        rows = self.session.execute(select(NasVgReplication).order_by(NasVgReplication.vg_id))
+        return [self._nas_vg_replication_to_dict(row) for row in rows.scalars()]
+
+    def upsert_nas_vg_replication(self, data: dict[str, object]) -> dict[str, object]:
+        vg_id = str(data["vg_id"])
+        row = self.session.get(NasVgReplication, vg_id) or NasVgReplication(vg_id=vg_id)
+        self.session.add(row)
+        row.barcodes_json = json.dumps(list(cast(list[str], data.get("barcodes", []))))
+        row.replicas_required = int(cast(int, data.get("replicas_required", 1)))
+        row.replicas_present = int(cast(int, data.get("replicas_present", 0)))
+        self.session.commit()
+        return self._nas_vg_replication_to_dict(row)
+
+    def delete_nas_vg_replication(self, vg_id: str) -> bool:
+        return self._delete_nas_row(NasVgReplication, vg_id)
+
+    def list_nas_file_spans(self, path: str | None = None) -> list[dict[str, object]]:
+        stmt = select(NasFileSpan).order_by(NasFileSpan.path, NasFileSpan.id)
+        if path is not None:
+            stmt = stmt.where(NasFileSpan.path == path)
+        return [
+            {"id": r.id, "path": r.path, "segments": _load_json_value(r.segments_json, [])}
+            for r in self.session.execute(stmt).scalars()
+        ]
+
+    def upsert_nas_file_span(self, data: dict[str, object]) -> dict[str, object]:
+        span_id = str(data.get("id") or uuid.uuid4())
+        row = self.session.get(NasFileSpan, span_id) or NasFileSpan(id=span_id)
+        self.session.add(row)
+        row.path = str(data["path"])
+        row.segments_json = json.dumps(list(cast(list[object], data.get("segments", []))))
+        self.session.commit()
+        return {"id": row.id, "path": row.path, "segments": json.loads(row.segments_json)}
+
+    def delete_nas_file_span(self, span_id: str) -> bool:
+        return self._delete_nas_row(NasFileSpan, span_id)
+
+    def get_scratch_thresholds(self) -> dict[str, object] | None:
+        return self.get_nas_config(self._SCRATCH_THRESHOLDS_KEY)
+
+    def set_scratch_thresholds(self, scratch_min: int, scratch_warn: int) -> dict[str, object]:
+        return self.set_nas_config(
+            self._SCRATCH_THRESHOLDS_KEY,
+            {"scratch_min": scratch_min, "scratch_warn": scratch_warn},
+        )
 
     def create_rebuild_run(self, run: dict[str, object]) -> dict[str, object]:
         parsed = CatalogRebuildRunRecord.model_validate(run)
@@ -1771,3 +2186,213 @@ class CatalogRepository:
         if row is not None:
             self.session.delete(row)
             self.session.commit()
+
+    # ── Drive leases (docs/decisions/2026-10-09-persistent-drive-leases.md) ──
+    #
+    # Lease operations run on their OWN short-lived Session over the catalog's
+    # engine, never on the shared `self.session`: a lease poll from a worker
+    # thread must not be able to commit or roll back another thread's pending
+    # rows (review finding, 2026-10-09). On a file-backed catalog this is a
+    # separate connection, so `BEGIN IMMEDIATE` is a real cross-process lock.
+
+    @contextmanager
+    def _lease_session(self) -> Iterator[Session]:
+        with Session(bind=self.session.get_bind(), expire_on_commit=False) as session:
+            yield session
+
+    def acquire_drive_leases(
+        self,
+        *,
+        job_id: str,
+        barcodes: list[str],
+        num_drives: int,
+        ttl: timedelta,
+        exclude: frozenset[int] = frozenset(),
+    ) -> list[DriveLease] | None:
+        """All-or-nothing: one live lease per barcode, or None if not enough free drives."""
+        with self._lock, self._lease_session() as session:
+            # Verified against installed SQLAlchemy 2.1.4 / pysqlite: an explicit
+            # BEGIN IMMEDIATE on the session's connection is honoured and
+            # session.commit() commits it, so check-then-insert is atomic.
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            now = _lease_now()
+            busy = set(
+                session.scalars(
+                    select(DriveLeaseRecord.drive_id).where(
+                        DriveLeaseRecord.released_at.is_(None),
+                        DriveLeaseRecord.expires_at > now,
+                    )
+                )
+            )
+            free = [d for d in range(num_drives) if d not in busy and d not in exclude]
+            if len(free) < len(barcodes):
+                session.rollback()
+                return None
+            token = int(
+                session.scalar(select(func.coalesce(func.max(DriveLeaseRecord.fencing_token), 0)))
+                or 0
+            )
+            rows: list[DriveLeaseRecord] = []
+            for drive_id, barcode in zip(free, barcodes, strict=False):
+                token += 1
+                row = DriveLeaseRecord(
+                    id=str(uuid4()),
+                    drive_id=drive_id,
+                    job_id=job_id,
+                    barcode=barcode,
+                    fencing_token=token,
+                    acquired_at=now,
+                    heartbeat_at=now,
+                    expires_at=now + ttl,
+                )
+                session.add(row)
+                rows.append(row)
+            session.commit()
+            return [_lease_from_row(row) for row in rows]
+
+    def acquire_drive_lease_at(
+        self, *, job_id: str, drive_id: int, barcode: str, ttl: timedelta
+    ) -> DriveLease | None:
+        """Lease one specific drive id (negative ids allowed), or None if it is held."""
+        with self._lock, self._lease_session() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            now = _lease_now()
+            held = session.scalar(
+                select(func.count())
+                .select_from(DriveLeaseRecord)
+                .where(
+                    DriveLeaseRecord.drive_id == drive_id,
+                    DriveLeaseRecord.released_at.is_(None),
+                    DriveLeaseRecord.expires_at > now,
+                )
+            )
+            if held:
+                session.rollback()
+                return None
+            token = int(
+                session.scalar(select(func.coalesce(func.max(DriveLeaseRecord.fencing_token), 0)))
+                or 0
+            )
+            row = DriveLeaseRecord(
+                id=str(uuid4()),
+                drive_id=drive_id,
+                job_id=job_id,
+                barcode=barcode,
+                fencing_token=token + 1,
+                acquired_at=now,
+                heartbeat_at=now,
+                expires_at=now + ttl,
+            )
+            session.add(row)
+            session.commit()
+            return _lease_from_row(row)
+
+    def heartbeat_leases(self, lease_ids: list[str], ttl: timedelta) -> None:
+        with self._lock, self._lease_session() as session:
+            now = _lease_now()
+            for row in session.scalars(
+                select(DriveLeaseRecord).where(
+                    DriveLeaseRecord.id.in_(lease_ids),
+                    DriveLeaseRecord.released_at.is_(None),
+                    DriveLeaseRecord.expires_at > now,
+                )
+            ):
+                row.heartbeat_at = now
+                row.expires_at = now + ttl
+            session.commit()
+
+    def set_lease_physical_drive(self, lease_id: str, physical_drive_id: int) -> None:
+        """Record where the cartridge actually is, so recovery reconciles the right drive."""
+        with self._lock, self._lease_session() as session:
+            row = session.get(DriveLeaseRecord, lease_id)
+            if row is not None:
+                row.physical_drive_id = physical_drive_id
+                session.commit()
+
+    def release_leases(self, lease_ids: list[str]) -> None:
+        with self._lock, self._lease_session() as session:
+            now = _lease_now()
+            for row in session.scalars(
+                select(DriveLeaseRecord).where(
+                    DriveLeaseRecord.id.in_(lease_ids), DriveLeaseRecord.released_at.is_(None)
+                )
+            ):
+                row.released_at = now
+            session.commit()
+
+    def lease_is_live(self, lease_id: str, fencing_token: int) -> bool:
+        with self._lock, self._lease_session() as session:
+            row = session.get(DriveLeaseRecord, lease_id)
+            return (
+                row is not None
+                and row.fencing_token == fencing_token
+                and row.released_at is None
+                and row.expires_at > _lease_now()
+            )
+
+    def live_leases(self) -> list[DriveLease]:
+        with self._lock, self._lease_session() as session:
+            now = _lease_now()
+            rows = session.scalars(
+                select(DriveLeaseRecord)
+                .where(DriveLeaseRecord.released_at.is_(None), DriveLeaseRecord.expires_at > now)
+                .order_by(DriveLeaseRecord.fencing_token)
+            )
+            return [_lease_from_row(row) for row in rows]
+
+    def expired_leases(self) -> list[DriveLease]:
+        """Unreleased leases whose owner stopped heartbeating: the only cross-process
+        evidence that a job is dead rather than running elsewhere."""
+        with self._lock, self._lease_session() as session:
+            now = _lease_now()
+            rows = session.scalars(
+                select(DriveLeaseRecord)
+                .where(DriveLeaseRecord.released_at.is_(None), DriveLeaseRecord.expires_at <= now)
+                .order_by(DriveLeaseRecord.fencing_token)
+            )
+            return [_lease_from_row(row) for row in rows]
+
+    def release_leases_for_job(self, job_id: str) -> int:
+        with self._lock, self._lease_session() as session:
+            now = _lease_now()
+            rows = list(
+                session.scalars(
+                    select(DriveLeaseRecord).where(
+                        DriveLeaseRecord.job_id == job_id, DriveLeaseRecord.released_at.is_(None)
+                    )
+                )
+            )
+            for row in rows:
+                row.released_at = now
+            session.commit()
+            return len(rows)
+
+    # -- Drive reconciliation (cross-job journal query) ------------------------
+
+    def journal_events(self, event: str, *, since: datetime | None = None) -> list[JobJournalEntry]:
+        """Every ``event`` journal entry across all jobs, oldest first (ties by id)."""
+        stmt = select(JobJournalEntry).where(JobJournalEntry.event == event)
+        if since is not None:
+            stmt = stmt.where(JobJournalEntry.at >= since)
+        stmt = stmt.order_by(JobJournalEntry.at, JobJournalEntry.id)
+        return list(self.session.scalars(stmt))
+
+
+def _lease_now() -> datetime:
+    """Naive UTC, matching how the catalog's DateTime columns store values."""
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _lease_from_row(row: DriveLeaseRecord) -> DriveLease:
+    return DriveLease(
+        id=row.id,
+        drive_id=row.drive_id,
+        job_id=row.job_id,
+        barcode=row.barcode,
+        physical_drive_id=row.physical_drive_id,
+        fencing_token=row.fencing_token,
+        acquired_at=row.acquired_at,
+        heartbeat_at=row.heartbeat_at,
+        expires_at=row.expires_at,
+        released_at=row.released_at,
+    )

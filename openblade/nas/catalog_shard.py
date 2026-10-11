@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from openblade.domain.clock import naive_utcnow
 from openblade.nas.ltfs_manifest import TapeMetadataWriter
 from openblade.nas.types import NasFileState, PathMappingRecord
 
@@ -38,6 +39,8 @@ class CatalogShardDatasetEntry(BaseModel):
     total_bytes: int = 0
     tape_set: list[str] = Field(default_factory=list)
     shard_set: list[str] = Field(default_factory=list)
+    # Serialized openblade.domain.protection.ProtectionPolicy; None on pre-v2 shards.
+    protection: dict[str, Any] | None = None
 
 
 class CatalogShard(BaseModel):
@@ -91,7 +94,7 @@ class CatalogShardWriter:
             barcode=barcode,
             openblade_tape_id=tape_id,
             volume_group=volume_group,
-            generated_at=datetime.utcnow().isoformat() + "Z",
+            generated_at=naive_utcnow().isoformat() + "Z",
             files=files,
             datasets=datasets,
         )

@@ -2,6 +2,17 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from openblade.domain.protection import (
+    Placement,
+    Protection,
+    ProtectionPolicy,
+    Striping,
+    StripingMode,
+)
+from openblade.nas.archive_lifecycle import finalize_tape_generation
+from openblade.nas.catalog_shard import CatalogShard, CatalogShardDatasetEntry, CatalogShardWriter
 from openblade.nas.ltfs_manifest import (
     ChecksumEntry,
     ManifestFileEntry,
@@ -10,6 +21,8 @@ from openblade.nas.ltfs_manifest import (
     TapeJson,
     TapeMetadataWriter,
     TapeSetManifest,
+    UnsupportedManifestSchemaError,
+    parse_manifest,
 )
 from openblade.simulator.library import MockLibraryBackend
 from openblade.simulator.ltfs_volume import MockLTFSBackend
@@ -281,3 +294,122 @@ def test_metadata_path_rejects_traversal_attempt() -> None:
 
     with pytest.raises(ValueError):
         writer._metadata_path("../etc/passwd")
+
+
+class RecordingMetadataBackend(FakeMetadataBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.write_order: list[str] = []
+
+    def write_bytes(self, path: str, content: bytes) -> None:
+        self.write_order.append(path.rsplit("/", 1)[-1])
+        super().write_bytes(path, content)
+
+
+def _generation_inputs(barcode: str = "OB0001L8") -> tuple[ManifestJson, CatalogShard, TapeJson]:
+    manifest = ManifestJson(barcode=barcode, openblade_tape_id="tape-1")
+    shard = CatalogShard(
+        barcode=barcode,
+        openblade_tape_id="tape-1",
+        datasets=[
+            CatalogShardDatasetEntry(
+                dataset_id="ds-1", shard_set=[barcode, "OB0002L8"], tape_set=["OB0003L8"]
+            )
+        ],
+    )
+    tape = TapeJson(
+        openblade_tape_id="tape-1",
+        barcode=barcode,
+        created_at="2026-01-01T00:00:00Z",
+        last_openblade_write_at="2026-01-01T00:00:00Z",
+        current_generation="gen-1",
+    )
+    return manifest, shard, tape
+
+
+def test_finalize_tape_generation_writes_commit_marker_last() -> None:
+    backend = RecordingMetadataBackend()
+    writer = TapeMetadataWriter(backend)
+    manifest, shard, tape = _generation_inputs()
+
+    finalize_tape_generation(
+        writer,
+        CatalogShardWriter(writer),
+        "OB0001L8",
+        generation_id="gen-2",
+        manifest=manifest,
+        shard=shard,
+        tape_json=tape,
+    )
+
+    order = [name for name in backend.write_order if not name.startswith(".")]
+    assert order == [
+        "manifest.json",
+        "manifest.sha256",
+        "catalog-shard.json",
+        "catalog-shard.sha256",
+        "tape.json",
+        "commit-gen-2.json",
+    ]
+
+
+def test_finalize_tape_generation_chains_generations_and_records_siblings() -> None:
+    _, writer = _writer()
+    manifest, shard, tape = _generation_inputs()
+
+    marker = finalize_tape_generation(
+        writer,
+        CatalogShardWriter(writer),
+        "OB0001L8",
+        generation_id="gen-2",
+        manifest=manifest,
+        shard=shard,
+        tape_json=tape,
+    )
+
+    stored_tape = writer.read_tape_json("OB0001L8")
+    stored_manifest = writer.read_manifest("OB0001L8")
+    assert stored_tape is not None and stored_manifest is not None
+    assert (stored_tape.current_generation, stored_tape.previous_generation) == ("gen-2", "gen-1")
+    assert stored_manifest.sibling_tapes == ["OB0002L8", "OB0003L8"]
+    assert writer.read_commit_marker("OB0001L8", "gen-2") == marker
+    assert marker.manifest_sha256 == writer.compute_json_checksum(
+        stored_manifest.model_dump(by_alias=True)
+    )
+
+
+def test_v1_manifest_parses_with_v2_defaults() -> None:
+    manifest = parse_manifest(
+        {"schema": "openblade.manifest.v1", "barcode": "OB0001L8", "openblade_tape_id": "t"}
+    )
+    assert manifest.sibling_tapes == []
+    assert manifest.protection is None
+    assert manifest.generation_id == ""
+
+
+def test_newer_manifest_schema_is_rejected_with_typed_error() -> None:
+    with pytest.raises(UnsupportedManifestSchemaError):
+        parse_manifest(
+            {"schema": "openblade.manifest.v3", "barcode": "OB0001L8", "openblade_tape_id": "t"}
+        )
+
+
+def test_manifest_round_trip_preserves_protection_policy() -> None:
+    policy = ProtectionPolicy(
+        placement=Placement.STRIPED,
+        striping=Striping(StripingMode.STRIPE),
+        protection=Protection.replication(2),
+    )
+    _, writer = _writer()
+    manifest = ManifestJson(
+        barcode="OB0001L8",
+        openblade_tape_id="t",
+        placement=policy.placement.value,
+        protection=policy.to_dict(),
+    )
+
+    writer.write_manifest("OB0001L8", manifest)
+    stored = writer.read_manifest("OB0001L8")
+
+    assert stored is not None and stored.protection is not None
+    assert ProtectionPolicy.from_dict(stored.protection) == policy

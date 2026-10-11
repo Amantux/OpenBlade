@@ -14,11 +14,13 @@ The suite also reports the captured/inferred split so the fidelity gap is loud.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from openblade.api import routes_aml_auth
 from openblade.api.main import app
 from openblade.bootstrap import create_context, reset_context
 from openblade.config import OpenBladeConfig
@@ -32,13 +34,23 @@ def _load_cases() -> list[dict]:
 
 CASES = _load_cases()
 CAPTURED = [c for c in CASES if c.get("source") == "captured"]
-INFERRED = [c for c in CASES if c.get("source") == "inferred"]
+# self-captured = recorded from the OpenBlade emulator by tools/compat_capture.py;
+# treated exactly like inferred (regression guard, never fidelity evidence).
+INFERRED = [c for c in CASES if c.get("source") in {"inferred", "self-captured"}]
+SELF_CAPTURED = [c for c in CASES if c.get("source") == "self-captured"]
+# compat_capture redacts request passwords; replay them with the emulator's default.
+_REDACTED = "<redacted>"
+_EMULATOR_PASSWORD = "password"
+_PLACEHOLDERS = {_REDACTED: _EMULATOR_PASSWORD, "<redacted-invalid>": "wrong-password"}
 
 
 @pytest.fixture()
-def client(tmp_path: Path) -> TestClient:
+def client(tmp_path: Path) -> Iterator[TestClient]:
     reset_context(create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 'compat.db'}")))
-    return TestClient(app)
+    # The login limiter is module-global; isolate cases that use request.repeat.
+    routes_aml_auth._login_attempts.clear()
+    yield TestClient(app)
+    routes_aml_auth._login_attempts.clear()
 
 
 def _authenticate(client: TestClient) -> None:
@@ -49,13 +61,60 @@ def _authenticate(client: TestClient) -> None:
     assert resp.status_code == 200, f"corpus auth setup failed: {resp.status_code}"
 
 
+def _enable_mfa(client: TestClient, user: str, mfa_type: str) -> None:
+    # Same documented route pair as tests/i3/test_aml_mfa_pending.py: fetch the
+    # user's key, then PUT /aml/users/mfa with a valid code to enable it.
+    import pyotp
+
+    login = client.post("/aml/users/login", json={"name": user, "password": _EMULATOR_PASSWORD})
+    assert login.status_code == 200, f"corpus mfa setup login failed: {login.status_code}"
+    bearer = {"Authorization": f"Bearer {login.json()['token']}"}
+    key = client.get(f"/aml/users/login/mfa/{mfa_type}/key", headers=bearer)
+    assert key.status_code == 200, f"corpus mfa setup key failed: {key.status_code}"
+    code = pyotp.TOTP(key.json()["key"]).now()
+    enabled = client.put(
+        "/aml/users/mfa",
+        json={"type": mfa_type, "enabled": True, "authenticationCode": code},
+        headers=bearer,
+    )
+    assert enabled.status_code == 200, f"corpus mfa setup enable failed: {enabled.status_code}"
+    client.cookies.clear()
+
+
 def _run(client: TestClient, case: dict):
+    # Optional "setup": {"mfa": {"user": ..., "type": "totp"}} enables MFA first.
+    mfa = (case.get("setup") or {}).get("mfa")
+    if mfa:
+        _enable_mfa(client, mfa["user"], mfa["type"])
     if case.get("auth") == "admin":
         _authenticate(client)
     req = case["request"]
-    return client.request(
-        req["method"], req["path"], json=req.get("json"), headers=req.get("headers")
-    )
+    headers = dict(req.get("headers") or {})
+    if "content_type" in req:
+        headers["Content-Type"] = req["content_type"]
+    kwargs: dict[str, object] = {"headers": headers or None}
+    if "body" in req:
+        kwargs["content"] = req["body"]
+    else:
+        payload = req.get("json")
+        if isinstance(payload, dict):
+            payload = {
+                k: _PLACEHOLDERS.get(v, v) if isinstance(v, str) else v for k, v in payload.items()
+            }
+        kwargs["json"] = payload
+    # request.repeat: send the request this many extra times first (e.g. to trip a limiter).
+    for _ in range(int(req.get("repeat", 0))):
+        client.request(req["method"], req["path"], **kwargs)
+    return client.request(req["method"], req["path"], **kwargs)
+
+
+def _header_problems(case: dict, resp) -> list[str]:
+    problems = []
+    for name, needle in case["expected"].get("headers", {}).items():
+        value = resp.headers.get(name)
+        if value is None or needle not in value:
+            problems.append(f"header {name}={value!r} lacks {needle!r}")
+    return problems
 
 
 def _subset_matches(expected: dict, actual: dict) -> list[str]:
@@ -71,7 +130,7 @@ def _subset_matches(expected: dict, actual: dict) -> list[str]:
 def test_corpus_is_non_empty_and_wellformed() -> None:
     assert CASES, "no compatibility cases found"
     for case in CASES:
-        assert case.get("source") in {"captured", "inferred"}, case.get("id")
+        assert case.get("source") in {"captured", "inferred", "self-captured"}, case.get("id")
         assert case.get("profile") and "request" in case and "expected" in case
 
 
@@ -82,6 +141,7 @@ def test_inferred_case_behaviour_is_stable(case: dict, client: TestClient) -> No
     assert resp.status_code == case["expected"]["status"], (
         f"{case['id']}: status {resp.status_code} != {case['expected']['status']}"
     )
+    assert not _header_problems(case, resp), f"{case['id']}: {_header_problems(case, resp)}"
     if "json_contains" in case["expected"]:
         problems = _subset_matches(case["expected"]["json_contains"], resp.json())
         assert not problems, f"{case['id']}: {problems}"
@@ -110,7 +170,10 @@ def test_captured_case_matches_appliance(case, client: TestClient) -> None:
 def test_fidelity_coverage_is_reported(capsys) -> None:
     # Make the gap visible in test output rather than silently green.
     with capsys.disabled():
-        print(f"\n[compatibility corpus] captured={len(CAPTURED)} inferred={len(INFERRED)}")
+        print(
+            f"\n[compatibility corpus] captured={len(CAPTURED)} "
+            f"inferred={len(INFERRED) - len(SELF_CAPTURED)} self-captured={len(SELF_CAPTURED)}"
+        )
         if not CAPTURED:
             print(
                 "[compatibility corpus] WARNING: i3 wire fidelity is UNVERIFIED (no appliance captures)."

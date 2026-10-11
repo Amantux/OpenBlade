@@ -17,9 +17,10 @@ from openblade.bootstrap import AppContext, get_context
 from openblade.catalog.db import get_session
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.errors import OpenBladeError, safe_job_error
+from openblade.jobs.inventory import InventoryService
 from openblade.jobs.restore import RestoreRequest as RestoreJobRequest
 from openblade.jobs.restore import run_restore_job
-from openblade.jobs.scheduler import DriveScheduler
+from openblade.jobs.scheduler import CatalogLeaseStore, DriveScheduler
 from openblade.jobs.sharded_restore import ShardedRestoreRequest, run_sharded_restore
 from openblade.jobs.tree_restore import TreeRestoreRequest, TreeRestoreResult, run_tree_restore
 
@@ -156,7 +157,11 @@ async def enqueue_restore(
         )
     try:
         if use_sharded_restore:
-            scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+            scheduler = DriveScheduler(
+                num_drives=len(context.library.inventory().drives),
+                store=context.lease_store,
+                job_id=job.id,
+            )
             run_sharded_restore(
                 ShardedRestoreRequest(catalog_path=catalog_path, dest_path=Path(request.dest_path)),
                 context.library,
@@ -172,16 +177,21 @@ async def enqueue_restore(
                 context.ltfs,
                 context.catalog,
                 job.id,
+                scheduler=DriveScheduler(
+                    num_drives=len(InventoryService(context.library).snapshot().drives),
+                    store=context.lease_store,
+                    job_id=job.id,
+                ),
             )
     except Exception as exc:
-        context.catalog.update_job_state(job.id, "failed", str(exc))
+        context.catalog.update_job_state(job.id, "failed", safe_job_error(exc))
         _bridge_to_aml(
             context,
             job_id=job.id,
             status="failed",
             catalog_path=catalog_path,
             dest_path=request.dest_path,
-            error=str(exc),
+            error=safe_job_error(exc),
         )
         raise
     refreshed = context.catalog.get_job(job.id)
@@ -231,7 +241,7 @@ async def restore_tree(
             "dry_run": request.dry_run,
         },
     )
-    scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+    num_drives = len(context.library.inventory().drives)
     tree_request = TreeRestoreRequest(
         catalog_prefix=request.catalog_prefix,
         dest_dir=Path(request.dest_dir),
@@ -246,12 +256,20 @@ async def restore_tree(
         # target drive 0) and two callers fight over one drive.
         db_session = get_session()
         try:
+            worker_catalog = CatalogRepository(db_session)
+            # Lease store over the worker's own session: the context's store
+            # wraps the process-global Session, which is not thread-safe.
+            scheduler = DriveScheduler(
+                num_drives=num_drives,
+                store=CatalogLeaseStore(worker_catalog),
+                job_id=job.id,
+            )
             with _ARCHIVE_REQUEST_LOCK:
                 return run_tree_restore(
                     tree_request,
                     context.library,
                     context.ltfs,
-                    CatalogRepository(db_session),
+                    worker_catalog,
                     scheduler,
                     job.id,
                 )

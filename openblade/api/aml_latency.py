@@ -9,8 +9,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
+from openblade.api.aml_faults import get_fault_state
 from openblade.api.aml_state import (
     get_aml_emulator_latency_config,
     record_aml_emulator_latency_metric,
@@ -128,18 +129,53 @@ def _resolve_profile_delay_ms(
     return max(0, delay_ms)
 
 
-def resolve_request_latency_delay_seconds(method: str, path: str) -> float:
-    if not _is_latency_managed_path(path):
-        return 0.0
+def _resolve_operation_class(method: str, path: str) -> str:
     operation_class = _lookup_operation_class(method, path)
     if operation_class is None:
         operation_class = _fallback_operation_class(method, path)
+    return operation_class
+
+
+def resolve_request_latency_delay_seconds(method: str, path: str) -> float:
+    if not _is_latency_managed_path(path):
+        return 0.0
+    operation_class = _resolve_operation_class(method, path)
     config = get_aml_emulator_latency_config()
     return _resolve_profile_delay_ms(config, operation_class) / 1000.0
 
 
+def resolve_request_fault(method: str, path: str) -> HTTPException | None:
+    """Return the injected AML error for this request, if a fault profile fires.
+
+    Driven by ``OPENBLADE_EMULATOR_FAULT_PROFILE`` (see ``aml_faults``). The caller
+    renders it through the normal AML error envelope.
+    """
+    if not _is_latency_managed_path(path):
+        return None
+    state = get_fault_state()
+    if not state.profile.active:
+        return None
+    if state.in_reboot_window():
+        return HTTPException(
+            status_code=503,
+            detail="Library is rebooting; retry later",
+            headers={"Retry-After": str(state.reboot_retry_after_s())},
+        )
+    if _resolve_operation_class(method, path) == "mount" and state.should_fail_load():
+        return HTTPException(status_code=409, detail="Drive load failed; retry the operation")
+    return None
+
+
 async def apply_request_latency(request: Request) -> float:
-    delay = resolve_request_latency_delay_seconds(request.method, request.url.path)
+    method, path = request.method, request.url.path
+    delay = resolve_request_latency_delay_seconds(method, path)
+    if (
+        delay > 0
+        and _resolve_operation_class(method, path) == "diagnostic"
+        and get_fault_state().should_retry_checksum()
+    ):
+        # Simulated checksum retry: the verify pass runs a second time.
+        delay *= 2
     if delay > 0:
         await asyncio.sleep(delay)
     return delay

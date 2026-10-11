@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+
+from openblade.domain.clock import naive_utcnow
+from openblade.domain.protection import ProtectionPolicy
+from openblade.nas.media import Cartridge, MediaGeneration
 
 
 class EffectivePolicySource(str, Enum):
@@ -448,6 +451,13 @@ class ArchivePlanRequest(BaseModel):
     shard_size_bytes: int | None = Field(default=None, ge=1)
     shard_strategy: ShardStrategy | None = None
     max_parallelism: int = Field(default=1, ge=1, le=16)
+    # Tape-native planning inputs (all optional; empty = previous behaviour).
+    cartridges: dict[str, Cartridge] = Field(default_factory=dict)
+    drive_generation: MediaGeneration | None = None
+    reserved_bytes: dict[str, int] = Field(default_factory=dict)
+    # Pool-level budget held by other jobs' NasReservation rows (the source of
+    # truth); subtracted from the summed tape capacity, not spread per barcode.
+    pool_reserved_bytes: int = Field(default=0, ge=0)
 
 
 class CacheDriveConfig(BaseModel):
@@ -524,6 +534,8 @@ class NasPool(BaseModel):
     virtual_mount_enabled: bool = True
     hydration_behavior: HydrationBehavior = HydrationBehavior.QUEUE
     replication_factor: int = Field(default=1, ge=1, le=4)
+    # Explicit protection/placement policy; None means derive from replication_factor.
+    protection: ProtectionPolicy | None = None
     backup_order_mode: Literal["sequential", "parallel"] = "sequential"
     cache_target_id: str | None = None
     restore_target_path: str = "/openblade/restore"
@@ -683,6 +695,22 @@ class RebuildPlanRequest(BaseModel):
     dry_run: bool = False
 
 
+class UncommittedGeneration(BaseModel):
+    """A tape whose generation has no valid commit marker; it is never rebuilt."""
+
+    barcode: str
+    generation_id: str
+    reason: str
+
+
+class MissingSibling(BaseModel):
+    """A sibling tape a planned tape's generation needs but the request omitted."""
+
+    barcode: str
+    required_by_barcode: str
+    generation_id: str | None = None
+
+
 class RebuildPlanResult(BaseModel):
     run_id: str
     dry_run: bool
@@ -693,6 +721,8 @@ class RebuildPlanResult(BaseModel):
     estimated_files: int = 0
     estimated_datasets: int = 0
     estimated_path_mappings: int = 0
+    uncommitted_generations: list[UncommittedGeneration] = Field(default_factory=list)
+    missing_siblings: list[MissingSibling] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     safe_to_enqueue: bool
 
@@ -860,8 +890,8 @@ class PathMappingRecord(BaseModel):
     size: int = 0
     checksum: str = ""
     last_seen_at: str = ""
-    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
-    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    created_at: str = Field(default_factory=lambda: naive_utcnow().isoformat() + "Z")
+    updated_at: str = Field(default_factory=lambda: naive_utcnow().isoformat() + "Z")
 
     @field_validator("logical_path", mode="before")
     @classmethod

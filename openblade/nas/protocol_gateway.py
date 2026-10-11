@@ -10,14 +10,22 @@ import contextlib
 import hashlib
 import hmac
 import importlib.util
+import logging
 import os
 import posixpath
 import secrets
 import socket
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from openblade.domain.clock import naive_utcnow
+from openblade.fuse.cache import CacheEntryInUseError, CacheIntegrityError
+from openblade.fuse.hydration import HydrationFailedError, HydrationState, Hydrator
+
+logger = logging.getLogger(__name__)
 
 
 class GatewayStatus(str, Enum):
@@ -90,7 +98,7 @@ class GatewayCredential:
     _hashed_password: str
     allowed_paths: list[str] = field(default_factory=lambda: [InboxPath.GENERAL.value])
     enabled: bool = True
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=naive_utcnow)
     last_seen_at: datetime | None = None
 
     @classmethod
@@ -127,7 +135,7 @@ class GatewayUpload:
     requested_path: str
     routed_path: str
     bytes_uploaded: int
-    uploaded_at: datetime = field(default_factory=datetime.utcnow)
+    uploaded_at: datetime = field(default_factory=naive_utcnow)
 
 
 @dataclass
@@ -143,6 +151,14 @@ class GatewaySession:
     uploads: list[GatewayUpload] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class GatewayHandle:
+    """An open handle: opaque ``token`` for ``on_close`` plus the state at open."""
+
+    token: str
+    state: HydrationState
+
+
 class ProtocolGateway:
     """In-process protocol gateway manager for emulated SFTP/SCP ingest."""
 
@@ -150,6 +166,8 @@ class ProtocolGateway:
         self._credentials: dict[str, GatewayCredential] = {}
         self._sessions: list[GatewaySession] = []
         self._last_error: str | None = None
+        self._handles: dict[str, str] = {}  # open-handle token -> pinned checksum
+        self._handles_lock = threading.Lock()
         self._bind_host = os.environ.get("OPENBLADE_SFTP_HOST", "0.0.0.0")
         self._bind_port = int(os.environ.get("OPENBLADE_SFTP_PORT", "2222"))
         self._max_sessions = int(os.environ.get("OPENBLADE_SFTP_MAX_SESSIONS", "10"))
@@ -211,7 +229,7 @@ class ProtocolGateway:
         if not cred or not cred.enabled:
             return None
         if cred.verify_password(password):
-            cred.last_seen_at = datetime.utcnow()
+            cred.last_seen_at = naive_utcnow()
             return cred
         return None
 
@@ -252,7 +270,7 @@ class ProtocolGateway:
             session_id=secrets.token_hex(16),
             username=username,
             remote_addr=remote_addr,
-            connected_at=datetime.utcnow(),
+            connected_at=naive_utcnow(),
         )
         self._sessions.append(session)
         return session
@@ -284,7 +302,7 @@ class ProtocolGateway:
         session = self._get_session(session_id)
         if session is None:
             return
-        session.disconnected_at = datetime.utcnow()
+        session.disconnected_at = naive_utcnow()
         session.bytes_uploaded = max(session.bytes_uploaded, bytes_uploaded)
         session.files_uploaded = max(session.files_uploaded, files_uploaded)
         session.errors = errors
@@ -334,7 +352,7 @@ class ProtocolGateway:
         """Mark gateway as stopped, closing any active sessions."""
         if self._status is GatewayStatus.DISABLED:
             return
-        now = datetime.utcnow()
+        now = naive_utcnow()
         for session in self._sessions:
             if session.disconnected_at is None:
                 with contextlib.suppress(Exception):
@@ -366,6 +384,78 @@ class ProtocolGateway:
             if session.session_id == session_id:
                 return session
         return None
+
+    # -- hydration entry points (single path for the SMB/NFS rig) ------------
+    def attach_hydrator(self, hydrator: Hydrator | None) -> None:
+        self._hydrator = hydrator
+
+    def _require_hydrator(self) -> Hydrator:
+        hydrator: Hydrator | None = getattr(self, "_hydrator", None)
+        if hydrator is None:
+            raise HydrationFailedError("no hydrator attached to the protocol gateway")
+        return hydrator
+
+    def on_open(self, catalog_path: str, *, timeout: float | None = 0.0) -> GatewayHandle:
+        """Pin the file and start hydration; optionally wait ``timeout`` seconds.
+
+        Every successful ``on_open`` takes exactly one pin, whatever the state,
+        and returns an opaque handle token; ``on_close(token)`` releases exactly
+        that pin, so a double close cannot drop another handle's pin.
+        """
+        hydrator = self._require_hydrator()
+        record = hydrator.catalog.get_file_record(catalog_path)
+        if record is not None and hydrator.cache.is_cached(record.checksum_sha256):
+            # Open-time integrity check; a failed entry is evicted so request() re-hydrates.
+            try:
+                hydrator.cache.verify_entry(record.checksum_sha256)
+            except CacheIntegrityError:
+                logger.warning(
+                    "gateway: cached entry %s failed integrity check; re-hydrating",
+                    record.checksum_sha256,
+                )
+        ticket = hydrator.request(catalog_path)
+        hydrator.cache.acquire(ticket.checksum)
+        try:
+            if timeout:
+                hydrator.wait(ticket, timeout)
+            state = hydrator.status(catalog_path)
+        except BaseException:
+            hydrator.cache.release(ticket.checksum)
+            raise
+        token = secrets.token_urlsafe(16)
+        with self._handles_lock:
+            self._handles[token] = ticket.checksum
+        return GatewayHandle(token=token, state=state)
+
+    def on_read_range(
+        self, catalog_path: str, offset: int, length: int, *, timeout: float | None = None
+    ) -> bytes:
+        hydrator = self._require_hydrator()
+        return hydrator.wait_range(hydrator.request(catalog_path), offset, length, timeout)
+
+    def on_close(self, token: str) -> None:
+        """Release the pin taken by the ``on_open`` that returned ``token``.
+
+        Unknown or already-closed tokens are a no-op: SMB/NFS rigs close
+        handles whose open failed, and a double close must not unpin others.
+        """
+        hydrator = self._require_hydrator()
+        with self._handles_lock:
+            checksum = self._handles.pop(token, None)
+        if checksum is not None:
+            hydrator.cache.release(checksum)
+
+    def on_evict(self, catalog_path: str) -> bool:
+        """Drop the cached copy; False when the file still has open handles."""
+        hydrator = self._require_hydrator()
+        record = hydrator.catalog.get_file_record(catalog_path)
+        if record is None:
+            return False
+        try:
+            hydrator.cache.evict(record.checksum_sha256)
+        except CacheEntryInUseError:
+            return False
+        return True
 
 
 _gateway = ProtocolGateway()

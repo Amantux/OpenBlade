@@ -6,13 +6,13 @@ plus hydration request queuing for offline tape-backed files.
 
 from __future__ import annotations
 
-from datetime import datetime
 from secrets import token_hex
 from threading import RLock
 
 import structlog
 
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.clock import naive_utcnow
 from openblade.nas.types import (
     HydrationJob,
     HydrationRequest,
@@ -405,4 +405,4 @@ class VirtualFilesystem:
         return [segment for segment in path.split("/") if segment]
 
     def _utcnow_iso(self) -> str:
-        return datetime.utcnow().isoformat() + "Z"
+        return naive_utcnow().isoformat() + "Z"

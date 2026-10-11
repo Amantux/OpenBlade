@@ -46,7 +46,7 @@ Definition of done = `make all` green + relevant frontend checks + any parity ga
 - `ruff check .` is expected to be **clean (0)**. If you add a `# noqa`, it needs
   a written reason at the site — bare noqa is not accepted here.
 - `ruff format` changes go in their own format-only commit, never mixed with
-  logic. Known exception still outstanding: `openblade/assistant/tools.py`.
+  logic. (The former `openblade/assistant/tools.py` exception is resolved; the tree is fully formatted.)
 - Background + the deferred `BLE`/`S` rule families:
   docs/decisions/2026-09-11-pin-ruff-toolchain.md.
 

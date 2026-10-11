@@ -73,15 +73,15 @@ Other limits, stated rather than hidden:
 |---|---|
 | `OPENBLADE_FUSE_MOUNT_POINT` | The config field `fuse_mount_point` exists, is **read by nothing**, and has no environment override. `openblade fuse mount` takes the mount point as an argument. |
 | A FUSE mount of the **NAS** namespace | **No.** Only the catalog namespace is mountable. |
-| An SMB (Samba) server | **No.** `openblade/nas/samba.py` is a 15-line class whose only method renders a 3-line `smb.conf` stanza. It is referenced by nothing — not by the app, not by tests. |
-| An NFS server | **No.** Same shape: `nfs.py` renders one `/etc/exports` line and is referenced by nothing. |
+| An SMB (Samba) server | **Not in the image.** The protocol rig lives in `deploy/nas-protocols`; see it for status. |
+| An NFS server | **Not in the image.** See `deploy/nas-protocols`. |
 | An SFTP listener | **Effectively no.** See below. |
-| `libfuse` in the shipped image | **No.** The extra and `libfuse2` are a host-side install; the container does not ship them. |
+| `libfuse` in the shipped image | `fuse3` is now apt-installed in the Dockerfile. The `fuse` Python extra (fusepy, libfuse2 API) and `/dev/fuse` + `SYS_ADMIN` at runtime are still the operator's job — unverified in a container. |
 
 The `nas_shares` table and the `/nas/shares` CRUD endpoints store share
 definitions as **metadata only**. Nothing renders or applies them.
 
-The code itself says so — `openblade/nas/fuse_hook.py`:
+Hydration for the **catalog** mount is now real (`openblade/fuse/hydration.py`, see `docs/fuse.md`). The NAS-pool hook below is still the old stub — `openblade/nas/fuse_hook.py`:
 
 > Stub for optional FUSE virtual filesystem integration. In v1, this is a no-op
 > stub that records access attempts and returns appropriate offline/hydrating
@@ -205,6 +205,60 @@ policy-resolution helper for ingest and has nothing to do with mounting.
 
 ---
 
+## Protocol test rig
+
+`deploy/nas-protocols/docker-compose.yml` brings up a throwaway SMB and NFS
+stack so the protocol exports can be exercised by real clients. Services:
+
+- `samba` — serves shares from an `smb.conf` rendered by `openblade/nas/samba.py`.
+- `nfs-ganesha` — serves exports from a config rendered by `openblade/nas/nfs.py`.
+- `client` — a privileged container that kernel-mounts both protocols
+  internally (SMB via `cifs vers=3.0,cache=none,actimeo=0`, NFS via `nfs4`);
+  mounting needs privileges the CI runner's test process does not have.
+
+Both config files are rendered from `NasShare` records, so the rig tests the
+renderers' output rather than hand-written configs.
+
+Run it:
+
+```bash
+make protocols-up && make test-protocols && make protocols-down
+```
+
+`protocols-up` builds, starts and waits for healthy; `test-protocols` runs
+`python -m pytest -m protocols tests/e2e/protocols -q`; `protocols-down` tears
+down with `-v`. Host ports come from `OB_SMB_PORT` and `OB_NFS_PORT`
+(Makefile defaults 14450 and 20490); the pytest fixture instead picks free
+ports when those variables are unset. Tests
+carry the `protocols` marker and skip, with a reason naming the missing
+capability, when the rig is not available.
+
+**What the rig simulates.** The rig contains a hydrator shim, not the real
+hydrator. The shim models a tape recall: a stub file becomes real content after
+a delay, or never does for an offline cartridge. It exists to check how SMB and
+NFS clients behave while a read blocks or times out. The real hydrator is the
+FUSE path described above, and it is not exercised by the rig, so rig results
+say nothing about actual recall from tape. The offline stub file is a rig-only
+format: the catalog has no on-disk OFFLINE_ON_TAPE representation.
+
+**SMB caching semantics.** The shim (like an evictor) swaps files outside
+smbd, so smbd cannot break client leases. The rendered `smb.conf` therefore
+sets `oplocks = no`, `level2 oplocks = no` and `smb2 leases = no`; with leases
+on, the Linux cifs client's deferred close (`closetimeo=1`) kept a cached
+handle on the stub's old inode while a poller reopened it more often than once
+a second, and the recall was never seen. Observed with leases off: a handle
+opened before an eviction keeps reading the old bytes, and while that handle
+stays open a reopen by path also returns the old bytes; after it closes, the
+next open sees the new file. A Samba restart mid-recall is survived (the soft
+mount reconnects and the poll completes).
+
+**CI.** `.github/workflows/nas-protocols.yml` runs the rig nightly and on manual
+dispatch. It is not triggered by pull requests or pushes and is not a required
+check. Per-scenario results are recorded by CI runs; on failure the workflow
+uploads the compose logs as an artifact.
+
+---
+
 ## Doc corrections
 
 - `docs/fuse.md` calls this "a lightweight namespace abstraction over the
@@ -228,6 +282,26 @@ policy-resolution helper for ingest and has nothing to do with mounting.
   roadmap is right.
 
 ---
+
+## Tape-native domain models
+
+Pure planning models (no I/O). Each is validated and covered by unit tests.
+
+| Model / function | Module | Tests |
+|---|---|---|
+| `TapeState` / `TapeEvent` / `transition()` -> `InvalidTransitionError`; `file_state_for_tape()` maps onto the existing `NasFileState` | `openblade/nas/state_machine.py` | `tests/unit/test_nas_tape_states.py` (every allowed edge, every forbidden edge) |
+| `MediaGeneration`, `can_read` / `can_write` (LTO-8/9 break the N-2 read rule), `Cartridge`, `is_foreign`, `require_writable` | `openblade/nas/media.py` | `tests/unit/test_nas_media_compat.py` |
+| `ArchivePlanRequest.cartridges` / `drive_generation` / `reserved_bytes`: the archive planner raises `ForeignMediaError` for un-adopted media without `tape.json` (never auto-formatted) and `IncompatibleMediaError` for an unwritable drive/media pairing; reserved bytes reduce per-tape capacity | `openblade/nas/planner.py` | `tests/unit/test_nas_media_compat.py` |
+| `ScratchThresholds` + `evaluate_scratch` (OK/WARN/CRITICAL) | `openblade/nas/capacity.py` | `tests/unit/test_nas_domain_models.py` |
+| `TapeFragmentation.needs_consolidation` (`live_bytes / written_bytes`) | same | same |
+| `ReservationLedger.reserve/release` (TTL; expired ignored; over-reserve -> `ReservationError`) | same | same |
+| `VolumeGroupReplication` (IN_SYNC/LAGGING/BROKEN), `merge_volume_groups`, `require_export_ready` | same | same |
+| `FileSpan` / `SpanSegment`, `required_tapes`, `span_state` (missing tape -> `MISSING_TAPE`) | same | same |
+| `ExportSet` (PREPARING/READY/EXPORTED/IMPORTED), `mark_export_ready`, `Vault`, `planning_available` (vaulted = offline) | same | same |
+| `plan_drives` -> `required_drives`, `estimated_swaps` | same | same |
+| `AggregationPolicy.aggregate_below_bytes` + `group_for_write` (grouping only, no container format) | same | same |
+
+No read-only HTTP view is exposed yet: there is no per-pool health hook to attach to.
 
 ## Related
 

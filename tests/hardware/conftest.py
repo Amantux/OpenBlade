@@ -57,13 +57,18 @@ def drive_devices():
     return [d.strip() for d in devs.split(",") if d.strip()]
 
 
+def split_barcode_env(raw: str) -> list[str]:
+    """Split a comma-separated barcode env value (the form tools.hardware.allowlist prints)."""
+    return [b.strip() for b in raw.split(",") if b.strip()]
+
+
 @pytest.fixture
 def scratch_barcodes():
     _skip_if_no_real_hardware()
     barcodes_str = os.environ.get("OPENBLADE_SCRATCH_BARCODES", "")
     if not barcodes_str:
         pytest.skip("No scratch barcodes configured (OPENBLADE_SCRATCH_BARCODES)")
-    return [b.strip() for b in barcodes_str.split(",") if b.strip()]
+    return split_barcode_env(barcodes_str)
 
 
 @pytest.fixture

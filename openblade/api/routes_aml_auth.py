@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import collections
 import os
+import re
 import string
 import time
 from collections.abc import Callable
 from typing import Any, TypeVar
+from xml.etree import ElementTree
 
 import pyotp
 from fastapi import (
@@ -58,6 +60,7 @@ def _check_rate_limit(remote_ip: str) -> None:
         raise HTTPException(
             status_code=429,
             detail=f"Too many login attempts. Try again in {_LOGIN_WINDOW_SECONDS // 60} minutes.",
+            headers={"Retry-After": str(max(1, int(deque[0] - window_start) + 1) if deque else 1)},
         )
     deque.append(now)
 
@@ -332,31 +335,122 @@ def _verify_totp(secret: str, code: str) -> bool:
     return pyotp.TOTP(secret).verify(code, valid_window=1)
 
 
-async def require_auth(request: Request, context: AppContext = Depends(get_context)) -> AmlUser:
-    _ensure_state(context)
+def _session_token(request: Request) -> str | None:
+    """Return the token that authenticates this request (cookie first, then Bearer)."""
+    session_id = request.cookies.get("sessionID")
+    if session_id and aml_state.get_session_user(session_id) is not None:
+        return session_id
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth.split(" ", 1)[1]
+        if aml_state.get_session_user(token) is not None:
+            return token
+    return None
+
+
+def _authenticate(request: Request, *, allow_mfa_pending: bool) -> AmlUser:
     # Prefer session cookie, fall back to Bearer token for API clients/tests
     session_id = request.cookies.get("sessionID")
-    user = None
-    if session_id:
-        user = aml_state.get_session_user(session_id)
-    if user is None:
-        auth = request.headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            token = auth.split(" ", 1)[1]
-            user = aml_state.get_session_user(token)
-    if user is None:
+    token = _session_token(request)
+    user = aml_state.get_session_user(token) if token is not None else None
+    if user is not None and not allow_mfa_pending and aml_state.is_session_mfa_pending(token or ""):
+        # Inferred: an MFA-pending session authenticates nothing but the MFA
+        # challenge routes and logout; same 401 as unauthenticated, cookie kept.
         raise HTTPException(status_code=401, detail="Authentication required")
+    if user is None:
+        headers = None
+        if session_id:
+            # Expired/unknown cookie: tell the browser to drop it.
+            headers = {"Set-Cookie": 'sessionID=""; Max-Age=0; Path=/; HttpOnly; SameSite=lax'}
+        raise HTTPException(status_code=401, detail="Authentication required", headers=headers)
     return user
 
 
+async def require_auth(request: Request, context: AppContext = Depends(get_context)) -> AmlUser:
+    _ensure_state(context)
+    return _authenticate(request, allow_mfa_pending=False)
+
+
+async def require_auth_mfa_pending_ok(
+    request: Request, context: AppContext = Depends(get_context)
+) -> AmlUser:
+    """Auth for MFA challenge routes and logout, which an MFA-pending session may use."""
+    _ensure_state(context)
+    return _authenticate(request, allow_mfa_pending=True)
+
+
+_XML_MEDIA_TYPES = frozenset({"application/xml", "text/xml"})
+_FORM_MEDIA_TYPES = frozenset({"application/x-www-form-urlencoded", "multipart/form-data"})
+_ACCEPTABLE_MEDIA_TYPES = frozenset({"*/*", "application/*", "text/*", "application/json"})
+_XML_FORBIDDEN_MARKUP = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
+
+
+class _LoginNegotiationError(Exception):
+    """Typed content-negotiation failure carrying a curated AML status/summary."""
+
+    def __init__(self, status_code: int, summary: str) -> None:
+        super().__init__(summary)
+        self.status_code = status_code
+        self.summary = summary
+
+
+def _media_type(header_value: str) -> str:
+    return header_value.split(";", 1)[0].strip().lower()
+
+
+def _wants_xml(request: Request) -> bool:
+    """True when Accept names an XML type and not JSON (inferred; manual is JSON-only)."""
+    accepted = {_media_type(part) for part in request.headers.get("accept", "").split(",")}
+    return bool(accepted & _XML_MEDIA_TYPES) and "application/json" not in accepted
+
+
+def _check_acceptable(request: Request) -> None:
+    raw = request.headers.get("accept", "").strip()
+    if not raw:
+        return
+    accepted = {_media_type(part) for part in raw.split(",")}
+    if not accepted & (_ACCEPTABLE_MEDIA_TYPES | _XML_MEDIA_TYPES):
+        raise _LoginNegotiationError(406, "Unsupported Accept media type")
+
+
+def _parse_login_xml(body: bytes) -> dict[str, Any]:
+    # defusedxml is not installed; refuse any DTD/entity declaration outright so
+    # neither external entities (XXE) nor entity expansion can reach the parser.
+    if _XML_FORBIDDEN_MARKUP.search(body):
+        raise _LoginNegotiationError(400, "XML DTD/entity declarations are not allowed")
+    try:
+        root = ElementTree.fromstring(body)
+    except ElementTree.ParseError as exc:
+        raise _LoginNegotiationError(400, "Malformed XML login payload") from exc
+    return {child.tag: (child.text or "") for child in root}
+
+
+def _negotiated(request: Request, status_code: int, body: dict[str, Any]) -> Response:
+    if not _wants_xml(request):
+        return JSONResponse(status_code=status_code, content=body)
+    root = ElementTree.Element("WSResultCode")
+    for key, value in body.items():
+        if value is not None:
+            ElementTree.SubElement(root, key).text = str(value)
+    return Response(
+        content=ElementTree.tostring(root, encoding="unicode"),
+        status_code=status_code,
+        media_type="application/xml",
+    )
+
+
 async def _parse_login_request(request: Request) -> LoginRequest:
-    content_type = request.headers.get("content-type", "")
+    media_type = _media_type(request.headers.get("content-type", ""))
     payload: dict[str, Any]
-    if "json" in content_type:
+    if media_type == "application/json":
         payload = await request.json()
-    else:
+    elif media_type in _XML_MEDIA_TYPES:
+        payload = _parse_login_xml(await request.body())
+    elif media_type in _FORM_MEDIA_TYPES:
         form = await request.form()
         payload = dict(form)
+    else:
+        raise _LoginNegotiationError(415, "Unsupported or missing Content-Type")
 
     # Backwards compatible: accept 'username' as an alias for 'name'
     if isinstance(payload, dict) and "username" in payload and "name" not in payload:
@@ -505,7 +599,11 @@ async def test_ldap(
 @no_auth
 async def login(request: Request, context: AppContext = Depends(get_context)) -> Response:
     _ensure_state(context)
-    payload = await _parse_login_request(request)
+    try:
+        _check_acceptable(request)
+        payload = await _parse_login_request(request)
+    except _LoginNegotiationError as exc:
+        return _ws_error(exc.status_code, exc.summary)
     user_name = _validate_user_name(payload.name)
     remote_address = _remote_address(request) or "unknown"
 
@@ -528,12 +626,24 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     _clear_rate_limit(remote_address)
     if user.role == 2 and not aml_state.get_service_access().get("enabled", True):
         raise HTTPException(status_code=503, detail="Service access is disabled")
-    session_record = aml_state.create_session(user)
+    mfa_pending = aml_state.user_has_enabled_mfa(user.name)
+    session_record = aml_state.create_session(user, mfa_pending=mfa_pending)
     aml_state.record_login_activity(user.name, success=True, remote_address=remote_address)
     body = _ws_result("Login successful").model_dump()
     # Provide session token in response body for API clients/tests that expect it
     body["token"] = session_record.token
-    response = JSONResponse(content=body)
+    # Inferred: Rev D signals a default password only via the Warning header. With
+    # OPENBLADE_AML_STRICT_PRECONDITIONS=true the same login answers 412 instead of
+    # 200; the session is still issued so the client can change the password.
+    strict = os.environ.get("OPENBLADE_AML_STRICT_PRECONDITIONS", "false").lower() == "true"
+    # Inferred likewise for MFA: the challenge wire shape is not in Rev D, so a
+    # pending login is signalled ONLY by the Warning header below. MFA never
+    # changes the status or body, in strict mode too: there is no documented
+    # MFA summary text to return.
+    precondition_failed = strict and user.require_password_change
+    if precondition_failed:
+        body.update(code=412, description="Error", summary="Default password must be changed")
+    response = _negotiated(request, 412 if precondition_failed else 200, body)
     _is_production = os.environ.get("OPENBLADE_ENV", "development").lower() == "production"
     response.set_cookie(
         "sessionID",
@@ -545,6 +655,8 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     )
     if user.require_password_change:
         response.headers["Warning"] = "Default Password Supplied"
+    if mfa_pending:
+        response.headers.append("Warning", '199 - "MFA Required"')
     return response
 
 
@@ -558,12 +670,16 @@ async def auth_login(request: Request, context: AppContext = Depends(get_context
 @router.delete("/users/login", response_model=WSResultCode)
 async def logout(
     request: Request,
-    current_user: AmlUser = Depends(require_auth),
+    current_user: AmlUser = Depends(require_auth_mfa_pending_ok),
     context: AppContext = Depends(get_context),
 ) -> Response:
     _ensure_state(context)
+    try:
+        _check_acceptable(request)
+    except _LoginNegotiationError as exc:
+        return _ws_error(exc.status_code, exc.summary)
     aml_state.clear_session(request.cookies.get("sessionID", ""))
-    response = JSONResponse(content=_ws_result(f"Logged out {current_user.name}").model_dump())
+    response = _negotiated(request, 200, _ws_result(f"Logged out {current_user.name}").model_dump())
     response.delete_cookie("sessionID")
     return response
 
@@ -572,7 +688,7 @@ async def logout(
 @router.post("/auth/logout", response_model=WSResultCode)
 async def auth_logout(
     request: Request,
-    current_user: AmlUser = Depends(require_auth),
+    current_user: AmlUser = Depends(require_auth_mfa_pending_ok),
     context: AppContext = Depends(get_context),
 ) -> Response:
     return await logout(request, current_user, context)
@@ -580,8 +696,9 @@ async def auth_logout(
 
 @router.post("/users/login/mfa", response_model=WSResultCode)
 async def validate_mfa(
+    request: Request,
     payload: MFAAuthentication,
-    current_user: AmlUser = Depends(require_auth),
+    current_user: AmlUser = Depends(require_auth_mfa_pending_ok),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
@@ -591,13 +708,14 @@ async def validate_mfa(
     code = _validate_mfa_code(payload.authenticationCode)
     if not _verify_totp(config.secret, code):
         raise HTTPException(status_code=401, detail="Invalid authentication code")
+    aml_state.clear_session_mfa_pending(_session_token(request) or "")
     return _ws_result(f"MFA validated for {payload.type}")
 
 
 @router.get("/users/login/mfa/{type}/key", response_model=MFASharedData)
 async def get_mfa_key(
     type: str,
-    current_user: AmlUser = Depends(require_auth),
+    current_user: AmlUser = Depends(require_auth_mfa_pending_ok),
     context: AppContext = Depends(get_context),
 ) -> MFASharedData:
     _ensure_state(context)

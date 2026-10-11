@@ -19,6 +19,7 @@ from uuid import uuid4
 import pyotp
 from sqlalchemy import select
 
+from openblade.api.aml_faults import get_fault_state
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.models import AmlUser
 from openblade.simulator.i3_config import scalar_i3_active_config
@@ -234,6 +235,9 @@ class SessionRecord:
     role: int
     created_at: datetime
     expires_at: datetime
+    # Inferred (not in the Rev D manual): a login by a user with an enabled MFA
+    # record is pending until POST /users/login/mfa succeeds. Never serialised.
+    mfa_pending: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -2462,15 +2466,50 @@ def purge_expired_sessions() -> None:
         _STATE.sessions.pop(token, None)
 
 
-def create_session(user: AmlUser) -> SessionRecord:
+_DEFAULT_MAX_SESSIONS_PER_USER = 5
+
+
+def max_sessions_per_user() -> int:
+    """Concurrent-session cap per user (inferred; the Rev D manual documents no limit).
+
+    Read from ``OPENBLADE_AML_MAX_SESSIONS`` at call time; unparseable or < 1 falls
+    back to the default.
+    """
+    raw = os.environ.get("OPENBLADE_AML_MAX_SESSIONS", "")
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_SESSIONS_PER_USER
+    return value if value >= 1 else _DEFAULT_MAX_SESSIONS_PER_USER
+
+
+def _session_lifetime() -> timedelta:
+    # OPENBLADE_EMULATOR_FAULT_PROFILE auth_ttl_s (e.g. "session-expiry") overrides
+    # the configured timeout so expiry is observable within a test run.
+    ttl = get_fault_state().profile.auth_ttl_s
+    if ttl is not None:
+        return timedelta(seconds=ttl)
+    return timedelta(minutes=_STATE.session_timeout_minutes)
+
+
+def create_session(user: AmlUser, *, mfa_pending: bool = False) -> SessionRecord:
     purge_expired_sessions()
+    # Evict the user's oldest sessions so the new login always succeeds: refusing
+    # would let abandoned sessions lock an operator (incl. admin) out until expiry.
+    own = sorted(
+        (record for record in _STATE.sessions.values() if record.user_name == user.name),
+        key=lambda record: record.created_at,
+    )
+    for stale in own[: max(0, len(own) - max_sessions_per_user() + 1)]:
+        _STATE.sessions.pop(stale.token, None)
     now = _utcnow()
     record = SessionRecord(
         token=str(uuid4()),
         user_name=user.name,
         role=user.role,
         created_at=now,
-        expires_at=now + timedelta(minutes=_STATE.session_timeout_minutes),
+        expires_at=now + _session_lifetime(),
+        mfa_pending=mfa_pending,
     )
     _STATE.sessions[record.token] = record
     return record
@@ -2481,8 +2520,21 @@ def get_session_user(token: str) -> AmlUser | None:
     record = _STATE.sessions.get(token)
     if record is None:
         return None
-    record.expires_at = _utcnow() + timedelta(minutes=_STATE.session_timeout_minutes)
+    if get_fault_state().profile.auth_ttl_s is None:
+        # Sliding expiry; a fault-profile TTL is absolute from login instead.
+        record.expires_at = _utcnow() + timedelta(minutes=_STATE.session_timeout_minutes)
     return get_user(record.user_name)
+
+
+def is_session_mfa_pending(token: str) -> bool:
+    record = _STATE.sessions.get(token)
+    return record is not None and record.mfa_pending
+
+
+def clear_session_mfa_pending(token: str) -> None:
+    record = _STATE.sessions.get(token)
+    if record is not None:
+        record.mfa_pending = False
 
 
 def clear_session(token: str) -> None:
@@ -2573,6 +2625,10 @@ def set_user_mfa(user_name: str, mfa_type: str, enabled: bool) -> dict[str, Any]
         existing.secret = _generate_totp_secret()
     existing.enabled = enabled
     return existing.as_dict()
+
+
+def user_has_enabled_mfa(user_name: str) -> bool:
+    return any(record.enabled for record in _STATE.mfa_configs.get(user_name, {}).values())
 
 
 def get_user_mfa(user_name: str, mfa_type: str) -> MFARecord | None:

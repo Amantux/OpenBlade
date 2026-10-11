@@ -9,13 +9,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from sqlalchemy import func, select
 
 from openblade.catalog.db import get_session, init_db
 from openblade.catalog.models import FileInstance
 from openblade.catalog.repository import _ARCHIVED_INSTANCE_STATES, CatalogRepository
+from openblade.domain.errors import StaleLeaseError
 from openblade.domain.policies import FormatConfirmation, SafetyToken
-from openblade.jobs.scheduler import DriveScheduler
+from openblade.jobs.scheduler import DriveScheduler, InMemoryLeaseStore
 from openblade.jobs.shard import ShardMode
 from openblade.jobs.sharded_archive import ShardedArchiveRequest, run_sharded_archive
 from openblade.simulator.library import MockLibraryBackend
@@ -74,7 +76,9 @@ def test_load_helpers_do_not_mutate_scheduler_lock_key() -> None:
         assert slot is not None
         library.load(slot, 1)  # cartridge physically in drive 1
         handle = DriveHandle(drive_id=0, barcode=BARCODES[0])  # scheduler reserved drive 0
-        physical, _slot = helper(None, library, ltfs, handle, "job")  # already-loaded fast path
+        physical, _slot = helper(
+            _catalog(), library, ltfs, handle, "job"
+        )  # already-loaded fast path
         assert handle.drive_id == 0, f"{helper.__name__} mutated the scheduler lock key"
         assert handle.physical == 1 and physical == 1
 
@@ -168,3 +172,39 @@ def test_unload_failure_blocks_commit(tmp_path: Path, monkeypatch) -> None:
     assert result.errors  # stuck unload surfaced, not swallowed
     assert result.files_archived == 0
     assert _archived_count(catalog) == 0  # tape stuck in drive -> batch must not be durable
+
+
+def test_stale_lease_aborts_archive_commits_nothing_and_leaves_the_drive_alone(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Spec docs/decisions/2026-10-09-persistent-drive-leases.md §3: a lease
+    # released behind a running job fences it out before unmount + commit, and
+    # the job must NOT touch the drive afterwards — whoever holds the lease now
+    # may already have their own tape loaded and mounted there.
+    library, ltfs = _setup()
+    catalog = _catalog()
+    store = InMemoryLeaseStore()
+    scheduler = DriveScheduler(num_drives=2, store=store)
+    real_write, real_unmount = ltfs.write_file, ltfs.unmount
+    unmounted: list[object] = []
+
+    def write_then_lose_lease(*args, **kwargs):
+        result = real_write(*args, **kwargs)
+        store.release([lease.id for lease in store.live_leases()])
+        return result
+
+    def tracking_unmount(mount):
+        unmounted.append(mount)
+        return real_unmount(mount)
+
+    monkeypatch.setattr(ltfs, "write_file", write_then_lose_lease)
+    monkeypatch.setattr(ltfs, "unmount", tracking_unmount)
+    job = catalog.create_job("archive", {})
+
+    with pytest.raises(StaleLeaseError):
+        run_sharded_archive(_request(_source(tmp_path)), library, ltfs, catalog, scheduler, job.id)
+
+    assert _archived_count(catalog) == 0  # no mark_instance_archived
+    assert unmounted == []  # fenced out: no unmount
+    loaded = {str(drive.barcode) for drive in library.inventory().drives if drive.barcode}
+    assert loaded == set(BARCODES)  # ...and no unload: the drives are left as they were

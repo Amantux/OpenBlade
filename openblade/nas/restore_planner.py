@@ -46,6 +46,7 @@ class RestorePlanner:
 
         requested_paths = [self._normalize_path(path) for path in request.paths]
         records = self._resolve_records(request.pool_id, requested_paths)
+        span_barcodes = self._span_barcodes_by_path()
 
         batches_by_tape: dict[str, list[str]] = defaultdict(list)
         required_counts: dict[str, int] = defaultdict(int)
@@ -75,6 +76,14 @@ class RestorePlanner:
             ):
                 required_counts[record.tape_barcode] += 1
                 batches_by_tape[record.tape_barcode].append(logical_path)
+                # A file spanning several tapes needs every segment's tape loaded.
+                for barcode in span_barcodes.get(logical_path, []):
+                    if (
+                        barcode != record.tape_barcode
+                        and logical_path not in batches_by_tape[barcode]
+                    ):
+                        required_counts[barcode] += 1
+                        batches_by_tape[barcode].append(logical_path)
             elif state is NasFileState.MISSING_TAPE:
                 missing_tapes.add(record.tape_barcode or "<unknown>")
             elif state is NasFileState.EXPORTED and record.tape_barcode:
@@ -179,6 +188,20 @@ class RestorePlanner:
                 return sorted(required_counts)
 
         return sorted(required_counts, key=lambda barcode: (-required_counts[barcode], barcode))
+
+    def _span_barcodes_by_path(self) -> dict[str, list[str]]:
+        """Persisted multi-tape spans, keyed by normalized path, barcodes in segment order."""
+        spans: dict[str, list[str]] = {}
+        for span in self.service.repository.list_nas_file_spans():
+            segments = span.get("segments")
+            if not isinstance(segments, list):
+                continue
+            barcodes = spans.setdefault(self._normalize_path(str(span["path"])), [])
+            for segment in segments:
+                barcode = segment.get("barcode") if isinstance(segment, dict) else None
+                if isinstance(barcode, str) and barcode and barcode not in barcodes:
+                    barcodes.append(barcode)
+        return spans
 
     def _normalize_path(self, path: str) -> str:
         normalized = str(PurePosixPath("/" + str(path or "").lstrip("/"))).lstrip("/")

@@ -158,7 +158,7 @@ def test_validate_manifest_sets_schema_version_from_content() -> None:
 
     result = validator.validate_manifest(manifest.barcode)
 
-    assert result.schema_version == "openblade.manifest.v1"
+    assert result.schema_version == "openblade.manifest.v2"
 
 
 def test_validate_manifest_sets_file_count_from_manifest() -> None:

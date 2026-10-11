@@ -65,6 +65,11 @@ class MountMode(str, Enum):
 
 class FileInstanceState(str, Enum):
     PENDING = "pending"
+    # Sharded-archive lifecycle: written but not yet verified (STAGING), read
+    # back and being verified (VERIFYING). Neither is restorable or "archived";
+    # only the single commit at the end of a job moves them to ARCHIVED.
+    STAGING = "staging"
+    VERIFYING = "verifying"
     ARCHIVED = "archived"
     VERIFIED = "verified"
     FAILED = "failed"
@@ -174,3 +179,19 @@ class OperationResult:
     success: bool
     message: str
     details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DriveLease:
+    """A catalog-backed reservation of one scheduler drive slot for one job."""
+
+    id: str
+    drive_id: int
+    job_id: str
+    barcode: str
+    physical_drive_id: int | None
+    fencing_token: int
+    acquired_at: datetime
+    heartbeat_at: datetime
+    expires_at: datetime
+    released_at: datetime | None = None

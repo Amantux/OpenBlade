@@ -793,7 +793,29 @@ def run_ingest_job(
             ltfs=ltfs,
             config=nas_service.get_source_stream_config(),
         )
-    return executor.run()
+    raised = True
+    try:
+        result = executor.run()
+        raised = False
+        return result
+    finally:
+        # The plan's pool booking (owner=plan_id) is held only while the job can still
+        # write; any terminal state frees it. run() normally converts failures into
+        # FAILED, but if it raises anyway (e.g. _mark_dataset_failed hit a broken
+        # session) the status can still be ARCHIVING and nothing will ever resume this
+        # job, so an escaping exception releases too. A non-terminal *return* keeps it.
+        if raised or job.status in _TERMINAL_JOB_STATES:
+            try:
+                nas_service.repository.delete_nas_reservations_for_owner(job.plan.plan_id)
+            except Exception as exc:  # noqa: BLE001 - a failed release (e.g. session in PendingRollbackError) must not replace the executor's exception; the booking expires by TTL
+                logger.warning(
+                    "reservation release failed for plan %s", job.plan.plan_id, exc_info=exc
+                )
+
+
+_TERMINAL_JOB_STATES = frozenset(
+    {DatasetStatus.ARCHIVED, DatasetStatus.FAILED, DatasetStatus.CANCELLED}
+)
 
 
 def _build_archive_lifecycle_manager(

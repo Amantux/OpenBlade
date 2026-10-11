@@ -42,23 +42,37 @@ def _unload_barcode(changer_device: str, runner, slot_id: int):
     assert result.returncode == 0, result.stderr
 
 
-def _format_tape(runner, drive_device: str, barcode: str):
-    # --tape-serial takes exactly 6 alphanumeric characters. Real LTO barcodes
-    # are 6-8 (typically 8: six characters plus a two-character media-type
-    # suffix such as "L8"), so passing a barcode there fails every time with
-    # "LTFS15029E Tape serial must be 6 characters." The barcode belongs in
-    # --volume-name, which is unbounded - and that is what
-    # openblade.hardware.ltfs.LTFSCommandBackend.format_tape uses.
-    result = runner.run(
-        [
-            "mkltfs",
-            f"--device={resolve_sg_device(drive_device)}",
-            f"--volume-name={barcode}",
-            "--force",
-        ],
-        timeout=LTFS_TIMEOUT,
-    )
-    assert result.returncode == 0, result.stderr
+def _format_tape(app_context, drive_device: str, barcode: str):
+    """Format ``barcode`` through the product's two-phase flow - never mkltfs directly.
+
+    Phase 1 is ``FormatService.dry_run``: it checks the barcode against live
+    inventory, persists a one-time SafetyToken and returns the plan. Phase 2 is
+    ``FormatService.confirm`` with exactly that token, which re-validates it
+    against the stored row before LTFSCommandBackend.format_tape runs mkltfs.
+    The cartridge is already in drive 0 (``_load_barcode``), and the orchestrator
+    formats a loaded cartridge in place without moving it.
+    """
+    service = app_context.format_service
+    # The tests mount ``drive_device``; make sure the service formats the same
+    # drive, otherwise every later mount would be testing an unformatted tape.
+    library = app_context.library
+    drive_id = library.find_drive_by_barcode(barcode)
+    assert drive_id is not None, f"{barcode} is not loaded in a drive the app can see"
+    drive_device_for = getattr(library, "drive_device", None)
+    if drive_device_for is not None:
+        assert resolve_sg_device(drive_device_for(drive_id)) == resolve_sg_device(drive_device), (
+            f"App would format {barcode} in drive {drive_id}, not {drive_device}"
+        )
+
+    plan, token = service.dry_run(barcode)
+    assert plan.operation == "format"
+    assert plan.is_destructive
+    assert plan.affected_barcodes == [barcode]
+    assert token.operation == "format"
+    assert token.target_barcode == barcode
+
+    result = service.confirm(barcode, token.token)
+    assert result.success, result.message
     return result
 
 
@@ -98,12 +112,13 @@ def test_mkltfs_formats_tape(
     drive_devices,
     runner,
     scratch_barcode,
+    real_app_context,
 ):
     """Requires: a scratch tape that is safe to format and load into drive 0."""
     slot_id = _load_barcode(changer_device, runner, scratch_barcode)
     try:
-        result = _format_tape(runner, drive_devices[0], scratch_barcode)
-        assert result.returncode == 0
+        result = _format_tape(real_app_context, drive_devices[0], scratch_barcode)
+        assert result.success
     finally:
         _unload_barcode(changer_device, runner, slot_id)
 
@@ -114,12 +129,13 @@ def test_ltfs_mount_formatted(
     drive_devices,
     runner,
     scratch_barcode,
+    real_app_context,
     tmp_mount_dir,
 ):
     """Requires: a scratch tape that is safe to format and mount."""
     slot_id = _load_barcode(changer_device, runner, scratch_barcode)
     try:
-        _format_tape(runner, drive_devices[0], scratch_barcode)
+        _format_tape(real_app_context, drive_devices[0], scratch_barcode)
         result = _mount_ltfs(runner, drive_devices[0], tmp_mount_dir)
         assert result.returncode == 0
         assert tmp_mount_dir.exists()
@@ -137,6 +153,7 @@ def test_ltfs_write_small_file(
     drive_devices,
     runner,
     scratch_barcode,
+    real_app_context,
     tmp_mount_dir,
     tmp_path,
 ):
@@ -144,7 +161,7 @@ def test_ltfs_write_small_file(
     slot_id = _load_barcode(changer_device, runner, scratch_barcode)
     payload = tmp_path / "small.bin"
     try:
-        _format_tape(runner, drive_devices[0], scratch_barcode)
+        _format_tape(real_app_context, drive_devices[0], scratch_barcode)
         _mount_ltfs(runner, drive_devices[0], tmp_mount_dir)
         _write_payload(payload)
         target = tmp_mount_dir / payload.name
@@ -165,6 +182,7 @@ def test_ltfs_read_small_file(
     drive_devices,
     runner,
     scratch_barcode,
+    real_app_context,
     tmp_mount_dir,
     tmp_path,
 ):
@@ -174,7 +192,7 @@ def test_ltfs_read_small_file(
     restored = tmp_path / "restored.bin"
     try:
         expected_sha = _write_payload(source)
-        _format_tape(runner, drive_devices[0], scratch_barcode)
+        _format_tape(real_app_context, drive_devices[0], scratch_barcode)
         _mount_ltfs(runner, drive_devices[0], tmp_mount_dir)
         target = tmp_mount_dir / source.name
         target.write_bytes(source.read_bytes())
@@ -195,12 +213,13 @@ def test_ltfs_unmount_clean(
     drive_devices,
     runner,
     scratch_barcode,
+    real_app_context,
     tmp_mount_dir,
 ):
     """Requires: a scratch tape that is safe to format and mount."""
     slot_id = _load_barcode(changer_device, runner, scratch_barcode)
     try:
-        _format_tape(runner, drive_devices[0], scratch_barcode)
+        _format_tape(real_app_context, drive_devices[0], scratch_barcode)
         _mount_ltfs(runner, drive_devices[0], tmp_mount_dir)
         result = _unmount_ltfs(runner, tmp_mount_dir)
         assert result.returncode == 0
@@ -214,6 +233,7 @@ def test_ltfs_remount_persistence(
     drive_devices,
     runner,
     scratch_barcode,
+    real_app_context,
     tmp_mount_dir,
     tmp_path,
 ):
@@ -221,7 +241,7 @@ def test_ltfs_remount_persistence(
     slot_id = _load_barcode(changer_device, runner, scratch_barcode)
     payload = tmp_path / "persist.bin"
     try:
-        _format_tape(runner, drive_devices[0], scratch_barcode)
+        _format_tape(real_app_context, drive_devices[0], scratch_barcode)
         expected_sha = _write_payload(payload)
         _mount_ltfs(runner, drive_devices[0], tmp_mount_dir)
         target = tmp_mount_dir / payload.name
@@ -245,12 +265,13 @@ def test_ltfs_capacity_reporting(
     drive_devices,
     runner,
     scratch_barcode,
+    real_app_context,
     tmp_mount_dir,
 ):
     """Requires: a scratch tape that is safe to format and mount."""
     slot_id = _load_barcode(changer_device, runner, scratch_barcode)
     try:
-        _format_tape(runner, drive_devices[0], scratch_barcode)
+        _format_tape(real_app_context, drive_devices[0], scratch_barcode)
         _mount_ltfs(runner, drive_devices[0], tmp_mount_dir)
         result = runner.run(["df", "-h", str(tmp_mount_dir)], timeout=30)
         assert result.returncode == 0, result.stderr

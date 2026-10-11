@@ -56,3 +56,23 @@ The Web Services guide is a *control-plane* API spec; drive/robotics performance
 figures live in hardware datasheets, not here. The emulator's latency profiles
 therefore remain OpenBlade-chosen approximations, not doc-certified numbers — do
 not present them as vendor-specified.
+
+## AML authentication behaviours
+
+Only the items marked "manual" are documented in Rev D; everything else is
+inferred (OpenBlade-chosen) and unverified against an appliance.
+
+| Behaviour | Source |
+|---|---|
+| JSON login/logout; `sessionID` cookie | manual §2.5 (users/login) |
+| `Warning: Default Password Supplied` header on login with a default password (200 kept by default) | manual §2.5 (users/login) |
+| 412 `{"code":412,"description":"Error","summary":"Default password must be changed"}` plus token, cookie and Warning header when `OPENBLADE_AML_STRICT_PRECONDITIONS=true` (default false) | inferred |
+| Per-user session cap, `OPENBLADE_AML_MAX_SESSIONS` (default 5); a login beyond the cap evicts the user's oldest session, whose token then gets 401 | inferred |
+| Login also accepts form and `application/xml` / `text/xml` bodies (`<login><name>..</name><password>..</password></login>`) | inferred |
+| XML response (root `<WSResultCode>`) when Accept names an XML type and not `application/json`; login and `DELETE /aml/users/login` only | inferred |
+| `<!DOCTYPE` / `<!ENTITY` in XML login: 400 "XML DTD/entity declarations are not allowed"; malformed XML: 400 "Malformed XML login payload" | inferred |
+| Missing/unsupported Content-Type on login: 415 "Unsupported or missing Content-Type" | inferred |
+| Unsupported Accept on login/logout: 406 "Unsupported Accept media type" | inferred |
+| Login rate limit 429 carries `Retry-After` (seconds) | inferred |
+| Expired/unknown `sessionID` cookie: 401 and `Set-Cookie` clearing it (Max-Age=0); expired Bearer: 401 | inferred |
+| MFA pending (inferred): a login by a user with an enabled MFA record keeps the documented body and adds `Warning: 199 - "MFA Required"`; MFA never changes the status code or body, with `OPENBLADE_AML_STRICT_PRECONDITIONS=true` too: strict mode answers 412 only for the documented default-password condition (`"Default password must be changed"`), else 200; the Warning header is the only MFA signal (session still issued). Until a valid code is posted to `POST /aml/users/login/mfa`, the session gets the ordinary 401 (cookie kept) on every route except that one, `GET /aml/users/login/mfa/{type}/key` and logout; an invalid code leaves it pending. Challenge wire shape not documented in Rev D manual; certify by appliance capture | inferred |

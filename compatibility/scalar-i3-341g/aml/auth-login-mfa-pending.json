@@ -1,0 +1,11 @@
+{
+  "id": "aml-auth-login-mfa-pending",
+  "profile": "scalar-i3-341g",
+  "source": "inferred",
+  "firmware": "341G",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "setup": { "mfa": { "user": "admin", "type": "totp" } },
+  "fidelity_notes": "Login by a user with an enabled MFA record returns the documented login body plus Warning: 199 - \"MFA Required\"; MFA never changes the status or body, in strict mode too (strict 412 only for the documented default-password condition); the session is pending (401 everywhere except POST /users/login/mfa, GET /users/login/mfa/{type}/key and logout) until a valid code is posted. The challenge wire shape is not documented in the Rev D manual; certify by appliance capture.",
+  "request": { "method": "POST", "path": "/aml/users/login", "json": { "name": "admin", "password": "password" } },
+  "expected": { "status": 200, "headers": { "Warning": "MFA Required" } }
+}

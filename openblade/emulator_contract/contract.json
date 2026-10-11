@@ -42,7 +42,8 @@
     "EMULATOR_DRIVE_COUNT": "integer",
     "EMULATOR_OCCUPANCY_PERCENT": "integer",
     "EMULATOR_LATENCY_PROFILE": "instant|realistic|hardware|custom",
-    "OPENBLADE_SCALAR_API_ONLY": "true|false"
+    "OPENBLADE_SCALAR_API_ONLY": "true|false",
+    "OPENBLADE_EMULATOR_FAULT_PROFILE": "preset-name|json-object"
   },
   "latency_profiles": ["instant", "realistic", "hardware", "custom"],
   "manual_matrix_file": "openblade/emulator_contract/quantum_i3_rev_h_matrix.json",

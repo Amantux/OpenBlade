@@ -8,6 +8,21 @@
 6. Keep the application in mock mode until read-only inventory and LTFS validation succeed end-to-end.
 7. Document barcode conventions and slot maps before allowing write workflows.
 
+## Write paths stay disabled until the drive-identity bridge has passed on the rig
+
+Do not enable any write path (format, archive, the destructive CI lane) on a
+real library until `tests/hardware/readonly/test_drive_identity_bridge.py` has
+passed **on that rig**. It walks the whole identity chain once, end to end:
+AML element coordinate → drive serial → `sg_inq` on the host → the
+`/dev/tape/by-id` node → an LTFS mount **dry run** (the mount is not performed;
+the test asserts the resolved device path exists and the serial matches, then
+stops). Until it passes, a write could land on a different physical drive than
+the one the library reports — the failure mode the serial correlation above
+exists to prevent.
+
+The bridge test runs in the nightly read-only lane. How the lanes are wired,
+gated and approved: [runbooks/hardware-lanes.md](runbooks/hardware-lanes.md).
+
 ## Always use the no-rewind device node (`/dev/nstN`, never `/dev/stN`)
 
 Linux exposes every tape drive twice: `/dev/stN` **rewinds the tape on every

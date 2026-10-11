@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any
@@ -58,9 +59,11 @@ from openblade.api import (
     routes_virtual_fs,
     routes_volume_groups,
 )
+from openblade.api.aml_faults import get_fault_state
 from openblade.api.aml_latency import (
     apply_request_latency,
     capture_request_latency_metric,
+    resolve_request_fault,
     should_capture_latency_metrics,
 )
 from openblade.api.api_auth import api_auth_middleware, log_api_auth_status
@@ -186,6 +189,12 @@ async def apply_aml_emulator_latency(
     if not should_capture_latency_metrics(request.url.path):
         return await call_next(request)
 
+    # Env-driven fault profile (OPENBLADE_EMULATOR_FAULT_PROFILE): reboot-window 503
+    # and intermittent load 409 are answered here, before routing, like the appliance.
+    fault = resolve_request_fault(request.method, request.url.path)
+    if fault is not None:
+        return await handle_http_exception(request, fault)
+
     start = time.perf_counter()
     simulated_delay = await apply_request_latency(request)
     status_code = 500
@@ -279,6 +288,9 @@ async def initialize_aml_state() -> None:
     from openblade.api.aml_state import ensure_initialized
 
     log_api_auth_status()
+    # Parse the fault profile at boot so a typo fails loudly here, not as a 500 on
+    # the first request; this also anchors the reboot window at process start.
+    get_fault_state()
     context = get_context()
     ensure_initialized(
         context.config.db_url,
@@ -370,8 +382,19 @@ async def handle_http_exception(request: Request, exc: HTTPException) -> Respons
     if not _is_aml_compatible_path(request.url.path):
         return await http_exception_handler(request, exc)
     return JSONResponse(
-        status_code=exc.status_code, content=_aml_error_payload(exc.status_code, exc.detail)
+        status_code=exc.status_code,
+        content=_aml_error_payload(exc.status_code, exc.detail),
+        headers=exc.headers,
     )
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_exception(request: Request, exc: Exception) -> Response:
+    """Last-resort handler: AML paths get the error envelope, never the exception text."""
+    if not _is_aml_compatible_path(request.url.path):
+        raise exc
+    logging.getLogger(__name__).exception("Unhandled error on %s", request.url.path)
+    return JSONResponse(status_code=500, content=_aml_error_payload(500, "Internal server error"))
 
 
 @app.exception_handler(RequestValidationError)

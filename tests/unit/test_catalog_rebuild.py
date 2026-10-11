@@ -32,6 +32,8 @@ from openblade.nas.types import (
     RebuildRunStatus,
 )
 
+pytestmark = pytest.mark.rebuild
+
 client = TestClient(app)
 
 
@@ -82,6 +84,7 @@ def _seed_tape(
     include_shard: bool = True,
     files_per_tape: int = 2,
     create_versions: int = 0,
+    protection: dict[str, object] | None = None,
 ) -> dict[str, object]:
     metadata_writer: TapeMetadataWriter = rebuild_env["metadata_writer"]
     shard_writer: CatalogShardWriter = rebuild_env["shard_writer"]
@@ -165,6 +168,7 @@ def _seed_tape(
                 total_bytes=sum(item.size for item in shard_files),
                 tape_set=[barcode],
                 shard_set=[],
+                protection=protection,
             )
         ],
         files=shard_files,
@@ -406,3 +410,164 @@ def test_api_get_run_returns_record(rebuild_env: dict[str, object]) -> None:
     assert response.status_code == 200
     assert response.json()["id"] == run_id
     assert response.json()["status"] == RebuildRunStatus.PLANNED.value
+
+
+def _stamp_generation(
+    rebuild_env: dict[str, object], barcode: str, *, marker: str, siblings: list[str] | None = None
+) -> None:
+    from openblade.nas.ltfs_manifest import CommitMarker
+
+    planner = rebuild_env["planner"]
+    writer = planner.metadata_writer
+    manifest = writer.read_manifest(barcode).model_copy(
+        update={"generation_id": "gen-7", "sibling_tapes": siblings or []}
+    )
+    manifest_sha = writer.write_manifest(barcode, manifest)
+    writer.write_manifest_checksum(barcode, manifest_sha)
+    shard_sha = writer._read_text(barcode, planner.shard_writer.SHARD_CHECKSUM_METADATA_PATH)
+    if marker == "missing":
+        return
+    writer.write_commit_marker(
+        barcode,
+        CommitMarker(
+            generation_id="gen-7",
+            manifest_sha256=manifest_sha if marker == "ok" else "0" * 64,
+            catalog_shard_sha256=shard_sha.strip(),
+            written_at="2026-10-09T00:00:00Z",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("marker", "reason"),
+    [("missing", "commit marker missing"), ("bad", "commit marker manifest hash mismatch")],
+)
+def test_plan_rebuild_uncommitted_generation_not_scanned(
+    rebuild_env: dict[str, object], marker: str, reason: str
+) -> None:
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode)
+    _stamp_generation(rebuild_env, barcode, marker=marker)
+
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
+
+    assert result.barcodes_to_scan == []
+    assert [u.model_dump() for u in result.uncommitted_generations] == [
+        {"barcode": barcode, "generation_id": "gen-7", "reason": reason}
+    ]
+    assert result.missing_siblings == []
+    assert len(result.warnings) == 1
+    assert barcode in result.warnings[0]
+    assert reason in result.warnings[0]
+
+
+def test_plan_rebuild_committed_generation_reports_missing_sibling(
+    rebuild_env: dict[str, object],
+) -> None:
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode)
+    _stamp_generation(rebuild_env, barcode, marker="ok", siblings=["ZZ9999L8"])
+
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
+
+    assert result.barcodes_to_scan == [barcode]
+    assert [m.model_dump() for m in result.missing_siblings] == [
+        {"barcode": "ZZ9999L8", "required_by_barcode": barcode, "generation_id": "gen-7"}
+    ]
+    assert result.uncommitted_generations == []
+    assert len(result.warnings) == 1
+    assert "ZZ9999L8" in result.warnings[0]
+
+
+def _dataset_protection_json(rebuild_env: dict[str, object], dataset_id: str) -> str | None:
+    from openblade.catalog.models import NasDataset as NasDatasetRow
+
+    repo = rebuild_env["planner"].repo
+    repo.session.expire_all()
+    row = repo.session.get(NasDatasetRow, dataset_id)
+    assert row is not None
+    return row.protection_json
+
+
+def test_execute_rebuild_recovers_dataset_protection_policy(
+    rebuild_env: dict[str, object],
+) -> None:
+    import json
+
+    from openblade.domain.protection import Protection, ProtectionPolicy
+
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    policy = ProtectionPolicy(protection=Protection.replication(3))
+    _seed_tape(rebuild_env, barcode, protection=policy.to_dict())
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
+
+    rebuild_env["planner"].execute_rebuild_run(plan.run_id)
+
+    stored = _dataset_protection_json(rebuild_env, f"dataset-{barcode}")
+    assert stored is not None
+    assert ProtectionPolicy.from_dict(json.loads(stored)) == policy
+
+
+def test_execute_rebuild_pre_v2_shard_leaves_protection_unset(
+    rebuild_env: dict[str, object],
+) -> None:
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode)
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
+
+    rebuild_env["planner"].execute_rebuild_run(plan.run_id)
+
+    assert _dataset_protection_json(rebuild_env, f"dataset-{barcode}") is None
+
+
+def test_execute_rebuild_skips_malformed_protection_policy(
+    rebuild_env: dict[str, object],
+) -> None:
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode, protection={"placement": "bogus"})
+    plan = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=False)
+    )
+
+    result = rebuild_env["planner"].execute_rebuild_run(plan.run_id)
+
+    assert result.datasets_recovered == 1
+    assert _dataset_protection_json(rebuild_env, f"dataset-{barcode}") is None
+
+
+def test_commit_marker_survives_new_defaulted_manifest_field(
+    rebuild_env: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the marker hashes on-tape bytes, so a newer ManifestJson with an extra
+    defaulted field (which changes model_dump()) still sees older generations as committed."""
+    from openblade.nas.ltfs_manifest import ManifestJson
+
+    class FutureManifestJson(ManifestJson):
+        future_field: str = "added-later"
+
+    barcode = rebuild_env["context"].library.get_all_barcodes()[0]
+    _seed_tape(rebuild_env, barcode)
+    _stamp_generation(rebuild_env, barcode, marker="ok")
+    writer = rebuild_env["planner"].metadata_writer
+    original_read = writer.read_manifest
+
+    def read_future(bc: str) -> ManifestJson | None:
+        parsed = original_read(bc)
+        return None if parsed is None else FutureManifestJson.model_validate(parsed.model_dump())
+
+    monkeypatch.setattr(writer, "read_manifest", read_future)
+
+    result = rebuild_env["planner"].plan_rebuild(
+        RebuildPlanRequest(barcodes=[barcode], dry_run=True)
+    )
+
+    assert result.uncommitted_generations == []
+    assert result.barcodes_to_scan == [barcode]

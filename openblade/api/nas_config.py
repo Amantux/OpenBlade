@@ -17,8 +17,18 @@ from openblade.bootstrap import get_context
 from openblade.catalog.db import get_catalog_repository
 from openblade.catalog.models import AmlUser
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.clock import naive_utcnow
 from openblade.domain.models import MountHandle, MountMode
 from openblade.domain.wire import coerce_int
+from openblade.nas.capacity import (
+    ClientBudgetFieldsError,
+    PoolNotFoundError,
+    ReservationError,
+    ScratchThresholds,
+    book_plan_capacity,
+    plan_with_pool_budget,
+    server_budget_request,
+)
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
 from openblade.nas.catalog_rebuild_worker import SAFE_REBUILD_PREFLIGHT_ERROR, CatalogRebuildWorker
 from openblade.nas.catalog_shard import CatalogShardWriter
@@ -38,7 +48,6 @@ from openblade.nas.ingest import (
 from openblade.nas.ltfs_manifest import TapeMetadataWriter
 from openblade.nas.manifest_validator import ManifestValidator
 from openblade.nas.path_mapping import PathMappingService
-from openblade.nas.planner import ArchivePlanner
 from openblade.nas.restore_planner import RestorePlan, RestorePlanner
 from openblade.nas.service import NasService
 from openblade.nas.sidecar import SidecarResolver
@@ -220,7 +229,7 @@ def _manifest_payload(service: NasService, dataset_id: str) -> dict[str, object]
         ],
         "total_files": detail["file_count"],
         "total_bytes": detail["total_bytes"],
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": naive_utcnow().isoformat() + "Z",
     }
 
 
@@ -237,7 +246,7 @@ def _report_payload(service: NasService, dataset_id: str) -> dict[str, object]:
             for record in records
         ],
         "checksums": {record.relative_path: record.checksum_sha256 for record in records},
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": naive_utcnow().isoformat() + "Z",
     }
 
 
@@ -878,6 +887,50 @@ async def get_pool(pool_id: str, service: NasService = Depends(get_nas_service))
     return pool
 
 
+@router.get("/reservations")
+async def list_reservations(
+    pool_id: str | None = None,
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> list[dict[str, object]]:
+    return repo.list_nas_reservations(pool_id)
+
+
+@router.get("/scratch-thresholds", response_model=ScratchThresholds)
+async def get_scratch_thresholds(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> ScratchThresholds:
+    stored = repo.get_scratch_thresholds()
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Scratch thresholds not configured"
+        )
+    return ScratchThresholds.model_validate(stored)
+
+
+@router.put("/scratch-thresholds", response_model=ScratchThresholds)
+async def put_scratch_thresholds(
+    thresholds: ScratchThresholds,
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> ScratchThresholds:
+    # The body is validated by ScratchThresholds itself (warn < min -> 422).
+    repo.set_scratch_thresholds(thresholds.scratch_min, thresholds.scratch_warn)
+    return thresholds
+
+
+@router.get("/export-sets")
+async def list_export_sets(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> list[dict[str, object]]:
+    return repo.list_nas_export_sets()
+
+
+@router.get("/vaults")
+async def list_vaults(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> list[dict[str, object]]:
+    return repo.list_nas_vaults()
+
+
 @router.put("/pools/{pool_id}", response_model=NasPool)
 async def update_pool(
     pool_id: str,
@@ -1112,6 +1165,14 @@ async def archive_plan(
     request: ArchivePlanRequest,
     service: NasService = Depends(get_nas_service),
 ) -> ArchivePlan:
+    """Plan an archive.
+
+    With ``pool`` set, tapes and capacities are derived server-side from the library
+    inventory + catalog: body-supplied ``available_tapes``/``tape_capacities``/
+    ``reserved_bytes``/``pool_reserved_bytes`` are refused (422) and an unknown pool
+    is 404. Without ``pool`` the body-supplied inputs drive a preview-only plan that
+    gets no pool budget and books nothing.
+    """
     policy = None
     if request.policy_id is not None:
         policy = service.get_policy(request.policy_id)
@@ -1141,7 +1202,15 @@ async def archive_plan(
             updates["max_parallelism"] = policy.max_parallelism
         request = request.model_copy(update=updates)
 
-    plan = ArchivePlanner().plan(request)
+    try:
+        request = server_budget_request(service.repository, request, get_context().library)
+    except ClientBudgetFieldsError as exc:
+        # Curated domain message naming only the refused field names.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PoolNotFoundError as exc:
+        # Curated domain message (pool id only).
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    plan = plan_with_pool_budget(service.repository, request, now=datetime.now(timezone.utc))
     if policy is not None:
         plan.policy_name = policy.name
         plan.policy_type = policy.policy_type
@@ -1181,6 +1250,13 @@ async def start_ingest(
         policy = service.get_policy(plan.policy_name)
         if policy is not None and not policy.auto_clean_before_archive:
             auto_clean_drives = False
+    try:
+        book_plan_capacity(
+            service.repository, plan, context.library, now=datetime.now(timezone.utc)
+        )
+    except ReservationError as exc:
+        # Curated domain message (pool + plan id only); the pool budget is exhausted.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if auto_clean_drives:
         cleaned_drives = _auto_clean_required_drives()
     job = start_ingest_job(

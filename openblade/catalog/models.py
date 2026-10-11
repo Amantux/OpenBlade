@@ -18,6 +18,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from openblade.domain.clock import naive_utcnow
+
 
 class Base(DeclarativeBase):
     """Base class for catalog ORM models."""
@@ -34,9 +36,9 @@ class LibraryInstance(Base):
     role: Mapped[str] = mapped_column(String, default="primary")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=naive_utcnow, onupdate=naive_utcnow
     )
 
 
@@ -45,7 +47,7 @@ class VolumeGroup(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
     cartridges: Mapped[list[Cartridge]] = relationship(
         "Cartridge", back_populates="volume_group", cascade="save-update"
@@ -74,7 +76,7 @@ class Cartridge(Base):
     used_bytes: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[str] = mapped_column(String, default="in_slot")
     formatted: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
     volume_group: Mapped[VolumeGroup | None] = relationship(
         "VolumeGroup", back_populates="cartridges"
@@ -96,7 +98,7 @@ class FileRecord(Base):
     block_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     shard_profile: Mapped[str | None] = mapped_column(String(32), nullable=True)
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
     volume_group: Mapped[VolumeGroup] = relationship("VolumeGroup", back_populates="file_records")
     instances: Mapped[list[FileInstance]] = relationship(
@@ -119,7 +121,7 @@ class FileInstance(Base):
     state: Mapped[str] = mapped_column(String, default="pending")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     checksum_verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
     file_record: Mapped[FileRecord] = relationship("FileRecord", back_populates="instances")
 
@@ -132,9 +134,9 @@ class Job(Base):
     state: Mapped[str] = mapped_column(String, default="pending")
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=naive_utcnow, onupdate=naive_utcnow
     )
 
     @property
@@ -180,9 +182,9 @@ class AmlUser(Base):
     password: Mapped[str] = mapped_column(String(64), nullable=False)
     role: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     require_password_change: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=naive_utcnow, onupdate=naive_utcnow
     )
 
     @property
@@ -197,8 +199,8 @@ class RbacRole(Base):
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     permissions: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
-    updated_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
 
 
 class RbacUser(Base):
@@ -213,8 +215,8 @@ class RbacUser(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     api_token_ids: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
-    updated_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
     last_login_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -227,7 +229,7 @@ class RbacApiToken(Base):
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     permissions: Mapped[str] = mapped_column(Text, default="[]")
     expires_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[str] = mapped_column(Text, default=lambda: datetime.utcnow().isoformat())
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat())
     last_used_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -244,7 +246,7 @@ class RbacAuditEvent(Base):
     outcome: Mapped[str] = mapped_column(String, default="")
     details: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat(), index=True
+        Text, default=lambda: naive_utcnow().isoformat(), index=True
     )
     ip_address: Mapped[str | None] = mapped_column(String, nullable=True)
 
@@ -256,9 +258,9 @@ class NasStoragePolicy(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     policy_type: Mapped[str] = mapped_column(String(64), nullable=False)
     config_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=naive_utcnow, onupdate=naive_utcnow
     )
 
 
@@ -270,7 +272,7 @@ class NasCacheDrive(Base):
     root_path: Mapped[str] = mapped_column(String, nullable=False)
     config_json: Mapped[str] = mapped_column(Text, default="{}")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
 
 class NasConfig(Base):
@@ -287,7 +289,7 @@ class NasShare(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     share_type: Mapped[str] = mapped_column(String(32), nullable=False)
     config_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utcnow)
 
 
 class NasPool(Base):
@@ -305,6 +307,9 @@ class NasPool(Base):
     cache_target_id: Mapped[str | None] = mapped_column(String, nullable=True)
     restore_target_path: Mapped[str] = mapped_column(String, default="/openblade/restore")
     access_mode: Mapped[str] = mapped_column(String, default="read_only")
+    replication_factor: Mapped[int] = mapped_column(Integer, default=1)
+    # Serialized ProtectionPolicy.to_dict(); None means derive from replication_factor.
+    protection_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -327,6 +332,8 @@ class NasDataset(Base):
     status: Mapped[str] = mapped_column(String, default="pending")
     copies_completed: Mapped[int] = mapped_column(Integer, default=0)
     manifest_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Serialized ProtectionPolicy.to_dict(); written by catalog rebuild, None if unknown.
+    protection_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -372,10 +379,10 @@ class PathMapping(Base):
     checksum: Mapped[str | None] = mapped_column(String, nullable=True)
     last_seen_at: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(
-        String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z"
+        String, nullable=False, default=lambda: naive_utcnow().isoformat() + "Z"
     )
     updated_at: Mapped[str] = mapped_column(
-        String, nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z"
+        String, nullable=False, default=lambda: naive_utcnow().isoformat() + "Z"
     )
 
     __table_args__ = (UniqueConstraint("logical_path", "pool_id", name="uq_path_pool"),)
@@ -395,12 +402,8 @@ class CatalogRebuildRun(Base):
     datasets_recovered: Mapped[int] = mapped_column(Integer, default=0)
     path_mappings_recovered: Mapped[int] = mapped_column(Integer, default=0)
     error_summary: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
-    )
-    updated_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
-    )
+    created_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat() + "Z")
+    updated_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat() + "Z")
     completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -414,9 +417,7 @@ class ManifestVersion(Base):
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     file_count: Mapped[int] = mapped_column(Integer, default=0)
     is_current: Mapped[bool] = mapped_column(Boolean, default=False)
-    recorded_at: Mapped[str] = mapped_column(
-        Text, default=lambda: datetime.utcnow().isoformat() + "Z"
-    )
+    recorded_at: Mapped[str] = mapped_column(Text, default=lambda: naive_utcnow().isoformat() + "Z")
 
 
 class NasRestoreJob(Base):
@@ -449,3 +450,91 @@ class NasRestoreJob(Base):
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DriveLeaseRecord(Base):
+    """Catalog-persisted drive lease (docs/decisions/2026-10-09-persistent-drive-leases.md).
+
+    Live = ``released_at IS NULL AND expires_at > now``. "One live lease per
+    drive" is enforced in the repository under ``BEGIN IMMEDIATE``, not by a
+    partial unique index. Timestamps are naive UTC, like the rest of the catalog.
+    """
+
+    __tablename__ = "drive_leases"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    drive_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    job_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    barcode: Mapped[str] = mapped_column(String(8), nullable=False)
+    physical_drive_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fencing_token: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class JobJournalEntry(Base):
+    """Append-only per-job event journal (lease acquired, shard staged, commit, failure...).
+
+    Created by ``Base.metadata.create_all`` like ``drive_leases`` -- a new table
+    needs no ``_migrate_schema`` step. ``detail_json`` is a JSON object; a
+    ``shard_staged`` row carries ``instance_id`` and is how staged instances are
+    linked back to their job (``file_instances`` has no job column).
+    """
+
+    __tablename__ = "job_journal"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    detail_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    @property
+    def detail(self) -> dict[str, Any]:
+        return cast("dict[str, Any]", json.loads(self.detail_json or "{}"))
+
+
+class NasReservation(Base):
+    __tablename__ = "nas_reservations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    pool_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    owner: Mapped[str] = mapped_column(String, nullable=False)
+    # ISO-8601 with offset (SQLite DateTime would drop the tzinfo).
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class NasExportSet(Base):
+    __tablename__ = "nas_export_sets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    barcodes_json: Mapped[str] = mapped_column(Text, default="[]")
+    state: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class NasVault(Base):
+    __tablename__ = "nas_vaults"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    barcodes_json: Mapped[str] = mapped_column(Text, default="[]")
+    location: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class NasVgReplication(Base):
+    __tablename__ = "nas_vg_replication"
+
+    vg_id: Mapped[str] = mapped_column(String, primary_key=True)
+    barcodes_json: Mapped[str] = mapped_column(Text, default="[]")
+    replicas_required: Mapped[int] = mapped_column(Integer, default=1)
+    replicas_present: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class NasFileSpan(Base):
+    __tablename__ = "nas_file_spans"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    path: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    segments_json: Mapped[str] = mapped_column(Text, default="[]")

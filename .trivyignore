@@ -1,0 +1,3 @@
+# Trivy ignore list for the release image scan (.github/workflows/release.yml).
+# Every entry MUST carry a written justification on the line above it, an owner,
+# and a review-by date. See docs/runbooks/release.md "Vulnerability exceptions".

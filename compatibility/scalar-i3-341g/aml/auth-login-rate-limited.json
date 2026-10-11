@@ -1,0 +1,4 @@
+{ "id": "aml-auth-login-rate-limited", "profile": "scalar-i3-341g", "source": "inferred", "firmware": "341G", "manual_ref": "Not in Rev D manual (inferred)",
+  "fidelity_notes": "Repeated failed logins from one client return 429 with Retry-After. Default limit 10/300s. Inferred; unverified against an appliance.",
+  "request": { "method": "POST", "path": "/aml/users/login", "json": {"name": "admin", "password": "wrong"}, "repeat": 10 },
+  "expected": { "status": 429, "headers": { "Retry-After": "" } } }

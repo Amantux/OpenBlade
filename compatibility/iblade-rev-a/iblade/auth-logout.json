@@ -1,0 +1,11 @@
+{
+  "id": "iblade-logout",
+  "profile": "iblade-rev-a",
+  "source": "inferred",
+  "firmware": "RevA",
+  "manual_ref": "iBlade Rev A (Sep 2017), scaffold",
+  "auth": "admin",
+  "fidelity_notes": "Scaffold: logout via the shared AML auth route. Unverified.",
+  "request": { "method": "POST", "path": "/aml/auth/logout" },
+  "expected": { "status": 200 }
+}

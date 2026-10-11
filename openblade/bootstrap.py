@@ -25,7 +25,9 @@ from openblade.jobs.archive import ArchiveService
 from openblade.jobs.format import FormatService
 from openblade.jobs.inventory import InventoryService, run_inventory_job
 from openblade.jobs.queue import JobQueue
+from openblade.jobs.recovery import RecoveryReport, recover_after_restart
 from openblade.jobs.restore import RestoreService
+from openblade.jobs.scheduler import CatalogLeaseStore, LeaseStore
 from openblade.jobs.worker import Worker
 from openblade.nas.service import NasService
 from openblade.nas.types import (
@@ -403,6 +405,8 @@ class AppContext:
     library: LibraryBackend
     ltfs: LTFSBackend
     catalog: CatalogRepository
+    lease_store: LeaseStore
+    recovery_report: RecoveryReport
     queue: JobQueue
     worker: Worker
     inventory_service: InventoryService
@@ -593,6 +597,9 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
     else:
         library, ltfs = _create_real_backends(active_config)
     catalog = CatalogRepository(get_session())
+    # Before anything can claim a drive: fail jobs the previous process left
+    # running, release their leases, and report (never fix) drive mismatches.
+    recovery_report = recover_after_restart(catalog, library)
     _seed_nas_defaults(catalog)
     if active_config.backend == BackendMode.MOCK:
         _seed_library_defaults(catalog, active_config)
@@ -604,13 +611,16 @@ def create_context(config: OpenBladeConfig | None = None) -> AppContext:
             with suppress(Exception):
                 _seed_demo_ltfs(catalog, ltfs)
     run_inventory_job(library, catalog)
-    queue = JobQueue()
+    lease_store = CatalogLeaseStore(catalog)
+    queue = JobQueue(catalog, lease_store)
     worker = Worker(queue)
     return AppContext(
         config=active_config,
         library=library,
         ltfs=ltfs,
         catalog=catalog,
+        lease_store=lease_store,
+        recovery_report=recovery_report,
         queue=queue,
         worker=worker,
         inventory_service=InventoryService(library),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -9,6 +10,8 @@ from openblade.domain.errors import DriveOccupiedError, SlotEmptyError, SlotOccu
 from openblade.domain.models import MountMode
 from openblade.domain.policies import FormatConfirmation, SafetyToken
 from openblade.simulator.scenarios import two_drive_library
+
+pytestmark = pytest.mark.fuzz
 
 
 @given(st.lists(st.integers(min_value=1, max_value=20), min_size=0, max_size=50))

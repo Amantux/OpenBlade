@@ -242,3 +242,32 @@ def test_sessions_api_includes_upload_audit(
     assert resp.status_code == 200
     payload = resp.json()
     assert payload[0]["uploads"][0]["requested_path"] == "/openblade/inbox/upload.iso"
+
+
+def test_on_open_evicts_corrupt_cache_entry_and_rehydrates(
+    gw: ProtocolGateway, tmp_path: Path
+) -> None:
+    from openblade.catalog.db import get_session, init_db
+    from openblade.catalog.repository import CatalogRepository
+    from openblade.fuse.cache import HydrationCache
+    from openblade.fuse.hydration import Hydrator
+    from tests.unit.test_fuse_cache_integrity import BIG, BIG_SUM, _Engine, _flip_sampled_byte
+
+    init_db(f"sqlite:///{tmp_path / 'gw-cat.db'}")
+    repo = CatalogRepository(get_session())
+    group = repo.create_volume_group("g")
+    rec = repo.create_file_record("/big.bin", len(BIG), BIG_SUM, group.id)
+    inst = repo.create_file_instance(rec.id, "TAPE01", "/big.bin")
+    repo.mark_instance_archived(inst.id)
+    cache = HydrationCache(str(tmp_path / "cache"))
+    cache.store(BIG_SUM, BIG)
+    cache.verify_entry(BIG_SUM)  # a verified, intact entry
+    engine = _Engine(tmp_path / "staging")
+    gw.attach_hydrator(Hydrator(repo, cache, engine, batch_window_s=0.01))  # type: ignore[arg-type]  # _Engine is a duck-typed test double
+
+    _flip_sampled_byte(cache, BIG_SUM)
+    handle = gw.on_open("/big.bin", timeout=5.0)
+
+    assert len(engine.batches) == 1  # a hydration was requested, not the bad bytes served
+    assert cache.cache_key(BIG_SUM).read_bytes() == BIG
+    gw.on_close(handle.token)

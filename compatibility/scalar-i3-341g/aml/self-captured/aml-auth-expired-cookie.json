@@ -1,0 +1,48 @@
+{
+  "captured_from": "openblade-emulator",
+  "expected": {
+    "headers": {
+      "content-type": "application/json"
+    },
+    "json_contains": {
+      "action": "Authenticate and retry the request.",
+      "code": "AML_AUTH_REQUIRED",
+      "customCode": null,
+      "description": "Authentication required",
+      "summary": "Authentication required"
+    },
+    "status": 401
+  },
+  "fidelity_notes": "Self-captured from the OpenBlade emulator by tools/compat_capture.py: a regression guard of emulator behaviour, NOT evidence of appliance fidelity.",
+  "firmware": "341G",
+  "id": "aml-auth-expired-cookie",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "observed": {
+    "body": {
+      "action": "Authenticate and retry the request.",
+      "code": "AML_AUTH_REQUIRED",
+      "customCode": null,
+      "description": "Authentication required",
+      "summary": "Authentication required"
+    },
+    "headers": {
+      "content-length": "169",
+      "content-type": "application/json",
+      "permissions-policy": "geolocation=(), microphone=(), camera=()",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "set-cookie": "sessionID=<token>; Max-Age=0; Path=/; HttpOnly; SameSite=lax",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    }
+  },
+  "profile": "scalar-i3-341g",
+  "request": {
+    "headers": {
+      "Cookie": "sessionID=<token>"
+    },
+    "method": "GET",
+    "path": "/aml/physicalLibrary/elements"
+  },
+  "source": "self-captured"
+}

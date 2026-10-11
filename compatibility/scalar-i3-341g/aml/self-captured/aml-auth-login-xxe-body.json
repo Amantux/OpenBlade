@@ -1,0 +1,46 @@
+{
+  "captured_from": "openblade-emulator",
+  "expected": {
+    "headers": {
+      "content-type": "application/json"
+    },
+    "json_contains": {
+      "action": null,
+      "code": 400,
+      "customCode": 0,
+      "description": "Error",
+      "summary": "XML DTD/entity declarations are not allowed"
+    },
+    "status": 400
+  },
+  "fidelity_notes": "Self-captured from the OpenBlade emulator by tools/compat_capture.py: a regression guard of emulator behaviour, NOT evidence of appliance fidelity.",
+  "firmware": "341G",
+  "id": "aml-auth-login-xxe-body",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "observed": {
+    "body": {
+      "action": null,
+      "code": 400,
+      "customCode": 0,
+      "description": "Error",
+      "summary": "XML DTD/entity declarations are not allowed"
+    },
+    "headers": {
+      "content-length": "119",
+      "content-type": "application/json",
+      "permissions-policy": "geolocation=(), microphone=(), camera=()",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    }
+  },
+  "profile": "scalar-i3-341g",
+  "request": {
+    "body": "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><user><name>&x;</name><password><redacted></password></user>",
+    "content_type": "application/xml",
+    "method": "POST",
+    "path": "/aml/users/login"
+  },
+  "source": "self-captured"
+}

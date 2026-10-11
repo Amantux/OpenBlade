@@ -167,3 +167,22 @@ in pull requests and pushes to `master`, and also support manual dispatch:
   review before OpenBlade consumes it.
 - OpenBlade should fail fast on startup/test bring-up when contract expectations
   are not met.
+
+## Fault profiles
+
+`OPENBLADE_EMULATOR_FAULT_PROFILE` (runtime env; not a wire change) injects
+AML wire-level faults. Value: a preset name or a JSON object with any of:
+
+| key | type | effect |
+|---|---|---|
+| `load_fail_every` | int | every Nth `mount`-class request returns 409 `AML_CONFLICT` |
+| `auth_ttl_s` | float | sessions expire this many seconds after login (absolute, no sliding refresh) → 401 |
+| `reboot_window_s` | float | every AML request returns 503 `AML_UNAVAILABLE` + `Retry-After` for this long after start |
+| `checksum_retry_every` | int | every Nth `diagnostic`-class request takes twice its latency (simulated checksum retry) |
+
+Presets (`openblade/api/aml_faults.py`, shared with `tests/i3/timing.py`):
+`intermittent-drive` (`load_fail_every=3`), `session-expiry` (`auth_ttl_s=5`),
+`rebooting` (`reboot_window_s=20`), `degraded-media` (`checksum_retry_every=4`);
+`instant`, `realistic`, `hardware`, `normal`, `slow-robotics`, `busy-library` = no faults.
+Unset/empty = no faults. An unknown preset or malformed JSON raises
+`FaultProfileError` (never a silent no-fault run).

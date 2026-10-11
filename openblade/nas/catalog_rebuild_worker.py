@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 import structlog
 
 from openblade.catalog.repository import CatalogRepository
+from openblade.domain.clock import naive_utcnow
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
 from openblade.nas.types import CatalogRebuildRunRecord, RebuildPlanRequest, RebuildRunStatus
 
@@ -17,7 +17,7 @@ SAFE_REBUILD_PREFLIGHT_ERROR = "catalog rebuild preflight failed"
 
 
 def _utcnow_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return naive_utcnow().isoformat() + "Z"
 
 
 class CatalogRebuildWorker:

@@ -20,9 +20,19 @@ import subprocess  # argv-list only, shell=False — see _deploy()
 import sys
 import urllib.error
 import urllib.request
+from dataclasses import asdict
 
 from openblade.config_validation import is_deployable, validate_config
-from openblade.deploy import Stage, StageResult, run_deploy_pipeline
+from openblade.deploy import (
+    InvalidDigestError,
+    ReadOnlyProbe,
+    Stage,
+    StageResult,
+    parse_image_digest,
+    run_deploy_pipeline,
+    run_read_only_appliance_checks,
+    run_rollback,
+)
 from openblade.topology import is_healthy_topology, verify_topology
 
 
@@ -34,12 +44,12 @@ def _precheck() -> StageResult:
     return StageResult(Stage.PRECHECK, ok, detail, findings=blocking)
 
 
-def _deploy(cmd: list[str] | None) -> StageResult:
+def _deploy(cmd: list[str] | None, env: dict[str, str] | None = None) -> StageResult:
     if not cmd:
         return StageResult(Stage.DEPLOY, True, "skipped (no --deploy-cmd)")
     # `cmd` is already an argv list (shlex.split of --deploy-cmd) and no shell=True:
     # an operator string can therefore never become shell syntax.
-    completed = subprocess.run(cmd, check=False)
+    completed = subprocess.run(cmd, check=False, env=env)
     ok = completed.returncode == 0
     return StageResult(Stage.DEPLOY, ok, f"`{' '.join(cmd)}` exited {completed.returncode}")
 
@@ -66,8 +76,8 @@ def _postcheck_in_process() -> StageResult:
     )
 
 
-def _postcheck_live(base_url: str) -> StageResult:
-    def probe(method: str, path: str) -> int:
+def _postcheck_live(base_url: str, *, read_only_appliance_checks: bool = False) -> StageResult:
+    def raw_probe(method: str, path: str) -> int:
         req = urllib.request.Request(base_url.rstrip("/") + path, method=method)
         try:
             # The URL is operator-supplied (--postcheck-url), so the scheme is not
@@ -84,15 +94,19 @@ def _postcheck_live(base_url: str) -> StageResult:
     # satisfied by _AllWired and only endpoint reachability is meaningful. Pass no
     # emulator URLs so the fleet check surfaces its honest "unverified" warning
     # rather than falsely reporting the remote fleet as configured.
+    # In read-only appliance mode every request goes through ReadOnlyProbe, so a
+    # non-GET topology probe (e.g. the login POST) is never sent; it is reported.
+    probe = ReadOnlyProbe(raw_probe) if read_only_appliance_checks else raw_probe
     findings = verify_topology(probe=probe, context=_AllWired(), emulator_urls=[])
     ok = is_healthy_topology(findings)
     blocking = [f.code for f in findings if f.severity == "blocking"]
-    return StageResult(
-        Stage.POSTCHECK,
-        ok,
-        "live topology OK" if ok else f"blocking: {blocking}",
-        findings=blocking,
-    )
+    detail = "live topology OK" if ok else f"blocking: {blocking}"
+    if isinstance(probe, ReadOnlyProbe):
+        appliance = run_read_only_appliance_checks(probe)
+        ok = ok and appliance.ok
+        blocking += appliance.findings
+        detail += f"; {appliance.detail}; not sent (non-GET): {probe.skipped}"
+    return StageResult(Stage.POSTCHECK, ok, detail, findings=blocking)
 
 
 class _AllWired:
@@ -102,7 +116,68 @@ class _AllWired:
         return self
 
 
+def _print_report(results: list[StageResult], as_json: bool) -> None:
+    if as_json:
+        print(json.dumps([asdict(r) | {"stage": r.stage.value} for r in results], indent=2))
+        return
+    for r in results:
+        print(f"  {'✓' if r.ok else '✗'} {r.stage.value}: {r.detail}")
+
+
+def postcheck_main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="deploy.py postcheck")
+    ap.add_argument("--base-url", required=True, help="the deployed appliance to verify")
+    ap.add_argument(
+        "--read-only-appliance-checks",
+        action="store_true",
+        help="also GET /inventory and /jobs/recovery; never sends a non-GET request",
+    )
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(argv)
+    result = _postcheck_live(
+        args.base_url, read_only_appliance_checks=args.read_only_appliance_checks
+    )
+    _print_report([result], args.json)
+    return 0 if result.ok else 1
+
+
+def rollback_main(argv: list[str]) -> int:
+    # Deliberately no option that touches tape state: rollback redeploys the
+    # application image only (asserted by tests/unit/test_deploy_release.py).
+    ap = argparse.ArgumentParser(prog="deploy.py rollback")
+    ap.add_argument(
+        "--to", required=True, help="previous image digest: sha256:<hex> or <image>@sha256:<hex>"
+    )
+    ap.add_argument(
+        "--image", default="ghcr.io/amantux/openblade", help="image name for a bare digest"
+    )
+    ap.add_argument(
+        "--deploy-cmd",
+        required=True,
+        help="redeploy command; receives OPENBLADE_IMAGE=<image>@<digest> in its environment",
+    )
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(argv)
+    try:
+        image_ref = parse_image_digest(args.to, args.image)
+    except InvalidDigestError as exc:
+        print(f"rollback refused: {exc}", file=sys.stderr)
+        return 2
+    cmd = shlex.split(args.deploy_cmd)
+    result = run_rollback(
+        image_ref=image_ref,
+        redeploy=lambda ref: _deploy(cmd, env=os.environ | {"OPENBLADE_IMAGE": ref}),
+        notify=lambda msg: print(msg, file=sys.stderr),
+    )
+    _print_report([result], args.json)
+    return 0 if result.ok else 1
+
+
 def main(argv: list[str]) -> int:
+    if argv and argv[0] == "postcheck":
+        return postcheck_main(argv[1:])
+    if argv and argv[0] == "rollback":
+        return rollback_main(argv[1:])
     ap = argparse.ArgumentParser()
     ap.add_argument("--deploy-cmd", help="deploy command, e.g. 'docker compose up -d'")
     ap.add_argument("--skip-deploy", action="store_true", help="run pre/post checks only")

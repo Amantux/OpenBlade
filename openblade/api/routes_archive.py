@@ -12,9 +12,10 @@ from pydantic import BaseModel, Field
 
 from openblade.api import aml_state
 from openblade.bootstrap import AppContext, get_context
-from openblade.domain.errors import FileNotFoundError
+from openblade.domain.errors import FileNotFoundError, safe_job_error
 from openblade.jobs.archive import ArchiveRequest as ArchiveJobRequest
 from openblade.jobs.archive import run_archive_job
+from openblade.jobs.inventory import InventoryService
 from openblade.jobs.scheduler import DriveScheduler
 from openblade.jobs.shard import ShardMode
 from openblade.jobs.sharded_archive import ShardedArchiveRequest, run_sharded_archive
@@ -140,17 +141,22 @@ async def enqueue_archive(
                 context.ltfs,
                 context.catalog,
                 job.id,
+                scheduler=DriveScheduler(
+                    num_drives=len(InventoryService(context.library).snapshot().drives),
+                    store=context.lease_store,
+                    job_id=job.id,
+                ),
             )
         except Exception as exc:
             _cleanup_failed_archive(context, source_path, request.volume_group)
-            context.catalog.update_job_state(job.id, "failed", str(exc))
+            context.catalog.update_job_state(job.id, "failed", safe_job_error(exc))
             _bridge_to_aml(
                 context,
                 job_id=job.id,
                 status="failed",
                 source_path=request.source_path,
                 volume_group=request.volume_group,
-                error=str(exc),
+                error=safe_job_error(exc),
             )
             raise
         refreshed = context.catalog.get_job(job.id)
@@ -193,7 +199,11 @@ async def enqueue_sharded_archive(
                 "block_size_mb": request.block_size_mb,
             },
         )
-        scheduler = DriveScheduler(num_drives=len(context.library.inventory().drives))
+        scheduler = DriveScheduler(
+            num_drives=len(context.library.inventory().drives),
+            store=context.lease_store,
+            job_id=job.id,
+        )
         try:
             run_sharded_archive(
                 ShardedArchiveRequest(
@@ -210,14 +220,14 @@ async def enqueue_sharded_archive(
                 job.id,
             )
         except Exception as exc:
-            context.catalog.update_job_state(job.id, "failed", str(exc))
+            context.catalog.update_job_state(job.id, "failed", safe_job_error(exc))
             _bridge_to_aml(
                 context,
                 job_id=job.id,
                 status="failed",
                 source_path=request.source_path,
                 volume_group=request.volume_group,
-                error=str(exc),
+                error=safe_job_error(exc),
             )
             raise
         refreshed = context.catalog.get_job(job.id)

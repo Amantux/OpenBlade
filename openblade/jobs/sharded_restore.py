@@ -6,7 +6,6 @@ import concurrent.futures
 import logging
 import shutil
 import uuid
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -15,8 +14,10 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.errors import CartridgeOfflineError, ChecksumMismatchError, FileNotFoundError
 from openblade.domain.models import MountMode
+from openblade.jobs.reconcile import ensure_drive_reconciled
 from openblade.jobs.scheduler import DriveHandle, DriveScheduler
 from openblade.jobs.shard import DEFAULT_BLOCK_SIZE, compute_checksum, reassemble_block_stripe
+from openblade.jobs.sharded_archive import PHYSICAL_STATE_UNKNOWN, record_physical_state_unknown
 from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
 
@@ -135,6 +136,21 @@ def run_sharded_restore(
         shutil.rmtree(scratch_dir, ignore_errors=True)
 
 
+def _cleanup_failed(
+    catalog: CatalogRepository,
+    job_id: str,
+    op: str,
+    barcode: str,
+    drive: int | None,
+    handles: list[DriveHandle],
+) -> None:
+    """Journal a failed cleanup op; it is the job error only if none exists yet."""
+    record_physical_state_unknown(catalog, job_id, op, barcode, drive, handles=handles)
+    job = catalog.get_job(job_id)
+    if job is not None and not job.error:
+        catalog.update_job_state(job_id, "failed", error=PHYSICAL_STATE_UNKNOWN)
+
+
 def _restore_single(
     instance: Any,
     file_record: Any,
@@ -157,6 +173,8 @@ def _restore_single(
     drive_id = handle.drive_id
     slot_id: int | None = None
 
+    cleanup_failed = False
+    still_mounted = False
     try:
         drive_id, slot_id = _ensure_loaded(catalog, library, ltfs, handle, job_id)
         mount = ltfs.mount(instance.barcode, MountMode.READ_ONLY)
@@ -175,10 +193,17 @@ def _restore_single(
                 raise ChecksumMismatchError(error)
             shutil.copy2(tmp_dest, request.dest_path)
         finally:
-            ltfs.unmount(mount)
+            try:
+                ltfs.unmount(mount)
+            except Exception:  # noqa: BLE001 - recorded as physical_state_unknown
+                cleanup_failed = True
+                still_mounted = True
+                _cleanup_failed(catalog, job_id, "unmount", instance.barcode, drive_id, handles)
     finally:
-        if slot_id is not None:
-            with suppress(Exception):
+        # Never unload while LTFS is mounted or dirty: a failed unmount is
+        # journaled above and the drive is left for reconciliation.
+        if slot_id is not None and not still_mounted:
+            try:
                 execute_tape_request(
                     catalog,
                     library,
@@ -192,9 +217,13 @@ def _restore_single(
                         job_id=job_id,
                     ),
                 )
+            except Exception:  # noqa: BLE001 - recorded as physical_state_unknown
+                cleanup_failed = True
+                _cleanup_failed(catalog, job_id, "unload", instance.barcode, drive_id, handles)
         scheduler.release_drives(handles)
 
-    catalog.update_job_state(job_id, "completed")
+    if not cleanup_failed:
+        catalog.update_job_state(job_id, "completed")
     return ShardedRestoreResult(
         job_id=job_id,
         source_barcodes=[instance.barcode],
@@ -228,10 +257,13 @@ def _restore_sharded(
     mounts: dict[str, Any] = {}
     loaded_slots: dict[int, int | None] = {}
 
+    cleanup_failed = False
     try:
         for handle in handles:
             drive_id, slot_id = _ensure_loaded(catalog, library, ltfs, handle, job_id)
             loaded_slots[drive_id] = slot_id
+        scheduler.record_physical_drives(handles)
+        for handle in handles:
             mounts[handle.barcode] = ltfs.mount(handle.barcode, MountMode.READ_ONLY)
 
         def _read_shard(index: int, instance: Any) -> Path:
@@ -262,13 +294,22 @@ def _restore_sharded(
             catalog.update_job_state(job_id, "failed", error=error)
             raise ChecksumMismatchError(error)
     finally:
-        for mount in mounts.values():
-            with suppress(Exception):
+        drive_by_barcode = {handle.barcode: handle.physical for handle in handles}
+        still_mounted_barcodes: set[str] = set()
+        for barcode, mount in mounts.items():
+            try:
                 ltfs.unmount(mount)
+            except Exception:  # noqa: BLE001 - recorded as physical_state_unknown
+                cleanup_failed = True
+                still_mounted_barcodes.add(barcode)
+                _cleanup_failed(
+                    catalog, job_id, "unmount", barcode, drive_by_barcode.get(barcode), handles
+                )
         for handle in handles:
             slot_id = loaded_slots.get(handle.physical)
-            if slot_id is not None:
-                with suppress(Exception):
+            # Never unload while LTFS is mounted or dirty (failed unmount above).
+            if slot_id is not None and handle.barcode not in still_mounted_barcodes:
+                try:
                     execute_tape_request(
                         catalog,
                         library,
@@ -282,9 +323,15 @@ def _restore_sharded(
                             job_id=job_id,
                         ),
                     )
+                except Exception:  # noqa: BLE001 - recorded as physical_state_unknown
+                    cleanup_failed = True
+                    _cleanup_failed(
+                        catalog, job_id, "unload", handle.barcode, handle.physical, handles
+                    )
         scheduler.release_drives(handles)
 
-    catalog.update_job_state(job_id, "completed")
+    if not cleanup_failed:
+        catalog.update_job_state(job_id, "completed")
     return ShardedRestoreResult(
         job_id=job_id,
         source_barcodes=barcodes,
@@ -302,6 +349,7 @@ def _ensure_loaded(
 ) -> tuple[int, int | None]:
     loaded_drive_id = library.find_drive_by_barcode(handle.barcode)
     if loaded_drive_id is not None:
+        ensure_drive_reconciled(catalog, loaded_drive_id, handle.barcode)
         # Record the physical drive without mutating the scheduler lock key
         # (handle.drive_id); mutating it leaks the reserved drive on release.
         if loaded_drive_id != handle.drive_id:
@@ -311,6 +359,7 @@ def _ensure_loaded(
     slot_id = library.find_slot_by_barcode(handle.barcode)
     if slot_id is None:
         raise CartridgeOfflineError(f"Barcode {handle.barcode} not found in library")
+    ensure_drive_reconciled(catalog, handle.drive_id, handle.barcode)
     execute_tape_request(
         catalog,
         library,

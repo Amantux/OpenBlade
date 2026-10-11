@@ -26,6 +26,38 @@ Verified against the repo before writing (not asserted from memory):
 - `sharded_archive.py:234,251` calls `mark_instance_archived` per-shard inside the write loop → review #6 confirmed real. ✅
 - Review #5 (scheduler `drive_id` mutation) **not reproduced**: `jobs/scheduler.py` is a plain allocator with no `_load_barcode`/mutation — re-investigate before "fixing." ⚠️
 
+## Status as of 2026-10-11 (fleet integration on `feat/persistent-drive-leases`)
+
+Verified against the tree, not asserted. "Landed" = implemented and tested in-repo;
+"appliance-gated" = authored and runnable, cannot be certified without the rig.
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 1 | Relabel simplified endpoint | landed | `routes_aml_move_medium.py` |
+| 2 | ScalarCoordinate / MoveClass IntFlag | landed (bit values appliance-gated) | `domain/scalar_coordinate.py` |
+| 3 | Compatibility corpus + differential harness | scaffold + `tools/compat_capture.py` capture/sanitize/diff; 12 self-captured emulator regression cases (0 drift vs inferred set); 0 appliance captures — fidelity unverified | `compatibility/`, `tests/compat/` |
+| 4 | Atomic sharded commit | landed: STAGING→VERIFYING→one ARCHIVED commit, job journal, no suppressed cleanup errors; `physical_state_unknown` now has a consumer (drive/barcode refusal, `reconcile_drive`, fail-closed when the journal write fails); resume = report-only | `jobs/sharded_archive.py`, `catalog/repository.py`, `jobs/recovery.py` |
+| 5 | Protocol-agnostic backends + contract suite | landed (sim, in-process emulator, scsi+fake-ltfs over a stateful mtx fake, real gated) | `tests/contract/` |
+| 6 | Scheduler lease regression | landed | `tests/unit/test_drive_leases.py` |
+| 7 | Persistent drive leases | landed | `catalog/models.py::DriveLeaseRecord`, `jobs/scheduler.py` |
+| 8 | Persistent, resumable jobs | landed (recovery + report, `JobQueue` persistent over catalog jobs + leases, `POST /jobs/recovery/reconcile/{drive}`); resume-from-staged not implemented | `jobs/recovery.py`, `jobs/queue.py`, `GET /jobs/recovery` |
+| 9 | Reconstructible catalog | landed: manifest v2, commit marker last, generation pointer, sibling tapes, uncommitted-generation rebuild rule | `nas/ltfs_manifest.py`, `nas/archive_lifecycle.py`, `nas/catalog_rebuild.py` |
+| 10 | Separate the axes | landed (models + manifest/catalog carry); erasure coding modelled, unsupported | `domain/protection.py` |
+| 11 | Aggregation gate + ownership check | landed | `ci.yml::ci-gate`, `tools/ci_ownership.py` |
+| 12 | Full suite on master + nightly lanes | landed | `ci.yml::full-suite`, `nightly.yml` |
+| 13 | Consolidated emulator workflows | landed | `_emulator-boot-test.yml` |
+| 14 | Lint/type ratchet | landed (both blocking, both at zero) | `ci.yml` |
+| 15 | Workflow hardening | landed: SHA pins, per-job permissions, actionlint/zizmor/shellcheck/yamllint | `workflow-lint.yml` |
+| 16 | Differential + mutation | mutation lane landed (mutmut 3.8.0, ratchet baseline for 6/6 modules as of 2026-10-10); differential appliance-gated | `tools/mutation_run.sh`, `mutation/baseline.txt` |
+| 17 | Timing profiles + virtual clock | landed (10 profiles; the 4 fault profiles are injected by the emulator via `OPENBLADE_EMULATOR_FAULT_PROFILE`) | `tests/i3/timing.py` |
+| 18 | Auth fidelity | landed as inferred behaviour + corpus cases: session cap, strict 412, XML, 415/406, 429 Retry-After, error matrix; MFA-pending session modelled (inferred): enabled-MFA login → 200 + `Warning: 199 - "MFA Required"` (412 strict); 401 except MFA challenge/key/logout until a valid TOTP; certify by appliance capture | `routes_aml_auth.py`, `compatibility/` |
+| 19 | Real SMB/NFS protocol tests | landed (containerised rig, 33/33 pass locally incl. real SMB byte-range lock conflict; NFSv4 named-user DENY ACE enforced across uids (Fedora 41 Ganesha 5.9 stage, VFS ACL mapping; EVERYONE@ deny folds into mode bits)) | `deploy/nas-protocols/`, `tests/e2e/protocols/` |
+| 20 | Tape-native NAS models | landed; pool protection/replication, reservations (atomic reserve), export sets, vaults, VG replication and file spans persisted in the catalog; scratch-threshold health and per-barcode `reserved_bytes` mapping still TODO | `nas/state_machine.py`, `nas/media.py`, `nas/capacity.py` |
+| 21 | FUSE data plane | landed: hydrator, cache (open-time integrity check, persisted LRU index, chunked pread), xattr state, gateway; see `docs/fuse.md` | `fuse/` |
+| 22 | Self-hosted i3/LTFS lanes | appliance-gated, authored: read-only nightly + destructive with environment approval, allowlist, snapshots; reboot persistence still manual (soft-reboot automation drafted, held for operator decision) | `hardware-*.yml`, `tools/hardware/` |
+| 23 | Drive-identity bridge | implemented + test authored; uncertified — skips on mhvtl (needs an AML endpoint with matching serials); certify on appliance | `hardware/correlation.py`, `tests/hardware/readonly/` |
+| 24 | Release pipeline | landed (never exercised on a tag): build-once digest, SBOM, scans, cosign, staging→approval→production, rollback | `release.yml`, `docs/runbooks/release.md` |
+
 ---
 
 ## Phase 0 — Stop the self-referential fidelity (the meta-fix) 🟢🟡
@@ -151,10 +183,14 @@ emulator.
     (GitHub Environment approval, allowlisted sacrificial barcodes, snapshot
     before/after, load/unload, LTFS format, write/read/checksum, reboot persistence,
     sharded write+restore, safe failure injection, guaranteed recovery).
-23. 🔴 **#E Physical drive-identity bridge:** certify AML coordinate ↔ serial ↔ SCSI
-    inquiry ↔ `/dev/tape/by-id` ↔ LTFS mount on the rig before enabling any real
-    write path. Never rely on transient `/dev/nst0` ordering. (`scalar_http` currently
-    raises `NotImplementedError` here — correct until proven on metal.)
+23. 🟡 **#E Physical drive-identity bridge:** AML coordinate ↔ serial ↔ SCSI
+    inquiry ↔ `/dev/tape/by-id` ↔ LTFS mount (dry) is implemented in
+    `openblade/hardware/correlation.py` (`resolve_tape_by_id`) and covered by
+    `tests/hardware/readonly/test_drive_identity_bridge.py`. Never rely on transient
+    `/dev/nst0` ordering. Not yet certified: the test needs an AML endpoint
+    (`OPENBLADE_APPLIANCE_*`), so on the mhvtl rig it skips (2026-10-11: discovery
+    passes, bridge skipped). Certify on the appliance before enabling any real write
+    path.
 
 ## Phase 8 — Release pipeline (P2) 🟢🟡
 

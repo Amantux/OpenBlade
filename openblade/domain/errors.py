@@ -46,8 +46,24 @@ class TapeMountedError(SafetyViolationError):
     """Cannot unload a mounted tape."""
 
 
+class DriveLeasedError(SafetyViolationError):
+    """Another job holds a live lease on this drive; it may have LTFS mounted."""
+
+
+class DriveUnreconciledError(SafetyViolationError):
+    """A drive's physical state is unknown after a failed unmount/unload; reconcile first."""
+
+
+class JournalWriteError(SafetyViolationError):
+    """A drive's physical_state_unknown could not be journaled; its lease was kept."""
+
+
 class DriveBusyError(OpenBladeError):
     """Drive is busy."""
+
+
+class StaleLeaseError(OpenBladeError):
+    """A drive lease expired, was released, or was superseded (fencing token mismatch)."""
 
 
 class ChangerBusyError(OpenBladeError):

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 .ONESHELL:
-.PHONY: up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware
+.PHONY: mutation up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration test-contract seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware protocols-up protocols-down test-protocols
 
 # Start all services
 up:
@@ -65,6 +65,11 @@ test-unit:
 test-integration:
 	python3 -m pytest tests/integration/ -q --tb=short
 
+# Run the backend contract suite against every backend pairing
+# (the real+real pairing skips unless OPENBLADE_REAL_HARDWARE_ENABLED=true)
+test-contract:
+	python3 -m pytest tests/contract/ -m contract -q --tb=short
+
 # Seed default library instances (library-1, library-2, library-3)
 seed-libraries:
 	python3 -c $$'from openblade.catalog.db import get_session, init_db\nfrom openblade.catalog.repository import CatalogRepository\nfrom openblade.config import load_config\n\ndb_url = load_config().db_url\ninit_db(db_url)\nrepo = CatalogRepository(get_session())\nfor name, url in [("library-1", "http://localhost:8010"), ("library-2", "http://localhost:8011"), ("library-3", "http://localhost:8012")]:\n    existing = repo.get_library_instance_by_name(name)\n    if existing:\n        print(f"Skipped {name} (already exists)")\n        continue\n    repo.create_library_instance(name=name, emulator_url=url, model="Scalar i3")\n    print(f"Created {name}")'
@@ -106,3 +111,20 @@ all: lint test build
 
 test-hardware:
 	OPENBLADE_BACKEND=real OPENBLADE_REAL_HARDWARE_ENABLED=true python3 -m pytest tests/hardware/ -v
+
+# NAS protocol rig (SMB/NFS, containerised). Host ports: OB_SMB_PORT / OB_NFS_PORT.
+PROTOCOLS_COMPOSE = docker compose -f deploy/nas-protocols/docker-compose.yml
+
+protocols-up:
+	python -m tests.e2e.protocols.rig
+	OB_SMB_PORT=$${OB_SMB_PORT:-14450} OB_NFS_PORT=$${OB_NFS_PORT:-20490} $(PROTOCOLS_COMPOSE) up -d --build --wait
+
+protocols-down:
+	$(PROTOCOLS_COMPOSE) down -v --remove-orphans
+
+test-protocols:
+	python -m pytest -m protocols tests/e2e/protocols -q
+
+# Mutation lane (nightly); see tools/mutation_run.sh and mutation/baseline.txt
+mutation:
+	PYTHON=$${PYTHON:-python} MUTATION_TIMEOUT=$${MUTATION_TIMEOUT:-3600} tools/mutation_run.sh
