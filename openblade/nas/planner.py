@@ -356,8 +356,9 @@ class ArchivePlanner:
 
     def _check_pool_budget(self, request: ArchivePlanRequest, plan: ArchivePlan) -> None:
         """Refuse a plan whose placed bytes exceed capacity left after pool reservations."""
-        if not request.available_tapes:
+        if request.pool is None:
             return
+        # An empty server-derived tape set yields budget 0 -> blocked, never skipped.
         budget = self.pool_capacity_bytes(request) - request.pool_reserved_bytes
         placed = plan.total_bytes * plan.copies_required
         if placed > budget:

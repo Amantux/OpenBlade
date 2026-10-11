@@ -20,7 +20,7 @@ TAPE_CAPACITY = 1_000
 
 
 def _request(
-    pool_reserved_bytes: int, *, copies: int = 1, pool: str | None = None
+    pool_reserved_bytes: int, *, copies: int = 1, pool: str | None = "pool-1"
 ) -> ArchivePlanRequest:
     return ArchivePlanRequest(
         pool=pool,
@@ -30,6 +30,13 @@ def _request(
         tape_capacities={"T00001L8": TAPE_CAPACITY, "T00002L8": TAPE_CAPACITY},
         copies=copies,
         pool_reserved_bytes=pool_reserved_bytes,
+    )
+
+
+def _server_request() -> ArchivePlanRequest:
+    """A pool request as the share-push route builds it: no client capacity inputs."""
+    return ArchivePlanRequest(
+        files=["a.bin", "b.bin"], file_sizes={"a.bin": 300, "b.bin": 300}, pool="pool-1"
     )
 
 
@@ -184,26 +191,37 @@ def test_upload_share_push_plan_refused_when_pool_budget_consumed(
     from fastapi import HTTPException
 
     from openblade.api.routes_upload import _plan_share_push
+    from openblade.bootstrap import get_context
+    from openblade.nas.capacity import server_data_tapes
 
-    # Arrange: another job holds 1500 of the pool's 2000 bytes; the push needs 600.
+    # Arrange: another job holds all but 100 bytes of the SERVER-derived capacity.
+    repo.upsert_nas_pool({"id": "pool-1", "name": "P1"})
+    capacity = sum(server_data_tapes(repo, get_context().library).values())
+    now = datetime.now(UTC)
     assert repo.reserve_nas_capacity(
-        "pool-1", 1_500, "other-job", NOW + timedelta(hours=1), capacity_bytes=2_000, now=NOW
+        "pool-1",
+        capacity - 100,
+        "other-job",
+        now + timedelta(hours=1),
+        capacity_bytes=capacity,
+        now=now,
     )
 
-    # Act
+    # Act: a body-free push (the route never sends capacity inputs) needing 600 bytes.
     with pytest.raises(HTTPException) as exc_info:
-        _plan_share_push(repo, _request(0, pool="pool-1"))
+        _plan_share_push(repo, _server_request())
 
     # Assert: refused on the budget, and nothing new was booked.
     assert exc_info.value.status_code == 400
     assert POOL_BUDGET_BLOCKER in str(exc_info.value.detail)
-    assert [r["owner"] for r in repo.reservations_for_pool("pool-1", now=NOW)] == ["other-job"]
+    assert [r["owner"] for r in repo.reservations_for_pool("pool-1", now=now)] == ["other-job"]
 
 
 def test_upload_share_push_plan_books_its_reservation(repo: CatalogRepository) -> None:
     from openblade.api.routes_upload import _plan_share_push
 
-    plan = _plan_share_push(repo, _request(0, pool="pool-1"))
+    repo.upsert_nas_pool({"id": "pool-1", "name": "P1"})
+    plan = _plan_share_push(repo, _server_request())
 
     assert {r["owner"] for r in repo.reservations_for_pool("pool-1", now=datetime.now(UTC))} == {
         plan.plan_id

@@ -7,6 +7,7 @@ Pure models and functions; no I/O. Planners compose these.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from enum import Enum
@@ -14,11 +15,13 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from openblade.jobs.inventory import InventoryService
 from openblade.nas.planner import ArchivePlanner
 from openblade.nas.types import ArchivePlan, ArchivePlanRequest, NasFileState
 
 if TYPE_CHECKING:
     from openblade.catalog.repository import CatalogRepository
+    from openblade.domain.backends import LibraryBackend
 
 # --- 2. scratch thresholds -------------------------------------------------
 
@@ -79,6 +82,9 @@ class TapeFragmentation(BaseModel):
 # --- 7. capacity reservations ---------------------------------------------
 
 
+logger = logging.getLogger(__name__)
+
+
 class ReservationError(ValueError):
     """A reservation cannot be satisfied from the pool's free capacity."""
 
@@ -86,6 +92,70 @@ class ReservationError(ValueError):
 # No lease-TTL setting is in scope where plans are built, so a booked plan holds
 # its pool bytes for one hour; expiry is the release path for plans never started.
 PLAN_RESERVATION_TTL = timedelta(hours=1)
+
+
+class PoolNotFoundError(LookupError):
+    """A pool-budgeted plan names a pool id the catalog does not know."""
+
+
+class ClientBudgetFieldsError(ValueError):
+    """A pool-budgeted request carried capacity inputs only the server may supply."""
+
+
+# With ``pool`` set these come from the library + catalog; a client value is refused
+# (never silently overwritten) so an inflated budget cannot be smuggled in.
+SERVER_BUDGET_FIELDS = (
+    "available_tapes",
+    "tape_capacities",
+    "reserved_bytes",
+    "pool_reserved_bytes",
+)
+
+
+def server_data_tapes(
+    repository: CatalogRepository, library: LibraryBackend | None
+) -> dict[str, int]:
+    """Writable data tapes (barcode -> usable bytes) from library inventory + catalog.
+
+    The library holds blank/scratch media the catalog has never seen, so slots count
+    at the planner's default capacity; catalogued cartridges use their recorded
+    ``capacity_bytes - used_bytes``. Cleaning cartridges are excluded.
+    """
+    capacities: dict[str, int] = {}
+    if library is not None:
+        try:
+            for slot in InventoryService(library).snapshot().slots:
+                if slot.barcode is not None:
+                    capacities[str(slot.barcode)] = ArchivePlanner.DEFAULT_TAPE_CAPACITY
+        except Exception as exc:  # noqa: BLE001 - library offline: fall back to the catalog alone
+            logger.warning("library inventory unavailable for pool budget", exc_info=exc)
+    for cartridge in repository.list_cartridges():
+        barcode = str(cartridge.barcode or "").strip()
+        if barcode:
+            capacities[barcode] = max(0, int(cartridge.capacity_bytes) - int(cartridge.used_bytes))
+    return {b: capacities[b] for b in sorted(capacities) if not b.upper().startswith("CLN")}
+
+
+def server_budget_request(
+    repository: CatalogRepository, request: ArchivePlanRequest, library: LibraryBackend | None
+) -> ArchivePlanRequest:
+    """Replace a pool request's capacity inputs with server-derived ones.
+
+    Pool-less requests are returned unchanged (they get no pool budget). Raises
+    ``ClientBudgetFieldsError`` if the body supplied any ``SERVER_BUDGET_FIELDS`` and
+    ``PoolNotFoundError`` for an unknown pool id.
+    """
+    if request.pool is None:
+        return request
+    supplied = [name for name in SERVER_BUDGET_FIELDS if name in request.model_fields_set]
+    if supplied:
+        raise ClientBudgetFieldsError(
+            f"{', '.join(supplied)} cannot be supplied when pool is set; the server derives them"
+        )
+    if repository.get_nas_pool(request.pool) is None:
+        raise PoolNotFoundError(f"Pool {request.pool} not found")
+    tapes = server_data_tapes(repository, library)
+    return request.model_copy(update={"available_tapes": list(tapes), "tape_capacities": tapes})
 
 
 def plan_with_pool_reservation(
