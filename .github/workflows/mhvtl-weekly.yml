@@ -358,7 +358,11 @@ jobs:
             # the scratch cartridges. Without it those suites fail on mount
             # rather than skip, which would make the canary permanently red for
             # a reason that is not a product defect.
-            suites=(tests/hardware/test_device_discovery.py
+            # The drive-identity bridge is a mount DRY (no mkltfs needed). It
+            # skips (reported via -rs) unless OPENBLADE_APPLIANCE_* point at an
+            # AML endpoint, which this rig does not provide.
+            suites=(tests/hardware/readonly/test_drive_identity_bridge.py
+                    tests/hardware/test_device_discovery.py
                     tests/hardware/test_changer_operations.py
                     tests/hardware/test_drive_health.py
                     tests/hardware/test_catalog_integrity.py)
