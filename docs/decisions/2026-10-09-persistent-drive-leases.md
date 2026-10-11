@@ -282,18 +282,37 @@ Decisions (WS-capacity, fleet round 3):
    `pool_reserved_bytes` (sum of unexpired `nas_reservations` for the pool) and adds
    the `POOL_BUDGET_BLOCKER` when placed bytes exceed total tape capacity minus that
    budget. `reserved_bytes` stays per barcode for explicit holds.
-2. **A plan books its own reservation.** `capacity.plan_with_pool_reservation` books
-   `total_bytes * copies` under `owner=plan_id` for 1h through the atomic
-   `reserve_nas_capacity`; a lost race raises `ReservationError` (HTTP 409). Both
-   `/nas/archive-plan` and the upload share-push use it. `run_ingest_job` deletes the
-   owner's rows once the job is archived, failed or cancelled; expiry covers the rest.
-3. **Scratch** = `volume_group_id IS NULL AND state = 'in_slot'`
-   (`count_scratch_cartridges`); the planner's barcode heuristic is unchanged.
-4. **Health**: a `scratch` component only when thresholds are configured; WARN is OK
+2. **The budget is server-derived.** When `pool` is set on `/nas/archive-plan` (and
+   always on the upload share-push), `capacity.server_budget_request` derives
+   `available_tapes` and `tape_capacities` from the library inventory + catalog
+   (`server_data_tapes`: `capacity_bytes - used_bytes`, excluding cleaning cartridges
+   and volume-group members). A body that also supplies `tape_capacities`,
+   `available_tapes` or `reserved_bytes` is rejected with 422 (never silently
+   overwritten); an unknown pool id is 404. An empty server-derived tape set blocks
+   the plan instead of skipping the budget check. Pool-less requests keep the
+   body-driven path but get no pool budget and no booking.
+3. **Book at consumption, not at preview.** `capacity.plan_with_pool_budget` only
+   computes the budget; previews book nothing, so repeating a preview is never
+   refused. `book_plan_capacity` books `total_bytes * copies` under `owner=plan_id`
+   for 1h through the atomic `reserve_nas_capacity`, called from
+   `POST /nas/ingest/start` and the share-push before the job exists; a lost race or
+   exhausted budget raises `ReservationError` -> 409 and no job is created.
+4. **Release.** `run_ingest_job` deletes the owner's rows when the job ends archived,
+   failed or cancelled, and also whenever the executor raises (the status may still
+   be non-terminal and nothing will resume the job). A failing release is logged
+   ("reservation release failed") and never replaces the executor's exception; the
+   row then expires by TTL.
+5. **Scratch** is counted from the library inventory
+   (`InventoryService(library).snapshot()`, `count_scratch_tapes`): slots holding a
+   barcode that is not a volume-group member, not catalogued with `used_bytes > 0`,
+   and not a `CLN` cartridge. Blank tapes have no catalog row, so a catalog count
+   would report a library full of scratch as CRITICAL.
+6. **Health**: a `scratch` component only when thresholds are configured; WARN is OK
    with a message, CRITICAL is DEGRADED, never UNHEALTHY. Thresholds are managed by
    `GET`/`PUT /nas/scratch-thresholds` (404 unset, 422 on `warn < min`).
 
-Reviewer risks still open: `request.pool` is used as the pool id without checking it
-names a configured pool; client-supplied `tape_capacities` set the capacity the
-booking is checked against, so a caller can inflate it; and an abandoned plan holds
-its bytes for the full hour.
+Reviewer risks still open: `book_plan_capacity` books against `plan.pool`, not the
+`pool_id` of the start request, so a plan previewed for one pool and started into
+another is budgeted against the first; the share-push registers its plan before
+booking, so a 409 there leaves a registered plan with no job; and a started job that
+never reaches a terminal state without raising holds its bytes for the full hour.

@@ -12,7 +12,12 @@ from sqlalchemy import func, select
 from openblade.catalog.models import Cartridge, NasDataset, NasFileRecord, PathMapping
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.clock import naive_utcnow
-from openblade.nas.capacity import ScratchHealth, ScratchThresholds, evaluate_scratch
+from openblade.nas.capacity import (
+    ScratchHealth,
+    ScratchThresholds,
+    count_scratch_tapes,
+    evaluate_scratch,
+)
 from openblade.nas.types import (
     CatalogStatusResponse,
     ComponentHealth,
@@ -73,8 +78,8 @@ class HealthService:
             if stored is None:
                 return None
             thresholds = ScratchThresholds.model_validate(stored)
-            count = self.repo.count_scratch_cartridges()
-        except Exception:  # noqa: BLE001 - health must not raise; DB failure is reported by the database component
+            count = count_scratch_tapes(self.repo, self.library)
+        except Exception:  # noqa: BLE001 - health must not raise; DB/library failures are reported by their own components
             logger.warning("scratch health probe failed", exc_info=True)
             return None
         level = evaluate_scratch(count, thresholds)

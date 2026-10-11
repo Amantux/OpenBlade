@@ -21,9 +21,13 @@ from openblade.domain.clock import naive_utcnow
 from openblade.domain.models import MountHandle, MountMode
 from openblade.domain.wire import coerce_int
 from openblade.nas.capacity import (
+    ClientBudgetFieldsError,
+    PoolNotFoundError,
     ReservationError,
     ScratchThresholds,
-    plan_with_pool_reservation,
+    book_plan_capacity,
+    plan_with_pool_budget,
+    server_budget_request,
 )
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
 from openblade.nas.catalog_rebuild_worker import SAFE_REBUILD_PREFLIGHT_ERROR, CatalogRebuildWorker
@@ -1161,6 +1165,14 @@ async def archive_plan(
     request: ArchivePlanRequest,
     service: NasService = Depends(get_nas_service),
 ) -> ArchivePlan:
+    """Plan an archive.
+
+    With ``pool`` set, tapes and capacities are derived server-side from the library
+    inventory + catalog: body-supplied ``available_tapes``/``tape_capacities``/
+    ``reserved_bytes``/``pool_reserved_bytes`` are refused (422) and an unknown pool
+    is 404. Without ``pool`` the body-supplied inputs drive a preview-only plan that
+    gets no pool budget and books nothing.
+    """
     policy = None
     if request.policy_id is not None:
         policy = service.get_policy(request.policy_id)
@@ -1191,12 +1203,14 @@ async def archive_plan(
         request = request.model_copy(update=updates)
 
     try:
-        plan = plan_with_pool_reservation(
-            service.repository, request, now=datetime.now(timezone.utc)
-        )
-    except ReservationError as exc:
-        # Curated domain message (pool id only); two plans raced for the same bytes.
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        request = server_budget_request(service.repository, request, get_context().library)
+    except ClientBudgetFieldsError as exc:
+        # Curated domain message naming only the refused field names.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PoolNotFoundError as exc:
+        # Curated domain message (pool id only).
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    plan = plan_with_pool_budget(service.repository, request, now=datetime.now(timezone.utc))
     if policy is not None:
         plan.policy_name = policy.name
         plan.policy_type = policy.policy_type
@@ -1236,6 +1250,13 @@ async def start_ingest(
         policy = service.get_policy(plan.policy_name)
         if policy is not None and not policy.auto_clean_before_archive:
             auto_clean_drives = False
+    try:
+        book_plan_capacity(
+            service.repository, plan, context.library, now=datetime.now(timezone.utc)
+        )
+    except ReservationError as exc:
+        # Curated domain message (pool + plan id only); the pool budget is exhausted.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if auto_clean_drives:
         cleaned_drives = _auto_clean_required_drives()
     job = start_ingest_job(

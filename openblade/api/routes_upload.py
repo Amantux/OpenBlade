@@ -53,7 +53,12 @@ from openblade.bootstrap import get_catalog, get_context
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.wire import coerce_int
-from openblade.nas.capacity import ReservationError, plan_with_pool_reservation
+from openblade.nas.capacity import (
+    ReservationError,
+    book_plan_capacity,
+    plan_with_pool_budget,
+    server_budget_request,
+)
 from openblade.nas.ingest import (
     get_ingest_job,
     register_archive_plan,
@@ -201,37 +206,15 @@ def _resolve_pool_for_share(
 
 
 def _plan_share_push(repo: CatalogRepository, request: ArchivePlanRequest) -> ArchivePlan:
-    """Plan a share push against the pool budget and book it, like ``/nas/archive-plan``."""
-    try:
-        plan = plan_with_pool_reservation(repo, request, now=datetime.now(timezone.utc))
-    except ReservationError as exc:
-        # Curated domain message (pool id only); two plans raced for the same bytes.
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    """Plan a share push against the server-derived pool budget (booked at ingest start)."""
+    request = server_budget_request(repo, request, get_context().library)
+    plan = plan_with_pool_budget(repo, request, now=datetime.now(timezone.utc))
     if not plan.is_safe_to_enqueue:
         raise HTTPException(
             status_code=400,
             detail=f"Archive plan is not safe to enqueue: {', '.join(plan.enqueue_blockers)}",
         )
     return plan
-
-
-def _available_data_tapes(repo: CatalogRepository) -> list[str]:
-    barcodes: set[str] = set()
-    # The physical library holds the writable media (scratch/loaded tapes); the
-    # catalog only tracks already-archived cartridges, so it can be empty even
-    # when tapes are available. Source from both.
-    try:
-        for slot in get_context().library.inventory().slots:
-            if slot.barcode is not None:
-                barcodes.add(str(slot.barcode))
-    except Exception:  # noqa: BLE001 - library unavailable falls back to the catalog
-        pass
-    for cartridge in repo.list_cartridges():
-        barcode = cartridge.get("barcode") if isinstance(cartridge, dict) else None
-        value = str(barcode or "").strip()
-        if value:
-            barcodes.add(value)
-    return sorted(value for value in barcodes if not value.upper().startswith("CLN"))
 
 
 def _safe_workspace_path(workspace: Path, relative_path: str) -> Path:
@@ -604,7 +587,6 @@ async def push_staged_files_to_share(
             file_sizes[candidate] = max(int(destination_path.stat().st_size), 0)
             staged_file_ids.append(file_id)
 
-        available_tapes = _available_data_tapes(repo)
         request_data = {
             "policy_id": policy.id,
             "policy_type": policy.policy_type,
@@ -613,7 +595,6 @@ async def push_staged_files_to_share(
             "pool": pool_id,
             "files": relative_files,
             "file_sizes": file_sizes,
-            "available_tapes": available_tapes,
             "copies": max(int(policy.copies_required), 1),
             "verify_before_archive": bool(policy.verify_before_archive),
             "verify_after_archive": bool(policy.verify_after_archive),
@@ -632,6 +613,11 @@ async def push_staged_files_to_share(
         dataset_name = request.dataset_name or (
             f"share-push-{pool_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         )
+        try:
+            book_plan_capacity(repo, plan, get_context().library, now=datetime.now(timezone.utc))
+        except ReservationError as exc:
+            # Curated domain message (pool + plan id only); the pool budget is exhausted.
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         job = start_ingest_job(
             plan=plan,
             dataset_name=dataset_name,

@@ -7,6 +7,7 @@ Pure models and functions; no I/O. Planners compose these.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from enum import Enum
@@ -14,11 +15,13 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from openblade.jobs.inventory import InventoryService
 from openblade.nas.planner import ArchivePlanner
 from openblade.nas.types import ArchivePlan, ArchivePlanRequest, NasFileState
 
 if TYPE_CHECKING:
     from openblade.catalog.repository import CatalogRepository
+    from openblade.domain.backends import LibraryBackend
 
 # --- 2. scratch thresholds -------------------------------------------------
 
@@ -79,6 +82,9 @@ class TapeFragmentation(BaseModel):
 # --- 7. capacity reservations ---------------------------------------------
 
 
+logger = logging.getLogger(__name__)
+
+
 class ReservationError(ValueError):
     """A reservation cannot be satisfied from the pool's free capacity."""
 
@@ -88,20 +94,111 @@ class ReservationError(ValueError):
 PLAN_RESERVATION_TTL = timedelta(hours=1)
 
 
-def plan_with_pool_reservation(
+class PoolNotFoundError(LookupError):
+    """A pool-budgeted plan names a pool id the catalog does not know."""
+
+
+class ClientBudgetFieldsError(ValueError):
+    """A pool-budgeted request carried capacity inputs only the server may supply."""
+
+
+# With ``pool`` set these come from the library + catalog; a client value is refused
+# (never silently overwritten) so an inflated budget cannot be smuggled in.
+SERVER_BUDGET_FIELDS = (
+    "available_tapes",
+    "tape_capacities",
+    "reserved_bytes",
+    "pool_reserved_bytes",
+)
+
+
+def server_data_tapes(
+    repository: CatalogRepository, library: LibraryBackend | None
+) -> dict[str, int]:
+    """Writable data tapes (barcode -> usable bytes) from library inventory + catalog.
+
+    The library holds blank/scratch media the catalog has never seen, so slots count
+    at the planner's default capacity; catalogued cartridges use their recorded
+    ``capacity_bytes - used_bytes``. Cleaning cartridges and volume-group members
+    (already assigned elsewhere) are excluded.
+    """
+    capacities: dict[str, int] = {}
+    if library is not None:
+        try:
+            for slot in InventoryService(library).snapshot().slots:
+                if slot.barcode is not None:
+                    capacities[str(slot.barcode)] = ArchivePlanner.DEFAULT_TAPE_CAPACITY
+        except Exception as exc:  # noqa: BLE001 - library offline: fall back to the catalog alone
+            logger.warning("library inventory unavailable for pool budget", exc_info=exc)
+    assigned: set[str] = set()
+    for cartridge in repository.list_cartridges():
+        barcode = str(cartridge.barcode or "").strip()
+        if not barcode:
+            continue
+        if cartridge.volume_group_id is not None:
+            assigned.add(barcode)
+        capacities[barcode] = max(0, int(cartridge.capacity_bytes) - int(cartridge.used_bytes))
+    return {
+        b: capacities[b]
+        for b in sorted(capacities)
+        if b not in assigned and not b.upper().startswith("CLN")
+    }
+
+
+def count_scratch_tapes(repository: CatalogRepository, library: LibraryBackend) -> int:
+    """Blank tapes in library slots: not in any volume group, not catalogued as written.
+
+    The catalog only holds catalogued/archived cartridges, so scratch stock must be
+    counted from the inventory snapshot. Cleaning cartridges are excluded.
+    """
+    excluded = {
+        str(c.barcode).strip()
+        for c in repository.list_cartridges()
+        if c.barcode and (c.volume_group_id is not None or int(c.used_bytes) > 0)
+    }
+    barcodes = {
+        str(slot.barcode)
+        for slot in InventoryService(library).snapshot().slots
+        if slot.barcode is not None
+    }
+    return sum(1 for b in barcodes if b not in excluded and not b.upper().startswith("CLN"))
+
+
+def server_budget_request(
+    repository: CatalogRepository, request: ArchivePlanRequest, library: LibraryBackend | None
+) -> ArchivePlanRequest:
+    """Replace a pool request's capacity inputs with server-derived ones.
+
+    Pool-less requests are returned unchanged (they get no pool budget). Raises
+    ``ClientBudgetFieldsError`` if the body supplied any ``SERVER_BUDGET_FIELDS`` and
+    ``PoolNotFoundError`` for an unknown pool id.
+    """
+    if request.pool is None:
+        return request
+    supplied = [name for name in SERVER_BUDGET_FIELDS if name in request.model_fields_set]
+    if supplied:
+        raise ClientBudgetFieldsError(
+            f"{', '.join(supplied)} cannot be supplied when pool is set; the server derives them"
+        )
+    if repository.get_nas_pool(request.pool) is None:
+        raise PoolNotFoundError(f"Pool {request.pool} not found")
+    tapes = server_data_tapes(repository, library)
+    return request.model_copy(update={"available_tapes": list(tapes), "tape_capacities": tapes})
+
+
+def plan_with_pool_budget(
     repository: CatalogRepository,
     request: ArchivePlanRequest,
     *,
     now: datetime,
     planner: ArchivePlanner | None = None,
 ) -> ArchivePlan:
-    """Plan against the pool's reservation budget, then book the plan's own bytes.
+    """Plan against the pool's reservation budget without booking anything.
 
     Unexpired ``NasReservation`` rows for ``request.pool`` are the source of truth:
-    their sum becomes ``pool_reserved_bytes``. A safe plan books
-    ``total_bytes * copies`` under ``owner=plan_id``; if the atomic booking loses
-    a race, ``ReservationError`` is raised. Requests without a pool are planned
-    unchanged.
+    their sum becomes ``pool_reserved_bytes``. Previews never consume budget; the
+    plan's bytes are booked only when ingest starts (``book_plan_capacity``).
+    Requests without a pool are planned unchanged.
     """
     planner = planner or ArchivePlanner()
     pool_id = request.pool
@@ -110,21 +207,35 @@ def plan_with_pool_reservation(
     reserved = sum(
         int(cast(int, row["bytes"])) for row in repository.reservations_for_pool(pool_id, now=now)
     )
-    request = request.model_copy(update={"pool_reserved_bytes": reserved})
-    plan = planner.plan(request)
-    if not plan.is_safe_to_enqueue:
-        return plan
+    return planner.plan(request.model_copy(update={"pool_reserved_bytes": reserved}))
+
+
+def book_plan_capacity(
+    repository: CatalogRepository,
+    plan: ArchivePlan,
+    library: LibraryBackend | None,
+    *,
+    now: datetime,
+) -> None:
+    """Book a pool plan's bytes at ingest start (owner=plan_id, TTL 1h).
+
+    The capacity ceiling is server-derived (``server_data_tapes``), never taken from
+    the stored request. Pool-less plans book nothing. Raises ``ReservationError``
+    when the atomic booking is refused, so the caller must not create the job.
+    """
+    pool_id = plan.pool
+    if pool_id is None:
+        return
     booked = repository.reserve_nas_capacity(
         pool_id,
         plan.total_bytes * plan.copies_required,
         plan.plan_id,
         now + PLAN_RESERVATION_TTL,
-        capacity_bytes=planner.pool_capacity_bytes(request),
+        capacity_bytes=sum(server_data_tapes(repository, library).values()),
         now=now,
     )
     if not booked:
-        raise ReservationError(f"pool {pool_id} capacity was reserved by a concurrent plan")
-    return plan
+        raise ReservationError(f"pool {pool_id} cannot reserve capacity for plan {plan.plan_id}")
 
 
 class CapacityReservation(BaseModel):
