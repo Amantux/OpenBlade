@@ -158,20 +158,19 @@ def server_budget_request(
     return request.model_copy(update={"available_tapes": list(tapes), "tape_capacities": tapes})
 
 
-def plan_with_pool_reservation(
+def plan_with_pool_budget(
     repository: CatalogRepository,
     request: ArchivePlanRequest,
     *,
     now: datetime,
     planner: ArchivePlanner | None = None,
 ) -> ArchivePlan:
-    """Plan against the pool's reservation budget, then book the plan's own bytes.
+    """Plan against the pool's reservation budget without booking anything.
 
     Unexpired ``NasReservation`` rows for ``request.pool`` are the source of truth:
-    their sum becomes ``pool_reserved_bytes``. A safe plan books
-    ``total_bytes * copies`` under ``owner=plan_id``; if the atomic booking loses
-    a race, ``ReservationError`` is raised. Requests without a pool are planned
-    unchanged.
+    their sum becomes ``pool_reserved_bytes``. Previews never consume budget; the
+    plan's bytes are booked only when ingest starts (``book_plan_capacity``).
+    Requests without a pool are planned unchanged.
     """
     planner = planner or ArchivePlanner()
     pool_id = request.pool
@@ -180,21 +179,35 @@ def plan_with_pool_reservation(
     reserved = sum(
         int(cast(int, row["bytes"])) for row in repository.reservations_for_pool(pool_id, now=now)
     )
-    request = request.model_copy(update={"pool_reserved_bytes": reserved})
-    plan = planner.plan(request)
-    if not plan.is_safe_to_enqueue:
-        return plan
+    return planner.plan(request.model_copy(update={"pool_reserved_bytes": reserved}))
+
+
+def book_plan_capacity(
+    repository: CatalogRepository,
+    plan: ArchivePlan,
+    library: LibraryBackend | None,
+    *,
+    now: datetime,
+) -> None:
+    """Book a pool plan's bytes at ingest start (owner=plan_id, TTL 1h).
+
+    The capacity ceiling is server-derived (``server_data_tapes``), never taken from
+    the stored request. Pool-less plans book nothing. Raises ``ReservationError``
+    when the atomic booking is refused, so the caller must not create the job.
+    """
+    pool_id = plan.pool
+    if pool_id is None:
+        return
     booked = repository.reserve_nas_capacity(
         pool_id,
         plan.total_bytes * plan.copies_required,
         plan.plan_id,
         now + PLAN_RESERVATION_TTL,
-        capacity_bytes=planner.pool_capacity_bytes(request),
+        capacity_bytes=sum(server_data_tapes(repository, library).values()),
         now=now,
     )
     if not booked:
-        raise ReservationError(f"pool {pool_id} capacity was reserved by a concurrent plan")
-    return plan
+        raise ReservationError(f"pool {pool_id} cannot reserve capacity for plan {plan.plan_id}")
 
 
 class CapacityReservation(BaseModel):

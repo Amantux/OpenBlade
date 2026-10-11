@@ -11,7 +11,8 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.nas.capacity import (
     PLAN_RESERVATION_TTL,
     ReservationError,
-    plan_with_pool_reservation,
+    book_plan_capacity,
+    plan_with_pool_budget,
 )
 from openblade.nas.planner import POOL_BUDGET_BLOCKER, ArchivePlanner
 from openblade.nas.types import ArchivePlanRequest
@@ -77,34 +78,49 @@ def repo(tmp_path: Path) -> CatalogRepository:
     return make_nas_service(tmp_path).repository
 
 
-def test_booked_plan_consumes_pool_so_second_plan_is_refused(repo: CatalogRepository) -> None:
+@pytest.fixture
+def two_tapes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Server-derived pool capacity of 2000 bytes for ``book_plan_capacity``."""
+    monkeypatch.setattr(
+        "openblade.nas.capacity.server_data_tapes",
+        lambda repo, library: {"T00001L8": TAPE_CAPACITY, "T00002L8": TAPE_CAPACITY},
+    )
+
+
+@pytest.mark.usefixtures("two_tapes")
+def test_preview_books_nothing_but_second_start_is_refused(repo: CatalogRepository) -> None:
     # Arrange: pool of 2000 bytes; another job already holds 800.
     assert repo.reserve_nas_capacity(
         "pool-1", 800, "other-job", NOW + timedelta(hours=1), capacity_bytes=2_000, now=NOW
     )
 
-    # Act: first plan places 600 and books it (1400 held); second places 601 > 600 left.
-    first = plan_with_pool_reservation(repo, _request(0, pool="pool-1"), now=NOW)
+    # Act: 600- and 601-byte previews both fit (nothing booked); only one START can book.
+    first = plan_with_pool_budget(repo, _request(0, pool="pool-1"), now=NOW)
     second_request = _request(0, pool="pool-1").model_copy(
         update={"file_sizes": {"/a": 300, "/b": 301}}
     )
-    second = plan_with_pool_reservation(repo, second_request, now=NOW)
+    second = plan_with_pool_budget(repo, second_request, now=NOW)
+    book_plan_capacity(repo, first, None, now=NOW)
 
     # Assert
-    assert first.is_safe_to_enqueue
+    assert first.is_safe_to_enqueue and second.is_safe_to_enqueue
+    with pytest.raises(ReservationError):
+        book_plan_capacity(repo, second, None, now=NOW)
     assert {r["owner"] for r in repo.reservations_for_pool("pool-1", now=NOW)} == {
         "other-job",
         first.plan_id,
     }
-    assert POOL_BUDGET_BLOCKER in second.enqueue_blockers
 
 
+@pytest.mark.usefixtures("two_tapes")
 def test_booking_expires_after_ttl(repo: CatalogRepository) -> None:
-    plan_with_pool_reservation(repo, _request(0, pool="pool-1", copies=3), now=NOW)
+    first = plan_with_pool_budget(repo, _request(0, pool="pool-1", copies=3), now=NOW)
+    book_plan_capacity(repo, first, None, now=NOW)
 
-    later = plan_with_pool_reservation(
+    later = plan_with_pool_budget(
         repo, _request(0, pool="pool-1", copies=3), now=NOW + PLAN_RESERVATION_TTL
     )
+    book_plan_capacity(repo, later, None, now=NOW + PLAN_RESERVATION_TTL)
 
     assert later.is_safe_to_enqueue
 
@@ -114,24 +130,22 @@ def test_expired_reservation_is_ignored(repo: CatalogRepository) -> None:
         "pool-1", 2_000, "stale-job", NOW + timedelta(seconds=1), capacity_bytes=2_000, now=NOW
     )
 
-    plan = plan_with_pool_reservation(
-        repo, _request(0, pool="pool-1"), now=NOW + timedelta(minutes=1)
-    )
+    plan = plan_with_pool_budget(repo, _request(0, pool="pool-1"), now=NOW + timedelta(minutes=1))
 
     assert plan.is_safe_to_enqueue
 
 
+@pytest.mark.usefixtures("two_tapes")
 def test_lost_booking_race_raises_typed_error(repo: CatalogRepository) -> None:
     # Simulate a concurrent writer landing between the budget read and the booking.
-    class RacingRepo:
-        def reservations_for_pool(self, pool_id: str, *, now: datetime) -> list[dict[str, object]]:
-            return []
+    plan = plan_with_pool_budget(repo, _request(0, pool="pool-1"), now=NOW)
 
+    class RacingRepo:
         def reserve_nas_capacity(self, *args: object, **kwargs: object) -> bool:
             return False
 
     with pytest.raises(ReservationError):
-        plan_with_pool_reservation(RacingRepo(), _request(0, pool="pool-1"), now=NOW)  # type: ignore[arg-type]
+        book_plan_capacity(RacingRepo(), plan, None, now=NOW)  # type: ignore[arg-type]
 
 
 def _seed_cartridges(repo: CatalogRepository, scratch: int) -> int:
@@ -217,15 +231,14 @@ def test_upload_share_push_plan_refused_when_pool_budget_consumed(
     assert [r["owner"] for r in repo.reservations_for_pool("pool-1", now=now)] == ["other-job"]
 
 
-def test_upload_share_push_plan_books_its_reservation(repo: CatalogRepository) -> None:
+def test_upload_share_push_plan_books_nothing_until_start(repo: CatalogRepository) -> None:
     from openblade.api.routes_upload import _plan_share_push
 
     repo.upsert_nas_pool({"id": "pool-1", "name": "P1"})
     plan = _plan_share_push(repo, _server_request())
 
-    assert {r["owner"] for r in repo.reservations_for_pool("pool-1", now=datetime.now(UTC))} == {
-        plan.plan_id
-    }
+    assert plan.is_safe_to_enqueue
+    assert repo.reservations_for_pool("pool-1", now=datetime.now(UTC)) == []
 
 
 def test_finished_job_releases_its_plan_reservation(tmp_path: Path) -> None:
@@ -241,7 +254,7 @@ def test_finished_job_releases_its_plan_reservation(tmp_path: Path) -> None:
         "pool-1", 2_000, plan.plan_id, now + PLAN_RESERVATION_TTL, capacity_bytes=2_000, now=now
     )
     assert POOL_BUDGET_BLOCKER in (
-        plan_with_pool_reservation(repo, _request(0, pool="pool-1"), now=now).enqueue_blockers
+        plan_with_pool_budget(repo, _request(0, pool="pool-1"), now=now).enqueue_blockers
     )
     job = start_ingest_job(
         plan=plan,
@@ -257,7 +270,7 @@ def test_finished_job_releases_its_plan_reservation(tmp_path: Path) -> None:
     # Assert: terminal job freed the booking, so the same plan now fits.
     assert finished.status.value in {"archived", "failed", "cancelled"}
     assert repo.reservations_for_pool("pool-1", now=now) == []
-    assert plan_with_pool_reservation(repo, _request(0, pool="pool-1"), now=now).is_safe_to_enqueue
+    assert plan_with_pool_budget(repo, _request(0, pool="pool-1"), now=now).is_safe_to_enqueue
 
 
 def test_delete_reservations_for_owner_keeps_other_owners(repo: CatalogRepository) -> None:

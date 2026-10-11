@@ -59,3 +59,39 @@ def test_poolless_request_keeps_body_inputs_and_no_budget() -> None:
     }
     plan = client.post("/nas/archive-plan", json=body).json()
     assert POOL_BUDGET_BLOCKER not in plan["enqueue_blockers"]
+
+
+def test_preview_books_nothing_but_second_start_is_409(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from openblade.bootstrap import get_context
+    from openblade.nas.capacity import server_data_tapes
+
+    # Arrange: keep started jobs running (no release) and leave 1500 bytes of pool budget.
+    monkeypatch.setattr("openblade.api.nas_config.run_ingest_job", lambda *a, **k: None)
+    context = get_context()
+    repo = context.catalog
+    capacity = sum(server_data_tapes(repo, context.library).values())
+    now = datetime.now(UTC)
+    assert repo.reserve_nas_capacity(
+        "pool-1",
+        capacity - 1_500,
+        "other-job",
+        now + timedelta(hours=1),
+        capacity_bytes=capacity,
+        now=now,
+    )
+
+    # Act: two previews of 1000 bytes each, then start both.
+    first = client.post("/nas/archive-plan", json=_body(1_000, ingest_mode="source_stream")).json()
+    second = client.post("/nas/archive-plan", json=_body(1_000, ingest_mode="source_stream")).json()
+    start = {"dataset_name": "ds", "pool_id": "pool-1", "auto_clean_drives": False}
+    first_start = client.post("/nas/ingest/start", json={**start, "plan_id": first["plan_id"]})
+    second_start = client.post("/nas/ingest/start", json={**start, "plan_id": second["plan_id"]})
+
+    # Assert: previews never consumed budget; the second START lost to the first booking.
+    assert first["is_safe_to_enqueue"] and second["is_safe_to_enqueue"]
+    assert first_start.status_code == 200, first_start.text
+    assert second_start.status_code == 409
+    owners = {r["owner"] for r in repo.reservations_for_pool("pool-1", now=now)}
+    assert owners == {"other-job", first["plan_id"]}

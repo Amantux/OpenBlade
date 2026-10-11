@@ -55,7 +55,8 @@ from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.wire import coerce_int
 from openblade.nas.capacity import (
     ReservationError,
-    plan_with_pool_reservation,
+    book_plan_capacity,
+    plan_with_pool_budget,
     server_budget_request,
 )
 from openblade.nas.ingest import (
@@ -205,13 +206,9 @@ def _resolve_pool_for_share(
 
 
 def _plan_share_push(repo: CatalogRepository, request: ArchivePlanRequest) -> ArchivePlan:
-    """Plan a share push against the pool budget and book it, like ``/nas/archive-plan``."""
+    """Plan a share push against the server-derived pool budget (booked at ingest start)."""
     request = server_budget_request(repo, request, get_context().library)
-    try:
-        plan = plan_with_pool_reservation(repo, request, now=datetime.now(timezone.utc))
-    except ReservationError as exc:
-        # Curated domain message (pool id only); two plans raced for the same bytes.
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    plan = plan_with_pool_budget(repo, request, now=datetime.now(timezone.utc))
     if not plan.is_safe_to_enqueue:
         raise HTTPException(
             status_code=400,
@@ -616,6 +613,11 @@ async def push_staged_files_to_share(
         dataset_name = request.dataset_name or (
             f"share-push-{pool_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         )
+        try:
+            book_plan_capacity(repo, plan, get_context().library, now=datetime.now(timezone.utc))
+        except ReservationError as exc:
+            # Curated domain message (pool + plan id only); the pool budget is exhausted.
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         job = start_ingest_job(
             plan=plan,
             dataset_name=dataset_name,
