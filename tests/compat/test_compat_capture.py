@@ -148,3 +148,31 @@ def test_wrong_password_stays_distinguishable_after_redaction() -> None:
     good = cc.build_case(recipe, _resp({}), source="self-captured", login="a:right")
     assert bad["request"]["json"]["password"] == cc.REDACTED_INVALID
     assert good["request"]["json"]["password"] == cc.REDACTED
+
+
+@pytest.mark.parametrize(
+    ("dirty", "secret"),
+    [
+        # Secret-class key holding a list: every leaf is masked, not just scalars.
+        ({"x-auth-tokens": ["eyJhbGciOi.secret"]}, "eyJhbGciOi.secret"),
+        ({"serials": {"drives": ["SN-LEAK-1"]}}, "SN-LEAK-1"),
+        ({"password": ["hunter2-list"]}, "hunter2-list"),
+        # XML attribute whose name hits a key rule.
+        ({"body": '<session id="1" sessionId="S3CR3T">x</session>'}, "S3CR3T"),
+        # XML element that carries attributes.
+        ({"body": '<sessionID attr="1">S3CR3T2</sessionID>'}, "S3CR3T2"),
+        # Basic credentials in a key that is not token-class.
+        ({"note": "Basic dXNlcjpwYXNz"}, "dXNlcjpwYXNz"),
+    ],
+)
+def test_sanitize_scrubs_nested_xml_attr_and_basic_shapes(
+    dirty: dict[str, Any], secret: str
+) -> None:
+    clean = cc.sanitize(dirty)
+    assert secret not in json.dumps(clean)
+    assert cc.sanitize(clean) == clean  # still idempotent
+
+
+def test_sanitize_xml_keeps_non_secret_attributes() -> None:
+    clean = cc.sanitize({"body": '<session id="1" sessionId="S3CR3T">x</session>'})
+    assert clean["body"] == f'<session id="1" sessionId="{cc.TOKEN}">{cc.TOKEN}</session>'
