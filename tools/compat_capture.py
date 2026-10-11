@@ -64,6 +64,11 @@ class Rules:
 DEFAULT_RULES = Rules()
 
 
+_XML_START_TAG = re.compile(r"<[A-Za-z_][\w.-]*\s[^<>]*>")
+_XML_ATTR = re.compile(r"([A-Za-z_][\w.:-]*)\s*=\s*([\"'])(.*?)\2")
+_XML_ELEMENT = re.compile(r"<([A-Za-z_][\w.-]*)((?:\s[^<>]*)?)>([^<]*)</\1>")
+
+
 def _norm(key: str) -> str:
     return key.lower().replace("_", "").replace("-", "")
 
@@ -81,22 +86,38 @@ def _scrub_cookie(value: str) -> str:
     return re.sub(r"([^=;,\s]+)=([^;,]*)", repl, value)
 
 
+def _secret_mark(name: str, rules: Rules) -> str | None:
+    for needles, mark in (
+        (rules.password_keys, REDACTED),
+        (rules.token_keys, TOKEN),
+        (rules.serial_keys, SERIAL),
+    ):
+        if _key_hit(name, needles):
+            return mark
+    return None
+
+
 def _scrub_xml(value: str, rules: Rules) -> str:
-    # XML bodies (Accept: application/xml) carry the same secrets as JSON keys.
-    def repl(m: re.Match[str]) -> str:
-        tag, text = m.group(1), m.group(2)
+    # XML bodies (Accept: application/xml) carry the same secrets as JSON keys,
+    # both as element text and as attribute values (``sessionId="..."``).
+    def attr_repl(m: re.Match[str]) -> str:
+        mark = _secret_mark(m.group(1), rules)
+        return m.group(0) if mark is None else f"{m.group(1)}={m.group(2)}{mark}{m.group(2)}"
+
+    def tag_repl(m: re.Match[str]) -> str:
+        return _XML_ATTR.sub(attr_repl, m.group(0))
+
+    def elem_repl(m: re.Match[str]) -> str:
+        tag, attrs, text = m.group(1), m.group(2), m.group(3)
         if not text:  # already a placeholder (or empty): keep idempotent
             return m.group(0)
-        for needles, mark in (
-            (rules.password_keys, REDACTED),
-            (rules.token_keys, TOKEN),
-            (rules.serial_keys, SERIAL),
-        ):
-            if _key_hit(tag, needles):
-                return f"<{tag}>{mark}</{tag}>"
-        return m.group(0)
+        mark = _secret_mark(tag, rules)
+        return m.group(0) if mark is None else f"<{tag}{attrs}>{mark}</{tag}>"
 
-    return re.sub(r"<([A-Za-z_][\w.-]*)>([^<]*)</\1>", repl, value)
+    # Element text first: once an attribute holds a placeholder the start tag
+    # no longer matches _XML_ELEMENT (that is what keeps a re-run idempotent).
+    value = _XML_ELEMENT.sub(elem_repl, value)
+    return _XML_START_TAG.sub(tag_repl, value)
 
 
 def _scrub_str(value: str, rules: Rules) -> str:
@@ -107,6 +128,17 @@ def _scrub_str(value: str, rules: Rules) -> str:
     return rules.timestamp.sub(TIMESTAMP, value)
 
 
+def _mask_leaves(node: Any, mark: str, keep: tuple[str, ...] = ()) -> Any:
+    # A secret-class key masks EVERY scalar beneath it, however it is nested.
+    if node is None or isinstance(node, bool):
+        return node
+    if isinstance(node, dict):
+        return {k: _mask_leaves(v, mark, keep) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_mask_leaves(item, mark, keep) for item in node]
+    return node if node in keep else mark
+
+
 def _walk(node: Any, rules: Rules) -> Any:
     if isinstance(node, dict):
         out: dict[str, Any] = {}
@@ -114,13 +146,13 @@ def _walk(node: Any, rules: Rules) -> Any:
             if value is None or isinstance(value, bool):
                 out[key] = value
             elif _key_hit(key, rules.password_keys):
-                out[key] = value if value in (REDACTED, REDACTED_INVALID) else REDACTED
+                out[key] = _mask_leaves(value, REDACTED, (REDACTED, REDACTED_INVALID))
             elif _key_hit(key, rules.cookie_keys) and isinstance(value, str):
                 out[key] = _scrub_str(_scrub_cookie(value), rules)
-            elif _key_hit(key, rules.token_keys) and not isinstance(value, (dict, list)):
-                out[key] = TOKEN
-            elif _key_hit(key, rules.serial_keys) and not isinstance(value, (dict, list)):
-                out[key] = SERIAL
+            elif _key_hit(key, rules.token_keys):
+                out[key] = _mask_leaves(value, TOKEN)
+            elif _key_hit(key, rules.serial_keys):
+                out[key] = _mask_leaves(value, SERIAL)
             else:
                 out[key] = _walk(value, rules)
         return out
