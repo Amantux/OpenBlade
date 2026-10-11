@@ -637,12 +637,12 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     # 200; the session is still issued so the client can change the password.
     strict = os.environ.get("OPENBLADE_AML_STRICT_PRECONDITIONS", "false").lower() == "true"
     # Inferred likewise for MFA: the challenge wire shape is not in Rev D, so a
-    # pending login is signalled by a Warning header (412 when strict). MFA wins
-    # the summary because the pending session cannot change a password anyway.
-    precondition_failed = strict and (user.require_password_change or mfa_pending)
+    # pending login is signalled ONLY by the Warning header below. MFA never
+    # changes the status or body, in strict mode too: there is no documented
+    # MFA summary text to return.
+    precondition_failed = strict and user.require_password_change
     if precondition_failed:
-        summary = "MFA verification required" if mfa_pending else "Default password must be changed"
-        body.update(code=412, description="Error", summary=summary)
+        body.update(code=412, description="Error", summary="Default password must be changed")
     response = _negotiated(request, 412 if precondition_failed else 200, body)
     _is_production = os.environ.get("OPENBLADE_ENV", "development").lower() == "production"
     response.set_cookie(

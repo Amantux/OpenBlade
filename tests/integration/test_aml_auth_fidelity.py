@@ -343,16 +343,31 @@ def test_mfa_login_lenient_is_200_with_warning_and_pending(
     assert aml_state._STATE.sessions[response.json()["token"]].mfa_pending is True
 
 
-def test_mfa_login_strict_is_412_and_session_issued(
+def test_mfa_login_strict_default_password_keeps_documented_412(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # MFA never invents a status or summary: the 412 is the default-password one.
     _enable_totp(client)
     monkeypatch.setenv("OPENBLADE_AML_STRICT_PRECONDITIONS", "true")
     response = client.post("/aml/users/login", json=CREDS)
     assert response.status_code == 412
     body = response.json()
-    assert body["code"] == 412 and body["summary"] == "MFA verification required"
+    assert body["code"] == 412 and body["summary"] == "Default password must be changed"
     assert MFA_WARNING in response.headers.get_list("Warning")
+    assert aml_state._STATE.sessions[body["token"]].mfa_pending is True
+
+
+def test_mfa_login_strict_without_other_precondition_is_200_with_warning(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_totp(client)
+    aml_state.update_user(CREDS["name"], password=CREDS["password"])  # clears default-pw flag
+    monkeypatch.setenv("OPENBLADE_AML_STRICT_PRECONDITIONS", "true")
+    response = client.post("/aml/users/login", json=CREDS)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0 and body["summary"] == "Login successful"
+    assert response.headers.get_list("Warning") == [MFA_WARNING]
     assert aml_state._STATE.sessions[body["token"]].mfa_pending is True
 
 
