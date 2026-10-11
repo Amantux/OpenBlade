@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 .ONESHELL:
-.PHONY: mutation up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration test-contract seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware protocols-up protocols-down test-protocols
+.PHONY: mutation up down logs emulator-up emulator-down emulator-logs emulator-config emulator-ps fleet-up fleet-down fleet-logs fleet-ps fleet-config fleet-build up-standalone test test-unit test-integration test-contract seed-libraries seed-tapes seed-all clean build-frontend dev-backend dev-frontend dev frontend lint build all test-hardware hw-preflight protocols-up protocols-down test-protocols
 
 # Start all services
 up:
@@ -111,6 +111,10 @@ all: lint test build
 
 test-hardware:
 	OPENBLADE_BACKEND=real OPENBLADE_REAL_HARDWARE_ENABLED=true python3 -m pytest tests/hardware/ -v
+
+# Read-only day-one rig check (no motion; must not run armed). Lane: PREFLIGHT_LANE=readonly|destructive.
+hw-preflight:
+	python3 -m tools.hardware.preflight --lane $${PREFLIGHT_LANE:-readonly}
 
 # NAS protocol rig (SMB/NFS, containerised). Host ports: OB_SMB_PORT / OB_NFS_PORT.
 PROTOCOLS_COMPOSE = docker compose -f deploy/nas-protocols/docker-compose.yml
