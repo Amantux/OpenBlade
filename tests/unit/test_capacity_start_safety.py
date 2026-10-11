@@ -12,7 +12,7 @@ from httpx import Response
 from openblade.api.main import app
 from openblade.bootstrap import create_context, get_context, reset_context
 from openblade.config import OpenBladeConfig
-from openblade.nas.ingest import get_archive_plan
+from openblade.nas.ingest import ArchivePlanStore, get_archive_plan
 
 client = TestClient(app)
 
@@ -121,3 +121,21 @@ def test_failed_rollback_release_does_not_mask_the_start_error(
 
     with pytest.raises(_Boom):
         _start(plan["plan_id"], "pool-1")
+
+
+def test_raising_cleanup_keeps_start_error_and_still_unregisters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise(**_: object) -> None:
+        raise _Boom("start failed")
+
+    def _release_raises(*_: object) -> None:
+        raise RuntimeError("release exploded")
+
+    monkeypatch.setattr("openblade.api.nas_config.start_ingest_job", _raise)
+    monkeypatch.setattr("openblade.api.nas_config.release_plan_capacity", _release_raises)
+    plan = _preview("pool-1")
+
+    with pytest.raises(_Boom):
+        _start(plan["plan_id"], "pool-1")
+    assert plan["plan_id"] not in ArchivePlanStore

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 BLOCKING = "blocking"
 WARNING = "warning"
@@ -22,6 +23,28 @@ DEFAULT_SERVICE_TOKEN = "openblade-controller-dev-token-do-not-expose"
 # Kept in sync with openblade/api/aml_state.py::_DEFAULT_ADMIN_PASSWORD / _DEFAULT_SERVICE_PASSWORD
 DEFAULT_ADMIN_PASSWORD = "password"
 DEFAULT_SERVICE_PASSWORD = "service123"
+MIN_PASSWORD_LENGTH = 12
+_KNOWN_DEFAULT_PASSWORDS = frozenset({DEFAULT_ADMIN_PASSWORD, DEFAULT_SERVICE_PASSWORD})
+
+
+def password_problem(value: str | None) -> str | None:
+    """Why ``value`` is not an acceptable AML password, or None if it is.
+
+    Surrounding whitespace is ignored for the check, so ``" "`` counts as unset
+    (it would otherwise satisfy compose's ``${VAR:?}``). Shared with
+    ``openblade/api/aml_state.py`` so the startup gate and the runtime getters
+    cannot disagree. Never includes the value itself.
+    """
+    pw = (value or "").strip()
+    if not pw:
+        return "is unset or blank"
+    if pw in _KNOWN_DEFAULT_PASSWORDS:
+        return "is a known insecure default"
+    if len(pw) < MIN_PASSWORD_LENGTH:
+        return f"is shorter than {MIN_PASSWORD_LENGTH} characters"
+    return None
+
+
 VALID_BACKENDS = {"mock", "simulator", "real"}
 
 
@@ -30,6 +53,26 @@ class Finding:
     severity: str  # BLOCKING | WARNING
     code: str
     message: str
+
+
+def redact_url(url: str) -> str:
+    """Return ``url`` as scheme://host[:port]/path with credentials as ``***``.
+
+    Query and fragment are dropped (they can carry ``password=`` parameters).
+    Every finding message that quotes a URL goes through this, because
+    WARNING findings are logged verbatim by the startup banner.
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:
+        return "<unparseable URL>"
+    if port is not None:
+        host = f"{host}:{port}"
+    creds = "***@" if (parts.username is not None or parts.password is not None) else ""
+    scheme = f"{parts.scheme}://" if parts.scheme else ""
+    return f"{scheme}{creds}{host}{parts.path}"
 
 
 def validate_config(env: Mapping[str, str]) -> list[Finding]:
@@ -108,23 +151,22 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
             )
         )
     if not is_prod:
-        if env.get("OPENBLADE_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD) == DEFAULT_ADMIN_PASSWORD:
+        problem = password_problem(env.get("OPENBLADE_ADMIN_PASSWORD"))
+        if problem:
             findings.append(
                 Finding(
                     WARNING,
                     "default_admin_password",
-                    "DEFAULT AML ADMIN PASSWORD: OPENBLADE_ADMIN_PASSWORD is unset or the default",
+                    f"WEAK AML ADMIN PASSWORD: OPENBLADE_ADMIN_PASSWORD {problem}",
                 )
             )
-        if (
-            env.get("OPENBLADE_SERVICE_PASSWORD", DEFAULT_SERVICE_PASSWORD)
-            == DEFAULT_SERVICE_PASSWORD
-        ):
+        problem = password_problem(env.get("OPENBLADE_SERVICE_PASSWORD"))
+        if problem:
             findings.append(
                 Finding(
                     WARNING,
                     "default_service_password",
-                    "DEFAULT AML SERVICE PASSWORD: OPENBLADE_SERVICE_PASSWORD is unset or the default",
+                    f"WEAK AML SERVICE PASSWORD: OPENBLADE_SERVICE_PASSWORD {problem}",
                 )
             )
         if env.get("OPENBLADE_SERVICE_TOKEN", DEFAULT_SERVICE_TOKEN) == DEFAULT_SERVICE_TOKEN:
@@ -156,23 +198,23 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
         return findings
 
     # --- production-only blocking checks ---
-    admin = env.get("OPENBLADE_ADMIN_PASSWORD", "")
-    if not admin or admin == DEFAULT_ADMIN_PASSWORD:
+    problem = password_problem(env.get("OPENBLADE_ADMIN_PASSWORD"))
+    if problem:
         findings.append(
             Finding(
                 BLOCKING,
                 "unsafe_admin_password",
-                "OPENBLADE_ADMIN_PASSWORD is unset or the insecure default in production",
+                f"OPENBLADE_ADMIN_PASSWORD {problem} (production)",
             )
         )
 
-    svc_pw = env.get("OPENBLADE_SERVICE_PASSWORD", "")
-    if not svc_pw or svc_pw == DEFAULT_SERVICE_PASSWORD:
+    problem = password_problem(env.get("OPENBLADE_SERVICE_PASSWORD"))
+    if problem:
         findings.append(
             Finding(
                 BLOCKING,
                 "missing_service_password",
-                "OPENBLADE_SERVICE_PASSWORD is unset or the insecure default in production",
+                f"OPENBLADE_SERVICE_PASSWORD {problem} (production)",
             )
         )
 
@@ -196,7 +238,7 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
             Finding(
                 WARNING,
                 "dev_db_path",
-                f"OPENBLADE_DB_URL={db_url!r} looks like a development/default path",
+                f"OPENBLADE_DB_URL={redact_url(db_url)!r} looks like a development/default path",
             )
         )
 

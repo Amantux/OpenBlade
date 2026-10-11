@@ -93,3 +93,21 @@ def test_share_push_start_failure_releases_booking_and_plan(
 
     assert set(ArchivePlanStore) == plans_before
     assert _owners() == set()
+
+
+def test_share_push_raising_cleanup_keeps_start_error_and_unregisters(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(**_: object) -> None:
+        raise _Boom("start failed")
+
+    def _release_raises(*_: object) -> None:
+        raise RuntimeError("release exploded")
+
+    monkeypatch.setattr("openblade.api.routes_upload.start_ingest_job", _raise)
+    monkeypatch.setattr("openblade.api.routes_upload.release_plan_capacity", _release_raises)
+    plans_before = set(ArchivePlanStore)
+
+    with pytest.raises(_Boom):
+        _push(client)
+    assert set(ArchivePlanStore) == plans_before

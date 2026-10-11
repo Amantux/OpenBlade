@@ -192,35 +192,41 @@ def _update_latency_stats(stats: dict[str, Any], value_ms: int, *, count: int) -
 
 
 def _get_admin_password() -> str:
-    pw = os.environ.get("OPENBLADE_ADMIN_PASSWORD", _DEFAULT_ADMIN_PASSWORD)
-    if pw == _DEFAULT_ADMIN_PASSWORD:
-        # Same fail-closed pattern as service_auth: production refuses the default.
-        if os.environ.get("OPENBLADE_ENV", "development").strip().lower() == "production":
-            from openblade.config_validation import ConfigurationError
+    from openblade.config_validation import ConfigurationError, password_problem
 
+    raw = os.environ.get("OPENBLADE_ADMIN_PASSWORD")
+    pw = raw if raw is not None else _DEFAULT_ADMIN_PASSWORD
+    problem = password_problem(raw)
+    if problem:
+        # Same fail-closed pattern as service_auth: production refuses weak values.
+        if os.environ.get("OPENBLADE_ENV", "development").strip().lower() == "production":
             raise ConfigurationError(
-                "OPENBLADE_ENV=production but OPENBLADE_ADMIN_PASSWORD is unset or the insecure default."
+                f"OPENBLADE_ENV=production but OPENBLADE_ADMIN_PASSWORD {problem}."
             )
         _aml_log.warning(
-            "Using default admin password 'password'. "
-            "Set OPENBLADE_ADMIN_PASSWORD env var before deploying to production."
+            "OPENBLADE_ADMIN_PASSWORD %s. "
+            "Set a strong OPENBLADE_ADMIN_PASSWORD env var before deploying to production.",
+            problem,
         )
     return pw
 
 
 def _get_service_password() -> str:
-    pw = os.environ.get("OPENBLADE_SERVICE_PASSWORD", _DEFAULT_SERVICE_PASSWORD)
-    if pw == _DEFAULT_SERVICE_PASSWORD:
-        # Same fail-closed pattern as service_auth: production refuses the default.
-        if os.environ.get("OPENBLADE_ENV", "development").strip().lower() == "production":
-            from openblade.config_validation import ConfigurationError
+    from openblade.config_validation import ConfigurationError, password_problem
 
+    raw = os.environ.get("OPENBLADE_SERVICE_PASSWORD")
+    pw = raw if raw is not None else _DEFAULT_SERVICE_PASSWORD
+    problem = password_problem(raw)
+    if problem:
+        # Same fail-closed pattern as service_auth: production refuses weak values.
+        if os.environ.get("OPENBLADE_ENV", "development").strip().lower() == "production":
             raise ConfigurationError(
-                "OPENBLADE_ENV=production but OPENBLADE_SERVICE_PASSWORD is unset or the insecure default."
+                f"OPENBLADE_ENV=production but OPENBLADE_SERVICE_PASSWORD {problem}."
             )
         _aml_log.warning(
-            "Using default service password. "
-            "Set OPENBLADE_SERVICE_PASSWORD env var before deploying to production."
+            "OPENBLADE_SERVICE_PASSWORD %s. "
+            "Set a strong OPENBLADE_SERVICE_PASSWORD env var before deploying to production.",
+            problem,
         )
     return pw
 
