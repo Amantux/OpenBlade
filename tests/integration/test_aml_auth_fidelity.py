@@ -298,3 +298,111 @@ def test_error_envelope_shape(
     assert "Traceback" not in text and LEAK not in text and "RuntimeError" not in text
     message = body.get("summary", body.get("detail", body.get("message")))
     assert isinstance(message, str) and message
+
+
+# --- MFA-required pending session (inferred; no Rev D challenge wire shape) -----
+
+MFA_WARNING = '199 - "MFA Required"'
+
+
+def _enable_totp(client: TestClient) -> str:
+    """Enable TOTP for admin through the documented routes; return the secret."""
+    import pyotp
+
+    token = _login(client)
+    auth = {"Authorization": f"Bearer {token}"}
+    secret = client.get("/aml/users/login/mfa/totp/key", headers=auth).json()["key"]
+    enabled = client.put(
+        "/aml/users/mfa",
+        json={"type": "totp", "enabled": True, "authenticationCode": pyotp.TOTP(secret).now()},
+        headers=auth,
+    )
+    assert enabled.status_code == 200, enabled.text
+    client.cookies.clear()
+    return str(secret)
+
+
+def test_mfa_login_lenient_is_200_with_warning_and_pending(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENBLADE_AML_STRICT_PRECONDITIONS", raising=False)
+    _enable_totp(client)
+    response = client.post("/aml/users/login", json=CREDS)
+    assert response.status_code == 200
+    assert MFA_WARNING in response.headers.get_list("Warning")
+    assert "Default Password Supplied" in response.headers.get_list("Warning")
+    # No new JSON fields: same keys as an ordinary (non-pending) login body.
+    assert set(response.json()) == {
+        "action",
+        "code",
+        "customCode",
+        "description",
+        "summary",
+        "token",
+    }
+    assert aml_state._STATE.sessions[response.json()["token"]].mfa_pending is True
+
+
+def test_mfa_login_strict_is_412_and_session_issued(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_totp(client)
+    monkeypatch.setenv("OPENBLADE_AML_STRICT_PRECONDITIONS", "true")
+    response = client.post("/aml/users/login", json=CREDS)
+    assert response.status_code == 412
+    body = response.json()
+    assert body["code"] == 412 and body["summary"] == "MFA verification required"
+    assert MFA_WARNING in response.headers.get_list("Warning")
+    assert aml_state._STATE.sessions[body["token"]].mfa_pending is True
+
+
+def test_login_without_enabled_mfa_is_not_pending(client: TestClient) -> None:
+    token = _login(client)
+    assert aml_state._STATE.sessions[token].mfa_pending is False
+
+
+def _pending_login(client: TestClient) -> tuple[str, dict[str, str]]:
+    secret = _enable_totp(client)
+    response = client.post("/aml/users/login", json=CREDS)
+    assert response.status_code == 200
+    client.cookies.clear()
+    return secret, {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def test_mfa_pending_session_is_401_until_valid_code(client: TestClient) -> None:
+    import pyotp
+
+    secret, auth = _pending_login(client)
+    assert client.get("/aml/users", headers=auth).status_code == 401
+    assert client.get("/aml/physicalLibrary/elements", headers=auth).status_code == 401
+    bad = client.post(
+        "/aml/users/login/mfa", json={"type": "totp", "authenticationCode": "000001"}, headers=auth
+    )
+    assert bad.status_code == 401
+    assert client.get("/aml/users", headers=auth).status_code == 401  # still pending
+    good = client.post(
+        "/aml/users/login/mfa",
+        json={"type": "totp", "authenticationCode": pyotp.TOTP(secret).now()},
+        headers=auth,
+    )
+    assert good.status_code == 200, good.text
+    assert client.get("/aml/users", headers=auth).status_code == 200
+
+
+def test_mfa_pending_cookie_session_is_gated_without_dropping_cookie(
+    client: TestClient,
+) -> None:
+    _enable_totp(client)
+    assert client.post("/aml/users/login", json=CREDS).status_code == 200
+    blocked = client.get("/aml/users")
+    assert blocked.status_code == 401
+    assert "set-cookie" not in blocked.headers
+
+
+def test_mfa_pending_session_can_fetch_key_route_and_logout(client: TestClient) -> None:
+    _, auth = _pending_login(client)
+    # Key route is reachable (403 because TOTP is already confirmed, not 401).
+    assert client.get("/aml/users/login/mfa/totp/key", headers=auth).status_code == 403
+    client.cookies.set("sessionID", auth["Authorization"].split(" ", 1)[1])
+    assert client.delete("/aml/users/login").status_code == 200
+    assert client.get("/aml/users", headers=auth).status_code == 401

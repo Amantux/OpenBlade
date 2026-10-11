@@ -335,18 +335,28 @@ def _verify_totp(secret: str, code: str) -> bool:
     return pyotp.TOTP(secret).verify(code, valid_window=1)
 
 
-async def require_auth(request: Request, context: AppContext = Depends(get_context)) -> AmlUser:
-    _ensure_state(context)
+def _session_token(request: Request) -> str | None:
+    """Return the token that authenticates this request (cookie first, then Bearer)."""
+    session_id = request.cookies.get("sessionID")
+    if session_id and aml_state.get_session_user(session_id) is not None:
+        return session_id
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth.split(" ", 1)[1]
+        if aml_state.get_session_user(token) is not None:
+            return token
+    return None
+
+
+def _authenticate(request: Request, *, allow_mfa_pending: bool) -> AmlUser:
     # Prefer session cookie, fall back to Bearer token for API clients/tests
     session_id = request.cookies.get("sessionID")
-    user = None
-    if session_id:
-        user = aml_state.get_session_user(session_id)
-    if user is None:
-        auth = request.headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            token = auth.split(" ", 1)[1]
-            user = aml_state.get_session_user(token)
+    token = _session_token(request)
+    user = aml_state.get_session_user(token) if token is not None else None
+    if user is not None and not allow_mfa_pending and aml_state.is_session_mfa_pending(token or ""):
+        # Inferred: an MFA-pending session authenticates nothing but the MFA
+        # challenge routes and logout; same 401 as unauthenticated, cookie kept.
+        raise HTTPException(status_code=401, detail="Authentication required")
     if user is None:
         headers = None
         if session_id:
@@ -354,6 +364,19 @@ async def require_auth(request: Request, context: AppContext = Depends(get_conte
             headers = {"Set-Cookie": 'sessionID=""; Max-Age=0; Path=/; HttpOnly; SameSite=lax'}
         raise HTTPException(status_code=401, detail="Authentication required", headers=headers)
     return user
+
+
+async def require_auth(request: Request, context: AppContext = Depends(get_context)) -> AmlUser:
+    _ensure_state(context)
+    return _authenticate(request, allow_mfa_pending=False)
+
+
+async def require_auth_mfa_pending_ok(
+    request: Request, context: AppContext = Depends(get_context)
+) -> AmlUser:
+    """Auth for MFA challenge routes and logout, which an MFA-pending session may use."""
+    _ensure_state(context)
+    return _authenticate(request, allow_mfa_pending=True)
 
 
 _XML_MEDIA_TYPES = frozenset({"application/xml", "text/xml"})
@@ -603,7 +626,8 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     _clear_rate_limit(remote_address)
     if user.role == 2 and not aml_state.get_service_access().get("enabled", True):
         raise HTTPException(status_code=503, detail="Service access is disabled")
-    session_record = aml_state.create_session(user)
+    mfa_pending = aml_state.user_has_enabled_mfa(user.name)
+    session_record = aml_state.create_session(user, mfa_pending=mfa_pending)
     aml_state.record_login_activity(user.name, success=True, remote_address=remote_address)
     body = _ws_result("Login successful").model_dump()
     # Provide session token in response body for API clients/tests that expect it
@@ -612,9 +636,13 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     # OPENBLADE_AML_STRICT_PRECONDITIONS=true the same login answers 412 instead of
     # 200; the session is still issued so the client can change the password.
     strict = os.environ.get("OPENBLADE_AML_STRICT_PRECONDITIONS", "false").lower() == "true"
-    precondition_failed = strict and user.require_password_change
+    # Inferred likewise for MFA: the challenge wire shape is not in Rev D, so a
+    # pending login is signalled by a Warning header (412 when strict). MFA wins
+    # the summary because the pending session cannot change a password anyway.
+    precondition_failed = strict and (user.require_password_change or mfa_pending)
     if precondition_failed:
-        body.update(code=412, description="Error", summary="Default password must be changed")
+        summary = "MFA verification required" if mfa_pending else "Default password must be changed"
+        body.update(code=412, description="Error", summary=summary)
     response = _negotiated(request, 412 if precondition_failed else 200, body)
     _is_production = os.environ.get("OPENBLADE_ENV", "development").lower() == "production"
     response.set_cookie(
@@ -627,6 +655,8 @@ async def login(request: Request, context: AppContext = Depends(get_context)) ->
     )
     if user.require_password_change:
         response.headers["Warning"] = "Default Password Supplied"
+    if mfa_pending:
+        response.headers.append("Warning", '199 - "MFA Required"')
     return response
 
 
@@ -640,7 +670,7 @@ async def auth_login(request: Request, context: AppContext = Depends(get_context
 @router.delete("/users/login", response_model=WSResultCode)
 async def logout(
     request: Request,
-    current_user: AmlUser = Depends(require_auth),
+    current_user: AmlUser = Depends(require_auth_mfa_pending_ok),
     context: AppContext = Depends(get_context),
 ) -> Response:
     _ensure_state(context)
@@ -658,7 +688,7 @@ async def logout(
 @router.post("/auth/logout", response_model=WSResultCode)
 async def auth_logout(
     request: Request,
-    current_user: AmlUser = Depends(require_auth),
+    current_user: AmlUser = Depends(require_auth_mfa_pending_ok),
     context: AppContext = Depends(get_context),
 ) -> Response:
     return await logout(request, current_user, context)
@@ -666,8 +696,9 @@ async def auth_logout(
 
 @router.post("/users/login/mfa", response_model=WSResultCode)
 async def validate_mfa(
+    request: Request,
     payload: MFAAuthentication,
-    current_user: AmlUser = Depends(require_auth),
+    current_user: AmlUser = Depends(require_auth_mfa_pending_ok),
     context: AppContext = Depends(get_context),
 ) -> WSResultCode:
     _ensure_state(context)
@@ -677,13 +708,14 @@ async def validate_mfa(
     code = _validate_mfa_code(payload.authenticationCode)
     if not _verify_totp(config.secret, code):
         raise HTTPException(status_code=401, detail="Invalid authentication code")
+    aml_state.clear_session_mfa_pending(_session_token(request) or "")
     return _ws_result(f"MFA validated for {payload.type}")
 
 
 @router.get("/users/login/mfa/{type}/key", response_model=MFASharedData)
 async def get_mfa_key(
     type: str,
-    current_user: AmlUser = Depends(require_auth),
+    current_user: AmlUser = Depends(require_auth_mfa_pending_ok),
     context: AppContext = Depends(get_context),
 ) -> MFASharedData:
     _ensure_state(context)
