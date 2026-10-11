@@ -3,9 +3,15 @@ name: Auto-merge trusted PRs
 # dangerous-triggers is ignored on `on:` below: this workflow runs only the GitHub API via
 # github-script on the trusted-author allowlist; never checks out or executes
 # PR code, which is what makes workflow_run dangerous.
+#
+# Two required checks live in two workflows (`ci-gate` in CI, `operability-gate` in
+# operability), so this listens to BOTH. Whichever finishes first sees the other's gate
+# still pending and exits; the second workflow's completion is the retry. After a merge
+# it dispatches CI and operability on master, because a merge made with GITHUB_TOKEN
+# emits no `push` run (so `full-suite` would never run on the merge commit).
 on:  # zizmor: ignore[dangerous-triggers] -- see comment above
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["CI", "operability"]
     types: [completed]
 
 permissions:
@@ -13,26 +19,94 @@ permissions:
 
 jobs:
   merge-trusted-pr:
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+    # No conclusion filter here: decide() enforces success per required check, and
+    # skipping non-success completions would drop the only retry a waiting PR has.
+    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
+    # Both workflows can finish together; serialise so the loser sees the PR merged.
+    concurrency:
+      group: auto-merge-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
+      checks: read
+      statuses: read
+      actions: write
     steps:
       - name: Merge trusted PRs targeting master
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7.1.0
         with:
           script: |
+            // decide(requiredContexts, checkRuns, statuses) -> { decision, pending, failed }
+            // decision is "merge" | "wait" | "fail". Pure: no API calls.
+            //   checkRuns: [{ id, name, status, conclusion }] (all runs on the head SHA)
+            //   statuses:  [{ context, state }] (combined status: latest per context)
+            // A required context counts as passed ONLY on conclusion/state "success".
+            // The newest check run (highest id) per name wins, so a re-run supersedes.
+            // A context with no run and no status yet is "pending" (its workflow has
+            // not reported; that workflow's completion re-triggers this job).
+            //
+            // Worked examples (required = ["ci-gate", "operability-gate"]):
+            //  1. all green: runs [{id:1,name:"ci-gate",status:"completed",conclusion:"success"},
+            //     {id:2,name:"operability-gate",status:"completed",conclusion:"success"}], statuses []
+            //     -> { decision: "merge", pending: [], failed: [] }
+            //  2. one pending (PR #47): runs [{id:1,name:"ci-gate",status:"completed",
+            //     conclusion:"success"}, {id:2,name:"operability-gate",status:"in_progress",
+            //     conclusion:null}] -> { decision: "wait", pending: ["operability-gate"], failed: [] }
+            //  3. one failed: runs [{id:1,name:"ci-gate",status:"completed",conclusion:"failure"},
+            //     {id:2,name:"operability-gate",status:"completed",conclusion:"success"}]
+            //     -> { decision: "fail", pending: [], failed: ["ci-gate (failure)"] }
+            function decide(requiredContexts, checkRuns, statuses) {
+              const pending = [];
+              const failed = [];
+              for (const ctx of requiredContexts) {
+                const runs = checkRuns.filter((r) => r.name === ctx).sort((a, b) => b.id - a.id);
+                const status = statuses.find((s) => s.context === ctx);
+                if (runs.length) {
+                  const run = runs[0];
+                  if (run.status !== "completed") pending.push(ctx);
+                  else if (run.conclusion !== "success") failed.push(`${ctx} (${run.conclusion})`);
+                } else if (status) {
+                  if (status.state === "pending") pending.push(ctx);
+                  else if (status.state !== "success") failed.push(`${ctx} (${status.state})`);
+                } else {
+                  pending.push(ctx);
+                }
+              }
+              const decision = failed.length ? "fail" : pending.length ? "wait" : "merge";
+              return { decision, pending, failed };
+            }
+
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const allowedAuthors = new Set(["Amantux", "Copilot"]);
+            const fallbackRequired = ["ci-gate", "operability-gate"];
             const prs = context.payload.workflow_run.pull_requests || [];
 
             if (!prs.length) {
-              core.info("No pull requests attached to this CI run.");
+              core.info("No pull requests attached to this workflow run.");
               return;
+            }
+
+            async function requiredContextsFor(branch) {
+              try {
+                const { data } = await github.rest.repos.getStatusChecksProtection({
+                  owner,
+                  repo,
+                  branch,
+                });
+                if (data.contexts && data.contexts.length) return data.contexts;
+                return fallbackRequired;
+              } catch (error) {
+                // GITHUB_TOKEN cannot be granted `administration: read`, so this is
+                // usually 403/404; fall back to the known branch-protection list.
+                if (error.status === 403 || error.status === 404) {
+                  core.info(`Branch protection not readable (${error.status}); using ${fallbackRequired.join(", ")}.`);
+                  return fallbackRequired;
+                }
+                throw error;
+              }
             }
 
             for (const prRef of prs) {
@@ -60,15 +134,65 @@ jobs:
                 continue;
               }
 
+              const required = await requiredContextsFor(pr.base.ref);
+              // Only GitHub Actions check runs count, so another app cannot post a
+              // look-alike gate name.
+              const checkRuns = (
+                await github.paginate(github.rest.checks.listForRef, {
+                  owner,
+                  repo,
+                  ref: pr.head.sha,
+                  per_page: 100,
+                })
+              ).filter((r) => r.app && r.app.slug === "github-actions");
+              const { data: combined } = await github.rest.repos.getCombinedStatusForRef({
+                owner,
+                repo,
+                ref: pr.head.sha,
+                per_page: 100,
+              });
+              const verdict = decide(required, checkRuns, combined.statuses || []);
+              if (verdict.decision === "wait") {
+                core.notice(`Not merging #${number} yet: waiting for ${verdict.pending.join(", ")}; the other workflow's completion will re-run this.`);
+                continue;
+              }
+              if (verdict.decision === "fail") {
+                core.notice(`Not merging #${number}: required check(s) not successful: ${verdict.failed.join(", ")}.`);
+                continue;
+              }
+
               try {
                 await github.rest.pulls.merge({
                   owner,
                   repo,
                   pull_number: number,
                   merge_method: "squash",
+                  sha: pr.head.sha,
                 });
                 core.info(`Merged trusted PR #${number}.`);
               } catch (error) {
                 core.warning(`Unable to merge #${number}: ${error.message}`);
+                continue;
+              }
+
+              // A GITHUB_TOKEN merge emits no `push` run; workflow_dispatch is the one
+              // event this token can trigger, so run the master-only lanes explicitly.
+              const dispatchFailures = [];
+              for (const workflowId of ["ci.yml", "operability.yml"]) {
+                try {
+                  await github.rest.actions.createWorkflowDispatch({
+                    owner,
+                    repo,
+                    workflow_id: workflowId,
+                    ref: "master",
+                  });
+                  core.info(`Dispatched ${workflowId} on master after merging #${number}.`);
+                } catch (error) {
+                  dispatchFailures.push(`${workflowId}: ${error.message}`);
+                }
+              }
+              if (dispatchFailures.length) {
+                // Fail red: without these runs full-suite never covers the merge.
+                core.setFailed(`Merged #${number} but could not dispatch master lanes: ${dispatchFailures.join("; ")}`);
               }
             }
