@@ -293,3 +293,109 @@ def test_delete_reservations_for_owner_keeps_other_owners(repo: CatalogRepositor
 
     assert repo.delete_nas_reservations_for_owner("plan-a") == 2
     assert [r["owner"] for r in repo.reservations_for_pool("pool-1", now=NOW)] == ["plan-b"]
+
+
+# --- S3: releasing the booking must never mask the executor's exception ---------
+
+
+def _raising_ingest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    """A started cache-drive ingest whose executor raises past run()'s own handler."""
+    from openblade.bootstrap import create_context, reset_context
+    from openblade.config import OpenBladeConfig
+    from openblade.nas import ingest as ingest_mod
+    from openblade.nas.service import NasService
+    from openblade.nas.types import (
+        ArchivePlan,
+        CacheDriveConfig,
+        IngestMode,
+        NasPool,
+        TapeAssignment,
+    )
+
+    context = create_context(OpenBladeConfig(db_url=f"sqlite:///{tmp_path / 's3.db'}"))
+    reset_context(context)
+    ingest_mod.clear_ingest_state()
+    service = NasService(context.catalog)
+    cache_root = tmp_path / "cache"
+    (cache_root / "dataset").mkdir(parents=True)
+    (cache_root / "dataset" / "a.txt").write_bytes(b"alpha")
+    service.upsert_pool(NasPool(id="pool-1", name="pool-1"))
+    service.upsert_cache_drive(
+        CacheDriveConfig(
+            id="cache-1", name="c", root_path=str(cache_root), max_bytes=10**6, min_free_bytes=0
+        )
+    )
+    plan = ingest_mod.register_archive_plan(
+        ArchivePlan(
+            plan_id="plan-s3",
+            ingest_mode=IngestMode.CACHE_DRIVE,
+            source_path=str(cache_root / "dataset"),
+            pool="pool-1",
+            volume_group="vg-1",
+            files=[str(cache_root / "dataset" / "a.txt")],
+            total_files=1,
+            total_bytes=5,
+            tape_assignments=[
+                TapeAssignment(barcode="VOL001L9", files=["a.txt"], estimated_bytes=5)
+            ],
+        )
+    )
+    job = ingest_mod.start_ingest_job(
+        plan=plan,
+        dataset_name="ds",
+        pool_id="pool-1",
+        nas_service=service,
+        cache_drive_id="cache-1",
+    )
+
+    def executor_boom(self: object) -> object:
+        raise RuntimeError("executor exploded")
+
+    # Raises past run()'s boundary without reaching a terminal status, like
+    # _mark_dataset_failed failing on a session in PendingRollbackError.
+    monkeypatch.setattr(ingest_mod.CacheDriveIngest, "run", executor_boom)
+
+    def run() -> object:
+        return ingest_mod.run_ingest_job(
+            job.job_id,
+            nas_service=service,
+            library=context.library,
+            ltfs=context.ltfs,
+            cache_drive_id="cache-1",
+        )
+
+    return service, run
+
+
+def test_failed_release_does_not_mask_executor_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    service, run = _raising_ingest(tmp_path, monkeypatch)
+
+    def release_boom(owner: str) -> int:
+        raise ValueError("session is in PendingRollbackError")
+
+    monkeypatch.setattr(service.repository, "delete_nas_reservations_for_owner", release_boom)
+
+    with (
+        caplog.at_level("WARNING", logger="openblade.nas.ingest"),
+        pytest.raises(RuntimeError, match="executor exploded"),
+    ):
+        run()
+    assert "reservation release failed for plan plan-s3" in caplog.text
+
+
+def test_executor_exception_releases_booking_even_if_status_not_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, run = _raising_ingest(tmp_path, monkeypatch)
+    released: list[str] = []
+    monkeypatch.setattr(
+        service.repository,
+        "delete_nas_reservations_for_owner",
+        lambda owner: released.append(owner),
+    )
+
+    with pytest.raises(RuntimeError, match="executor exploded"):
+        run()
+    assert released == ["plan-s3"]
