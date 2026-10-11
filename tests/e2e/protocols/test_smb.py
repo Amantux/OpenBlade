@@ -1,8 +1,12 @@
 """SMB (Samba, kernel cifs vers=3.0) protocol scenarios."""
 
+import grp
+import os
+
 import pytest
 
 from tests.e2e.protocols.conftest import Rig
+from tests.e2e.protocols.rig import STATE as _RIG_STATE
 from tests.e2e.protocols.scenarios import *  # noqa: F403 -- re-collect the shared scenarios bound to proto=smb
 
 pytestmark = pytest.mark.protocols
@@ -33,7 +37,12 @@ def test_smb_acl_maps_posix_mode(mounted: Rig) -> None:
     lines = res.stdout.splitlines()
     owner = next(line.split(":", 1)[1] for line in lines if line.startswith("OWNER:"))
     assert f"ACL:{owner}:ALLOWED/0x0/RW" in lines, res.stdout
-    assert "ACL:Unix Group\\root:ALLOWED/0x0/R" in lines, res.stdout
+    # mode640.txt is written host-side by rig.py, so its group is the host gid. Samba
+    # renders a gid it can resolve by name ("root" locally) and an unresolvable one
+    # numerically (1001 on a GitHub runner); accept the real gid under either form.
+    gid = os.stat(_RIG_STATE / "export" / "ro" / "mode640.txt").st_gid
+    group_names = {grp.getgrgid(gid).gr_name, str(gid)}
+    assert any(f"ACL:Unix Group\\{g}:ALLOWED/0x0/R" in lines for g in group_names), res.stdout
     assert "ACL:Everyone:ALLOWED/0x0/" in lines, res.stdout
 
 
