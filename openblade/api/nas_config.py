@@ -1288,8 +1288,16 @@ async def start_ingest(
     except Exception:
         # Anything failing after the booking must not leave pool budget held for 1h
         # or a startable plan behind; re-raise the original error unchanged.
-        release_plan_capacity(service.repository, plan.plan_id)
-        unregister_archive_plan(plan.plan_id)
+        # Each cleanup step is isolated so a failing cleanup can never replace
+        # the original error (which is what the caller must see).
+        try:
+            release_plan_capacity(service.repository, plan.plan_id)
+        except Exception:  # noqa: BLE001 - best-effort rollback; original error re-raised below
+            logger.exception("rollback: release_plan_capacity failed for %s", plan.plan_id)
+        try:
+            unregister_archive_plan(plan.plan_id)
+        except Exception:  # noqa: BLE001 - best-effort rollback; original error re-raised below
+            logger.exception("rollback: unregister_archive_plan failed for %s", plan.plan_id)
         raise
     return StartIngestResponse(job_id=job.job_id, dataset_id=job.dataset_id, status="running")
 

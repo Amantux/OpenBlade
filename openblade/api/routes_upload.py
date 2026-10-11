@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import shutil
@@ -653,8 +654,20 @@ async def push_staged_files_to_share(
             )
         except Exception:
             # Roll back the booking and the registration; re-raise the original error.
-            release_plan_capacity(repo, plan.plan_id)
-            unregister_archive_plan(plan.plan_id)
+            # Each cleanup step is isolated so a failing cleanup can never replace
+            # the original error (which is what the caller must see).
+            try:
+                release_plan_capacity(repo, plan.plan_id)
+            except Exception:  # noqa: BLE001 - best-effort rollback; original error re-raised below
+                logging.getLogger(__name__).exception(
+                    "rollback: release_plan_capacity failed for %s", plan.plan_id
+                )
+            try:
+                unregister_archive_plan(plan.plan_id)
+            except Exception:  # noqa: BLE001 - best-effort rollback; original error re-raised below
+                logging.getLogger(__name__).exception(
+                    "rollback: unregister_archive_plan failed for %s", plan.plan_id
+                )
             raise
     except Exception:
         shutil.rmtree(workspace, ignore_errors=True)
