@@ -45,7 +45,7 @@ def test_production_blocks_default_admin_password_value() -> None:
         {
             "OPENBLADE_ENV": "production",
             "OPENBLADE_ADMIN_PASSWORD": "password",  # the insecure default value
-            "OPENBLADE_SERVICE_PASSWORD": "x",
+            "OPENBLADE_SERVICE_PASSWORD": "x-strong-service-pw",
             "OPENBLADE_SERVICE_TOKEN": "strong",
             "OPENBLADE_DB_URL": "sqlite:////data/openblade.db",
         }
@@ -57,8 +57,8 @@ def test_production_blocks_default_service_token() -> None:
     findings = validate_config(
         {
             "OPENBLADE_ENV": "production",
-            "OPENBLADE_ADMIN_PASSWORD": "s3cret",
-            "OPENBLADE_SERVICE_PASSWORD": "s3cret",
+            "OPENBLADE_ADMIN_PASSWORD": "s3cret-long-enough",
+            "OPENBLADE_SERVICE_PASSWORD": "s3cret-long-enough",
             "OPENBLADE_SERVICE_TOKEN": DEFAULT_SERVICE_TOKEN,
             "OPENBLADE_DB_URL": "sqlite:////data/openblade.db",
         }
@@ -70,7 +70,7 @@ def test_production_blocks_default_service_password_value() -> None:
     findings = validate_config(
         {
             "OPENBLADE_ENV": "production",
-            "OPENBLADE_ADMIN_PASSWORD": "s3cret",
+            "OPENBLADE_ADMIN_PASSWORD": "s3cret-long-enough",
             "OPENBLADE_SERVICE_PASSWORD": DEFAULT_SERVICE_PASSWORD,  # the shipped default 'service123'
             "OPENBLADE_SERVICE_TOKEN": "strong",
             "OPENBLADE_DB_URL": "sqlite:////data/openblade.db",
@@ -85,8 +85,8 @@ def test_production_deployable_when_secrets_set() -> None:
         {
             "OPENBLADE_ENV": "production",
             "OPENBLADE_API_TOKEN": "api",  # production requires native API auth
-            "OPENBLADE_ADMIN_PASSWORD": "s3cret-admin",
-            "OPENBLADE_SERVICE_PASSWORD": "s3cret-svc",
+            "OPENBLADE_ADMIN_PASSWORD": "s3cret-admin-long",
+            "OPENBLADE_SERVICE_PASSWORD": "s3cret-svc-long-pw",
             "OPENBLADE_SERVICE_TOKEN": "0a1b2c3d-strong-token",
             "OPENBLADE_DB_URL": "sqlite:////data/openblade.db",
         }
@@ -98,8 +98,8 @@ def test_webservices_transport_requires_scalar_url_in_production() -> None:
     findings = validate_config(
         {
             "OPENBLADE_ENV": "production",
-            "OPENBLADE_ADMIN_PASSWORD": "a",
-            "OPENBLADE_SERVICE_PASSWORD": "b",
+            "OPENBLADE_ADMIN_PASSWORD": "a-strong-admin-pw",
+            "OPENBLADE_SERVICE_PASSWORD": "b-strong-service-pw",
             "OPENBLADE_SERVICE_TOKEN": "t",
             "OPENBLADE_DB_URL": "sqlite:////data/db",
             "OPENBLADE_ROBOTICS_TRANSPORT": "webservices",  # no OPENBLADE_SCALAR_URL
@@ -113,8 +113,8 @@ def test_debug_logging_in_production_is_a_warning() -> None:
         {
             "OPENBLADE_ENV": "production",
             "OPENBLADE_API_TOKEN": "api",  # production requires native API auth
-            "OPENBLADE_ADMIN_PASSWORD": "a",
-            "OPENBLADE_SERVICE_PASSWORD": "b",
+            "OPENBLADE_ADMIN_PASSWORD": "a-strong-admin-pw",
+            "OPENBLADE_SERVICE_PASSWORD": "b-strong-service-pw",
             "OPENBLADE_SERVICE_TOKEN": "t",
             "OPENBLADE_DB_URL": "sqlite:////data/db",
             "OPENBLADE_LOG_LEVEL": "DEBUG",
@@ -129,8 +129,8 @@ def test_debug_logging_in_production_is_a_warning() -> None:
 _SAFE_PROD = {
     "OPENBLADE_ENV": "production",
     "OPENBLADE_API_TOKEN": "api-strong",
-    "OPENBLADE_ADMIN_PASSWORD": "s3cret",
-    "OPENBLADE_SERVICE_PASSWORD": "s3cret",
+    "OPENBLADE_ADMIN_PASSWORD": "s3cret-long-enough",
+    "OPENBLADE_SERVICE_PASSWORD": "s3cret-long-enough",
     "OPENBLADE_SERVICE_TOKEN": "strong",
     "OPENBLADE_DB_URL": "sqlite:////data/openblade.db",
     "OPENBLADE_CORS_ORIGINS": "http://lan-host:8091",
@@ -179,8 +179,8 @@ def test_startup_development_banner_lists_every_open_gate() -> None:
     )
     for line in (
         "NATIVE API OPEN",
-        "DEFAULT AML ADMIN PASSWORD",
-        "DEFAULT AML SERVICE PASSWORD",
+        "WEAK AML ADMIN PASSWORD",
+        "WEAK AML SERVICE PASSWORD",
         "DEFAULT SERVICE TOKEN",
         "CORS WILDCARD",
     ):
@@ -273,3 +273,61 @@ def test_redact_url_drops_query_and_handles_plain_paths() -> None:
 
     assert redact_url("postgresql://u:p@h/db?password=x") == "postgresql://***@h/db"
     assert redact_url("sqlite:////tmp/x.db") == "sqlite:////tmp/x.db"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [" ", "   \t", "short-pw", "password", "service123", "  service123  "],
+    ids=["space", "whitespace", "short", "admin-default", "svc-default", "padded-default"],
+)
+@pytest.mark.parametrize(
+    ("var", "code"),
+    [
+        ("OPENBLADE_ADMIN_PASSWORD", "unsafe_admin_password"),
+        ("OPENBLADE_SERVICE_PASSWORD", "missing_service_password"),
+    ],
+)
+def test_production_blocks_weak_passwords(value: str, var: str, code: str) -> None:
+    env = dict(_SAFE_PROD)
+    env[var] = value
+    findings = validate_config(env)
+    assert code in _codes(findings, BLOCKING)
+    assert not is_deployable(findings)
+
+
+@pytest.mark.parametrize("var", ["OPENBLADE_ADMIN_PASSWORD", "OPENBLADE_SERVICE_PASSWORD"])
+def test_development_warns_on_short_password(var: str) -> None:
+    findings = validate_config({"OPENBLADE_ENV": "development", var: "short-pw"})
+    assert is_deployable(findings)
+    msgs = [f.message for f in findings if f.severity == WARNING and var in f.message]
+    assert msgs and "shorter than 12" in msgs[0] and "short-pw" not in msgs[0]
+
+
+def test_twelve_char_password_is_accepted() -> None:
+    from openblade.config_validation import password_problem
+
+    assert password_problem("abcdefghijkl") is None
+    assert password_problem("abcdefghijk") is not None
+
+
+@pytest.mark.parametrize(
+    ("getter", "var"),
+    [
+        ("_get_admin_password", "OPENBLADE_ADMIN_PASSWORD"),
+        ("_get_service_password", "OPENBLADE_SERVICE_PASSWORD"),
+    ],
+)
+@pytest.mark.parametrize("value", [" ", "short-pw", "password", "service123"])
+def test_aml_password_getters_refuse_weak_values_in_production(
+    monkeypatch: pytest.MonkeyPatch, getter: str, var: str, value: str
+) -> None:
+    from openblade.api import aml_state
+    from openblade.config_validation import ConfigurationError
+
+    monkeypatch.setenv("OPENBLADE_ENV", "production")
+    monkeypatch.setenv(var, value)
+    with pytest.raises(ConfigurationError) as exc:
+        getattr(aml_state, getter)()
+    assert value.strip() == "" or value not in str(exc.value)
+    monkeypatch.setenv(var, "a-strong-password-1")
+    assert getattr(aml_state, getter)() == "a-strong-password-1"

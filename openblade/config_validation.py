@@ -23,6 +23,28 @@ DEFAULT_SERVICE_TOKEN = "openblade-controller-dev-token-do-not-expose"
 # Kept in sync with openblade/api/aml_state.py::_DEFAULT_ADMIN_PASSWORD / _DEFAULT_SERVICE_PASSWORD
 DEFAULT_ADMIN_PASSWORD = "password"
 DEFAULT_SERVICE_PASSWORD = "service123"
+MIN_PASSWORD_LENGTH = 12
+_KNOWN_DEFAULT_PASSWORDS = frozenset({DEFAULT_ADMIN_PASSWORD, DEFAULT_SERVICE_PASSWORD})
+
+
+def password_problem(value: str | None) -> str | None:
+    """Why ``value`` is not an acceptable AML password, or None if it is.
+
+    Surrounding whitespace is ignored for the check, so ``" "`` counts as unset
+    (it would otherwise satisfy compose's ``${VAR:?}``). Shared with
+    ``openblade/api/aml_state.py`` so the startup gate and the runtime getters
+    cannot disagree. Never includes the value itself.
+    """
+    pw = (value or "").strip()
+    if not pw:
+        return "is unset or blank"
+    if pw in _KNOWN_DEFAULT_PASSWORDS:
+        return "is a known insecure default"
+    if len(pw) < MIN_PASSWORD_LENGTH:
+        return f"is shorter than {MIN_PASSWORD_LENGTH} characters"
+    return None
+
+
 VALID_BACKENDS = {"mock", "simulator", "real"}
 
 
@@ -129,23 +151,22 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
             )
         )
     if not is_prod:
-        if env.get("OPENBLADE_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD) == DEFAULT_ADMIN_PASSWORD:
+        problem = password_problem(env.get("OPENBLADE_ADMIN_PASSWORD"))
+        if problem:
             findings.append(
                 Finding(
                     WARNING,
                     "default_admin_password",
-                    "DEFAULT AML ADMIN PASSWORD: OPENBLADE_ADMIN_PASSWORD is unset or the default",
+                    f"WEAK AML ADMIN PASSWORD: OPENBLADE_ADMIN_PASSWORD {problem}",
                 )
             )
-        if (
-            env.get("OPENBLADE_SERVICE_PASSWORD", DEFAULT_SERVICE_PASSWORD)
-            == DEFAULT_SERVICE_PASSWORD
-        ):
+        problem = password_problem(env.get("OPENBLADE_SERVICE_PASSWORD"))
+        if problem:
             findings.append(
                 Finding(
                     WARNING,
                     "default_service_password",
-                    "DEFAULT AML SERVICE PASSWORD: OPENBLADE_SERVICE_PASSWORD is unset or the default",
+                    f"WEAK AML SERVICE PASSWORD: OPENBLADE_SERVICE_PASSWORD {problem}",
                 )
             )
         if env.get("OPENBLADE_SERVICE_TOKEN", DEFAULT_SERVICE_TOKEN) == DEFAULT_SERVICE_TOKEN:
@@ -177,23 +198,23 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
         return findings
 
     # --- production-only blocking checks ---
-    admin = env.get("OPENBLADE_ADMIN_PASSWORD", "")
-    if not admin or admin == DEFAULT_ADMIN_PASSWORD:
+    problem = password_problem(env.get("OPENBLADE_ADMIN_PASSWORD"))
+    if problem:
         findings.append(
             Finding(
                 BLOCKING,
                 "unsafe_admin_password",
-                "OPENBLADE_ADMIN_PASSWORD is unset or the insecure default in production",
+                f"OPENBLADE_ADMIN_PASSWORD {problem} (production)",
             )
         )
 
-    svc_pw = env.get("OPENBLADE_SERVICE_PASSWORD", "")
-    if not svc_pw or svc_pw == DEFAULT_SERVICE_PASSWORD:
+    problem = password_problem(env.get("OPENBLADE_SERVICE_PASSWORD"))
+    if problem:
         findings.append(
             Finding(
                 BLOCKING,
                 "missing_service_password",
-                "OPENBLADE_SERVICE_PASSWORD is unset or the insecure default in production",
+                f"OPENBLADE_SERVICE_PASSWORD {problem} (production)",
             )
         )
 
