@@ -1435,6 +1435,19 @@ class CatalogRepository:
     def delete_nas_reservation(self, reservation_id: str) -> bool:
         return self._delete_nas_row(NasReservation, reservation_id)
 
+    def delete_nas_reservations_for_owner(self, owner: str) -> int:
+        """Delete every reservation booked by ``owner`` (a plan id); return how many."""
+        rows = list(
+            self.session.execute(
+                select(NasReservation).where(NasReservation.owner == owner)
+            ).scalars()
+        )
+        for row in rows:
+            self.session.delete(row)
+        if rows:
+            self.session.commit()
+        return len(rows)
+
     def list_nas_export_sets(self) -> list[dict[str, object]]:
         rows = self.session.execute(select(NasExportSet).order_by(NasExportSet.id)).scalars()
         return [

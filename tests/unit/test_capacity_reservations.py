@@ -208,3 +208,45 @@ def test_upload_share_push_plan_books_its_reservation(repo: CatalogRepository) -
     assert {r["owner"] for r in repo.reservations_for_pool("pool-1", now=datetime.now(UTC))} == {
         plan.plan_id
     }
+
+
+def test_finished_job_releases_its_plan_reservation(tmp_path: Path) -> None:
+    from openblade.nas.ingest import register_archive_plan, start_ingest_job
+    from tests.unit.test_nas_ingest import _make_plan, _run_job, _setup_service
+
+    # Arrange: the plan's own booking fills the 2000-byte pool; another job holds none.
+    service, cache_root = _setup_service(tmp_path)
+    repo = service.repository
+    now = datetime.now(UTC)
+    plan = register_archive_plan(_make_plan(cache_root))
+    assert repo.reserve_nas_capacity(
+        "pool-1", 2_000, plan.plan_id, now + PLAN_RESERVATION_TTL, capacity_bytes=2_000, now=now
+    )
+    assert POOL_BUDGET_BLOCKER in (
+        plan_with_pool_reservation(repo, _request(0, pool="pool-1"), now=now).enqueue_blockers
+    )
+    job = start_ingest_job(
+        plan=plan,
+        dataset_name="dataset-a",
+        pool_id="pool-1",
+        nas_service=service,
+        cache_drive_id="cache-1",
+    )
+
+    # Act
+    finished = _run_job(service, job.job_id)
+
+    # Assert: terminal job freed the booking, so the same plan now fits.
+    assert finished.status.value in {"archived", "failed", "cancelled"}
+    assert repo.reservations_for_pool("pool-1", now=now) == []
+    assert plan_with_pool_reservation(repo, _request(0, pool="pool-1"), now=now).is_safe_to_enqueue
+
+
+def test_delete_reservations_for_owner_keeps_other_owners(repo: CatalogRepository) -> None:
+    for owner in ("plan-a", "plan-a", "plan-b"):
+        assert repo.reserve_nas_capacity(
+            "pool-1", 10, owner, NOW + timedelta(hours=1), capacity_bytes=2_000, now=NOW
+        )
+
+    assert repo.delete_nas_reservations_for_owner("plan-a") == 2
+    assert [r["owner"] for r in repo.reservations_for_pool("pool-1", now=NOW)] == ["plan-b"]
