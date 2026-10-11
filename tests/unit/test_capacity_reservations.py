@@ -2,14 +2,28 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from openblade.catalog.repository import CatalogRepository
+from openblade.nas.capacity import (
+    PLAN_RESERVATION_TTL,
+    ReservationError,
+    plan_with_pool_reservation,
+)
 from openblade.nas.planner import POOL_BUDGET_BLOCKER, ArchivePlanner
 from openblade.nas.types import ArchivePlanRequest
 
 TAPE_CAPACITY = 1_000
 
 
-def _request(pool_reserved_bytes: int, *, copies: int = 1) -> ArchivePlanRequest:
+def _request(
+    pool_reserved_bytes: int, *, copies: int = 1, pool: str | None = None
+) -> ArchivePlanRequest:
     return ArchivePlanRequest(
+        pool=pool,
         files=["/a", "/b"],
         file_sizes={"/a": 300, "/b": 300},
         available_tapes=["T00001L8", "T00002L8"],
@@ -44,3 +58,70 @@ def test_default_budget_is_unchanged_behaviour() -> None:
     request = _request(0)
     assert request.pool_reserved_bytes == 0
     assert ArchivePlanner().plan(request).is_safe_to_enqueue
+
+
+NOW = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> CatalogRepository:
+    from tests.unit.test_nas_restore_planner import make_nas_service
+
+    return make_nas_service(tmp_path).repository
+
+
+def test_booked_plan_consumes_pool_so_second_plan_is_refused(repo: CatalogRepository) -> None:
+    # Arrange: pool of 2000 bytes; another job already holds 800.
+    assert repo.reserve_nas_capacity(
+        "pool-1", 800, "other-job", NOW + timedelta(hours=1), capacity_bytes=2_000, now=NOW
+    )
+
+    # Act: first plan places 600 and books it (1400 held); second places 601 > 600 left.
+    first = plan_with_pool_reservation(repo, _request(0, pool="pool-1"), now=NOW)
+    second_request = _request(0, pool="pool-1").model_copy(
+        update={"file_sizes": {"/a": 300, "/b": 301}}
+    )
+    second = plan_with_pool_reservation(repo, second_request, now=NOW)
+
+    # Assert
+    assert first.is_safe_to_enqueue
+    assert {r["owner"] for r in repo.reservations_for_pool("pool-1", now=NOW)} == {
+        "other-job",
+        first.plan_id,
+    }
+    assert POOL_BUDGET_BLOCKER in second.enqueue_blockers
+
+
+def test_booking_expires_after_ttl(repo: CatalogRepository) -> None:
+    plan_with_pool_reservation(repo, _request(0, pool="pool-1", copies=3), now=NOW)
+
+    later = plan_with_pool_reservation(
+        repo, _request(0, pool="pool-1", copies=3), now=NOW + PLAN_RESERVATION_TTL
+    )
+
+    assert later.is_safe_to_enqueue
+
+
+def test_expired_reservation_is_ignored(repo: CatalogRepository) -> None:
+    assert repo.reserve_nas_capacity(
+        "pool-1", 2_000, "stale-job", NOW + timedelta(seconds=1), capacity_bytes=2_000, now=NOW
+    )
+
+    plan = plan_with_pool_reservation(
+        repo, _request(0, pool="pool-1"), now=NOW + timedelta(minutes=1)
+    )
+
+    assert plan.is_safe_to_enqueue
+
+
+def test_lost_booking_race_raises_typed_error(repo: CatalogRepository) -> None:
+    # Simulate a concurrent writer landing between the budget read and the booking.
+    class RacingRepo:
+        def reservations_for_pool(self, pool_id: str, *, now: datetime) -> list[dict[str, object]]:
+            return []
+
+        def reserve_nas_capacity(self, *args: object, **kwargs: object) -> bool:
+            return False
+
+    with pytest.raises(ReservationError):
+        plan_with_pool_reservation(RacingRepo(), _request(0, pool="pool-1"), now=NOW)  # type: ignore[arg-type]
