@@ -19,6 +19,16 @@ from openblade.nas.tape_orchestrator import execute_tape_request
 from openblade.nas.types import TapeOpRequest, TapeOpType
 
 
+def normalize_barcode(barcode: str) -> str:
+    """Service-boundary form (``strip().upper()``), matching the scratch allowlist.
+
+    Applied once on entry so allowlist, inventory lookup, token and catalog all
+    see the same barcode (``" abc123"`` used to pass the allowlist, then fail as
+    unknown).
+    """
+    return barcode.strip().upper()
+
+
 def real_backend_from_config() -> bool:
     """True when the configured backend is REAL, ignoring the enable flag (fail closed).
 
@@ -56,6 +66,7 @@ class FormatService:
             )
 
     def dry_run(self, barcode: str) -> tuple[DryRunPlan, SafetyToken]:
+        barcode = normalize_barcode(barcode)
         self._require_scratch_media(barcode)
         inventory = self.library.inventory()
         known = {str(slot.barcode) for slot in inventory.slots if slot.barcode is not None} | {
@@ -76,6 +87,7 @@ class FormatService:
         return plan, token
 
     def confirm(self, barcode: str, token_value: str) -> OperationResult:
+        barcode = normalize_barcode(barcode)
         self._require_scratch_media(barcode)
         token = self.catalog.get_safety_token(token_value)
         if token is None:

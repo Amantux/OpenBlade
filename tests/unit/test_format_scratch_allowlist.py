@@ -68,3 +68,16 @@ def test_default_reads_backend_and_allowlist_from_env(monkeypatch: pytest.Monkey
 def test_is_scratch_barcode_normalises_and_fails_closed() -> None:
     assert is_scratch_barcode("scr001l9", parse_barcodes("SCR001L9,X"))
     assert not is_scratch_barcode(SCRATCH, [])
+
+
+def test_real_backend_padded_lowercase_barcode_is_normalised_and_accepted() -> None:
+    inventory = SimpleNamespace(slots=[SimpleNamespace(barcode="ABC123")], drives=[])
+    library = SimpleNamespace(inventory=lambda: inventory)
+    catalog = SimpleNamespace(save_safety_token=lambda token: None)
+    fake: Any = (catalog, library, SimpleNamespace())
+    service = FormatService(*fake, real_backend=True, scratch_barcodes=["ABC123"])
+
+    plan, token = service.dry_run(" abc123 ")
+
+    assert plan.target == "ABC123"
+    assert token.target_barcode == "ABC123"
