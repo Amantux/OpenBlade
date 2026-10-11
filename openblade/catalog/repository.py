@@ -1518,6 +1518,15 @@ class CatalogRepository:
     def delete_nas_file_span(self, span_id: str) -> bool:
         return self._delete_nas_row(NasFileSpan, span_id)
 
+    def count_scratch_cartridges(self) -> int:
+        """Cartridges with no volume group that are sitting in a slot (not loaded/exported)."""
+        stmt = (
+            select(func.count())
+            .select_from(Cartridge)
+            .where(Cartridge.volume_group_id.is_(None), Cartridge.state == "in_slot")
+        )
+        return int(self.session.execute(stmt).scalar_one())
+
     def get_scratch_thresholds(self) -> dict[str, object] | None:
         return self.get_nas_config(self._SCRATCH_THRESHOLDS_KEY)
 

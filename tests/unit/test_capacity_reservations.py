@@ -125,3 +125,54 @@ def test_lost_booking_race_raises_typed_error(repo: CatalogRepository) -> None:
 
     with pytest.raises(ReservationError):
         plan_with_pool_reservation(RacingRepo(), _request(0, pool="pool-1"), now=NOW)  # type: ignore[arg-type]
+
+
+def _seed_cartridges(repo: CatalogRepository, scratch: int) -> int:
+    """Add cartridges on top of the simulator's seeded stock; return that baseline."""
+    baseline = repo.count_scratch_cartridges()
+    from openblade.catalog.models import Cartridge
+
+    for i in range(scratch):
+        repo.session.add(Cartridge(barcode=f"S{i:05d}L8", state="in_slot"))
+    repo.session.add(Cartridge(barcode="LOADED1L8", state="loaded"))
+    repo.session.add(Cartridge(barcode="ASSIGN1L8", state="in_slot", volume_group_id="vg-1"))
+    repo.session.commit()
+    return baseline
+
+
+def test_count_scratch_excludes_loaded_and_assigned(repo: CatalogRepository) -> None:
+    baseline = _seed_cartridges(repo, scratch=2)
+
+    assert repo.count_scratch_cartridges() == baseline + 2
+
+
+def _scratch_component(tmp_path: Path, scratch: int, thresholds: tuple[int, int] | None):  # type: ignore[no-untyped-def]
+    from tests.unit.test_health_service import make_health_service
+
+    service, _ = make_health_service(tmp_path, "scratch.db")
+    base = _seed_cartridges(service.repo, scratch)
+    if thresholds is not None:
+        service.repo.set_scratch_thresholds(base + thresholds[0], base + thresholds[1])
+    result = service.check_health()
+    return result, next((c for c in result.components if c.name == "scratch"), None)
+
+
+def test_scratch_component_absent_when_thresholds_unset(tmp_path: Path) -> None:
+    _, component = _scratch_component(tmp_path, 0, None)
+    assert component is None
+
+
+def test_scratch_warn_is_ok_with_message(tmp_path: Path) -> None:
+    _, component = _scratch_component(tmp_path, 3, (2, 5))
+    assert component is not None
+    assert component.status.value == "ok"
+    assert component.message.startswith("scratch count ")
+    assert " below warn " in component.message
+
+
+def test_scratch_critical_is_degraded_not_unhealthy(tmp_path: Path) -> None:
+    from openblade.nas.types import HealthStatus
+
+    _, component = _scratch_component(tmp_path, 1, (2, 5))
+    assert component is not None
+    assert component.status is HealthStatus.DEGRADED

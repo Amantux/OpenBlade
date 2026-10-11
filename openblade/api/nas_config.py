@@ -20,7 +20,11 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.domain.clock import naive_utcnow
 from openblade.domain.models import MountHandle, MountMode
 from openblade.domain.wire import coerce_int
-from openblade.nas.capacity import ReservationError, plan_with_pool_reservation
+from openblade.nas.capacity import (
+    ReservationError,
+    ScratchThresholds,
+    plan_with_pool_reservation,
+)
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
 from openblade.nas.catalog_rebuild_worker import SAFE_REBUILD_PREFLIGHT_ERROR, CatalogRebuildWorker
 from openblade.nas.catalog_shard import CatalogShardWriter
@@ -885,6 +889,28 @@ async def list_reservations(
     repo: CatalogRepository = Depends(get_catalog_repository),
 ) -> list[dict[str, object]]:
     return repo.list_nas_reservations(pool_id)
+
+
+@router.get("/scratch-thresholds", response_model=ScratchThresholds)
+async def get_scratch_thresholds(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> ScratchThresholds:
+    stored = repo.get_scratch_thresholds()
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Scratch thresholds not configured"
+        )
+    return ScratchThresholds.model_validate(stored)
+
+
+@router.put("/scratch-thresholds", response_model=ScratchThresholds)
+async def put_scratch_thresholds(
+    thresholds: ScratchThresholds,
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> ScratchThresholds:
+    # The body is validated by ScratchThresholds itself (warn < min -> 422).
+    repo.set_scratch_thresholds(thresholds.scratch_min, thresholds.scratch_warn)
+    return thresholds
 
 
 @router.get("/export-sets")
