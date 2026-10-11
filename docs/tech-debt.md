@@ -87,10 +87,14 @@ and no production caller uses `claim_drive`/`claim_changer` yet.
 Resolved: unexpired `nas_reservations` rows are a pool-level budget
 (`ArchivePlanRequest.pool_reserved_bytes`) that every plan from `/nas/archive-plan`
 and the upload share-push must fit under; the per-barcode `reserved_bytes` dict
-stays for explicit holds. A safe plan books its own bytes (`owner=plan_id`) with a
-1h TTL, released when its ingest job reaches a terminal state and otherwise by
-expiry (abandoned plans hold the pool for up to an hour). Scratch health counts
-cartridges with `volume_group_id IS NULL AND state='in_slot'`; the `scratch`
+stays for explicit holds. With `pool` set, the budget's tape set and capacities are
+derived server-side (client-supplied capacity fields are 422, unknown pool 404).
+Previews book nothing; ingest start books `owner=plan_id` with a 1h TTL (409 and no
+job when the budget is exhausted), released when the job reaches a terminal state or
+the executor raises, and otherwise by expiry. Open: the booking uses `plan.pool`
+rather than the start request's pool, and a 409 on share-push leaves a registered
+plan with no job. Scratch health counts inventory slots whose barcode is not a
+volume-group member, not written (`used_bytes > 0`) and not `CLN`; the `scratch`
 component appears only once thresholds are set and degrades, never fails readiness.
 `nas_file_spans` has no `pool_id`, so identical relative paths in two pools share
 spans. The protocol rig's NFS server is Fedora 41 nfs-ganesha 5.9 (VFS FSAL, built
