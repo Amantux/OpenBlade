@@ -19,10 +19,14 @@ permissions:
 
 jobs:
   merge-trusted-pr:
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+    # No conclusion filter here: decide() enforces success per required check, and
+    # skipping non-success completions would drop the only retry a waiting PR has.
+    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
+    # Both workflows can finish together; serialise so the loser sees the PR merged.
+    concurrency:
+      group: auto-merge-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -131,12 +135,16 @@ jobs:
               }
 
               const required = await requiredContextsFor(pr.base.ref);
-              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
-                owner,
-                repo,
-                ref: pr.head.sha,
-                per_page: 100,
-              });
+              // Only GitHub Actions check runs count, so another app cannot post a
+              // look-alike gate name.
+              const checkRuns = (
+                await github.paginate(github.rest.checks.listForRef, {
+                  owner,
+                  repo,
+                  ref: pr.head.sha,
+                  per_page: 100,
+                })
+              ).filter((r) => r.app && r.app.slug === "github-actions");
               const { data: combined } = await github.rest.repos.getCombinedStatusForRef({
                 owner,
                 repo,
@@ -169,6 +177,7 @@ jobs:
 
               // A GITHUB_TOKEN merge emits no `push` run; workflow_dispatch is the one
               // event this token can trigger, so run the master-only lanes explicitly.
+              const dispatchFailures = [];
               for (const workflowId of ["ci.yml", "operability.yml"]) {
                 try {
                   await github.rest.actions.createWorkflowDispatch({
@@ -179,7 +188,11 @@ jobs:
                   });
                   core.info(`Dispatched ${workflowId} on master after merging #${number}.`);
                 } catch (error) {
-                  core.warning(`Unable to dispatch ${workflowId} on master: ${error.message}`);
+                  dispatchFailures.push(`${workflowId}: ${error.message}`);
                 }
+              }
+              if (dispatchFailures.length) {
+                // Fail red: without these runs full-suite never covers the merge.
+                core.setFailed(`Merged #${number} but could not dispatch master lanes: ${dispatchFailures.join("; ")}`);
               }
             }
