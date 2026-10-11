@@ -54,11 +54,37 @@ exact body match (use for `captured` cases where the full body is authoritative)
 
 ## Adding a real appliance capture (the goal)
 
-1. Capture the sanitized request/response on the rig (headers, status, body).
-2. Save it here with `"source": "captured"` and the firmware.
-3. Run the harness. If the emulator diverges, either the emulator is wrong (fix it)
-   or the capture reveals a real contract we hadn't modeled (fix the emulator to
-   match). The emulator is required to satisfy the corpus — not the reverse.
+Use `tools/compat_capture.py` (replays each recipe's `request` block, fills
+`expected` from the observed response, sanitizes, writes `<id>.json`).
+
+On site, against the appliance:
+
+```bash
+python tools/compat_capture.py capture --base-url https://<i3-host> \
+  --recipe compatibility/scalar-i3-341g/aml --out compatibility/scalar-i3-341g/aml/captured \
+  --source captured --appliance-firmware <ver> --attest "<operator name>" --login <user>:<pass>
+```
+
+- `--source captured` is REFUSED (exit 2, nothing written) unless BOTH
+  `--appliance-firmware` and `--attest` are given; they are recorded as
+  `firmware` / `attested_by`. Never label emulator output `captured`.
+- Redacted before writing (`sanitize()`, pure + unit-tested): session tokens
+  (Bearer/Basic, cookie values, `session`/`token`-like JSON keys and XML tags),
+  serials (`serial*` keys/tags), hosts/IPs in URLs and text, ISO/HTTP-date
+  timestamps, and request passwords (`<redacted>` = the `--login` credential,
+  `<redacted-invalid>` = any other). Review the diff anyway before committing.
+- Only response keys the sanitizer left untouched go into
+  `expected.json_contains`; the full scrubbed response is kept under `observed`.
+- `captured` cases are ENFORCED by `tests/compat/test_compatibility_corpus.py`:
+  if the emulator diverges, fix the emulator (or record a contract we hadn't
+  modeled). The emulator must satisfy the corpus — not the reverse. Flip the
+  `len(CAPTURED) == 0` guard in that file when the first capture lands.
+
+Self-capture loop (emulator, `source: self-captured`, regression guard only):
+`--diff` replays existing cases and prints drift without writing (exit 1 on
+drift); then capture into `<profile>/<surface>/self-captured/`. Against a live
+base URL, the module-global login limiter persists between cases — prefer a
+fresh process per run.
 
 ## iblade-rev-a
 

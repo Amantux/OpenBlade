@@ -36,6 +36,7 @@ single-job) through `InventoryService`.
 | `emulator+sim-ltfs` | `ScalarHttpLibraryBackend` over in-process ASGI (`openblade.api.main:app`) | `MockLTFSBackend` | always |
 | `scsi+fake-ltfs` | `RealLibraryBackend` + `MtxChangerBackend` over a stateful fake `mtx`/`sg_inq` runner (`tests/fakes/mtx.py`) | `MockLTFSBackend` | always |
 | `real+real` | `get_library()` | `get_ltfs()` | only with `OPENBLADE_REAL_HARDWARE_ENABLED=true` (marker `real_hardware`) |
+| `compat-capture` | in-process `TestClient` (or `--base-url`) via `tools/compat_capture.py` | n/a | always (`tests/compat`); `self-captured` cases are regression-only, `captured` enforced |
 
 Known contract violations are `xfail(strict=True)` with the defect's file:line, so a
 fix flips them to XPASS and fails the run until the marker is removed.
