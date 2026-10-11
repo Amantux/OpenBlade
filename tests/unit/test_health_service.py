@@ -72,6 +72,7 @@ def test_check_health_all_ok(tmp_path) -> None:
     result = service.check_health()
 
     assert result.status is HealthStatus.OK
+    # Thresholds unset -> no scratch component, so the set stays exact.
     assert {component.name for component in result.components} == {"database", "library", "ltfs"}
 
 

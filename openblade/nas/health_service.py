@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from openblade.catalog.models import Cartridge, NasDataset, NasFileRecord, PathMapping
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.clock import naive_utcnow
+from openblade.nas.capacity import ScratchHealth, ScratchThresholds, evaluate_scratch
 from openblade.nas.types import (
     CatalogStatusResponse,
     ComponentHealth,
@@ -51,6 +52,9 @@ class HealthService:
             self._check_library_component(),
             self._check_ltfs_component(),
         ]
+        scratch = self._check_scratch_component()
+        if scratch is not None:
+            components.append(scratch)
         status = max(components, key=lambda component: _STATUS_PRIORITY[component.status]).status
         return HealthResponse(
             status=status,
@@ -58,6 +62,34 @@ class HealthService:
             checked_at=checked_at,
             version=get_version_info()["version"],
         )
+
+    def _check_scratch_component(self) -> ComponentHealth | None:
+        """Scratch-stock component; absent when no thresholds are configured.
+
+        CRITICAL maps to DEGRADED, never UNHEALTHY: tape stock must not fail a probe.
+        """
+        try:
+            stored = self.repo.get_scratch_thresholds()
+            if stored is None:
+                return None
+            thresholds = ScratchThresholds.model_validate(stored)
+            count = self.repo.count_scratch_cartridges()
+        except Exception:  # noqa: BLE001 - health must not raise; DB failure is reported by the database component
+            logger.warning("scratch health probe failed", exc_info=True)
+            return None
+        level = evaluate_scratch(count, thresholds)
+        if level is ScratchHealth.CRITICAL:
+            return ComponentHealth(
+                name="scratch",
+                status=HealthStatus.DEGRADED,
+                message=f"scratch count {count} below min {thresholds.scratch_min}",
+            )
+        message = (
+            f"scratch count {count} below warn {thresholds.scratch_warn}"
+            if level is ScratchHealth.WARN
+            else ""
+        )
+        return ComponentHealth(name="scratch", status=HealthStatus.OK, message=message)
 
     def check_ready(self) -> ReadyResponse:
         """Return ready=True only when the database is reachable and the library is connected."""

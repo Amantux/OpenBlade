@@ -6,7 +6,7 @@
 
 Introspected from the OpenAPI schema of `openblade.api.main:app`.
 
-**1186 operations** total: 206 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
+**1190 operations** total: 210 on the native OpenBlade control plane, 980 on the Quantum AML / iBlade emulator surface.
 
 The application serves two surfaces from one ASGI app. Setting
 `OPENBLADE_SCALAR_API_ONLY=true` puts it in emulator-only mode, where the
@@ -114,7 +114,7 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `GET` | `/virtual/ls` | List Virtual Directory | `path`? (query) | - | `VirtualDirectoryListing` |
 | `GET` | `/virtual/stat` | Stat Virtual Path | `path` (query) | - | `VirtualFileEntry` |
 
-### `NAS Config` (124 operations)
+### `NAS Config` (128 operations)
 
 | Method | Path | Summary | Parameters | Request | Response |
 | --- | --- | --- | --- | --- | --- |
@@ -172,6 +172,8 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `POST` | `/nas/restore-jobs/{job_id}/retry` | Retry Restore Job Endpoint | `job_id` (path) | - | `NasRestoreJob` |
 | `POST` | `/nas/restore-jobs/{job_id}/run` | Run Restore Job Endpoint | `job_id` (path) | - | `NasRestoreJob` |
 | `POST` | `/nas/restore-plan` | Restore Plan | - | `RestorePlanRequest` | `RestorePlan` |
+| `GET` | `/nas/scratch-thresholds` | Get Scratch Thresholds | - | - | `ScratchThresholds` |
+| `PUT` | `/nas/scratch-thresholds` | Put Scratch Thresholds | - | `ScratchThresholds` | `ScratchThresholds` |
 | `GET` | `/nas/shares` | List Shares | - | - | `NasShareDefinition[]` |
 | `POST` | `/nas/shares` | Create Or Update Share | - | `NasShareDefinition` | `NasShareDefinition` |
 | `GET` | `/nas/shares/{share_id}` | Get Share | `share_id` (path) | - | `NasShareDefinition` |
@@ -234,6 +236,8 @@ Interactive docs for a running instance are at `/docs` and `/redoc`.
 | `POST` | `/storage/nas/restore-jobs/{job_id}/retry` | Retry Restore Job Endpoint | `job_id` (path) | - | `NasRestoreJob` |
 | `POST` | `/storage/nas/restore-jobs/{job_id}/run` | Run Restore Job Endpoint | `job_id` (path) | - | `NasRestoreJob` |
 | `POST` | `/storage/nas/restore-plan` | Restore Plan | - | `RestorePlanRequest` | `RestorePlan` |
+| `GET` | `/storage/nas/scratch-thresholds` | Get Scratch Thresholds | - | - | `ScratchThresholds` |
+| `PUT` | `/storage/nas/scratch-thresholds` | Put Scratch Thresholds | - | `ScratchThresholds` | `ScratchThresholds` |
 | `GET` | `/storage/nas/shares` | List Shares | - | - | `NasShareDefinition[]` |
 | `POST` | `/storage/nas/shares` | Create Or Update Share | - | `NasShareDefinition` | `NasShareDefinition` |
 | `GET` | `/storage/nas/shares/{share_id}` | Get Share | `share_id` (path) | - | `NasShareDefinition` |

@@ -53,15 +53,16 @@ from openblade.bootstrap import get_catalog, get_context
 from openblade.catalog.repository import CatalogRepository
 from openblade.domain.backends import LibraryBackend, LTFSBackend
 from openblade.domain.wire import coerce_int
+from openblade.nas.capacity import ReservationError, plan_with_pool_reservation
 from openblade.nas.ingest import (
     get_ingest_job,
     register_archive_plan,
     run_ingest_job,
     start_ingest_job,
 )
-from openblade.nas.planner import ArchivePlanner
 from openblade.nas.service import NasService
 from openblade.nas.types import (
+    ArchivePlan,
     ArchivePlanRequest,
     DatasetStatus,
     IngestMode,
@@ -197,6 +198,21 @@ def _resolve_pool_for_share(
             detail=f"No default policy configured for share {share.path} or pool {pool_id}",
         )
     return pool
+
+
+def _plan_share_push(repo: CatalogRepository, request: ArchivePlanRequest) -> ArchivePlan:
+    """Plan a share push against the pool budget and book it, like ``/nas/archive-plan``."""
+    try:
+        plan = plan_with_pool_reservation(repo, request, now=datetime.now(timezone.utc))
+    except ReservationError as exc:
+        # Curated domain message (pool id only); two plans raced for the same bytes.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not plan.is_safe_to_enqueue:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Archive plan is not safe to enqueue: {', '.join(plan.enqueue_blockers)}",
+        )
+    return plan
 
 
 def _available_data_tapes(repo: CatalogRepository) -> list[str]:
@@ -608,14 +624,9 @@ async def push_staged_files_to_share(
         if policy.shard_strategy is not None:
             request_data["shard_strategy"] = policy.shard_strategy
 
-        plan = ArchivePlanner().plan(ArchivePlanRequest.model_validate(request_data))
+        plan = _plan_share_push(repo, ArchivePlanRequest.model_validate(request_data))
         plan.policy_name = policy.name
         plan.policy_type = policy.policy_type
-        if not plan.is_safe_to_enqueue:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Archive plan is not safe to enqueue: {', '.join(plan.enqueue_blockers)}",
-            )
         plan = register_archive_plan(plan)
 
         dataset_name = request.dataset_name or (

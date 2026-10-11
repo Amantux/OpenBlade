@@ -1435,6 +1435,19 @@ class CatalogRepository:
     def delete_nas_reservation(self, reservation_id: str) -> bool:
         return self._delete_nas_row(NasReservation, reservation_id)
 
+    def delete_nas_reservations_for_owner(self, owner: str) -> int:
+        """Delete every reservation booked by ``owner`` (a plan id); return how many."""
+        rows = list(
+            self.session.execute(
+                select(NasReservation).where(NasReservation.owner == owner)
+            ).scalars()
+        )
+        for row in rows:
+            self.session.delete(row)
+        if rows:
+            self.session.commit()
+        return len(rows)
+
     def list_nas_export_sets(self) -> list[dict[str, object]]:
         rows = self.session.execute(select(NasExportSet).order_by(NasExportSet.id)).scalars()
         return [
@@ -1517,6 +1530,15 @@ class CatalogRepository:
 
     def delete_nas_file_span(self, span_id: str) -> bool:
         return self._delete_nas_row(NasFileSpan, span_id)
+
+    def count_scratch_cartridges(self) -> int:
+        """Cartridges with no volume group that are sitting in a slot (not loaded/exported)."""
+        stmt = (
+            select(func.count())
+            .select_from(Cartridge)
+            .where(Cartridge.volume_group_id.is_(None), Cartridge.state == "in_slot")
+        )
+        return int(self.session.execute(stmt).scalar_one())
 
     def get_scratch_thresholds(self) -> dict[str, object] | None:
         return self.get_nas_config(self._SCRATCH_THRESHOLDS_KEY)

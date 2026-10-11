@@ -16,6 +16,8 @@ from openblade.nas.types import (
     TapeAssignment,
 )
 
+POOL_BUDGET_BLOCKER = "Insufficient pool capacity after reservations"
+
 
 class ArchivePlanner:
     DEFAULT_TAPE_CAPACITY = 12_000_000_000_000
@@ -350,6 +352,20 @@ class ArchivePlanner:
                 "Requested copies exceed number of available tapes",
                 field="copies",
             )
+        self._check_pool_budget(request, plan)
+
+    def _check_pool_budget(self, request: ArchivePlanRequest, plan: ArchivePlan) -> None:
+        """Refuse a plan whose placed bytes exceed capacity left after pool reservations."""
+        if not request.available_tapes:
+            return
+        budget = self.pool_capacity_bytes(request) - request.pool_reserved_bytes
+        placed = plan.total_bytes * plan.copies_required
+        if placed > budget:
+            self._block_plan(plan, POOL_BUDGET_BLOCKER)
+
+    def pool_capacity_bytes(self, request: ArchivePlanRequest) -> int:
+        """Summed usable capacity of the request's tapes (per-barcode holds already removed)."""
+        return sum(self._tape_capacity(request, barcode) for barcode in request.available_tapes)
 
     def _ordered_tapes(self, request: ArchivePlanRequest) -> list[str]:
         preferred = [

@@ -10,11 +10,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from openblade.nas.types import NasFileState
+from openblade.nas.planner import ArchivePlanner
+from openblade.nas.types import ArchivePlan, ArchivePlanRequest, NasFileState
 
 if TYPE_CHECKING:
     from openblade.catalog.repository import CatalogRepository
@@ -80,6 +81,50 @@ class TapeFragmentation(BaseModel):
 
 class ReservationError(ValueError):
     """A reservation cannot be satisfied from the pool's free capacity."""
+
+
+# No lease-TTL setting is in scope where plans are built, so a booked plan holds
+# its pool bytes for one hour; expiry is the release path for plans never started.
+PLAN_RESERVATION_TTL = timedelta(hours=1)
+
+
+def plan_with_pool_reservation(
+    repository: CatalogRepository,
+    request: ArchivePlanRequest,
+    *,
+    now: datetime,
+    planner: ArchivePlanner | None = None,
+) -> ArchivePlan:
+    """Plan against the pool's reservation budget, then book the plan's own bytes.
+
+    Unexpired ``NasReservation`` rows for ``request.pool`` are the source of truth:
+    their sum becomes ``pool_reserved_bytes``. A safe plan books
+    ``total_bytes * copies`` under ``owner=plan_id``; if the atomic booking loses
+    a race, ``ReservationError`` is raised. Requests without a pool are planned
+    unchanged.
+    """
+    planner = planner or ArchivePlanner()
+    pool_id = request.pool
+    if pool_id is None:
+        return planner.plan(request)
+    reserved = sum(
+        int(cast(int, row["bytes"])) for row in repository.reservations_for_pool(pool_id, now=now)
+    )
+    request = request.model_copy(update={"pool_reserved_bytes": reserved})
+    plan = planner.plan(request)
+    if not plan.is_safe_to_enqueue:
+        return plan
+    booked = repository.reserve_nas_capacity(
+        pool_id,
+        plan.total_bytes * plan.copies_required,
+        plan.plan_id,
+        now + PLAN_RESERVATION_TTL,
+        capacity_bytes=planner.pool_capacity_bytes(request),
+        now=now,
+    )
+    if not booked:
+        raise ReservationError(f"pool {pool_id} capacity was reserved by a concurrent plan")
+    return plan
 
 
 class CapacityReservation(BaseModel):

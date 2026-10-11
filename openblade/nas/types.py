@@ -455,6 +455,9 @@ class ArchivePlanRequest(BaseModel):
     cartridges: dict[str, Cartridge] = Field(default_factory=dict)
     drive_generation: MediaGeneration | None = None
     reserved_bytes: dict[str, int] = Field(default_factory=dict)
+    # Pool-level budget held by other jobs' NasReservation rows (the source of
+    # truth); subtracted from the summed tape capacity, not spread per barcode.
+    pool_reserved_bytes: int = Field(default=0, ge=0)
 
 
 class CacheDriveConfig(BaseModel):

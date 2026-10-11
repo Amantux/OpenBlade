@@ -273,3 +273,27 @@ Known costs: each claim of id *k* writes up to *k* released probe rows; claims
 are not heartbeated, so they lapse after the TTL. A repository method that
 leases one specific drive id would remove both the probes and the retry loop.
 Covered by `tests/unit/test_job_queue_persistent.py` (two sessions, one file).
+
+## Capacity reservations
+
+Decisions (WS-capacity, fleet round 3):
+
+1. **Pool reservations are the source of truth.** The planner takes
+   `pool_reserved_bytes` (sum of unexpired `nas_reservations` for the pool) and adds
+   the `POOL_BUDGET_BLOCKER` when placed bytes exceed total tape capacity minus that
+   budget. `reserved_bytes` stays per barcode for explicit holds.
+2. **A plan books its own reservation.** `capacity.plan_with_pool_reservation` books
+   `total_bytes * copies` under `owner=plan_id` for 1h through the atomic
+   `reserve_nas_capacity`; a lost race raises `ReservationError` (HTTP 409). Both
+   `/nas/archive-plan` and the upload share-push use it. `run_ingest_job` deletes the
+   owner's rows once the job is archived, failed or cancelled; expiry covers the rest.
+3. **Scratch** = `volume_group_id IS NULL AND state = 'in_slot'`
+   (`count_scratch_cartridges`); the planner's barcode heuristic is unchanged.
+4. **Health**: a `scratch` component only when thresholds are configured; WARN is OK
+   with a message, CRITICAL is DEGRADED, never UNHEALTHY. Thresholds are managed by
+   `GET`/`PUT /nas/scratch-thresholds` (404 unset, 422 on `warn < min`).
+
+Reviewer risks still open: `request.pool` is used as the pool id without checking it
+names a configured pool; client-supplied `tape_capacities` set the capacity the
+booking is checked against, so a caller can inflate it; and an abandoned plan holds
+its bytes for the full hour.

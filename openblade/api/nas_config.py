@@ -20,6 +20,11 @@ from openblade.catalog.repository import CatalogRepository
 from openblade.domain.clock import naive_utcnow
 from openblade.domain.models import MountHandle, MountMode
 from openblade.domain.wire import coerce_int
+from openblade.nas.capacity import (
+    ReservationError,
+    ScratchThresholds,
+    plan_with_pool_reservation,
+)
 from openblade.nas.catalog_rebuild import CatalogRebuildPlanner
 from openblade.nas.catalog_rebuild_worker import SAFE_REBUILD_PREFLIGHT_ERROR, CatalogRebuildWorker
 from openblade.nas.catalog_shard import CatalogShardWriter
@@ -39,7 +44,6 @@ from openblade.nas.ingest import (
 from openblade.nas.ltfs_manifest import TapeMetadataWriter
 from openblade.nas.manifest_validator import ManifestValidator
 from openblade.nas.path_mapping import PathMappingService
-from openblade.nas.planner import ArchivePlanner
 from openblade.nas.restore_planner import RestorePlan, RestorePlanner
 from openblade.nas.service import NasService
 from openblade.nas.sidecar import SidecarResolver
@@ -887,6 +891,28 @@ async def list_reservations(
     return repo.list_nas_reservations(pool_id)
 
 
+@router.get("/scratch-thresholds", response_model=ScratchThresholds)
+async def get_scratch_thresholds(
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> ScratchThresholds:
+    stored = repo.get_scratch_thresholds()
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Scratch thresholds not configured"
+        )
+    return ScratchThresholds.model_validate(stored)
+
+
+@router.put("/scratch-thresholds", response_model=ScratchThresholds)
+async def put_scratch_thresholds(
+    thresholds: ScratchThresholds,
+    repo: CatalogRepository = Depends(get_catalog_repository),
+) -> ScratchThresholds:
+    # The body is validated by ScratchThresholds itself (warn < min -> 422).
+    repo.set_scratch_thresholds(thresholds.scratch_min, thresholds.scratch_warn)
+    return thresholds
+
+
 @router.get("/export-sets")
 async def list_export_sets(
     repo: CatalogRepository = Depends(get_catalog_repository),
@@ -1164,7 +1190,13 @@ async def archive_plan(
             updates["max_parallelism"] = policy.max_parallelism
         request = request.model_copy(update=updates)
 
-    plan = ArchivePlanner().plan(request)
+    try:
+        plan = plan_with_pool_reservation(
+            service.repository, request, now=datetime.now(timezone.utc)
+        )
+    except ReservationError as exc:
+        # Curated domain message (pool id only); two plans raced for the same bytes.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if policy is not None:
         plan.policy_name = policy.name
         plan.policy_type = policy.policy_type
