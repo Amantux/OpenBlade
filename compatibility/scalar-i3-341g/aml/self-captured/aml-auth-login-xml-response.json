@@ -1,0 +1,40 @@
+{
+  "captured_from": "openblade-emulator",
+  "expected": {
+    "headers": {
+      "content-type": "application/xml"
+    },
+    "status": 200
+  },
+  "fidelity_notes": "Self-captured from the OpenBlade emulator by tools/compat_capture.py: a regression guard of emulator behaviour, NOT evidence of appliance fidelity.",
+  "firmware": "341G",
+  "id": "aml-auth-login-xml-response",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "observed": {
+    "body": "<WSResultCode><code>0</code><description>OK</description><summary>Login successful</summary><customCode>0</customCode><token><token></token></WSResultCode>",
+    "headers": {
+      "content-length": "184",
+      "content-type": "application/xml",
+      "permissions-policy": "geolocation=(), microphone=(), camera=()",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "set-cookie": "sessionID=<token>; HttpOnly; Max-Age=86400; Path=/; SameSite=lax",
+      "vary": "Origin",
+      "warning": "Default Password Supplied",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    }
+  },
+  "profile": "scalar-i3-341g",
+  "request": {
+    "headers": {
+      "Accept": "application/xml"
+    },
+    "json": {
+      "name": "admin",
+      "password": "<redacted>"
+    },
+    "method": "POST",
+    "path": "/aml/users/login"
+  },
+  "source": "self-captured"
+}

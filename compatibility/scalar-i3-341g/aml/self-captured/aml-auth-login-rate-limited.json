@@ -1,0 +1,50 @@
+{
+  "captured_from": "openblade-emulator",
+  "expected": {
+    "headers": {
+      "content-type": "application/json"
+    },
+    "json_contains": {
+      "action": "Review the error details and retry.",
+      "code": "AML_ERROR",
+      "customCode": null,
+      "description": "Too many login attempts. Try again in 5 minutes.",
+      "summary": "Too many login attempts. Try again in 5 minutes."
+    },
+    "status": 429
+  },
+  "fidelity_notes": "Self-captured from the OpenBlade emulator by tools/compat_capture.py: a regression guard of emulator behaviour, NOT evidence of appliance fidelity.",
+  "firmware": "341G",
+  "id": "aml-auth-login-rate-limited",
+  "manual_ref": "Not in Rev D manual (inferred)",
+  "observed": {
+    "body": {
+      "action": "Review the error details and retry.",
+      "code": "AML_ERROR",
+      "customCode": null,
+      "description": "Too many login attempts. Try again in 5 minutes.",
+      "summary": "Too many login attempts. Try again in 5 minutes."
+    },
+    "headers": {
+      "content-length": "211",
+      "content-type": "application/json",
+      "permissions-policy": "geolocation=(), microphone=(), camera=()",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "retry-after": "297",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    }
+  },
+  "profile": "scalar-i3-341g",
+  "request": {
+    "json": {
+      "name": "admin",
+      "password": "<redacted-invalid>"
+    },
+    "method": "POST",
+    "path": "/aml/users/login",
+    "repeat": 10
+  },
+  "source": "self-captured"
+}

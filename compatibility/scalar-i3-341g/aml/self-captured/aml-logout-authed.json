@@ -1,0 +1,46 @@
+{
+  "auth": "admin",
+  "captured_from": "openblade-emulator",
+  "expected": {
+    "headers": {
+      "content-type": "application/json"
+    },
+    "json_contains": {
+      "action": null,
+      "code": 0,
+      "customCode": 0,
+      "description": "OK",
+      "summary": "Logged out admin"
+    },
+    "status": 200
+  },
+  "fidelity_notes": "Self-captured from the OpenBlade emulator by tools/compat_capture.py: a regression guard of emulator behaviour, NOT evidence of appliance fidelity.",
+  "firmware": "341G",
+  "id": "aml-logout-authed",
+  "manual_ref": "Web Services Guide Rev D \u00a72.5 (logout)",
+  "observed": {
+    "body": {
+      "action": null,
+      "code": 0,
+      "customCode": 0,
+      "description": "OK",
+      "summary": "Logged out admin"
+    },
+    "headers": {
+      "content-length": "87",
+      "content-type": "application/json",
+      "permissions-policy": "geolocation=(), microphone=(), camera=()",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "set-cookie": "sessionID=<token>; expires=<timestamp>; Max-Age=0; Path=/; SameSite=lax",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    }
+  },
+  "profile": "scalar-i3-341g",
+  "request": {
+    "method": "POST",
+    "path": "/aml/auth/logout"
+  },
+  "source": "self-captured"
+}
