@@ -1,0 +1,40 @@
+# LAN exposure override. Use ONLY via `make lan-up` / `make lan-down`:
+#   docker compose -p openblade-lan -f docker-compose.yml \
+#     -f deploy/lan/docker-compose.lan.yml --profile web-flask \
+#     --env-file deploy/lan/.env up -d --build
+# Publishes api/web/web-flask on ${OPENBLADE_BIND_IP:-0.0.0.0}:8090/8091/8092
+# (8000/5173/5175 belong to other projects on the target box) and runs in
+# production mode, so the api REFUSES TO START with any open auth gate. Every
+# secret below is required: compose aborts with a named error if one is unset.
+# HTTP on a LAN is cleartext -- put a TLS reverse proxy in front next.
+name: openblade-lan
+
+services:
+  api:
+    ports: !override
+      - "${OPENBLADE_BIND_IP:-0.0.0.0}:8090:8000"
+    environment:
+      OPENBLADE_ENV: production
+      OPENBLADE_API_TOKEN: ${OPENBLADE_API_TOKEN:?set OPENBLADE_API_TOKEN in deploy/lan/.env}
+      OPENBLADE_SERVICE_TOKEN: ${OPENBLADE_SERVICE_TOKEN:?set OPENBLADE_SERVICE_TOKEN in deploy/lan/.env}
+      OPENBLADE_ADMIN_PASSWORD: ${OPENBLADE_ADMIN_PASSWORD:?set OPENBLADE_ADMIN_PASSWORD in deploy/lan/.env}
+      OPENBLADE_SERVICE_PASSWORD: ${OPENBLADE_SERVICE_PASSWORD:?set OPENBLADE_SERVICE_PASSWORD in deploy/lan/.env}
+      OPENBLADE_CORS_ORIGINS: ${OPENBLADE_CORS_ORIGINS:?set OPENBLADE_CORS_ORIGINS in deploy/lan/.env}
+
+  web:
+    # nginx proxies /api and /aml to api:8000 by compose name, so the browser
+    # only talks to this port (same origin); CORS does not apply to the SPA.
+    ports: !override
+      - "${OPENBLADE_BIND_IP:-0.0.0.0}:8091:80"
+
+  web-flask:
+    ports: !override
+      - "${OPENBLADE_BIND_IP:-0.0.0.0}:8092:8080"
+    environment:
+      OPENBLADE_ENV: production
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?set FLASK_SECRET_KEY in deploy/lan/.env}
+      OPENBLADE_API_TOKEN: ${OPENBLADE_API_TOKEN:?set OPENBLADE_API_TOKEN in deploy/lan/.env}
+      OPENBLADE_SERVICE_TOKEN: ${OPENBLADE_SERVICE_TOKEN:?set OPENBLADE_SERVICE_TOKEN in deploy/lan/.env}
+      # Production defaults cookies to Secure, which browsers drop over plain
+      # HTTP (login would silently fail). Set true once a TLS proxy is in front.
+      OPENBLADE_WEB_SECURE_COOKIES: ${OPENBLADE_WEB_SECURE_COOKIES:-false}
