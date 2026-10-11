@@ -16,6 +16,7 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urlsplit
 
 import structlog
 from fastapi import APIRouter, HTTPException
@@ -129,9 +130,39 @@ def _parse_json_report(run_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# The runner spawns pytest with request-supplied AML URL/credentials, so it is a
+# dev-only surface: opt-in, never in production, and never pointed off-host (SSRF).
+TEST_RUNNER_ENABLED_ENV_VAR = "OPENBLADE_ENABLE_TEST_RUNNER"
+_ALLOWED_AML_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "host.docker.internal"})
+
+
+def test_runner_enabled() -> bool:
+    """True only when explicitly enabled AND not running in production."""
+    if os.environ.get("OPENBLADE_ENV", "development").strip().lower() == "production":
+        return False
+    return os.environ.get(TEST_RUNNER_ENABLED_ENV_VAR, "false").strip().lower() == "true"
+
+
+def aml_url_allowed(url: str) -> bool:
+    """Allow only http(s) URLs whose host is loopback or host.docker.internal."""
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return False
+    return parts.scheme in {"http", "https"} and host in _ALLOWED_AML_HOSTS
+
+
 @router.post("/run", response_model=TestRunResponse)
 async def start_test_run(req: TestRunRequest) -> TestRunResponse:
     """Start a test run. Returns run_id. Output streams via /stream/{run_id}."""
+    if not test_runner_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not aml_url_allowed(req.i3_aml_url):
+        raise HTTPException(
+            status_code=400,
+            detail="i3_aml_url must be http(s) on localhost, 127.0.0.1, ::1 or host.docker.internal",
+        )
     if (
         req.target == "real"
         and os.environ.get("I3_REAL_HARDWARE_ENABLED", "false").lower() != "true"
