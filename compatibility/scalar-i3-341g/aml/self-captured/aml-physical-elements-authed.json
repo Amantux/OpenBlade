@@ -1,0 +1,1513 @@
+{
+  "auth": "admin",
+  "captured_from": "openblade-emulator",
+  "expected": {
+    "headers": {
+      "content-type": "application/json"
+    },
+    "json_contains": {
+      "elementList": {
+        "element": [
+          {
+            "address": 1,
+            "barcode": "VOL001L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 1,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 2,
+            "barcode": "VOL002L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 2,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 3,
+            "barcode": "VOL003L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 3,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 4,
+            "barcode": "VOL004L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 4,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 5,
+            "barcode": "VOL005L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 5,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 6,
+            "barcode": "VOL006L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 6,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 7,
+            "barcode": "VOL007L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 7,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 8,
+            "barcode": "VOL008L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 8,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 9,
+            "barcode": "VOL009L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 9,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 10,
+            "barcode": "VOL010L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 10,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 11,
+            "barcode": "VOL011L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 11,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 12,
+            "barcode": "VOL012L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 12,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 13,
+            "barcode": "VOL013L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 13,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 14,
+            "barcode": "VOL014L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 14,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 15,
+            "barcode": "VOL015L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 15,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 16,
+            "barcode": "VOL016L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 16,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 17,
+            "barcode": "VOL017L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 17,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 18,
+            "barcode": "VOL018L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 18,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 19,
+            "barcode": "VOL019L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 19,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 20,
+            "barcode": "VOL020L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 20,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 21,
+            "barcode": "VOL021L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 21,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 22,
+            "barcode": "VOL022L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 22,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 23,
+            "barcode": "VOL023L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 23,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 24,
+            "barcode": "VOL024L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 24,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 25,
+            "barcode": "VOL025L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 25,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 26,
+            "barcode": "VOL026L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 1,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 27,
+            "barcode": "VOL027L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 2,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 28,
+            "barcode": "VOL028L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 3,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 29,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 4,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 30,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 5,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 31,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 6,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 32,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 7,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 33,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 8,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 34,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 9,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 35,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 10,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 36,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 11,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 37,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 12,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 38,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 13,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 39,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 14,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 40,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 15,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 41,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 16,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 42,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 17,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 43,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 18,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 44,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 19,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 45,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 20,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 46,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 21,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 47,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 22,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 48,
+            "barcode": "CLN001L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 23,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 49,
+            "barcode": "CLN002L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 24,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 50,
+            "barcode": "CLN003L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 25,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 0,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "drive"
+          },
+          {
+            "address": 1,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "drive"
+          },
+          {
+            "address": 2,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "drive"
+          },
+          {
+            "address": 1,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "ieSlot"
+          },
+          {
+            "address": 2,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "ieSlot"
+          }
+        ]
+      }
+    },
+    "status": 200
+  },
+  "fidelity_notes": "Self-captured from the OpenBlade emulator by tools/compat_capture.py: a regression guard of emulator behaviour, NOT evidence of appliance fidelity.",
+  "firmware": "341G",
+  "id": "aml-physical-elements-authed",
+  "manual_ref": "Web Services Guide Rev D, Table 212 (physicalLibrary/elements)",
+  "observed": {
+    "body": {
+      "elementList": {
+        "element": [
+          {
+            "address": 1,
+            "barcode": "VOL001L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 1,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 2,
+            "barcode": "VOL002L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 2,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 3,
+            "barcode": "VOL003L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 3,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 4,
+            "barcode": "VOL004L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 4,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 5,
+            "barcode": "VOL005L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 5,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 6,
+            "barcode": "VOL006L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 6,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 7,
+            "barcode": "VOL007L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 7,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 8,
+            "barcode": "VOL008L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 8,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 9,
+            "barcode": "VOL009L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 9,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 10,
+            "barcode": "VOL010L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 10,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 11,
+            "barcode": "VOL011L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 11,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 12,
+            "barcode": "VOL012L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 12,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 13,
+            "barcode": "VOL013L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 13,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 14,
+            "barcode": "VOL014L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 14,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 15,
+            "barcode": "VOL015L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 15,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 16,
+            "barcode": "VOL016L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 16,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 17,
+            "barcode": "VOL017L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 17,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 18,
+            "barcode": "VOL018L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 18,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 19,
+            "barcode": "VOL019L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 19,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 20,
+            "barcode": "VOL020L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 20,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 21,
+            "barcode": "VOL021L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 21,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 22,
+            "barcode": "VOL022L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 22,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 23,
+            "barcode": "VOL023L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 23,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 24,
+            "barcode": "VOL024L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 24,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 25,
+            "barcode": "VOL025L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 25,
+              "section": 1,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 26,
+            "barcode": "VOL026L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 1,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 27,
+            "barcode": "VOL027L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 2,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 28,
+            "barcode": "VOL028L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 3,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 29,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 4,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 30,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 5,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 31,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 6,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 32,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 7,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 33,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 8,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 34,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 9,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 35,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 10,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 36,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 11,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 37,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 12,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 38,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 13,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 39,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 14,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 40,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 15,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 41,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 16,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 42,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 17,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 43,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 18,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 44,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 19,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 45,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 20,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 46,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 21,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 47,
+            "barcode": null,
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 22,
+              "section": 2,
+              "type": 2
+            },
+            "state": "empty",
+            "type": "slot"
+          },
+          {
+            "address": 48,
+            "barcode": "CLN001L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 23,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 49,
+            "barcode": "CLN002L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 24,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 50,
+            "barcode": "CLN003L9",
+            "coordinate": {
+              "column": 1,
+              "frame": 1,
+              "rack": 1,
+              "row": 25,
+              "section": 2,
+              "type": 2
+            },
+            "state": "occupied",
+            "type": "slot"
+          },
+          {
+            "address": 0,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "drive"
+          },
+          {
+            "address": 1,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "drive"
+          },
+          {
+            "address": 2,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "drive"
+          },
+          {
+            "address": 1,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "ieSlot"
+          },
+          {
+            "address": 2,
+            "barcode": null,
+            "coordinate": null,
+            "state": "empty",
+            "type": "ieSlot"
+          }
+        ]
+      }
+    },
+    "headers": {
+      "content-length": "7423",
+      "content-type": "application/json",
+      "permissions-policy": "geolocation=(), microphone=(), camera=()",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "vary": "Origin",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    }
+  },
+  "profile": "scalar-i3-341g",
+  "request": {
+    "method": "GET",
+    "path": "/aml/physicalLibrary/elements"
+  },
+  "source": "self-captured"
+}

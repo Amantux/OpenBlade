@@ -34,7 +34,14 @@ def _load_cases() -> list[dict]:
 
 CASES = _load_cases()
 CAPTURED = [c for c in CASES if c.get("source") == "captured"]
-INFERRED = [c for c in CASES if c.get("source") == "inferred"]
+# self-captured = recorded from the OpenBlade emulator by tools/compat_capture.py;
+# treated exactly like inferred (regression guard, never fidelity evidence).
+INFERRED = [c for c in CASES if c.get("source") in {"inferred", "self-captured"}]
+SELF_CAPTURED = [c for c in CASES if c.get("source") == "self-captured"]
+# compat_capture redacts request passwords; replay them with the emulator's default.
+_REDACTED = "<redacted>"
+_EMULATOR_PASSWORD = "password"
+_PLACEHOLDERS = {_REDACTED: _EMULATOR_PASSWORD, "<redacted-invalid>": "wrong-password"}
 
 
 @pytest.fixture()
@@ -65,7 +72,12 @@ def _run(client: TestClient, case: dict):
     if "body" in req:
         kwargs["content"] = req["body"]
     else:
-        kwargs["json"] = req.get("json")
+        payload = req.get("json")
+        if isinstance(payload, dict):
+            payload = {
+                k: _PLACEHOLDERS.get(v, v) if isinstance(v, str) else v for k, v in payload.items()
+            }
+        kwargs["json"] = payload
     # request.repeat: send the request this many extra times first (e.g. to trip a limiter).
     for _ in range(int(req.get("repeat", 0))):
         client.request(req["method"], req["path"], **kwargs)
@@ -94,7 +106,7 @@ def _subset_matches(expected: dict, actual: dict) -> list[str]:
 def test_corpus_is_non_empty_and_wellformed() -> None:
     assert CASES, "no compatibility cases found"
     for case in CASES:
-        assert case.get("source") in {"captured", "inferred"}, case.get("id")
+        assert case.get("source") in {"captured", "inferred", "self-captured"}, case.get("id")
         assert case.get("profile") and "request" in case and "expected" in case
 
 
@@ -134,7 +146,10 @@ def test_captured_case_matches_appliance(case, client: TestClient) -> None:
 def test_fidelity_coverage_is_reported(capsys) -> None:
     # Make the gap visible in test output rather than silently green.
     with capsys.disabled():
-        print(f"\n[compatibility corpus] captured={len(CAPTURED)} inferred={len(INFERRED)}")
+        print(
+            f"\n[compatibility corpus] captured={len(CAPTURED)} "
+            f"inferred={len(INFERRED) - len(SELF_CAPTURED)} self-captured={len(SELF_CAPTURED)}"
+        )
         if not CAPTURED:
             print(
                 "[compatibility corpus] WARNING: i3 wire fidelity is UNVERIFIED (no appliance captures)."
