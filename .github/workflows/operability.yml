@@ -79,5 +79,7 @@ jobs:
           OPENBLADE_ADMIN_PASSWORD: ci-strong-admin
           OPENBLADE_SERVICE_PASSWORD: ci-strong-service
           OPENBLADE_SERVICE_TOKEN: ci-strong-token
+          # Production refuses to start with the native API open (native_api_open).
+          OPENBLADE_API_TOKEN: ci-strong-api-token
           OPENBLADE_DB_URL: sqlite:////tmp/openblade-ci-deploy.db
         run: python scripts/deploy.py --skip-deploy
