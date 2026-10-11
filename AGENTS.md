@@ -7,6 +7,9 @@ Develop and maintain OpenBlade, a high-reliability, simulator-first tape archive
 ### Hardware Safety & Data Integrity
 - **Safety Override:** Never bypass or disable the real-hardware safety guard mechanisms.
 - **Destructive Operations:** Never perform format or erase operations without positive barcode confirmation and a cryptographically valid safety token.
+- **Single-use format token:** `FormatService.confirm` atomically consumes the safety token BEFORE the job; a reused, concurrent, or failed-delete token is refused and a failed job never re-arms it.
+- **Scratch-media allowlist in code:** on a real backend `FormatService` formats only barcodes in `OPENBLADE_SCRATCH_BARCODES` (`openblade/domain/media_allowlist.py`); an empty allowlist refuses everything.
+- **Third real-mode signal:** `OPENBLADE_BACKEND=real` + `OPENBLADE_REAL_HARDWARE_ENABLED=true` also requires `OPENBLADE_API_TOKEN` (or `_FILE`), else `load_config` raises `RealHardwareDisabledError`; `simulator` is an alias of `mock`.
 - **State Management:** Never initiate an unload sequence while the Linear Tape File System (LTFS) is mounted or in a "dirty" state.
 - **Verification:** Every hardware command must be preceded by a state-check and followed by a verification of the resulting state.
 

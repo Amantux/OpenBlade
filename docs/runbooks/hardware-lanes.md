@@ -90,6 +90,10 @@ Each lane also captures inventory + drive state before and after
 (`tools.hardware.snapshot capture`), diffs them, and uploads `snapshots/` as an
 artifact even on failure. On the read-only lanes the diff must be empty.
 
+The allowlist is also enforced by the service itself: on a real backend
+`FormatService` refuses to dry-run or confirm a format for any barcode outside
+`OPENBLADE_SCRATCH_BARCODES`, and an empty list refuses everything.
+
 ## 5. The destructive sequence
 
 Load/unload → LTFS write/read/checksum → archive + restore → sharded write +
