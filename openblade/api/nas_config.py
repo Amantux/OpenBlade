@@ -1232,6 +1232,12 @@ async def start_ingest(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Archive plan is not safe to enqueue"
         )
+    if plan.pool != request.pool_id:
+        # The booking is made against plan.pool; starting into any other pool (or a
+        # pool-less preview into a pool) would write to an unbudgeted pool.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="pool_id does not match plan pool"
+        )
     if plan.ingest_mode is IngestMode.CACHE_DRIVE:
         if request.cache_drive_id is None:
             raise HTTPException(
@@ -1262,7 +1268,7 @@ async def start_ingest(
     job = start_ingest_job(
         plan=plan,
         dataset_name=request.dataset_name,
-        pool_id=request.pool_id,
+        pool_id=plan.pool,
         nas_service=service,
         cache_drive_id=request.cache_drive_id,
     )
