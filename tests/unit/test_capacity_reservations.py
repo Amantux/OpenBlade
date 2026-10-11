@@ -12,6 +12,7 @@ from openblade.nas.capacity import (
     PLAN_RESERVATION_TTL,
     ReservationError,
     book_plan_capacity,
+    count_scratch_tapes,
     plan_with_pool_budget,
 )
 from openblade.nas.planner import POOL_BUDGET_BLOCKER, ArchivePlanner
@@ -148,30 +149,41 @@ def test_lost_booking_race_raises_typed_error(repo: CatalogRepository) -> None:
         book_plan_capacity(RacingRepo(), plan, None, now=NOW)  # type: ignore[arg-type]
 
 
-def _seed_cartridges(repo: CatalogRepository, scratch: int) -> int:
-    """Add cartridges on top of the simulator's seeded stock; return that baseline."""
-    baseline = repo.count_scratch_cartridges()
-    from openblade.catalog.models import Cartridge
-
-    for i in range(scratch):
-        repo.session.add(Cartridge(barcode=f"S{i:05d}L8", state="in_slot"))
-    repo.session.add(Cartridge(barcode="LOADED1L8", state="loaded"))
-    repo.session.add(Cartridge(barcode="ASSIGN1L8", state="in_slot", volume_group_id="vg-1"))
-    repo.session.commit()
-    return baseline
-
-
-def test_count_scratch_excludes_loaded_and_assigned(repo: CatalogRepository) -> None:
-    baseline = _seed_cartridges(repo, scratch=2)
-
-    assert repo.count_scratch_cartridges() == baseline + 2
-
-
-def _scratch_component(tmp_path: Path, scratch: int, thresholds: tuple[int, int] | None):  # type: ignore[no-untyped-def]
+def _scratch_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     from tests.unit.test_health_service import make_health_service
 
     service, _ = make_health_service(tmp_path, "scratch.db")
-    base = _seed_cartridges(service.repo, scratch)
+    return service, count_scratch_tapes(service.repo, service.library)
+
+
+def test_scratch_counts_blank_inventory_minus_assigned_and_written(tmp_path: Path) -> None:
+    from openblade.catalog.models import Cartridge
+    from openblade.jobs.inventory import InventoryService
+
+    # Arrange: N blank tapes from the simulator inventory; none are catalog rows yet.
+    service, blank = _scratch_service(tmp_path)
+    slots = InventoryService(service.library).snapshot().slots
+    barcodes = sorted(
+        str(s.barcode) for s in slots if s.barcode and not str(s.barcode).startswith("CLN")
+    )
+    assert blank == len(barcodes) >= 2
+
+    # Act + Assert: a volume-group member is no longer scratch...
+    group = service.repo.create_volume_group("vg-scratch")
+    service.repo.add_barcode_to_volume_group(group.id, barcodes[0])
+    assert count_scratch_tapes(service.repo, service.library) == blank - 1
+    # ...nor is a tape catalogued as written.
+    written = service.repo.session.query(Cartridge).filter_by(barcode=barcodes[1]).one_or_none()
+    if written is None:
+        service.repo.session.add(Cartridge(barcode=barcodes[1], used_bytes=10))
+    else:
+        written.used_bytes = 10
+    service.repo.session.commit()
+    assert count_scratch_tapes(service.repo, service.library) == blank - 2
+
+
+def _scratch_component(tmp_path: Path, thresholds: tuple[int, int] | None):  # type: ignore[no-untyped-def]
+    service, base = _scratch_service(tmp_path)
     if thresholds is not None:
         service.repo.set_scratch_thresholds(base + thresholds[0], base + thresholds[1])
     result = service.check_health()
@@ -179,12 +191,12 @@ def _scratch_component(tmp_path: Path, scratch: int, thresholds: tuple[int, int]
 
 
 def test_scratch_component_absent_when_thresholds_unset(tmp_path: Path) -> None:
-    _, component = _scratch_component(tmp_path, 0, None)
+    _, component = _scratch_component(tmp_path, None)
     assert component is None
 
 
 def test_scratch_warn_is_ok_with_message(tmp_path: Path) -> None:
-    _, component = _scratch_component(tmp_path, 3, (2, 5))
+    _, component = _scratch_component(tmp_path, (-1, 2))
     assert component is not None
     assert component.status.value == "ok"
     assert component.message.startswith("scratch count ")
@@ -194,7 +206,7 @@ def test_scratch_warn_is_ok_with_message(tmp_path: Path) -> None:
 def test_scratch_critical_is_degraded_not_unhealthy(tmp_path: Path) -> None:
     from openblade.nas.types import HealthStatus
 
-    _, component = _scratch_component(tmp_path, 1, (2, 5))
+    _, component = _scratch_component(tmp_path, (1, 3))
     assert component is not None
     assert component.status is HealthStatus.DEGRADED
 

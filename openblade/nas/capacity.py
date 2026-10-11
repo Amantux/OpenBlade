@@ -119,7 +119,8 @@ def server_data_tapes(
 
     The library holds blank/scratch media the catalog has never seen, so slots count
     at the planner's default capacity; catalogued cartridges use their recorded
-    ``capacity_bytes - used_bytes``. Cleaning cartridges are excluded.
+    ``capacity_bytes - used_bytes``. Cleaning cartridges and volume-group members
+    (already assigned elsewhere) are excluded.
     """
     capacities: dict[str, int] = {}
     if library is not None:
@@ -129,11 +130,38 @@ def server_data_tapes(
                     capacities[str(slot.barcode)] = ArchivePlanner.DEFAULT_TAPE_CAPACITY
         except Exception as exc:  # noqa: BLE001 - library offline: fall back to the catalog alone
             logger.warning("library inventory unavailable for pool budget", exc_info=exc)
+    assigned: set[str] = set()
     for cartridge in repository.list_cartridges():
         barcode = str(cartridge.barcode or "").strip()
-        if barcode:
-            capacities[barcode] = max(0, int(cartridge.capacity_bytes) - int(cartridge.used_bytes))
-    return {b: capacities[b] for b in sorted(capacities) if not b.upper().startswith("CLN")}
+        if not barcode:
+            continue
+        if cartridge.volume_group_id is not None:
+            assigned.add(barcode)
+        capacities[barcode] = max(0, int(cartridge.capacity_bytes) - int(cartridge.used_bytes))
+    return {
+        b: capacities[b]
+        for b in sorted(capacities)
+        if b not in assigned and not b.upper().startswith("CLN")
+    }
+
+
+def count_scratch_tapes(repository: CatalogRepository, library: LibraryBackend) -> int:
+    """Blank tapes in library slots: not in any volume group, not catalogued as written.
+
+    The catalog only holds catalogued/archived cartridges, so scratch stock must be
+    counted from the inventory snapshot. Cleaning cartridges are excluded.
+    """
+    excluded = {
+        str(c.barcode).strip()
+        for c in repository.list_cartridges()
+        if c.barcode and (c.volume_group_id is not None or int(c.used_bytes) > 0)
+    }
+    barcodes = {
+        str(slot.barcode)
+        for slot in InventoryService(library).snapshot().slots
+        if slot.barcode is not None
+    }
+    return sum(1 for b in barcodes if b not in excluded and not b.upper().startswith("CLN"))
 
 
 def server_budget_request(
