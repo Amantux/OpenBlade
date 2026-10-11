@@ -207,7 +207,7 @@ def test_nas_i3_end_to_end_archive_recall_hash_verified(iteration: int, tmp_path
             "pool": "archive-pool",
             "files": relative_paths,
             "file_sizes": file_sizes,
-            "available_tapes": tape_candidates[:2],
+            # With `pool` set the server derives the tape set; sending it is a 422.
             "copies": 1,
             "verify_before_archive": True,
             "verify_after_archive": True,
