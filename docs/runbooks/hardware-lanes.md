@@ -59,6 +59,9 @@ Repo → **Settings → Secrets and variables → Actions → Variables**:
   writes JUnit XML and a final **Gate** step (`python -m tools.hardware.junit_gate`)
   fails the job if any test skipped or nothing passed. An expected skip must be
   passed explicitly (`--expected-skip classname::name`) with a comment saying why.
+- **`HARDWARE_REBOOT_TESTS`** = `true` — optional opt-in for the destructive
+  lane's soft-reboot step (see §5 "Reboot persistence"). Unset (the default),
+  the step is skipped and the run shows a `::notice::` saying so.
 
 ## 3. Environment approval (settings-only — cannot be committed)
 
@@ -100,12 +103,42 @@ LTFS format goes only through the two-phase flow (dry-run plan → explicit
 barcode + one-time safety token). `test_mkltfs_formats_tape` is deselected in
 this lane because it calls `mkltfs` directly.
 
-### Reboot persistence (manual)
+### Reboot persistence
 
-The runner cannot power-cycle the appliance. Once per quarter, after a green
-destructive run: reboot the i3 from its web UI, wait for it to come Ready,
-dispatch `hardware-library-smoke.yml`, and confirm the snapshot diff against
-the pre-reboot `after.json` shows the same cartridges in the same slots.
+**Automated (soft reboot) — opt-in, two levels.** The
+"Reboot persistence (AML soft reboot)" step of `hardware-destructive.yml` runs
+`tests/hardware/test_reboot_persistence.py` only when:
+
+1. repo variable **`HARDWARE_REBOOT_TESTS`** = `true` (§2) — unset, the step is
+   skipped and a `::notice::` says so; and
+2. every earlier step succeeded (`success()`, never `always()`): the test steps,
+   the junit gate, the recovery-report check and the lane's after-snapshot.
+
+The step itself exports `OPENBLADE_REBOOT_TESTS=enabled`; the test skips without
+it, so a plain `pytest tests/hardware -m real_hardware` never reboots anything.
+It runs under the same `hardware-destructive` environment approval, after the
+lane's after-snapshot (so the lane diff is not polluted) and before the upload,
+with `timeout-minutes: 20`. It pins `OPENBLADE_APPLIANCE_INSECURE=false`: a rig
+with a self-signed appliance cert fails this step until the cert is trusted.
+
+The test refuses to reboot (fails loudly) unless the library is quiescent — no
+live drive leases, no drive loaded, nothing mounted. It then snapshots inventory,
+drive state and live leases, sends the documented `POST /aml/system/reboot`
+`{"delay":0,"force":false}` (a dropped connection counts as accepted), polls
+every 2 s until a login fails (bounded: 5 min — proves the reboot happened) and
+then until a login succeeds (bounded: 10 min), re-snapshots, and fails on any
+inventory/drive diff or lease change. It does **not** call
+`recover_after_restart` (that function has no report-only mode and would release
+leases); the lane's "Recovery report must be clean" step is the recovery
+assertion. Only `reboot()` bypasses the read-only AML guard, for that one path;
+a no-hardware unit test in the same file pins that `request()` still refuses
+writes.
+
+**Manual (hard power-cycle) — fallback.** The runner cannot cut power. Once per
+quarter, or whenever a soft reboot is not representative (firmware update,
+power event): after a green destructive run, power-cycle the i3, wait for it to
+come Ready, dispatch `hardware-library-smoke.yml`, and confirm the snapshot diff
+against the pre-reboot `after.json` shows the same cartridges in the same slots.
 
 ## 6. What "no rig" looks like — and the no-green-by-skipping rule
 

@@ -136,9 +136,6 @@ jobs:
       - name: Gate — fail on any skip or zero passes
         run: python -m tools.hardware.junit_gate reports/*.xml
 
-      # Reboot persistence is a MANUAL step (the runner cannot power-cycle the
-      # appliance): see docs/runbooks/hardware-lanes.md "Reboot persistence".
-
       - name: Recovery report must be clean
         # Only once the allowlist passed: before that, nothing was touched.
         if: always() && steps.allowlist.outcome == 'success'
@@ -175,6 +172,31 @@ jobs:
           fi
           python -m tools.hardware.snapshot capture --out snapshots/after.json
           python -m tools.hardware.snapshot diff snapshots/before.json snapshots/after.json --out snapshots/diff.json
+
+      # Soft reboot through the documented AML endpoint. Opt-in per repo: runs
+      # only when vars.HARDWARE_REBOOT_TESTS == 'true' AND every earlier step
+      # succeeded (success(), never always()) — i.e. the tests, the gate, the
+      # recovery report and the lane's after-snapshot (taken first so the lane
+      # diff is not polluted by the reboot; the test diffs its own before/after).
+      # Disruptive but non-destructive to media; same environment approval as
+      # the rest of the job. A hard power-cycle stays manual:
+      # docs/runbooks/hardware-lanes.md "Reboot persistence".
+      - name: Reboot persistence (AML soft reboot)
+        if: ${{ success() && vars.HARDWARE_REBOOT_TESTS == 'true' }}
+        # Bounds the test's own waits (300s down + 600s up) plus snapshots.
+        timeout-minutes: 20
+        env:
+          OPENBLADE_REBOOT_TESTS: enabled
+          # Pinned: this step always verifies TLS, whatever the rig var says.
+          OPENBLADE_APPLIANCE_INSECURE: "false"
+        run: |
+          set -euo pipefail
+          python -m pytest tests/hardware/test_reboot_persistence.py -m real_hardware -q -p no:cacheprovider --tb=short -rs --junitxml=reports/test_reboot_persistence.xml
+          python -m tools.hardware.junit_gate reports/test_reboot_persistence.xml
+
+      - name: Reboot persistence not enabled
+        if: ${{ success() && vars.HARDWARE_REBOOT_TESTS != 'true' }}
+        run: echo "::notice::Reboot persistence skipped — set repo variable HARDWARE_REBOOT_TESTS=true to opt in (docs/runbooks/hardware-lanes.md)."
 
       - name: Upload snapshots
         if: always()
