@@ -75,4 +75,4 @@ inferred (OpenBlade-chosen) and unverified against an appliance.
 | Unsupported Accept on login/logout: 406 "Unsupported Accept media type" | inferred |
 | Login rate limit 429 carries `Retry-After` (seconds) | inferred |
 | Expired/unknown `sessionID` cookie: 401 and `Set-Cookie` clearing it (Max-Age=0); expired Bearer: 401 | inferred |
-| MFA-required login state | not implemented |
+| MFA pending (inferred): a login by a user with an enabled MFA record keeps the documented body and adds `Warning: 199 - "MFA Required"`; with `OPENBLADE_AML_STRICT_PRECONDITIONS=true` it is 412 `"summary":"MFA verification required"` (session still issued). Until a valid code is posted to `POST /aml/users/login/mfa`, the session gets the ordinary 401 (cookie kept) on every route except that one, `GET /aml/users/login/mfa/{type}/key` and logout; an invalid code leaves it pending. Challenge wire shape not documented in Rev D manual; certify by appliance capture | inferred |
