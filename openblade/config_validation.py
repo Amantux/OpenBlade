@@ -84,6 +84,74 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
             )
         )
 
+    # --- open gates: blocking in production, one loud banner line otherwise ---
+    sev = BLOCKING if is_prod else WARNING
+    if (
+        not env.get("OPENBLADE_API_TOKEN", "").strip()
+        and not env.get("OPENBLADE_API_TOKEN_FILE", "").strip()
+    ):
+        findings.append(
+            Finding(
+                sev,
+                "native_api_open",
+                "NATIVE API OPEN: OPENBLADE_API_TOKEN / OPENBLADE_API_TOKEN_FILE unset; "
+                "every native mutating route is unauthenticated",
+            )
+        )
+    origins = [o.strip() for o in env.get("OPENBLADE_CORS_ORIGINS", "").split(",")]
+    if "*" in origins:
+        findings.append(
+            Finding(
+                sev,
+                "cors_wildcard",
+                "CORS WILDCARD: OPENBLADE_CORS_ORIGINS contains '*' (credentials are allowed)",
+            )
+        )
+    if not is_prod:
+        if env.get("OPENBLADE_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD) == DEFAULT_ADMIN_PASSWORD:
+            findings.append(
+                Finding(
+                    WARNING,
+                    "default_admin_password",
+                    "DEFAULT AML ADMIN PASSWORD: OPENBLADE_ADMIN_PASSWORD is unset or the default",
+                )
+            )
+        if (
+            env.get("OPENBLADE_SERVICE_PASSWORD", DEFAULT_SERVICE_PASSWORD)
+            == DEFAULT_SERVICE_PASSWORD
+        ):
+            findings.append(
+                Finding(
+                    WARNING,
+                    "default_service_password",
+                    "DEFAULT AML SERVICE PASSWORD: OPENBLADE_SERVICE_PASSWORD is unset or the default",
+                )
+            )
+        if env.get("OPENBLADE_SERVICE_TOKEN", DEFAULT_SERVICE_TOKEN) == DEFAULT_SERVICE_TOKEN:
+            findings.append(
+                Finding(
+                    WARNING,
+                    "default_service_token",
+                    "DEFAULT SERVICE TOKEN: OPENBLADE_SERVICE_TOKEN is unset or the default",
+                )
+            )
+
+    # Mirrors web_flask/app.py::_bool_env: any set, non-truthy value is "off".
+    cookies = env.get("OPENBLADE_WEB_SECURE_COOKIES")
+    if (
+        is_prod
+        and cookies is not None
+        and cookies.strip().lower() not in {"1", "true", "yes", "on"}
+    ):
+        findings.append(
+            Finding(
+                WARNING,
+                "insecure_session_cookies",
+                "INSECURE FLASK COOKIES: OPENBLADE_WEB_SECURE_COOKIES=false in production "
+                "(session cookies cross the LAN in cleartext; put TLS in front)",
+            )
+        )
+
     if not is_prod:
         return findings
 
@@ -157,3 +225,50 @@ def validate_config(env: Mapping[str, str]) -> list[Finding]:
 
 def is_deployable(findings: list[Finding]) -> bool:
     return not any(f.severity == BLOCKING for f in findings)
+
+
+# Codes the API process refuses to start on in production (startup gate). Other
+# BLOCKING findings (e.g. missing_db_url) remain deploy-gate-only.
+STARTUP_REFUSAL_CODES = frozenset(
+    {
+        "native_api_open",
+        "cors_wildcard",
+        "unsafe_admin_password",
+        "missing_service_password",
+        "unsafe_service_token",
+    }
+)
+
+
+class ConfigurationError(RuntimeError):
+    """Raised at startup when production configuration leaves an auth gate open.
+
+    The message names variables/codes only; it never echoes configured values.
+    """
+
+
+def startup_banner(findings: list[Finding]) -> str:
+    """One multi-line banner listing every open gate (empty string if none)."""
+    if not findings:
+        return ""
+    bar = "!" * 72
+    lines = [bar, "OPENBLADE SECURITY: the following gates are OPEN"]
+    lines += [f"  - {f.message}" for f in findings]
+    lines.append(bar)
+    return "\n".join(lines)
+
+
+def enforce_startup_config(env: Mapping[str, str]) -> list[Finding]:
+    """Refuse to start in production with an open auth gate; else return findings.
+
+    Collects every problem and reports them together. Outside production the
+    caller logs :func:`startup_banner` of the returned findings.
+    """
+    findings = validate_config(env)
+    refusals = [f for f in findings if f.severity == BLOCKING and f.code in STARTUP_REFUSAL_CODES]
+    if refusals:
+        raise ConfigurationError(
+            "Refusing to start in OPENBLADE_ENV=production: "
+            + "; ".join(f.message for f in refusals)
+        )
+    return findings

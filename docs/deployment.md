@@ -106,3 +106,29 @@ deploy fails the build. No production data or credentials are used.
   yet been exercised on a real tag**.
 - `rollback` redeploys application code only. It never touches tape state; if
   the catalog needs restoring, follow docs/disaster-recovery.md.
+
+## Exposing on a LAN
+
+`docker-compose.yml` binds every published port to `127.0.0.1`. To reach the
+stack from other machines use the production override in `deploy/lan/`
+(full steps in `deploy/lan/README.md`):
+
+- **Ports:** api `8090`, React UI `8091`, Flask UI `8092`, on
+  `${OPENBLADE_BIND_IP:-0.0.0.0}`. The React UI proxies `/api` and `/aml` to
+  the api by compose name, so browsers only need port 8091.
+- **Required secrets** (compose refuses to render without them):
+  `OPENBLADE_API_TOKEN`, `OPENBLADE_SERVICE_TOKEN`, `OPENBLADE_ADMIN_PASSWORD`,
+  `OPENBLADE_SERVICE_PASSWORD`, `FLASK_SECRET_KEY`, `OPENBLADE_CORS_ORIGINS`.
+  Generate each with
+  `python -c "import secrets;print(secrets.token_urlsafe(32))"`.
+- **Fail-closed:** with `OPENBLADE_ENV=production` the api refuses to start
+  (`ConfigurationError`) on an unset API token, a default AML admin/service
+  password or service token, or `*` in CORS origins; the Flask UI refuses to
+  start without `FLASK_SECRET_KEY`; the test-runner route returns 404.
+  Outside production the api logs one banner listing every open gate, and
+  `scripts/validate_config.py` reports the same set.
+- **Cleartext:** plain HTTP on a LAN exposes tokens and passwords to anyone on
+  the segment. Terminate TLS in a reverse proxy next, then set
+  `OPENBLADE_WEB_SECURE_COOKIES=true` (the override defaults it to `false`
+  because Secure cookies are dropped over HTTP).
+- `make lan-up` / `make lan-down` start and stop the `openblade-lan` project.
