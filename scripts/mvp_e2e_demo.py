@@ -278,7 +278,7 @@ def policy_driven_nas_flow() -> None:
     from fastapi.testclient import TestClient
 
     from openblade.api.main import app
-    from openblade.bootstrap import create_context, get_context, reset_context
+    from openblade.bootstrap import create_context, reset_context
     from openblade.config import OpenBladeConfig
     from openblade.nas.ingest import clear_ingest_state
 
@@ -347,11 +347,8 @@ def policy_driven_nas_flow() -> None:
         )
         ok("policy + pool + cache-drive configured", "policy=nas-sharded -> pool=archive-pool")
 
-        tapes = sorted(
-            str(s.barcode)
-            for s in get_context().library.inventory().slots
-            if s.barcode is not None and not str(s.barcode).upper().startswith("CLN")
-        )
+        # With ``pool`` set the server derives the tape set and capacities itself;
+        # client-supplied ``available_tapes`` is rejected (422) by design.
         plan = client.post(
             "/nas/archive-plan",
             json={
@@ -360,7 +357,6 @@ def policy_driven_nas_flow() -> None:
                 "pool": "archive-pool",
                 "files": relative_paths,
                 "file_sizes": file_sizes,
-                "available_tapes": tapes[:3],
                 "copies": 1,
                 "max_parallelism": 2,
             },
