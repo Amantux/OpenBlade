@@ -1,0 +1,129 @@
+# Machine-readable agent remediation policy for OpenBlade.
+# Authorization for ANY action comes ONLY from an entry here with enabled:true
+# AND all preconditions satisfied AND minimum_confidence met. The wiki is never
+# authorization on its own. Validated by scripts/wiki_validate.py.
+#
+# Conservative by design: OpenBlade has almost no truly stateless-with-redundancy
+# component (the emulator holds in-memory AML state; jobs run in-process; audit is
+# non-durable), so only read-only diagnostics are autonomous today. State-changing
+# actions are approval_required until their runbooks + agent-safety tests exist.
+schema_version: 1
+last_verified: 2026-07-19
+
+global:
+  kill_switch:
+    env: OPENBLADE_AGENT_WRITE_ENABLED   # proposed: when != "true", the agent may
+                                         # diagnose and notify but perform NO write action
+    default_when_unset: disabled
+  audit_required_for_all: true           # every evaluated action -> audit record (agent/audit-requirements.md)
+  evidence_order: [live_telemetry, verified_runbook, verified_architecture, historical_incident, model_knowledge]
+
+# ---- Autonomous, read-only diagnostics (safe in all environments) ----
+actions:
+  - id: rerun_health_check
+    description: Re-call /healthz and /readyz and compare to prior result.
+    enabled: true
+    approval_required: false
+    risk: low
+    environments: [development, emulator, real, ci]
+    components: [api]
+    required_evidence: []
+    minimum_confidence: low
+    max_scope: {requests: 3}
+    required_permissions: [telemetry_read]
+    timeout_seconds: 15
+    retry_limit: 1
+    rollback: {action: none, reason: read-only}
+    verification: ["response received", "status parsed"]
+    stop_conditions: [endpoint_unreachable_after_retries]
+    escalation: notify_if_still_unhealthy
+
+  - id: collect_diagnostic_evidence
+    description: Fetch logs window, current metrics snapshot, health/component detail, fleet probe, config summary.
+    enabled: true
+    approval_required: false
+    risk: low
+    environments: [development, emulator, real, ci]
+    components: [api, emulator, catalog, jobs]
+    required_evidence: []
+    minimum_confidence: unknown
+    max_scope: {read_only: true}
+    required_permissions: [telemetry_read]
+    timeout_seconds: 30
+    retry_limit: 1
+    rollback: {action: none, reason: read-only}
+    verification: ["evidence bundle assembled with source citations"]
+    stop_conditions: []
+    escalation: none
+
+  - id: synthetic_login_probe
+    description: Attempt a synthetic login with a dedicated probe account to test AUTH-001.
+    enabled: true
+    approval_required: false
+    risk: low
+    environments: [development, emulator]
+    components: [api]
+    required_evidence: ["AUTH-001 symptoms observed"]
+    minimum_confidence: low
+    max_scope: {attempts: 1}
+    required_permissions: [synthetic_probe]
+    timeout_seconds: 15
+    retry_limit: 0
+    rollback: {action: none}
+    verification: ["login result observed"]
+    stop_conditions: [account_lockout_risk]
+    escalation: notify
+
+# ---- Approval-required, state-changing (NOT autonomous yet) ----
+  - id: restart_emulator_instance
+    description: Restart ONE standalone emulator container in the fleet.
+    enabled: true
+    approval_required: true          # loses in-memory AML state on restart -> never silent
+    risk: medium
+    environments: [development, emulator]   # NEVER real
+    components: [emulator]
+    required_evidence: ["EMU-001 confirmed", "other fleet instances healthy", "instance unreachable >5m"]
+    minimum_confidence: high
+    max_scope: {instances: 1}
+    required_permissions: [container_restart_dev]
+    timeout_seconds: 120
+    retry_limit: 1
+    rollback: {action: none, reason: restart is not reversible; re-seed if state needed}
+    verification: ["{emulator_url}/health returns 200", "fleet probe shows instance online"]
+    stop_conditions: [second_restart_required, new_error_signature, real_environment_detected]
+    escalation: escalate_if_verification_fails
+
+  - id: restart_api_process
+    description: Restart the api uvicorn process (development only).
+    enabled: true
+    approval_required: true
+    risk: high
+    environments: [development]      # NEVER staging/real without human
+    components: [api]
+    required_evidence: ["API-001 confirmed", "no in-flight archive/restore job active"]
+    minimum_confidence: high
+    max_scope: {instances: 1}
+    required_permissions: [process_restart_dev]
+    timeout_seconds: 60
+    retry_limit: 1
+    rollback: {action: none}
+    verification: ["/healthz reachable", "/readyz ready=true"]
+    stop_conditions: [restart_loop_detected, data_volume_unwritable]
+    escalation: escalate_if_verification_fails
+
+# ---- Explicit denylist (agent MUST refuse; requires a human, never autonomous) ----
+denylist:
+  - format_or_erase_tape          # safety-gated (token + barcode); data destruction
+  - unload_while_mounted          # safety guard; data corruption risk
+  - enable_real_hardware          # sets OPENBLADE_BACKEND=real / REAL_HARDWARE_ENABLED
+  - move_real_media               # moveMedium against a real i3
+  - delete_or_modify_catalog_records
+  - run_database_migration        # (none exist; create_all schema)
+  - restore_backup_over_live_data
+  - rotate_or_read_secrets
+  - modify_auth_or_rbac
+  - disable_security_controls
+  - modify_network_dns_firewall_ports
+  - deploy_or_merge_code          # note: auto-merge-trusted.yml exists but is CI, not the ops agent
+  - clear_durable_state
+  - any_action_not_listed_in_actions
